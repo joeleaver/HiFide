@@ -1,0 +1,21 @@
+/* GitHub-like markdown body with dark-friendly code blocks */
+.markdown-body {
+  line-height: 1.6;
+  font-size: 14px;
+}
+.markdown-body p { margin: 0.5rem 0; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3 { margin: 0.8rem 0 0.4rem; }
+.markdown-body pre { margin: 0.5rem 0; overflow: auto; border-radius: 8px; }
+.markdown-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+/* highlight.js theme overrides (works with github-dark.css) */
+.hljs { background: #0b0d10 !important; padding: 12px 14px; border-radius: 8px; }
+
+/* Inline code */
+/* Lists, quotes, and hr */
+.markdown-body ul, .markdown-body ol { margin: 0.5rem 0 0.5rem 1.25rem; }
+.markdown-body blockquote { margin: 0.5rem 0; padding: 0.25rem 0.75rem; border-left: 3px solid rgba(255,255,255,0.2); color: rgba(255,255,255,0.8); }
+.markdown-body hr { border: none; height: 1px; background: rgba(255,255,255,0.12); margin: 0.75rem 0; }
+
+.markdown-body :not(pre) > code { background: rgba(255,255,255,0.06); padding: 0.15rem 0.35rem; border-radius: 4px; }
+

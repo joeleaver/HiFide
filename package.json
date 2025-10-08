@@ -1,0 +1,64 @@
+{
+  "name": "hifide",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build && electron-builder",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview",
+    "postinstall": "electron-rebuild -f -w keytar"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.65.0",
+    "@emotion/react": "^11.14.0",
+    "@google/generative-ai": "^0.24.1",
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
+    "@mantine/core": "^8.3.3",
+    "@mantine/hooks": "^8.3.3",
+    "@mantine/notifications": "^8.3.3",
+    "@monaco-editor/react": "^4.7.0",
+    "@tanstack/react-query": "^5.90.2",
+    "dompurify": "^3.2.7",
+    "highlight.js": "^11.11.1",
+    "keytar": "^7.9.0",
+    "markdown-it": "^14.1.0",
+    "monaco-editor": "^0.54.0",
+    "openai": "^6.2.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "ts-morph": "^27.0.0",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0",
+    "zod": "^4.1.12",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.1",
+    "@tabler/icons-react": "^3.35.0",
+    "@types/markdown-it": "^14.1.2",
+    "@types/react": "^18.2.64",
+    "@types/react-dom": "^18.2.21",
+    "@typescript-eslint/eslint-plugin": "^7.1.1",
+    "@typescript-eslint/parser": "^7.1.1",
+    "@vitejs/plugin-react": "^4.2.1",
+    "electron": "^38.2.1",
+    "electron-builder": "^24.13.3",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "typescript": "^5.2.2",
+    "vite": "^5.1.6",
+    "vite-plugin-electron": "^0.28.6",
+    "vite-plugin-electron-renderer": "^0.14.5"
+  },
+  "main": "dist-electron/main.mjs",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "keytar",
+      "esbuild"
+    ]
+  }
+}
