@@ -41,6 +41,9 @@ declare global {
         entries?: Array<{ name: string; isDirectory: boolean; path: string }>;
         error?: string
       }>;
+      watchDir: (dirPath: string) => Promise<{ success: boolean; id?: number; error?: string }>;
+      unwatch: (id: number) => Promise<{ success: boolean; error?: string }>;
+      onWatch: (listener: (payload: { id: number; type: 'rename' | 'change'; path: string; dir: string }) => void) => () => void;
     };
     pty?: {
       create: (opts?: { shell?: string; cwd?: string; cols?: number; rows?: number; env?: Record<string, string>; log?: boolean }) => Promise<{ sessionId: string }>;

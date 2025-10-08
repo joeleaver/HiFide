@@ -17,11 +17,10 @@ function App() {
     const openSettings = () => setCurrentView('settings')
     const openChat = () => setCurrentView('agent')
     const toggleTerminalPanel = () => {
-      const { currentView } = useAppStore.getState()
-      if (currentView === 'explorer') {
-        useAppStore.getState().toggleExplorerTerminalPanel()
-      }
-      // In agent view, panel is only opened by agents; ignore here
+      // Ensure Explorer view is active so the panel is mounted
+      setCurrentView('explorer')
+      const s = useAppStore.getState()
+      s.setExplorerTerminalPanelOpen(!s.explorerTerminalPanelOpen)
     }
     window.ipcRenderer?.on('menu:open-settings', openSettings)
     window.ipcRenderer?.on('menu:open-chat', openChat)

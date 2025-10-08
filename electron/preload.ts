@@ -54,6 +54,13 @@ contextBridge.exposeInMainWorld('fs', {
   getCwd: () => ipcRenderer.invoke('fs:getCwd'),
   readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
   readDir: (dirPath: string) => ipcRenderer.invoke('fs:readDir', dirPath),
+  watchDir: (dirPath: string) => ipcRenderer.invoke('fs:watchStart', dirPath),
+  unwatch: (id: number) => ipcRenderer.invoke('fs:watchStop', id),
+  onWatch: (listener: (payload: { id: number; type: 'rename'|'change'; path: string; dir: string }) => void) => {
+    const fn = (_: any, payload: any) => listener(payload)
+    ipcRenderer.on('fs:watch:event', fn)
+    return () => ipcRenderer.off('fs:watch:event', fn)
+  },
 })
 
 // PTY (embedded terminal) API

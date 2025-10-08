@@ -3,6 +3,7 @@ import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs/promises'
+import * as fsSync from 'node:fs'
 import keytar from 'keytar'
 import { OpenAIProvider } from './providers/openai'
 import { AnthropicProvider } from './providers/anthropic'
@@ -11,9 +12,50 @@ import type { ProviderAdapter, AgentTool } from './providers/provider'
 import { createRequire } from 'node:module'
 // Load CJS pty at runtime to avoid bundling and __dirname issues
 const require = createRequire(import.meta.url)
-const ptyModule = require('@homebridge/node-pty-prebuilt-multiarch')
-const ptySpawn = (ptyModule as any).spawn as any
+// lazy-require pty module inside create handler to allow fallback when Electron prebuild is missing
 import { randomUUID } from 'node:crypto'
+import { spawn as spawnChild } from 'node:child_process'
+
+// PTY helper (Node runtime) fallback for Windows when Electron prebuild is missing
+let ptyHelperProc: import('node:child_process').ChildProcessWithoutNullStreams | null = null
+let ptyHelperBuf = ''
+const ptyHelperPending = new Map<string, (payload: any) => void>()
+function helperSend(obj: any) { try { ptyHelperProc?.stdin.write(JSON.stringify(obj) + '\n') } catch {} }
+function ensurePtyHelper() {
+  if (ptyHelperProc && !ptyHelperProc.killed) return
+  // Resolve helper relative to project root in dev
+  const helperPath = path.resolve(process.cwd(), 'electron', 'pty-helper.cjs')
+  ptyHelperProc = spawnChild('node', [helperPath], { stdio: ['pipe', 'pipe', 'pipe'] })
+  ptyHelperProc.stdout.on('data', (chunk) => {
+    ptyHelperBuf += chunk.toString('utf8')
+    let idx
+    while ((idx = ptyHelperBuf.indexOf('\n')) >= 0) {
+      const line = ptyHelperBuf.slice(0, idx); ptyHelperBuf = ptyHelperBuf.slice(idx + 1)
+      if (!line.trim()) continue
+      let msg: any; try { msg = JSON.parse(line) } catch { continue }
+      if (msg.reqId && ptyHelperPending.has(msg.reqId)) { const res = ptyHelperPending.get(msg.reqId)!; ptyHelperPending.delete(msg.reqId); res(msg); continue }
+      // Forward PTY stream events to renderers
+      if (msg.type === 'data' && msg.sessionId) {
+        const s = ptySessions.get(msg.sessionId)
+        if (s) {
+          const { redacted, bytesRedacted } = redactOutput(msg.data || '')
+          if (bytesRedacted > 0) { logEvent(msg.sessionId, 'data_redacted', { bytesRedacted }).catch(() => {}) }
+          const wc = BrowserWindow.fromId(s.wcId)?.webContents
+          try { wc?.send('pty:data', { sessionId: msg.sessionId, data: redacted }) } catch {}
+        }
+      } else if (msg.type === 'exit' && msg.sessionId) {
+        const s = ptySessions.get(msg.sessionId)
+        if (s) {
+          const wc = BrowserWindow.fromId(s.wcId)?.webContents
+          try { wc?.send('pty:exit', { sessionId: msg.sessionId, exitCode: msg.exitCode ?? -1 }) } catch {}
+          logEvent(msg.sessionId, 'session_exit', { exitCode: msg.exitCode ?? -1 }).catch(() => {})
+          ptySessions.delete(msg.sessionId)
+        }
+      }
+    }
+  })
+}
+
 
 import { renameSymbol as tsRenameSymbol, organizeImports as tsOrganizeImports, verifyTypecheck as tsVerify, addNamedExport as tsAddNamedExport, moveFileWithImports as tsMoveFile, ensureDefaultExport as tsEnsureDefault, addNamedExportFrom as tsAddExportFrom, extractFunction as tsExtractFunction, suggestParams as tsSuggestParams, inlineVariable as tsInlineVar, inlineFunction as tsInlineFn, convertDefaultToNamed as tsDefaultToNamed, convertNamedToDefault as tsNamedToDefault } from './refactors/ts'
 
@@ -214,6 +256,66 @@ ipcMain.handle('fs:readDir', async (_e, dirPath: string) => {
   } catch (error) {
     return { success: false, error: String(error) }
   }
+  })
+
+
+// Directory watch management (cross-platform)
+let nextWatchId = 1
+const activeWatches = new Map<number, { close: () => void }>()
+
+function sendFsEvent(payload: { id: number; type: 'rename'|'change'; path: string; dir: string }) {
+  try { win?.webContents.send('fs:watch:event', payload) } catch {}
+}
+
+async function addWatchersRecursively(root: string, onEvent: (dir: string, type: 'rename'|'change', filename?: string) => void) {
+  const watchers: fsSync.FSWatcher[] = []
+  const isLinux = process.platform === 'linux'
+  const mkWatcher = (dirPath: string) => {
+    const watcher = fsSync.watch(
+      dirPath,
+      // recursive is only reliably supported on darwin/win32
+      isLinux ? undefined : { recursive: true },
+      (eventType, filename) => onEvent(dirPath, eventType, typeof filename === 'string' ? filename : undefined)
+    )
+    watchers.push(watcher)
+  }
+  const walk = async (dirPath: string) => {
+    mkWatcher(dirPath)
+    if (!isLinux) return // recursive handles subdirs
+    try {
+      const entries = await fs.readdir(dirPath, { withFileTypes: true })
+      for (const e of entries) {
+        if (e.isDirectory()) {
+          const child = path.join(dirPath, e.name)
+          await walk(child)
+        }
+      }
+    } catch {}
+  }
+  await walk(root)
+  return () => {
+    for (const w of watchers) { try { w.close() } catch {} }
+  }
+}
+
+ipcMain.handle('fs:watchStart', async (_e, dirPath: string) => {
+  try {
+    const id = nextWatchId++
+    const close = await addWatchersRecursively(dirPath, (dir, type, filename) => {
+      const full = filename ? path.join(dir, filename) : dir
+      sendFsEvent({ id, type: (type as any) || 'change', path: full, dir })
+    })
+    activeWatches.set(id, { close })
+    return { success: true, id }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+})
+
+ipcMain.handle('fs:watchStop', async (_e, id: number) => {
+  const rec = activeWatches.get(id)
+  if (!rec) return { success: false }
+  try { rec.close(); activeWatches.delete(id); return { success: true } } catch (error) { return { success: false, error: String(error) } }
 })
 
 // Generic file edits (MVP): replaceOnce | insertAfterLine | replaceRange
@@ -456,23 +558,51 @@ ipcMain.handle('pty:create', async (event, opts: { shell?: string; cwd?: string;
   const rows = opts.rows || 24
   const env = { ...process.env, ...(opts.env || {}) }
   const cwd = opts.cwd || process.cwd()
-  const p = ptySpawn(shell, [], { name: 'xterm-color', cols, rows, cwd, env })
-  const sessionId = randomUUID()
-  ptySessions.set(sessionId, { p, wcId: wc.id, log: opts.log !== false })
-  await logEvent(sessionId, 'session_create', { shell, cwd, cols, rows })
-  p.onData(async (data) => {
-    try {
-      const { redacted, bytesRedacted } = redactOutput(data)
-      if (bytesRedacted > 0) { await logEvent(sessionId, 'data_redacted', { bytesRedacted }) }
-      wc.send('pty:data', { sessionId, data: redacted })
-    } catch {}
-  })
-  p.onExit(async ({ exitCode }) => {
-    try { wc.send('pty:exit', { sessionId, exitCode }) } catch {}
-    await logEvent(sessionId, 'session_exit', { exitCode })
-    ptySessions.delete(sessionId)
-  })
-  return { sessionId }
+  try {
+    const ptyModule = require('@homebridge/node-pty-prebuilt-multiarch')
+    const p = (ptyModule as any).spawn(shell, [], { name: 'xterm-color', cols, rows, cwd, env })
+    const sessionId = randomUUID()
+    ptySessions.set(sessionId, { p, wcId: wc.id, log: opts.log !== false })
+    await logEvent(sessionId, 'session_create', { shell, cwd, cols, rows })
+    p.onData(async (data: string) => {
+      try {
+        const { redacted, bytesRedacted } = redactOutput(data)
+        if (bytesRedacted > 0) { await logEvent(sessionId, 'data_redacted', { bytesRedacted }) }
+        wc.send('pty:data', { sessionId, data: redacted })
+      } catch {}
+    })
+    p.onExit(async ({ exitCode }: { exitCode: number }) => {
+      try { wc.send('pty:exit', { sessionId, exitCode }) } catch {}
+      await logEvent(sessionId, 'session_exit', { exitCode })
+      ptySessions.delete(sessionId)
+    })
+    return { sessionId }
+  } catch (e: any) {
+    // Fallback: use node helper when Electron prebuild is missing (Windows conpty.node)
+    const msg = e?.message || ''
+    if (process.platform === 'win32' && (msg.includes('conpty.node') || msg.includes('MODULE_NOT_FOUND'))) {
+      ensurePtyHelper()
+      const reqId = randomUUID()
+      const sessionId = await new Promise<string>((resolve) => {
+        ptyHelperPending.set(reqId, (res: any) => resolve(res.sessionId))
+        helperSend({ type: 'create', reqId, shell, cwd, cols, rows, env })
+      })
+      ptySessions.set(sessionId, {
+        p: {
+          pid: 0,
+          onData: () => {},
+          write: (d: string) => helperSend({ type: 'write', sessionId, data: d }),
+          resize: (c: number, r: number) => helperSend({ type: 'resize', sessionId, cols: c, rows: r }),
+          kill: () => helperSend({ type: 'dispose', sessionId }),
+        },
+        wcId: wc.id,
+        log: opts.log !== false,
+      })
+      await logEvent(sessionId, 'session_create', { shell, cwd, cols, rows, via: 'helper' })
+      return { sessionId }
+    }
+    throw e
+  }
 })
 
 // Agent-initiated command execution with policy gating

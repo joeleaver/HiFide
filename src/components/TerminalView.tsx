@@ -28,51 +28,65 @@ export default function TerminalView({ disableStdin = false }: { disableStdin?: 
     fitRef.current = fit
 
     if (containerRef.current) {
-      term.open(containerRef.current)
-      // Defer initial fit to ensure layout has settled
+      // Defer open until next frame to ensure the element is fully laid out
       requestAnimationFrame(() => {
-        fit.fit()
-        if (sessionId) {
-          const { cols, rows } = term
-          window.pty?.resize?.(sessionId, cols, rows)
-        }
+        if (!containerRef.current) return
+        try {
+          term.open(containerRef.current)
+        } catch {}
+        // Defer initial fit to ensure layout has settled
+        requestAnimationFrame(() => {
+          try { fit.fit() } catch {}
+          if (sessionId) {
+            const { cols, rows } = term
+            try { window.pty?.resize?.(sessionId, cols, rows) } catch {}
+          }
+        })
+        // Observe container size changes and refit
+        roRef.current = new ResizeObserver(() => {
+          if (!fitRef.current || !termRef.current) return
+          try { fitRef.current.fit() } catch {}
+          if (sessionId) {
+            const { cols, rows } = termRef.current
+            try { window.pty?.resize?.(sessionId, cols, rows) } catch {}
+          }
+        })
+        roRef.current.observe(containerRef.current)
       })
-      // Observe container size changes and refit
-      roRef.current = new ResizeObserver(() => {
-        if (!fitRef.current || !termRef.current) return
-        fitRef.current.fit()
-        if (sessionId) {
-          const { cols, rows } = termRef.current
-          window.pty?.resize?.(sessionId, cols, rows)
-        }
-      })
-      roRef.current.observe(containerRef.current)
     }
 
     let cleanupSubs: Array<() => void> = []
 
     // Create PTY session and wire events
     const setup = async () => {
-      const res = await window.pty?.create?.({})
-      if (!res?.sessionId) return
-      const id = res.sessionId
-      setSessionId(id)
+      let ptyId: string | null = null
+      try {
+        const res = await window.pty?.create?.({})
+        if (!res?.sessionId) return
+        ptyId = res.sessionId
+      } catch (err: any) {
+        // Surface a friendly message inside the terminal UI, but do not crash
+        term.writeln('\r\n[Failed to start PTY: ' + (err?.message || String(err)) + ']')
+        return
+      }
+      if (!ptyId) return
+      setSessionId(ptyId)
       cleanupSubs.push(window.pty!.onData(({ sessionId: sid, data }) => {
-        if (sid === id) term.write(data)
+        if (sid === ptyId) term.write(data)
       }))
       cleanupSubs.push(window.pty!.onExit(({ sessionId: sid, exitCode }) => {
-        if (sid === id) term.writeln(`\r\n[process exited with code ${exitCode}]`)
+        if (sid === ptyId) term.writeln(`\r\n[process exited with code ${exitCode}]`)
       }))
       if (!disableStdin) {
         term.onData((data) => {
-          if (id) window.pty?.write?.(id, data)
+          if (ptyId) window.pty?.write?.(ptyId, data)
         })
       }
       // Initial PTY resize after fit
       requestAnimationFrame(() => {
         const cols = term.cols
         const rows = term.rows
-        window.pty?.resize?.(id, cols, rows)
+        if (ptyId) window.pty?.resize?.(ptyId, cols, rows)
       })
     }
 

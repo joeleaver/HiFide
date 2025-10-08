@@ -65,7 +65,20 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
     if (open && tabsRef.current.length === 0) addTab()
   }, [open])
 
-  if (!open) return null
+  if (!open) {
+    const onToggleClick = () => {
+      if (context === 'explorer') toggleExplorer()
+      else if (context === 'agent') setAgentOpen(true)
+    }
+    return (
+      <Box style={{ height: 28, backgroundColor: '#252526', borderTop: '1px solid #3e3e42', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 8px' }}>
+        <Text size="sm" c="dimmed">Terminal</Text>
+        <ActionIcon variant="subtle" onClick={onToggleClick}>
+          <IconChevronUp size={16} />
+        </ActionIcon>
+      </Box>
+    )
+  }
 
   const onToggleClick = () => {
     if (context === 'explorer') toggleExplorer()
@@ -106,7 +119,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
           {tabsRef.current.map((id) => (
             <Tabs.Tab key={id} value={id}
               rightSection={
-                <ActionIcon size="xs" variant="subtle" onClick={(e) => { e.stopPropagation(); closeTab(id) }}>
+                <ActionIcon component="div" size="xs" variant="subtle" onClick={(e) => { e.stopPropagation(); closeTab(id) }}>
                   <IconX size={12} />
                 </ActionIcon>
               }
