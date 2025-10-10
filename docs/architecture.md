@@ -7,6 +7,15 @@ This app is an Electron desktop application with a React renderer. It is being e
 - Main process (Electron): IPC orchestration, OpenAI streaming provider, secure key storage via keytar.
 - Preload: Safe bridge exposing curated APIs (`ipcRenderer`, `secrets`, `llm`, `fs`).
 
+
+## State management (simplified)
+- Single source of truth: a single Zustand store in `src/store/app.ts` now contains both UI and chat/conversation state.
+- Facades only: `useChatStore` is a typed facade that binds to the same underlying store for convenience, but it does not own state.
+- Reads via selectors, writes via store actions. Components must not mutate local state that duplicates store values.
+- Persistence: important preferences and conversations persist via explicit `localStorage` writes in actions (migrateable to `zustand/middleware` persist later).
+- Side effects: IPC calls (e.g., PTY, view switching, model refresh) are triggered inside store actions to keep component code declarative.
+- Dev tooling: the store remains available on `window.__appStore` for automation/e2e.
+
 ## Current capabilities (implemented)
 - Streaming chat completions via OpenAI (function-call style IPC) with cancel support.
 - Secure API key storage using OS keychain via `keytar`.

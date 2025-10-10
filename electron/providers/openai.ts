@@ -1,33 +1,64 @@
 import OpenAI from 'openai'
 import type { ProviderAdapter, StreamHandle, ChatMessage, AgentTool } from './provider'
+import { validateJson } from './jsonschema'
+import { withRetries } from './retry'
+
+// Helper to map our ChatMessage[] to Responses API input format
+function toResponsesInput(messages: ChatMessage[]) {
+  return messages.map((m) => ({ role: m.role as any, content: m.content }))
+}
+
 
 export const OpenAIProvider: ProviderAdapter = {
   id: 'openai',
 
-  // Plain chat streaming (no tool-calling)
-  async chatStream({ apiKey, model, messages, onChunk, onDone, onError }): Promise<StreamHandle> {
+  // Plain chat (Responses API). We use non-stream + chunked emit for reliability; can be upgraded to true streaming.
+  async chatStream({ apiKey, model, messages, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey })
 
-    const holder: { stream?: any } = {}
+    const holder: { stream?: any; cancelled?: boolean } = {}
 
     ;(async () => {
       try {
-        const stream: any = await client.chat.completions.create({
+        const stream: any = await withRetries(() => Promise.resolve(client.responses.stream({
           model,
-          stream: true,
-          messages: messages.map((m: ChatMessage) => ({ role: m.role as any, content: m.content })),
-        })
+          input: toResponsesInput(messages),
+        })))
         holder.stream = stream
-
-        for await (const part of stream) {
-          try {
-            const delta = part?.choices?.[0]?.delta?.content
-            if (delta) onChunk(delta)
-          } catch (e: any) {
-            onError(e?.message || String(e))
+        try {
+          // Generic streaming loop: consume deltas as they arrive
+          for await (const evt of stream) {
+            try {
+              const type = evt?.type || ''
+              if (typeof evt?.delta === 'string') {
+                onChunk(evt.delta)
+              } else if (typeof (evt as any)?.text === 'string') {
+                onChunk((evt as any).text)
+              } else if (type?.includes('output_text') && typeof (evt as any)?.text === 'string') {
+                onChunk((evt as any).text)
+              }
+            } catch (e: any) { onError(e?.message || String(e)) }
           }
+
+          // Extract token usage from final response
+          try {
+            const finalResponse = await stream.finalResponse()
+            if (finalResponse?.usage && onTokenUsage) {
+              onTokenUsage({
+                inputTokens: finalResponse.usage.input_tokens || 0,
+                outputTokens: finalResponse.usage.output_tokens || 0,
+                totalTokens: finalResponse.usage.total_tokens || 0,
+              })
+            }
+          } catch (e) {
+            // Token usage extraction failed, continue anyway
+          }
+
+          onDone()
+        } catch (e: any) {
+          if (e?.name === 'AbortError') return
+          onError(e?.message || String(e))
         }
-        onDone()
       } catch (e: any) {
         if (e?.name === 'AbortError') return
         onError(e?.message || String(e))
@@ -36,21 +67,24 @@ export const OpenAIProvider: ProviderAdapter = {
 
     return {
       cancel: () => {
-        try {
-          holder.stream?.controller?.abort?.()
-          holder.stream?.close?.()
-        } catch {
-          /* noop */
-        }
+        holder.cancelled = true
+        try { holder.stream?.controller?.abort?.() } catch {}
+        try { holder.stream?.close?.() } catch {}
       },
     }
   },
 
-  // Agent streaming with tool-calling via Chat Completions tools
-  async agentStream({ apiKey, model, messages, tools, responseSchema, onChunk, onDone, onError }): Promise<StreamHandle> {
+  // Agent loop with tool-calling via Responses API
+  async agentStream({ apiKey, model, messages, tools, responseSchema, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey })
 
-    // Map internal tools to OpenAI Chat Completions tools format (sanitize names)
+    // Validate tools array
+    if (!Array.isArray(tools)) {
+      onError('Tools must be an array')
+      return { cancel: () => {} }
+    }
+
+    // Map internal tools to OpenAI Responses tool format (sanitize names)
     const toolMap = new Map<string, AgentTool>()
     const usedNames = new Set<string>()
     const toSafeName = (name: string) => {
@@ -61,99 +95,182 @@ export const OpenAIProvider: ProviderAdapter = {
       usedNames.add(safe)
       return safe
     }
-    const oaTools: any[] = tools.map((t) => {
-      const safeName = toSafeName(t.name)
-      toolMap.set(safeName, t)
-      return {
-        type: 'function',
-        function: {
+
+    const oaTools: any[] = tools
+      .filter(t => t && t.name) // Filter out invalid tools
+      .map((t) => {
+        const safeName = toSafeName(t.name)
+        toolMap.set(safeName, t)
+        // Responses API uses flat structure: { type: "function", name, description, parameters }
+        // NOT nested like Chat Completions: { type: "function", function: { name, ... } }
+        return {
+          type: 'function',
           name: safeName,
           description: t.description || undefined,
           parameters: t.parameters || { type: 'object', properties: {} },
-        },
-      }
-    })
+        }
+      })
 
-    // Conversation loop with tool calls; final answer is streamed in chunks
-    const conv: Array<{ role: string; content?: string; name?: string; tool_call_id?: string; tool_calls?: any[] }> =
-      messages.map((m) => ({ role: m.role, content: m.content }))
+    // Debug logging
+    console.log('[OpenAI Provider] agentStream called with:', {
+      model,
+      toolCount: tools.length,
+      oaToolsCount: oaTools.length,
+      toolNames: tools.map(t => t?.name),
+      hasResponseSchema: !!responseSchema
+    })
+    console.log('[OpenAI Provider] Formatted tools (Responses API format):', JSON.stringify(oaTools.slice(0, 2), null, 2))
+
+    // Responses API uses a different format than Chat Completions
+    // Input can be: { role, content } OR { type, call_id, output } for function results
+    const conv: Array<any> = messages
+      .map((m) => ({ role: m.role, content: m.content || '' }))
+      .filter(m => m.content !== '') // Remove messages with empty content
 
     let cancelled = false
-    const controller = new AbortController()
 
     const run = async () => {
       try {
         while (!cancelled) {
+          // Start a streaming turn; stream user-visible text as it comes, while accumulating any tool calls
           let useResponseFormat = !!responseSchema
-          // Use non-streaming for tool loops; stream only the final assistant message
-          let completion: any
-          try {
-            completion = await client.chat.completions.create({
+          const mkOpts = (strict: boolean) => {
+            const opts: any = {
               model,
-              messages: conv as any,
-              tools: oaTools.length ? oaTools : undefined,
-              tool_choice: oaTools.length ? 'auto' : undefined,
-              // If provided, request structured output (best-effort; supported on newer models)
-              response_format: useResponseFormat ? { type: 'json_schema', json_schema: responseSchema } as any : undefined,
-            })
+              input: conv as any,
+            }
+            // Only add tools if we have valid tools
+            if (oaTools.length > 0) {
+              opts.tools = oaTools
+              opts.tool_choice = 'auto'
+            }
+            // Add response format if requested
+            if (strict && responseSchema) {
+              opts.response_format = { type: 'json_schema', json_schema: responseSchema }
+            }
+            return opts
+          }
+
+          let stream: any
+          try {
+            const opts = mkOpts(useResponseFormat)
+            console.log('[OpenAI Provider] Sending request with options:', JSON.stringify({
+              model: opts.model,
+              hasTools: !!opts.tools,
+              toolsCount: opts.tools?.length,
+              firstToolName: opts.tools?.[0]?.function?.name,
+              toolChoice: opts.tool_choice
+            }, null, 2))
+            stream = await withRetries(() => Promise.resolve(client.responses.stream(opts)))
           } catch (err: any) {
-            // Some models don’t support response_format or strict JSON schema; retry once without it
             const msg = err?.message || ''
             if (useResponseFormat && (err?.status === 400 || /response_format|json_schema|unsupported/i.test(msg))) {
               useResponseFormat = false
-              completion = await client.chat.completions.create({
-                model,
-                messages: conv as any,
-                tools: oaTools.length ? oaTools : undefined,
-                tool_choice: oaTools.length ? 'auto' : undefined,
-              })
+              stream = await withRetries(() => Promise.resolve(client.responses.stream(mkOpts(false))))
             } else {
               throw err
             }
           }
 
-          const choice = completion?.choices?.[0]
-          const msg = choice?.message
-          const toolCalls = msg?.tool_calls || []
+          // Stream text chunks to the user
+          for await (const evt of stream) {
+            try {
+              const t = evt?.type || ''
 
-          // If the model requested tools, execute them and continue
-          if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-            // Append assistant tool_calls message to history
-            conv.push({ role: 'assistant', content: msg?.content || null, tool_calls: toolCalls })
+              // Stream any textual deltas
+              if (typeof (evt as any)?.delta === 'string') onChunk((evt as any).delta)
+              if (typeof (evt as any)?.text === 'string') onChunk((evt as any).text)
+              if (t.includes('output_text') && typeof (evt as any)?.text === 'string') onChunk((evt as any).text)
+            } catch (e: any) { onError(e?.message || String(e)) }
+          }
 
-            for (const tc of toolCalls) {
-              try {
-                const name = tc?.function?.name as string
-                const argsStr = tc?.function?.arguments || '{}'
-                const tool = toolMap.get(name)
-                if (!tool) {
-                  conv.push({ role: 'tool', tool_call_id: tc?.id, content: `Tool ${name} not found` })
-                  continue
-                }
-                let input: any = {}
-                try { input = JSON.parse(argsStr) } catch {}
-                const result = await Promise.resolve(tool.run(input))
-                const content = typeof result === 'string' ? result : JSON.stringify(result)
-                conv.push({ role: 'tool', tool_call_id: tc?.id, content, name })
-              } catch (e: any) {
-                conv.push({ role: 'tool', tool_call_id: tc?.id, content: `Error: ${e?.message || String(e)}` })
+          // After stream completes, get the final response with complete output array
+          const finalResponse = await stream.finalResponse()
+          console.log('[OpenAI Provider] Final response output:', JSON.stringify(finalResponse?.output, null, 2))
+
+          // Extract function calls from the output array and add them to conversation
+          const toolCalls: Array<{ id: string; name: string; arguments: any }> = []
+          if (Array.isArray(finalResponse?.output)) {
+            for (const item of finalResponse.output) {
+              if (item.type === 'function_call') {
+                // Add the function call to the conversation input
+                conv.push({
+                  type: 'function_call',
+                  call_id: item.call_id,
+                  name: item.name,
+                  arguments: item.arguments
+                })
+
+                // Also track it for execution
+                toolCalls.push({
+                  id: item.call_id,
+                  name: item.name,
+                  arguments: typeof item.arguments === 'string' ? JSON.parse(item.arguments) : item.arguments
+                })
               }
             }
-            // Continue loop to let the model observe tool results
+          }
+
+          console.log('[OpenAI Provider] Parsed tool calls:', toolCalls.map(tc => ({ id: tc.id, name: tc.name })))
+
+          if (toolCalls.length > 0) {
+            // Execute tool calls sequentially to avoid rate limits
+            for (const tc of toolCalls) {
+              try {
+                const name = tc.name
+                const tool = toolMap.get(name)
+                if (!tool) {
+                  conv.push({
+                    type: 'function_call_output',
+                    call_id: tc.id,
+                    output: JSON.stringify({ error: `Tool ${name} not found` })
+                  })
+                  continue
+                }
+                const args = typeof (tc as any).arguments === 'string' ? (JSON.parse((tc as any).arguments || '{}') || {}) : ((tc as any).arguments || {})
+                const schema = (tool as any)?.parameters
+                const v = validateJson(schema, args)
+                if (!v.ok) {
+                  conv.push({
+                    type: 'function_call_output',
+                    call_id: tc.id,
+                    output: JSON.stringify({ error: `Validation error: ${v.errors || 'invalid input'}` })
+                  })
+                  continue
+                }
+                const result = await Promise.resolve(tool.run(args))
+                const output = typeof result === 'string' ? result : JSON.stringify(result)
+                conv.push({
+                  type: 'function_call_output',
+                  call_id: tc.id,
+                  output
+                })
+              } catch (e: any) {
+                conv.push({
+                  type: 'function_call_output',
+                  call_id: tc.id,
+                  output: JSON.stringify({ error: e?.message || String(e) })
+                })
+              }
+            }
+            // Continue loop to request next streamed assistant turn
             continue
           }
 
-          // No tool calls: we have final assistant content. Stream it to caller.
-          const finalText: string = msg?.content || ''
-          if (finalText) {
-            // Stream in small chunks to mimic streaming UX
-            const CHUNK = 80
-            for (let i = 0; i < finalText.length && !cancelled; i += CHUNK) {
-              onChunk(finalText.slice(i, i + CHUNK))
-              // micro-yield
-              await new Promise((r) => setTimeout(r, 1))
+          // No tool calls in this streamed turn -> we have already streamed the final answer
+          // Extract token usage from final response
+          try {
+            if (finalResponse?.usage && onTokenUsage) {
+              onTokenUsage({
+                inputTokens: finalResponse.usage.input_tokens || 0,
+                outputTokens: finalResponse.usage.output_tokens || 0,
+                totalTokens: finalResponse.usage.total_tokens || 0,
+              })
             }
+          } catch (e) {
+            // Token usage extraction failed, continue anyway
           }
+
           onDone()
           return
         }
@@ -165,11 +282,6 @@ export const OpenAIProvider: ProviderAdapter = {
 
     run()
 
-    return {
-      cancel: () => {
-        cancelled = true
-        try { (controller as any).abort?.() } catch {}
-      },
-    }
+    return { cancel: () => { cancelled = true } }
   }
 }

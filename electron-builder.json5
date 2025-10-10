@@ -3,8 +3,10 @@
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.hifide.app",
   "asar": true,
+  "npmRebuild": false,
   "asarUnpack": [
-    "node_modules/node-pty/build/Release/*.node"
+    "node_modules/node-pty/build/Release/*.node",
+    "node_modules/@homebridge/node-pty-prebuilt-multiarch/build/Release/*.node"
   ],
   "productName": "HiFide",
   "directories": {

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef } from 'react'
-import { ActionIcon, Box, Group, Tabs, Text, Tooltip } from '@mantine/core'
-import { IconPlus, IconX, IconArrowsMoveVertical, IconChevronUp, IconChevronDown } from '@tabler/icons-react'
+import { useRef } from 'react'
+import { Group, Text, UnstyledButton, Badge } from '@mantine/core'
+import { IconPlus, IconX, IconChevronUp, IconChevronDown } from '@tabler/icons-react'
 import { useAppStore } from '../store/app'
 import TerminalView from './TerminalView'
 
@@ -11,128 +11,241 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
   const toggleExplorer = useAppStore((s) => s.toggleExplorerTerminalPanel)
   const setAgentOpen = useAppStore((s) => s.setAgentTerminalPanelOpen)
 
-  // Local tabs state kept minimal: just IDs; each TerminalView owns its PTY lifecycle
-  const tabsRef = useRef<string[]>(['t1'])
-  const activeRef = useRef<string>('t1')
-  const rerender = useRef(0)
-  const force = useCallback(() => { rerender.current++; }, [])
+  // Terminal tabs from store
+  const tabs = useAppStore((s) => context === 'agent' ? s.agentTerminalTabs : s.explorerTerminalTabs)
+  const activeTab = useAppStore((s) => context === 'agent' ? s.agentActiveTerminal : s.explorerActiveTerminal)
+  const addTerminalTab = useAppStore((s) => s.addTerminalTab)
+  const removeTerminalTab = useAppStore((s) => s.removeTerminalTab)
+  const setActiveTerminal = useAppStore((s) => s.setActiveTerminal)
+  const fitAllTerminals = useAppStore((s) => s.fitAllTerminals)
 
   const addTab = () => {
-    const id = `t${crypto.randomUUID().slice(0, 8)}`
-    tabsRef.current.push(id)
-    activeRef.current = id
-    force()
-  }
-  const closeTab = (id: string) => {
-    const idx = tabsRef.current.indexOf(id)
-    if (idx >= 0) {
-      tabsRef.current.splice(idx, 1)
-      if (tabsRef.current.length === 0) {
-        // Ensure there is always one terminal when panel is open
-        if (open) {
-          const nextId = `t${crypto.randomUUID().slice(0, 8)}`
-          tabsRef.current.push(nextId)
-          activeRef.current = nextId
-        } else {
-          activeRef.current = ''
-        }
-      } else if (activeRef.current === id) {
-        activeRef.current = tabsRef.current[idx - 1] || tabsRef.current[0] || ''
-      }
-      force()
-    }
+    addTerminalTab(context)
   }
 
-  const onMouseDownResize = (e: React.MouseEvent) => {
+  const closeTab = (id: string) => {
+    removeTerminalTab(context, id)
+  }
+
+
+  const onToggleClick = () => {
+    if (context === 'explorer') toggleExplorer()
+    else if (context === 'agent') setAgentOpen(!open)
+  }
+
+  const isResizingRef = useRef(false)
+
+  const handleResizeStart = (e: React.MouseEvent) => {
     e.preventDefault()
+    isResizingRef.current = true
     const startY = e.clientY
     const startH = height
+
+    document.body.style.cursor = 'ns-resize'
+    document.body.style.userSelect = 'none'
+
     const onMove = (ev: MouseEvent) => {
       const dy = startY - ev.clientY
       const next = Math.min(800, Math.max(160, startH + dy))
       setHeight(next)
     }
+
     const onUp = () => {
+      isResizingRef.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
+
+      // Fit all terminals after resize completes
+      fitAllTerminals(context)
     }
+
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
   }
 
-  // Ensure a terminal exists when panel is opened and none are present
-  useEffect(() => {
-    if (open && tabsRef.current.length === 0) addTab()
-  }, [open])
-
-  if (!open) {
-    const onToggleClick = () => {
-      if (context === 'explorer') toggleExplorer()
-      else if (context === 'agent') setAgentOpen(true)
-    }
-    return (
-      <Box style={{ height: 28, backgroundColor: '#252526', borderTop: '1px solid #3e3e42', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 8px' }}>
-        <Text size="sm" c="dimmed">Terminal</Text>
-        <ActionIcon variant="subtle" onClick={onToggleClick}>
-          <IconChevronUp size={16} />
-        </ActionIcon>
-      </Box>
-    )
-  }
-
-  const onToggleClick = () => {
-    if (context === 'explorer') toggleExplorer()
-    else if (context === 'agent') setAgentOpen(false) // allow collapse in agent view
-  }
-
   return (
-    <Box style={{ height, backgroundColor: '#1e1e1e', borderTop: '1px solid #3e3e42', display: 'flex', flexDirection: 'column' }}>
+    <div
+      style={{
+        height: open ? `${height}px` : 'auto',
+        backgroundColor: '#1e1e1e',
+        display: 'flex',
+        flexDirection: 'column',
+        flexShrink: 0,
+      }}
+    >
       {/* Resize handle */}
-      <div onMouseDown={onMouseDownResize} style={{ height: 6, cursor: 'ns-resize', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <IconArrowsMoveVertical size={12} color="#777" />
-      </div>
-      {/* Header */}
-      <Group justify="space-between" px={8} py={6} style={{ borderBottom: '1px solid #3e3e42', background: '#252526' }}>
-        <Text size="sm" c="dimmed">Terminal</Text>
-        <Group gap={6} wrap="nowrap">
-          <Tooltip label={open ? 'Collapse' : 'Expand'} withArrow position="left">
-            <ActionIcon variant="subtle" onClick={onToggleClick}>
-              {open ? <IconChevronDown size={16} /> : <IconChevronUp size={16} />}
-            </ActionIcon>
-          </Tooltip>
-          <Tooltip label="New Terminal" withArrow position="left">
-            <ActionIcon variant="subtle" onClick={addTab}>
-              <IconPlus size={16} />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-      </Group>
+      {open && (
+        <div
+          onMouseDown={handleResizeStart}
+          style={{
+            height: '4px',
+            cursor: 'ns-resize',
+            backgroundColor: 'transparent',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = '#007acc'
+          }}
+          onMouseLeave={(e) => {
+            if (!isResizingRef.current) {
+              e.currentTarget.style.backgroundColor = 'transparent'
+            }
+          }}
+        />
+      )}
 
-      {/* Tabs */}
-      <Tabs
-        value={activeRef.current}
-        onChange={(v) => { if (typeof v === 'string') { activeRef.current = v; force() }}}
-        keepMounted={false}
-        style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}
+      {/* Header */}
+      <div
+        style={{
+          height: '28px',
+          padding: '0 12px',
+          borderBottom: open ? '1px solid #3e3e42' : 'none',
+          backgroundColor: '#252526',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexShrink: 0,
+        }}
       >
-        <Tabs.List>
-          {tabsRef.current.map((id) => (
-            <Tabs.Tab key={id} value={id}
-              rightSection={
-                <ActionIcon component="div" size="xs" variant="subtle" onClick={(e) => { e.stopPropagation(); closeTab(id) }}>
+        <Group gap="xs">
+          <Text size="xs" fw={600} c="dimmed">
+            TERMINAL
+          </Text>
+          {tabs.length > 1 && (
+            <Badge size="xs" variant="light" color="gray">
+              {tabs.length}
+            </Badge>
+          )}
+        </Group>
+        <Group gap="xs">
+          {open && (
+            <UnstyledButton
+              onClick={addTab}
+              style={{
+                color: '#888',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '2px',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = '#fff'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = '#888'
+              }}
+            >
+              <IconPlus size={14} />
+            </UnstyledButton>
+          )}
+          <UnstyledButton
+            onClick={onToggleClick}
+            style={{
+              color: '#888',
+              display: 'flex',
+              alignItems: 'center',
+              padding: '2px',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = '#fff'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = '#888'
+            }}
+          >
+            {open ? <IconChevronDown size={14} /> : <IconChevronUp size={14} />}
+          </UnstyledButton>
+        </Group>
+      </div>
+
+      {/* Terminal content area */}
+      {open && (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {/* Tab buttons */}
+          <div
+            style={{
+              height: '36px',
+              display: 'flex',
+              alignItems: 'flex-end',
+              backgroundColor: '#252526',
+              borderBottom: '1px solid #3e3e42',
+              flexShrink: 0,
+            }}
+          >
+            {tabs.map((id) => (
+              <div
+                key={id}
+                onClick={() => {
+                  setActiveTerminal(context, id)
+                }}
+                style={{
+                  height: '32px',
+                  padding: '0 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  cursor: 'pointer',
+                  backgroundColor: activeTab === id ? '#1e1e1e' : 'transparent',
+                  borderTop: activeTab === id ? '1px solid #007acc' : '1px solid transparent',
+                  borderLeft: '1px solid #3e3e42',
+                  borderRight: '1px solid #3e3e42',
+                  color: activeTab === id ? '#ffffff' : '#888888',
+                  fontSize: '13px',
+                }}
+              >
+                <span>{id}</span>
+                <div
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    closeTab(id)
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '2px',
+                    color: '#888',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = '#fff'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = '#888'
+                  }}
+                >
                   <IconX size={12} />
-                </ActionIcon>
-              }
-            >{id}</Tabs.Tab>
-          ))}
-        </Tabs.List>
-        {tabsRef.current.map((id) => (
-          <Tabs.Panel key={id} value={id} style={{ height: '100%', display: 'flex' }}>
-            <TerminalView key={id} disableStdin={context === 'agent'} />
-          </Tabs.Panel>
-        ))}
-      </Tabs>
-    </Box>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Terminal views */}
+          <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+            {tabs.length === 0 ? (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888' }}>
+                <Text size="sm">No terminals open. Click + to create one.</Text>
+              </div>
+            ) : (
+              tabs.map((id) => (
+                <div
+                  key={id}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    display: activeTab === id ? 'block' : 'none',
+                  }}
+                >
+                  <TerminalView tabId={id} context={context} />
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 

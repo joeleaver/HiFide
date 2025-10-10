@@ -1,5 +1,5 @@
 directories:
-  output: release/${version}
+  output: ''
   buildResources: build
 $schema: https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json
 appId: com.hifide.app

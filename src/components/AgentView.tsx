@@ -1,18 +1,65 @@
-import { Group, Stack, Text, UnstyledButton, ScrollArea, Card, Select, Button } from '@mantine/core'
+import { useState, useRef, useEffect } from 'react'
+import { Group, Stack, Text, UnstyledButton, ScrollArea, Card, Select, Button, Badge } from '@mantine/core'
 import { IconChevronLeft, IconChevronRight, IconPlus } from '@tabler/icons-react'
 import { useAppStore } from '../store/app'
 import { useChatStore } from '../store/chat'
 import ChatPane from '../ChatPane'
 import TerminalPanel from './TerminalPanel'
+import AgentDebugPanel from './AgentDebugPanel'
+
+
 
 export default function AgentView() {
   const metaPanelOpen = useAppStore((s) => s.metaPanelOpen)
   const setMetaPanelOpen = useAppStore((s) => s.setMetaPanelOpen)
+  const debugPanelCollapsed = useAppStore((s) => s.debugPanelCollapsed)
 
-  const conversations = useChatStore((s) => s.conversations)
+  const sessions = useChatStore((s) => s.sessions)
   const currentId = useChatStore((s) => s.currentId)
   const select = useChatStore((s) => s.select)
-  const newConversation = useChatStore((s) => s.newConversation)
+  const workspaceRoot = useAppStore((s) => s.workspaceRoot)
+  const ctxRefreshing = useAppStore((s) => s.ctxRefreshing)
+  const ctxResult = useAppStore((s) => s.ctxResult)
+  const refreshContext = useAppStore((s) => s.refreshContext)
+
+  const newSession = useChatStore((s) => s.newSession)
+
+  // Debug panel resize state
+  const [debugPanelHeight, setDebugPanelHeight] = useState(300)
+  const isResizingRef = useRef(false)
+  const startYRef = useRef(0)
+  const startHeightRef = useRef(0)
+
+  const handleResizeStart = (e: React.MouseEvent) => {
+    isResizingRef.current = true
+    startYRef.current = e.clientY
+    startHeightRef.current = debugPanelHeight
+    document.body.style.cursor = 'ns-resize'
+    document.body.style.userSelect = 'none'
+  }
+
+  const handleResizeMove = (e: MouseEvent) => {
+    if (!isResizingRef.current) return
+    const deltaY = startYRef.current - e.clientY
+    const newHeight = Math.max(150, Math.min(600, startHeightRef.current + deltaY))
+    setDebugPanelHeight(newHeight)
+  }
+
+  const handleResizeEnd = () => {
+    isResizingRef.current = false
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+  }
+
+  // Add/remove mouse event listeners
+  useEffect(() => {
+    document.addEventListener('mousemove', handleResizeMove)
+    document.addEventListener('mouseup', handleResizeEnd)
+    return () => {
+      document.removeEventListener('mousemove', handleResizeMove)
+      document.removeEventListener('mouseup', handleResizeEnd)
+    }
+  }, [])
 
   return (
     <Group
@@ -35,7 +82,7 @@ export default function AgentView() {
           overflow: 'hidden',
         }}
       >
-        {/* Conversation Selector Bar */}
+        {/* Session Selector Bar */}
         <div
           style={{
             padding: '8px 16px',
@@ -49,11 +96,11 @@ export default function AgentView() {
           <Select
             value={currentId || undefined}
             onChange={(v) => v && select(v)}
-            data={conversations.map((c) => ({
-              value: c.id,
-              label: c.title || 'Untitled',
+            data={sessions.map((sess) => ({
+              value: sess.id,
+              label: sess.title || 'Untitled',
             }))}
-            placeholder="Select conversation"
+            placeholder="Select session"
             size="xs"
             style={{ flex: 1, maxWidth: 300 }}
             styles={{
@@ -68,7 +115,7 @@ export default function AgentView() {
             size="xs"
             variant="light"
             leftSection={<IconPlus size={14} />}
-            onClick={() => newConversation()}
+            onClick={() => newSession()}
           >
             New
           </Button>
@@ -133,39 +180,214 @@ export default function AgentView() {
             </UnstyledButton>
           </Group>
 
-          {/* Meta Panel Content */}
+          {/* Meta Panel Content - Scrollable */}
           <ScrollArea style={{ flex: 1 }} p="md">
             <Stack gap="md">
               <Card withBorder style={{ backgroundColor: '#1e1e1e' }}>
                 <Stack gap="xs">
-                  <Text size="xs" fw={600} c="dimmed">
-                    CONTEXT
-                  </Text>
-                  <Text size="sm">No active context</Text>
+                  <Text size="xs" fw={600} c="dimmed">CONTEXT</Text>
+                  <Group justify="space-between">
+                    <Button size="xs" variant="light" onClick={refreshContext} loading={ctxRefreshing} disabled={!workspaceRoot}>
+                      Refresh Context
+                    </Button>
+                    {ctxResult ? (
+                      ctxResult.ok ? (
+                        <Badge color="teal" variant="light" size="xs">OK</Badge>
+                      ) : (
+                        <Badge color="red" variant="light" size="xs">ERROR</Badge>
+                      )
+                    ) : null}
+                  </Group>
+                  <Stack gap={2}>
+                    <Text size="xs" c="dimmed">Folder: {workspaceRoot || '—'}</Text>
+                    {ctxResult?.ok ? (
+                      <Text size="xs" c="dimmed">
+                        {ctxResult.createdPublic ? 'Created .hifide-public; ' : ''}
+                        {ctxResult.createdPrivate ? 'Created .hifide-private; ' : ''}
+                        {ctxResult.ensuredGitIgnore ? 'Updated .gitignore; ' : ''}
+                        {ctxResult.generatedContext ? 'Generated context' : 'Context already present'}
+                      </Text>
+                    ) : ctxResult?.error ? (
+                      <Text size="xs" c="red.4">{ctxResult.error}</Text>
+                    ) : (
+                      <Text size="xs" c="dimmed">No recent action</Text>
+                    )}
+                  </Stack>
                 </Stack>
               </Card>
 
               <Card withBorder style={{ backgroundColor: '#1e1e1e' }}>
-                <Stack gap="xs">
+                <Stack gap="md">
                   <Text size="xs" fw={600} c="dimmed">
-                    TOKEN USAGE
+                    TOKEN USAGE & COSTS
                   </Text>
-                  <Text size="sm">0 tokens used</Text>
-                </Stack>
-              </Card>
 
-              <Card withBorder style={{ backgroundColor: '#1e1e1e' }}>
-                <Stack gap="xs">
-                  <Text size="xs" fw={600} c="dimmed">
-                    THINKING
-                  </Text>
-                  <Text size="sm" c="dimmed">
-                    Waiting for input...
-                  </Text>
+                  {/* Session Total */}
+                  {(() => {
+                    const currentSession = sessions.find((sess) => sess.id === currentId)
+                    if (!currentSession) return <Text size="sm" c="dimmed">No session selected</Text>
+
+                    const { total, byProvider } = currentSession.tokenUsage
+                    const costs = currentSession.costs || { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }
+                    const { totalCost, byProviderAndModel } = costs
+                    const hasUsage = total.totalTokens > 0
+
+                    return (
+                      <Stack gap="md">
+                        {/* Session Totals */}
+                        <div>
+                          <Text size="xs" fw={600} c="blue" mb={4}>SESSION TOTALS</Text>
+                          <Group gap="xs" mb={2}>
+                            <Text size="xs" c="dimmed" style={{ minWidth: '60px' }}>Tokens:</Text>
+                            <Text size="xs">
+                              <span style={{ color: '#4fc3f7' }}>{total.inputTokens.toLocaleString()}</span>
+                              <span style={{ color: '#666' }}> in</span>
+                              <span style={{ color: '#666' }}> + </span>
+                              <span style={{ color: '#81c784' }}>{total.outputTokens.toLocaleString()}</span>
+                              <span style={{ color: '#666' }}> out</span>
+                              <span style={{ color: '#666' }}> = </span>
+                              <span style={{ color: '#fff' }}>{total.totalTokens.toLocaleString()}</span>
+                            </Text>
+                          </Group>
+                          {totalCost > 0 && (
+                            <Group gap="xs">
+                              <Text size="xs" c="dimmed" style={{ minWidth: '60px' }}>Cost:</Text>
+                              <Text size="xs" c="#4ade80" fw={600}>
+                                ${totalCost.toFixed(4)} USD
+                              </Text>
+                            </Group>
+                          )}
+                        </div>
+
+                        {/* By Provider & Model */}
+                        {hasUsage && Object.keys(byProviderAndModel).length > 0 && (
+                          <div>
+                            <Text size="xs" fw={600} c="dimmed" mb={4}>BY PROVIDER & MODEL</Text>
+                            <Stack gap={6}>
+                              {Object.entries(byProviderAndModel).map(([provider, models]) => (
+                                <div key={provider}>
+                                  {Object.entries(models).map(([model, cost]) => {
+                                    // Get token usage for this provider/model combination
+                                    const providerUsage = byProvider[provider]
+
+                                    return (
+                                      <div key={`${provider}-${model}`} style={{ marginBottom: '6px' }}>
+                                        <Text size="xs" c="#888" mb={2}>
+                                          {provider} / {model}
+                                        </Text>
+                                        <Group gap="xs" ml="md">
+                                          <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Tokens:</Text>
+                                          <Text size="xs" c="dimmed">
+                                            {providerUsage ? providerUsage.totalTokens.toLocaleString() : '—'}
+                                          </Text>
+                                        </Group>
+                                        <Group gap="xs" ml="md">
+                                          <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Cost:</Text>
+                                          <Text size="xs" c="#4ade80">
+                                            ${cost.totalCost.toFixed(4)}
+                                          </Text>
+                                          <Text size="xs" c="dimmed">
+                                            (${cost.inputCost.toFixed(4)} in + ${cost.outputCost.toFixed(4)} out)
+                                          </Text>
+                                        </Group>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              ))}
+                            </Stack>
+                          </div>
+                        )}
+
+                        {/* Last Request */}
+                        {(() => {
+                          const lastRequest = useChatStore.getState().lastRequestTokenUsage
+                          if (!lastRequest) return null
+
+                          const cost = useAppStore.getState().calculateCost(
+                            lastRequest.provider,
+                            lastRequest.model,
+                            lastRequest.usage
+                          )
+
+                          return (
+                            <div>
+                              <Text size="xs" fw={600} c="orange" mb={4}>LAST REQUEST</Text>
+                              <Text size="xs" c="#888" mb={2}>
+                                {lastRequest.provider} / {lastRequest.model}
+                              </Text>
+                              <Group gap="xs" ml="md">
+                                <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Tokens:</Text>
+                                <Text size="xs">
+                                  <span style={{ color: '#4fc3f7' }}>{lastRequest.usage.inputTokens.toLocaleString()}</span>
+                                  <span style={{ color: '#666' }}> in</span>
+                                  <span style={{ color: '#666' }}> + </span>
+                                  <span style={{ color: '#81c784' }}>{lastRequest.usage.outputTokens.toLocaleString()}</span>
+                                  <span style={{ color: '#666' }}> out</span>
+                                  <span style={{ color: '#666' }}> = </span>
+                                  <span style={{ color: '#ccc' }}>{lastRequest.usage.totalTokens.toLocaleString()}</span>
+                                </Text>
+                              </Group>
+                              <Group gap="xs" ml="md">
+                                <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Cost:</Text>
+                                {cost ? (
+                                  <Text size="xs" c="#4ade80">
+                                    ${cost.totalCost.toFixed(4)} USD
+                                  </Text>
+                                ) : (
+                                  <Text size="xs" c="dimmed" fs="italic">
+                                    Unknown (no pricing configured)
+                                  </Text>
+                                )}
+                              </Group>
+                            </div>
+                          )
+                        })()}
+                      </Stack>
+                    )
+                  })()}
                 </Stack>
               </Card>
             </Stack>
           </ScrollArea>
+
+          {/* Agent Debug Panel - Fixed at bottom with resize handle */}
+          <div style={{
+            borderTop: '1px solid #3e3e42',
+            height: debugPanelCollapsed ? 'auto' : `${debugPanelHeight}px`,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            position: 'relative',
+          }}>
+            {/* Resize handle - only show when not collapsed */}
+            {!debugPanelCollapsed && (
+              <div
+                onMouseDown={handleResizeStart}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: '4px',
+                  cursor: 'ns-resize',
+                  backgroundColor: 'transparent',
+                  zIndex: 10,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#007acc'
+                }}
+                onMouseLeave={(e) => {
+                  if (!isResizingRef.current) {
+                    e.currentTarget.style.backgroundColor = 'transparent'
+                  }
+                }}
+              />
+            )}
+            <div style={{ flex: debugPanelCollapsed ? 'none' : 1, overflow: 'hidden' }}>
+              <AgentDebugPanel />
+            </div>
+          </div>
         </div>
       )}
 

@@ -55,7 +55,7 @@ export default function ActivityBar() {
       gap={0}
       style={{
         width: ACTIVITY_BAR_WIDTH,
-        height: '100vh',
+        height: '100%',
         backgroundColor: '#333333',
         borderRight: '1px solid #1e1e1e',
         flexShrink: 0,

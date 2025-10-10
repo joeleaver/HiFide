@@ -9,6 +9,10 @@ declare global {
       getApiKeyFor: (provider: string) => Promise<string | null>;
       validateApiKeyFor: (provider: string, key: string, model?: string) => Promise<{ ok: boolean; error?: string }>;
       presence: () => Promise<{ openai: boolean; anthropic: boolean; gemini: boolean }>;
+      onPresenceChanged: (listener: (p: { openai: boolean; anthropic: boolean; gemini: boolean }) => void) => () => void;
+    };
+    models?: {
+      list: (provider: string) => Promise<{ ok: boolean; models?: Array<{ id: string; label?: string; supported?: string[] }>; error?: string }>;
     };
     llm?: {
       start: (
@@ -25,6 +29,14 @@ declare global {
         tools?: string[],
         responseSchema?: any,
       ) => Promise<{ ok: boolean }>;
+      auto: (
+        requestId: string,
+        messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+        model?: string,
+        provider?: string,
+        tools?: string[],
+        responseSchema?: any,
+      ) => Promise<{ ok: boolean; mode?: 'chat'|'tools' }>;
       cancel: (requestId: string) => Promise<{ ok: boolean }>;
     };
     ipcRenderer: {
@@ -44,6 +56,12 @@ declare global {
       watchDir: (dirPath: string) => Promise<{ success: boolean; id?: number; error?: string }>;
       unwatch: (id: number) => Promise<{ success: boolean; error?: string }>;
       onWatch: (listener: (payload: { id: number; type: 'rename' | 'change'; path: string; dir: string }) => void) => () => void;
+    };
+    sessions?: {
+      list: () => Promise<{ ok: boolean; sessions?: any[]; error?: string }>;
+      load: (sessionId: string) => Promise<{ ok: boolean; session?: any; error?: string }>;
+      save: (session: any) => Promise<{ ok: boolean; error?: string }>;
+      delete: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
     };
     pty?: {
       create: (opts?: { shell?: string; cwd?: string; cols?: number; rows?: number; env?: Record<string, string>; log?: boolean }) => Promise<{ sessionId: string }>;
@@ -112,6 +130,24 @@ declare global {
         clear: () => Promise<{ ok: boolean; error?: string }>;
         search: (query: string, k?: number) => Promise<{ ok: boolean; chunks?: Array<{ path: string; startLine: number; endLine: number; text: string }>; error?: string }>;
       };
+      workspace?: {
+        getRoot: () => Promise<string>;
+        setRoot: (newRoot: string) => Promise<{ ok: boolean; error?: string }>;
+        openFolderDialog: () => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;
+        notifyRecentFoldersChanged: (recentFolders: Array<{ path: string; lastOpened: number }>) => void;
+        bootstrap: (baseDir: string, preferAgent?: boolean, overwrite?: boolean) => Promise<{
+          ok: boolean;
+          createdPublic?: boolean;
+          createdPrivate?: boolean;
+          ensuredGitIgnore?: boolean;
+          generatedContext?: boolean;
+          error?: string;
+        }>;
+      };
+
     }
   }
+
+
+
 

@@ -4,6 +4,13 @@ export interface StreamHandle {
   cancel: () => void
 }
 
+// Token usage information from LLM providers
+export type TokenUsage = {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+}
+
 // Generic tool spec used by provider-native agent runtimes
 export interface AgentTool {
   name: string
@@ -24,6 +31,7 @@ export interface ProviderAdapter {
     onChunk: (text: string) => void
     onDone: () => void
     onError: (error: string) => void
+    onTokenUsage?: (usage: TokenUsage) => void
   }): Promise<StreamHandle>
 
   // Optional provider-native agent streaming with tool-calling and optional structured outputs
@@ -37,5 +45,6 @@ export interface ProviderAdapter {
     onChunk: (text: string) => void
     onDone: () => void
     onError: (error: string) => void
+    onTokenUsage?: (usage: TokenUsage) => void
   }) => Promise<StreamHandle>
 }

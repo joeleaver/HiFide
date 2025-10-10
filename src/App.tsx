@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, Profiler } from 'react'
 import { Button, Group, Title } from '@mantine/core'
 import { useAppStore } from './store/app'
 import ActivityBar from './components/ActivityBar'
@@ -7,61 +7,83 @@ import AgentView from './components/AgentView'
 import ExplorerView from './components/ExplorerView'
 import SourceControlView from './components/SourceControlView'
 import SettingsPane from './SettingsPane'
+import LoadingScreen from './components/LoadingScreen'
+
+// Menu event handlers - defined once at module level
+const menuHandlers = {
+  openSettings: () => {
+    useAppStore.getState().setCurrentView('settings')
+  },
+  openChat: () => {
+    useAppStore.getState().setCurrentView('agent')
+  },
+  toggleTerminalPanel: () => {
+    const s = useAppStore.getState()
+    s.setCurrentView('explorer')
+    s.setExplorerTerminalPanelOpen(!s.explorerTerminalPanelOpen)
+  },
+  openFolder: async () => {
+    const result = await window.workspace?.openFolderDialog?.()
+    if (result?.ok && result.path) {
+      await useAppStore.getState().openFolder(result.path)
+    }
+  },
+  openRecentFolder: async (_e: any, folderPath: string) => {
+    await useAppStore.getState().openFolder(folderPath)
+  },
+  clearRecentFolders: () => {
+    useAppStore.getState().clearRecentFolders()
+  }
+}
+
+// Track if handlers are registered to prevent duplicates
+let handlersRegistered = false
 
 function App() {
   const currentView = useAppStore((s) => s.currentView)
-  const setCurrentView = useAppStore((s) => s.setCurrentView)
+  const appBootstrapping = useAppStore((s) => s.appBootstrapping)
+  const startupMessage = useAppStore((s) => s.startupMessage)
+  const initializeApp = useAppStore((s) => s.initializeApp)
 
-  // Respond to App Menu navigation
+  // Register menu handlers once
+  if (!handlersRegistered && window.ipcRenderer) {
+    handlersRegistered = true
+    window.ipcRenderer.on('menu:open-settings', menuHandlers.openSettings)
+    window.ipcRenderer.on('menu:open-chat', menuHandlers.openChat)
+    window.ipcRenderer.on('menu:toggle-terminal-panel', menuHandlers.toggleTerminalPanel)
+    window.ipcRenderer.on('menu:open-folder', menuHandlers.openFolder)
+    window.ipcRenderer.on('menu:open-recent-folder', menuHandlers.openRecentFolder)
+    window.ipcRenderer.on('menu:clear-recent-folders', menuHandlers.clearRecentFolders)
+  }
+
+  // Bootstrap on first mount: fetch keys and load models
   useEffect(() => {
-    const openSettings = () => setCurrentView('settings')
-    const openChat = () => setCurrentView('agent')
-    const toggleTerminalPanel = () => {
-      // Ensure Explorer view is active so the panel is mounted
-      setCurrentView('explorer')
-      const s = useAppStore.getState()
-      s.setExplorerTerminalPanelOpen(!s.explorerTerminalPanelOpen)
-    }
-    window.ipcRenderer?.on('menu:open-settings', openSettings)
-    window.ipcRenderer?.on('menu:open-chat', openChat)
-    window.ipcRenderer?.on('menu:toggle-terminal-panel', toggleTerminalPanel)
-    return () => {
-      window.ipcRenderer?.off('menu:open-settings', openSettings)
-      window.ipcRenderer?.off('menu:open-chat', openChat)
-      window.ipcRenderer?.off('menu:toggle-terminal-panel', toggleTerminalPanel)
-    }
-  }, [setCurrentView])
+    void initializeApp()
+  }, [initializeApp])
+
 
   // Keep main-process menu state in sync with current view (for enabling/disabling items)
   useEffect(() => {
     window.ipcRenderer?.invoke('app:set-view', currentView)
   }, [currentView])
-  // Bootstrap provider validation from keytar OR env (so saved keys and env keys both show as validated)
+  // Single source of truth: presence comes from main via IPC; subscribe and seed once
   useEffect(() => {
-    (async () => {
+    // Subscribe
+    const off = window.secrets?.onPresenceChanged?.((p) => {
+      useAppStore.getState().setProvidersValid({ openai: !!p.openai, anthropic: !!p.anthropic, gemini: !!p.gemini })
+      // Refresh models whenever provider presence changes
+      try { void useAppStore.getState().refreshAllModels() } catch {}
+    })
+    // Seed
+    ;(async () => {
       try {
-        const presence = await window.secrets?.presence?.()
-        if (presence && typeof presence === 'object') {
-          useAppStore.getState().setProvidersValid({
-            openai: !!presence.openai,
-            anthropic: !!presence.anthropic,
-            gemini: !!presence.gemini,
-          })
-          return
+        const p = await window.secrets?.presence?.()
+        if (p) {
+          useAppStore.getState().setProvidersValid({ openai: !!p.openai, anthropic: !!p.anthropic, gemini: !!p.gemini })
         }
       } catch {}
-      // Fallback to keytar-only
-      try {
-        const openaiKey = await window.secrets?.getApiKey?.()
-        const anthropicKey = await window.secrets?.getApiKeyFor?.('anthropic')
-        const geminiKey = await window.secrets?.getApiKeyFor?.('gemini')
-        useAppStore.getState().setProvidersValid({
-          openai: !!(openaiKey && openaiKey.trim()),
-          anthropic: !!(anthropicKey && anthropicKey.trim()),
-          gemini: !!(geminiKey && geminiKey.trim()),
-        })
-      } catch {}
     })()
+    return () => { try { off && off() } catch {} }
   }, [])
 
 
@@ -80,15 +102,30 @@ function App() {
           <div style={{ padding: '16px', backgroundColor: '#1e1e1e', height: '100%', overflow: 'auto' }}>
             <SettingsPane />
           </div>
+
         )
       default:
         return <AgentView />
     }
   }
 
+  // Gate UI until boot completes
+  if (appBootstrapping) {
+    return <LoadingScreen message={startupMessage} />
+  }
+
   return (
+    <Profiler
+      id="App"
+      onRender={(id, phase, actualDuration) => {
+        if (actualDuration > 16) {
+          console.log(`[Profiler] ${id} ${phase}: ${actualDuration.toFixed(2)}ms`)
+        }
+      }}
+    >
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       {/* Custom Title Bar */}
+
       <div
         style={{
           height: 36,
@@ -211,6 +248,7 @@ function App() {
                 width: 46,
                 height: 36,
                 borderRadius: 0,
+
                 '&:hover': {
                   backgroundColor: '#e81123',
                   color: '#ffffff',
@@ -225,20 +263,30 @@ function App() {
         </Group>
       </div>
 
-      {/* Main Content Area */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* Activity Bar */}
-        <ActivityBar />
+      {/* Main Content Area + Status Bar */}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', flexDirection: 'column' }}>
+        {/* Content row (ActivityBar + Views) */}
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          {/* Activity Bar */}
+          <ActivityBar />
 
-        {/* Main View Area */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {renderView()}
+          {startupMessage && currentView === 'settings' && (
+            <div style={{ padding: '8px 12px', backgroundColor: '#3a2b2b', color: '#ffffff', borderBottom: '1px solid #3e3e42' }}>
+              {startupMessage}
+            </div>
+          )}
+
+          {/* Main View Area */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {renderView()}
+          </div>
         </div>
-      </div>
 
-      {/* Status Bar */}
-      <StatusBar />
+        {/* Status Bar */}
+        <StatusBar />
+      </div>
     </div>
+    </Profiler>
   )
 }
 

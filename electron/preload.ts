@@ -26,13 +26,37 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 
 // Secure secrets API
 contextBridge.exposeInMainWorld('secrets', {
-  setApiKey: (k: string) => ipcRenderer.invoke('secrets:set', k),
-  getApiKey: () => ipcRenderer.invoke('secrets:get'),
-  setApiKeyFor: (provider: string, key: string) => ipcRenderer.invoke('secrets:setFor', { provider, key }),
-  getApiKeyFor: (provider: string) => ipcRenderer.invoke('secrets:getFor', provider),
+  setApiKey: (k: string) => {
+    return ipcRenderer.invoke('secrets:set', k)
+  },
+  getApiKey: async () => {
+    try { return await ipcRenderer.invoke('secrets:get') } catch { return null }
+  },
+  setApiKeyFor: (provider: string, key: string) => {
+    console.log(`[preload] setApiKeyFor(${provider}): saving via IPC, key=${key ? key.slice(0, 10) + '...' : 'empty'}`)
+    return ipcRenderer.invoke('secrets:setFor', { provider, key })
+  },
+  getApiKeyFor: async (provider: string) => {
+    try {
+      const fromMain = await ipcRenderer.invoke('secrets:getFor', provider)
+      console.log(`[preload] getApiKeyFor(${provider}): from main=${fromMain ? fromMain.slice(0, 10) + '...' : 'null'}`)
+      return fromMain
+    } catch {
+      console.log(`[preload] getApiKeyFor(${provider}): main process returned null`)
+      return null
+    }
+  },
   validateApiKeyFor: (provider: string, key: string, model?: string) => ipcRenderer.invoke('secrets:validateFor', { provider, key, model }),
   presence: () => ipcRenderer.invoke('secrets:presence'),
+  onPresenceChanged: (listener: (p: { openai: boolean; anthropic: boolean; gemini: boolean }) => void) => {
+    const fn = (_: any, payload: any) => listener(payload)
+    ipcRenderer.on('secrets:presence-changed', fn)
+    return () => ipcRenderer.off('secrets:presence-changed', fn)
+  },
+
 })
+
+// Keys are now stored in electron-store in the main process - no localStorage needed!
 
 
 contextBridge.exposeInMainWorld('llm', {
@@ -46,7 +70,21 @@ contextBridge.exposeInMainWorld('llm', {
     tools?: string[],
     responseSchema?: any,
   ) => ipcRenderer.invoke('llm:agentStart', { requestId, messages, model, provider, tools, responseSchema }),
+  auto: (
+    requestId: string,
+    messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>,
+    model?: string,
+    provider?: string,
+    tools?: string[],
+    responseSchema?: any,
+  ) => ipcRenderer.invoke('llm:auto', { requestId, messages, model, provider, tools, responseSchema }),
   cancel: (requestId: string) => ipcRenderer.invoke('llm:cancel', { requestId }),
+})
+
+
+// Models API: list models for a provider
+contextBridge.exposeInMainWorld('models', {
+  list: (provider: string) => ipcRenderer.invoke('models:list', provider),
 })
 
 // File system API
@@ -61,6 +99,14 @@ contextBridge.exposeInMainWorld('fs', {
     ipcRenderer.on('fs:watch:event', fn)
     return () => ipcRenderer.off('fs:watch:event', fn)
   },
+})
+
+// Session management API
+contextBridge.exposeInMainWorld('sessions', {
+  list: () => ipcRenderer.invoke('sessions:list'),
+  load: (sessionId: string) => ipcRenderer.invoke('sessions:load', sessionId),
+  save: (session: any) => ipcRenderer.invoke('sessions:save', session),
+  delete: (sessionId: string) => ipcRenderer.invoke('sessions:delete', sessionId),
 })
 
 // PTY (embedded terminal) API
@@ -146,4 +192,16 @@ contextBridge.exposeInMainWorld('indexing', {
   status: () => ipcRenderer.invoke('index:status'),
   clear: () => ipcRenderer.invoke('index:clear'),
   search: (query: string, k?: number) => ipcRenderer.invoke('index:search', { query, k }),
+})
+
+
+// Workspace API
+contextBridge.exposeInMainWorld('workspace', {
+  getRoot: () => ipcRenderer.invoke('workspace:get-root'),
+  setRoot: (newRoot: string) => ipcRenderer.invoke('workspace:set-root', newRoot),
+  openFolderDialog: () => ipcRenderer.invoke('workspace:open-folder-dialog'),
+  notifyRecentFoldersChanged: (recentFolders: Array<{ path: string; lastOpened: number }>) =>
+    ipcRenderer.send('workspace:recent-folders-changed', recentFolders),
+  bootstrap: (baseDir: string, preferAgent?: boolean, overwrite?: boolean) =>
+    ipcRenderer.invoke('workspace:bootstrap', { baseDir, preferAgent, overwrite }),
 })

@@ -1,0 +1,29 @@
+{
+  "project": {
+    "name": "hifide",
+    "version": "0.0.0"
+  },
+  "frameworks": [
+    "electron",
+    "vite",
+    "typescript",
+    "react"
+  ],
+  "entryPoints": {
+    "electronMain": "electron/main.ts",
+    "preload": "electron/preload.ts",
+    "webMain": "src/main.tsx",
+    "app": "src/App.tsx"
+  },
+  "docs": {
+    "readme": "README.md",
+    "architecture": "docs/architecture.md",
+    "implementationPlan": "docs/implementation-plan.md",
+    "retrieval": "docs/retrieval.md",
+    "tools": "docs/tools.md",
+    "terminal": "docs/terminal.md",
+    "verification": "docs/verification.md",
+    "roadmap": "docs/roadmap.md"
+  },
+  "goals": []
+}

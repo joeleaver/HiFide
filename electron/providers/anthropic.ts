@@ -1,25 +1,37 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { ProviderAdapter, StreamHandle, ChatMessage, AgentTool } from './provider'
+import { validateJson } from './jsonschema'
+import { withRetries } from './retry'
 
 export const AnthropicProvider: ProviderAdapter = {
   id: 'anthropic',
 
-  async chatStream({ apiKey, model, messages, onChunk, onDone, onError }): Promise<StreamHandle> {
+  async chatStream({ apiKey, model, messages, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
     const client = new Anthropic({ apiKey })
 
-    const conv = messages.map((m: ChatMessage) => ({ role: m.role as 'system' | 'user' | 'assistant', content: m.content }))
+    const system = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
+    const conv = messages.filter(m => m.role !== 'system').map((m: ChatMessage) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
 
     const holder: { abort?: () => void } = {}
 
     ;(async () => {
       try {
-        const stream = await client.messages.create({ model, messages: conv as any, stream: true, max_tokens: 2048 }) as any
+        const stream: any = await withRetries(() => client.messages.create({ model, system: system || undefined, messages: conv as any, stream: true, max_tokens: 2048 }) as any)
         holder.abort = () => { try { stream?.controller?.abort?.() } catch {} }
+
+        let usage: any = null
+
         for await (const evt of stream) {
           try {
             if (evt?.type === 'content_block_delta') {
               const t = evt?.delta?.text
               if (t) onChunk(String(t))
+            } else if (evt?.type === 'message_start') {
+              // Capture usage from message_start event
+              usage = evt?.message?.usage
+            } else if (evt?.type === 'message_delta') {
+              // Update usage from message_delta event
+              if (evt?.usage) usage = evt.usage
             } else if (evt?.type === 'message_stop') {
               // end of stream
             }
@@ -27,6 +39,16 @@ export const AnthropicProvider: ProviderAdapter = {
             onError(e?.message || String(e))
           }
         }
+
+        // Report token usage if available
+        if (usage && onTokenUsage) {
+          onTokenUsage({
+            inputTokens: usage.input_tokens || 0,
+            outputTokens: usage.output_tokens || 0,
+            totalTokens: (usage.input_tokens || 0) + (usage.output_tokens || 0),
+          })
+        }
+
         onDone()
       } catch (e: any) {
         if (e?.name === 'AbortError') return
@@ -40,7 +62,7 @@ export const AnthropicProvider: ProviderAdapter = {
   },
 
   // Agent streaming with tool-calling using Anthropic Messages API
-  async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, onChunk, onDone, onError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
     const client = new Anthropic({ apiKey })
 
     // Map tools to Anthropic format
@@ -50,38 +72,91 @@ export const AnthropicProvider: ProviderAdapter = {
       return { name: t.name, description: t.description || undefined, input_schema: t.parameters as any }
     }) as any
 
-    const conv: any[] = messages.map((m) => ({ role: m.role, content: m.content }))
+    const system = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
+    const conv: any[] = messages.filter(m => m.role !== 'system').map((m: any) => ({ role: m.role, content: m.content }))
     let cancelled = false
 
     const run = async () => {
       try {
+        let totalUsage: any = null
+
         while (!cancelled) {
-          const resp: any = await client.messages.create({
+          // Stream an assistant turn and capture any tool_use blocks while streaming
+          const stream: any = await withRetries(() => client.messages.create({
             model: model as any,
+            system: system || undefined,
             messages: conv as any,
             tools: anthTools.length ? anthTools : undefined,
+            stream: true,
             max_tokens: 2048,
-            // No strict structured output here; Anthropic recommends using tools for structure
-          })
+          }) as any)
 
-          // Collect tool calls from content blocks
-          const toolUses: Array<{ id: string; name: string; input: any }> = []
-          for (const block of resp?.content || []) {
-            if (block?.type === 'tool_use') {
-              toolUses.push({ id: block.id, name: block.name, input: block.input })
+          // Accumulate tool_use inputs incrementally and track usage
+          const active: Record<string, { id: string; name: string; inputText: string }> = {}
+          const completed: Array<{ id: string; name: string; input: any }> = []
+          let usage: any = null
+
+          for await (const evt of stream) {
+            try {
+              if (evt?.type === 'content_block_delta') {
+                const t = evt?.delta?.text
+                if (t) onChunk(String(t))
+              } else if (evt?.type === 'content_block_start' && evt?.content_block?.type === 'tool_use') {
+                const id = evt?.content_block?.id
+                const name = evt?.content_block?.name
+                if (id && name) active[id] = { id, name, inputText: '' }
+              } else if (evt?.type === 'input_json_delta' && evt?.delta) {
+                // Append partial JSON chunks for the active tool_use (Anthropic streams JSON deltas)
+                const id = evt?.content_block_id || evt?.block_id
+                const chunk = typeof evt.delta === 'string' ? evt.delta : JSON.stringify(evt.delta)
+                if (id && active[id]) active[id].inputText += chunk
+              } else if (evt?.type === 'content_block_stop') {
+                const id = evt?.content_block_id || evt?.block_id
+                const item = id ? active[id] : undefined
+                if (item) {
+                  let parsed: any = {}
+                  try { parsed = item.inputText ? JSON.parse(item.inputText) : {} } catch {}
+                  completed.push({ id: item.id, name: item.name, input: parsed })
+                  delete active[id!]
+                }
+              } else if (evt?.type === 'message_start') {
+                // Capture usage from message_start event
+                usage = evt?.message?.usage
+              } else if (evt?.type === 'message_delta') {
+                // Update usage from message_delta event
+                if (evt?.usage) usage = evt.usage
+              }
+            } catch (e: any) { onError(e?.message || String(e)) }
+          }
+
+          // Accumulate usage across multiple turns
+          if (usage) {
+            if (!totalUsage) {
+              totalUsage = usage
+            } else {
+              totalUsage.input_tokens = (totalUsage.input_tokens || 0) + (usage.input_tokens || 0)
+              totalUsage.output_tokens = (totalUsage.output_tokens || 0) + (usage.output_tokens || 0)
             }
           }
 
-          if (toolUses.length > 0) {
-            // Append assistant message including tool_use
-            conv.push({ role: 'assistant', content: resp.content })
-            // Execute tools and add a single user message with tool_result blocks
+          if (completed.length > 0) {
+            // Reconstruct assistant content with tool_use blocks for the transcript context
+            const assistantBlocks = completed.map(tu => ({ type: 'tool_use', id: tu.id, name: tu.name, input: tu.input }))
+            conv.push({ role: 'assistant', content: assistantBlocks as any })
+
+            // Execute tools and add tool_result blocks
             const results: any[] = []
-            for (const tu of toolUses) {
+            for (const tu of completed) {
               try {
                 const tool = toolMap.get(tu.name)
                 if (!tool) {
                   results.push({ type: 'tool_result', tool_use_id: tu.id, content: `Error: Tool ${tu.name} not found`, is_error: true })
+                  continue
+                }
+                const schema = (tool as any)?.parameters
+                const v = validateJson(schema, tu.input)
+                if (!v.ok) {
+                  results.push({ type: 'tool_result', tool_use_id: tu.id, content: `Validation error: ${v.errors || 'invalid input'}`, is_error: true })
                   continue
                 }
                 const result = await Promise.resolve(tool.run(tu.input))
@@ -94,18 +169,16 @@ export const AnthropicProvider: ProviderAdapter = {
             continue
           }
 
-          // No tool use: stream final text
-          const finalText = (resp?.content || [])
-            .filter((b: any) => b?.type === 'text')
-            .map((b: any) => String(b.text || ''))
-            .join('')
-          if (finalText) {
-            const CHUNK = 80
-            for (let i = 0; i < finalText.length && !cancelled; i += CHUNK) {
-              onChunk(finalText.slice(i, i + CHUNK))
-              await new Promise((r) => setTimeout(r, 1))
-            }
+          // No tool_use in this streamed turn; we already streamed the final text
+          // Report accumulated token usage
+          if (totalUsage && onTokenUsage) {
+            onTokenUsage({
+              inputTokens: totalUsage.input_tokens || 0,
+              outputTokens: totalUsage.output_tokens || 0,
+              totalTokens: (totalUsage.input_tokens || 0) + (totalUsage.output_tokens || 0),
+            })
           }
+
           onDone()
           return
         }

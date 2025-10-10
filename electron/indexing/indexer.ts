@@ -1,6 +1,5 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { app } from 'electron'
 import { EmbeddingEngine, getLocalEngine, cosine } from './engine'
 
 export type Chunk = {
@@ -39,8 +38,10 @@ export class Indexer {
 
   constructor(root: string) {
     this.root = root
-    const base = app.getPath('userData')
-    this.indexPath = path.join(base, 'index', 'index.json')
+    // Store index in workspace .hifide-private/indexes/
+    const privateDir = path.join(root, '.hifide-private')
+    const indexesDir = path.join(privateDir, 'indexes')
+    this.indexPath = path.join(indexesDir, 'index.json')
     fs.mkdirSync(path.dirname(this.indexPath), { recursive: true })
   }
 
@@ -97,6 +98,7 @@ export class Indexer {
     const parts = rel.split(path.sep)
     if (parts.some((p) => this.defaultExcludes.has(p))) return true
     if (parts.some((p) => this.gitignoreDirs.includes(p))) return true
+
     const ext = path.extname(filePath).toLowerCase()
     const binExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.zip', '.ico', '.dll', '.exe'])
     if (binExts.has(ext)) return true
@@ -194,13 +196,20 @@ export class Indexer {
     if (!this.data) return { chunks: [] }
     if (!this.engine) this.engine = await getLocalEngine()
 
+    console.log(`[indexer] search query="${query}", total chunks=${this.data.chunks.length}`)
     const [qv] = await this.engine.embed([query])
     const scored = this.data.chunks
       .map((c) => ({ c, score: cosine(qv, c.vector) }))
       .sort((a, b) => b.score - a.score)
-      .slice(0, k)
-      .map((x) => x.c)
-    return { chunks: scored }
+
+    // Log top 10 results with scores
+    console.log('[indexer] Top 10 results:')
+    scored.slice(0, 10).forEach((x, i) => {
+      console.log(`  ${i+1}. score=${x.score.toFixed(4)} path=${x.c.path}:${x.c.startLine}-${x.c.endLine}`)
+    })
+
+    const results = scored.slice(0, k).map((x) => x.c)
+    return { chunks: results }
   }
   // Simple watcher (best-effort). On Windows/macOS recursive fs.watch works; on Linux may be limited.
   private watcher: fs.FSWatcher | null = null

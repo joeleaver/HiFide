@@ -12,6 +12,8 @@ dist
 dist-ssr
 dist-electron
 *.local
+release
+win-unpacked
 
 # Editor directories and files
 .vscode/*
@@ -25,3 +27,6 @@ dist-electron
 *.sw?
 
 api_key.txt
+
+# Hifide
+.hifide-private

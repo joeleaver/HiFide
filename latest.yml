@@ -1,0 +1,8 @@
+version: 0.0.0
+files:
+  - url: HiFide-Windows-0.0.0-Setup.exe
+    sha512: LMbckFjXJ220p4pG1wh0NXiKihWxN4F1MIom83Zgmmbg1t5r1cQLgQybsNIO5r4m7oa3CwTwgEJ4Mf7deI7uUA==
+    size: 134696892
+path: HiFide-Windows-0.0.0-Setup.exe
+sha512: LMbckFjXJ220p4pG1wh0NXiKihWxN4F1MIom83Zgmmbg1t5r1cQLgQybsNIO5r4m7oa3CwTwgEJ4Mf7deI7uUA==
+releaseDate: '2025-10-09T00:57:18.896Z'

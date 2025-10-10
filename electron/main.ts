@@ -1,10 +1,10 @@
-import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, shell, screen, dialog } from 'electron'
 
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs/promises'
+import Store from 'electron-store'
 import * as fsSync from 'node:fs'
-import keytar from 'keytar'
 import { OpenAIProvider } from './providers/openai'
 import { AnthropicProvider } from './providers/anthropic'
 import { GeminiProvider } from './providers/gemini'
@@ -14,53 +14,15 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 // lazy-require pty module inside create handler to allow fallback when Electron prebuild is missing
 import { randomUUID } from 'node:crypto'
-import { spawn as spawnChild } from 'node:child_process'
-
-// PTY helper (Node runtime) fallback for Windows when Electron prebuild is missing
-let ptyHelperProc: import('node:child_process').ChildProcessWithoutNullStreams | null = null
-let ptyHelperBuf = ''
-const ptyHelperPending = new Map<string, (payload: any) => void>()
-function helperSend(obj: any) { try { ptyHelperProc?.stdin.write(JSON.stringify(obj) + '\n') } catch {} }
-function ensurePtyHelper() {
-  if (ptyHelperProc && !ptyHelperProc.killed) return
-  // Resolve helper relative to project root in dev
-  const helperPath = path.resolve(process.cwd(), 'electron', 'pty-helper.cjs')
-  ptyHelperProc = spawnChild('node', [helperPath], { stdio: ['pipe', 'pipe', 'pipe'] })
-  ptyHelperProc.stdout.on('data', (chunk) => {
-    ptyHelperBuf += chunk.toString('utf8')
-    let idx
-    while ((idx = ptyHelperBuf.indexOf('\n')) >= 0) {
-      const line = ptyHelperBuf.slice(0, idx); ptyHelperBuf = ptyHelperBuf.slice(idx + 1)
-      if (!line.trim()) continue
-      let msg: any; try { msg = JSON.parse(line) } catch { continue }
-      if (msg.reqId && ptyHelperPending.has(msg.reqId)) { const res = ptyHelperPending.get(msg.reqId)!; ptyHelperPending.delete(msg.reqId); res(msg); continue }
-      // Forward PTY stream events to renderers
-      if (msg.type === 'data' && msg.sessionId) {
-        const s = ptySessions.get(msg.sessionId)
-        if (s) {
-          const { redacted, bytesRedacted } = redactOutput(msg.data || '')
-          if (bytesRedacted > 0) { logEvent(msg.sessionId, 'data_redacted', { bytesRedacted }).catch(() => {}) }
-          const wc = BrowserWindow.fromId(s.wcId)?.webContents
-          try { wc?.send('pty:data', { sessionId: msg.sessionId, data: redacted }) } catch {}
-        }
-      } else if (msg.type === 'exit' && msg.sessionId) {
-        const s = ptySessions.get(msg.sessionId)
-        if (s) {
-          const wc = BrowserWindow.fromId(s.wcId)?.webContents
-          try { wc?.send('pty:exit', { sessionId: msg.sessionId, exitCode: msg.exitCode ?? -1 }) } catch {}
-          logEvent(msg.sessionId, 'session_exit', { exitCode: msg.exitCode ?? -1 }).catch(() => {})
-          ptySessions.delete(msg.sessionId)
-        }
-      }
-    }
-  })
-}
-
 
 import { renameSymbol as tsRenameSymbol, organizeImports as tsOrganizeImports, verifyTypecheck as tsVerify, addNamedExport as tsAddNamedExport, moveFileWithImports as tsMoveFile, ensureDefaultExport as tsEnsureDefault, addNamedExportFrom as tsAddExportFrom, extractFunction as tsExtractFunction, suggestParams as tsSuggestParams, inlineVariable as tsInlineVar, inlineFunction as tsInlineFn, convertDefaultToNamed as tsDefaultToNamed, convertNamedToDefault as tsNamedToDefault } from './refactors/ts'
 
 
 import { Indexer } from './indexing/indexer'
+
+import { exec as execCb } from 'node:child_process'
+import { promisify } from 'node:util'
+const exec = promisify(execCb)
 
 const DIRNAME = path.dirname(fileURLToPath(import.meta.url))
 
@@ -82,10 +44,7 @@ export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
 
-const SERVICE_NAME = 'HiFide'
-const ACCOUNT_OPENAI_KEY = 'openai_api_key'
-const ACCOUNT_ANTHROPIC_KEY = 'anthropic_api_key'
-const ACCOUNT_GEMINI_KEY = 'gemini_api_key'
+
 
 
 let win: BrowserWindow | null
@@ -148,37 +107,106 @@ async function logEvent(sessionId: string, type: string, payload: any) {
     await fs.appendFile(path.join(logsRoot(), `${sessionId}.jsonl`), JSON.stringify(entry) + '\n', 'utf-8')
   } catch {}
 }
+// Secure persistent store for API keys (electron-store handles multi-instance safely)
+const secureStore = new Store({
+  name: 'hifide-secrets',
+  encryptionKey: 'hifide-local-encryption-key', // Basic obfuscation
+})
 
+// Window state store for persisting window size and position
+const windowStateStore = new Store({
+  name: 'hifide-window-state',
+})
 
-// Secure secret storage IPC handlers
+// In-memory cache for provider API keys (loaded from electron-store on startup)
+const providerKeysMem: Record<string, string> = {}
+
+function providerKeyName(provider: string) {
+  return provider === 'anthropic' ? 'anthropic' : provider === 'gemini' ? 'gemini' : 'openai'
+}
+
+// Load keys from electron-store into memory cache on startup
+function loadKeysFromStore() {
+  try {
+    const openai = secureStore.get('openai') as string | undefined
+    const anthropic = secureStore.get('anthropic') as string | undefined
+    const gemini = secureStore.get('gemini') as string | undefined
+    if (openai) providerKeysMem.openai = openai
+    if (anthropic) providerKeysMem.anthropic = anthropic
+    if (gemini) providerKeysMem.gemini = gemini
+    console.log('[main] Loaded keys from electron-store:', {
+      openai: openai ? openai.slice(0, 10) + '...' : 'none',
+      anthropic: anthropic ? anthropic.slice(0, 10) + '...' : 'none',
+      gemini: gemini ? gemini.slice(0, 10) + '...' : 'none',
+    })
+  } catch (e) {
+    console.error('[main] Failed to load keys from electron-store:', e)
+  }
+}
+
+// Load keys immediately
+loadKeysFromStore()
+
+// Helpers to compute and broadcast presence across windows
+function computePresence() {
+  const env = process.env
+  const hasOpenAI = !!providerKeysMem.openai || !!env?.OPENAI_API_KEY
+  const hasAnthropic = !!providerKeysMem.anthropic || !!env?.ANTHROPIC_API_KEY
+  const hasGemini = !!providerKeysMem.gemini || !!env?.GEMINI_API_KEY || !!env?.GOOGLE_API_KEY
+  return { openai: hasOpenAI, anthropic: hasAnthropic, gemini: hasGemini }
+}
+function broadcastPresence() {
+  const payload = computePresence()
+  try {
+    for (const w of BrowserWindow.getAllWindows()) {
+      try { w.webContents.send('secrets:presence-changed', payload) } catch {}
+    }
+  } catch {}
+}
+
+// Secure secret storage IPC handlers (now using electron-store for persistence)
 ipcMain.handle('secrets:set', async (_e, k: string) => {
-  await keytar.setPassword(SERVICE_NAME, ACCOUNT_OPENAI_KEY, k)
+  providerKeysMem['openai'] = k
+  secureStore.set('openai', k)
+  broadcastPresence()
   return true
 })
 
-
-// Provider-specific secret APIs
+// Provider-specific secret APIs (now using electron-store for persistence)
 ipcMain.handle('secrets:setFor', async (_e, args: { provider: string; key: string }) => {
-  const acc = args.provider === 'anthropic' ? ACCOUNT_ANTHROPIC_KEY : args.provider === 'gemini' ? ACCOUNT_GEMINI_KEY : ACCOUNT_OPENAI_KEY
-  await keytar.setPassword(SERVICE_NAME, acc, args.key)
+  const keyName = providerKeyName(args.provider)
+  providerKeysMem[keyName] = args.key
+  secureStore.set(keyName, args.key)
+  console.log(`[main] Saved ${keyName} to electron-store`)
+  broadcastPresence()
   return true
 })
 
 ipcMain.handle('secrets:getFor', async (_e, provider: string) => {
-  const acc = provider === 'anthropic' ? ACCOUNT_ANTHROPIC_KEY : provider === 'gemini' ? ACCOUNT_GEMINI_KEY : ACCOUNT_OPENAI_KEY
-  return keytar.getPassword(SERVICE_NAME, acc)
+  const keyName = providerKeyName(provider)
+  // Try memory cache first, then electron-store
+  if (providerKeysMem[keyName]) return providerKeysMem[keyName]
+  const stored = secureStore.get(keyName) as string | undefined
+  if (stored) {
+    providerKeysMem[keyName] = stored
+    return stored
+  }
+  return null
 })
+
+
 
 
 // Helper: get provider API key with env fallback for dev
 async function getProviderKey(providerId: string): Promise<string | null> {
-  const account = providerId === 'anthropic' ? ACCOUNT_ANTHROPIC_KEY : providerId === 'gemini' ? ACCOUNT_GEMINI_KEY : ACCOUNT_OPENAI_KEY
-  const stored = await keytar.getPassword(SERVICE_NAME, account)
-  if (stored && stored.trim()) return stored
+  const mem = providerKeysMem[providerKeyName(providerId)]
+  console.log(`[main] getProviderKey(${providerId}): mem=${mem ? `${mem.slice(0, 10)}...` : 'none'}`)
+  if (mem && mem.trim()) return mem
   const env = process.env
   if (providerId === 'openai' && env?.OPENAI_API_KEY) return env.OPENAI_API_KEY
   if (providerId === 'anthropic' && env?.ANTHROPIC_API_KEY) return env.ANTHROPIC_API_KEY
-  if (providerId === 'gemini' && env?.GEMINI_API_KEY) return env.GEMINI_API_KEY
+  if (providerId === 'gemini' && (env?.GEMINI_API_KEY || env?.GOOGLE_API_KEY)) return env.GEMINI_API_KEY || env.GOOGLE_API_KEY || null
+  console.log(`[main] getProviderKey(${providerId}): returning null (no key found)`)
   return null
 }
 
@@ -201,11 +229,27 @@ ipcMain.handle('secrets:validateFor', async (_e, args: { provider: string; key: 
       await c.messages.countTokens({ model: m as any, messages: [{ role: 'user', content: 'ping' }] as any })
       return { ok: true }
     } else if (provider === 'gemini') {
-      const { GoogleGenerativeAI } = await import('@google/generative-ai')
-      const g = new GoogleGenerativeAI(key)
-      const m = g.getGenerativeModel({ model: model || 'gemini-1.5-pro' }) as any
-      await m.countTokens({ contents: [{ role: 'user', parts: [{ text: 'ping' }] }] })
-      return { ok: true }
+      // Validate with public listModels on v1; success implies key is valid regardless of specific model support
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1/models?key=${encodeURIComponent(key)}`
+        const f: any = (globalThis as any).fetch
+        if (!f) return { ok: false, error: 'Fetch API unavailable in main process to validate Gemini key' }
+        const resp = await f(url, { method: 'GET' })
+        if (resp.ok) {
+          // Some SDKs return { models: [...] }, others may wrap in { data: [...] }
+          const data = await resp.json().catch(() => ({}))
+          if (data && (Array.isArray((data as any).models) || Array.isArray((data as any).data))) {
+            return { ok: true }
+          }
+          // If response body is empty but 200 OK, treat as valid
+          return { ok: true }
+        } else {
+          const txt = await resp.text().catch(() => '')
+          return { ok: false, error: `Gemini listModels HTTP ${resp.status}: ${txt.slice(0, 300)}` }
+        }
+      } catch (e: any) {
+        return { ok: false, error: e?.message || String(e) }
+      }
     }
     return { ok: false, error: 'Unknown provider' }
   } catch (e: any) {
@@ -214,18 +258,117 @@ ipcMain.handle('secrets:validateFor', async (_e, args: { provider: string; key: 
 })
 
 
-// Presence check: keytar OR env vars indicate a provider is available
+// Presence check: in-memory cache OR env vars indicate a provider is available
 ipcMain.handle('secrets:presence', async () => {
   const env = process.env
-  const hasOpenAI = !!(await keytar.getPassword(SERVICE_NAME, ACCOUNT_OPENAI_KEY)) || !!env?.OPENAI_API_KEY
-  const hasAnthropic = !!(await keytar.getPassword(SERVICE_NAME, ACCOUNT_ANTHROPIC_KEY)) || !!env?.ANTHROPIC_API_KEY
-  const hasGemini = !!(await keytar.getPassword(SERVICE_NAME, ACCOUNT_GEMINI_KEY)) || !!env?.GEMINI_API_KEY || !!env?.GOOGLE_API_KEY
+  const hasOpenAI = !!providerKeysMem.openai || !!env?.OPENAI_API_KEY
+  const hasAnthropic = !!providerKeysMem.anthropic || !!env?.ANTHROPIC_API_KEY
+  const hasGemini = !!providerKeysMem.gemini || !!env?.GEMINI_API_KEY || !!env?.GOOGLE_API_KEY
   return { openai: hasOpenAI, anthropic: hasAnthropic, gemini: hasGemini }
 })
 
+// List available models for a provider using the provider's API
+ipcMain.handle('models:list', async (_e, provider: string) => {
+  try {
+    const prov = provider || 'openai'
+    const key = await getProviderKey(prov)
+    if (!key) return { ok: false, error: 'Missing API key for provider' }
+
+    if (prov === 'openai') {
+      const { default: OpenAI } = await import('openai')
+      const client = new OpenAI({ apiKey: key })
+      const res: any = await client.models.list()
+      const ids: string[] = (res?.data || [])
+        .map((m: any) => m?.id)
+        .filter((id: any) => typeof id === 'string')
+      // Filter to models relevant for agentic coding (general-purpose chat/coding LLMs)
+      const allowPriority = [
+        'gpt-5', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini', 'o4', 'o4-mini', 'o3-mini',
+      ]
+      const allowed = ids.filter((id) =>
+        /^(gpt-5|gpt-4\.1|gpt-4o|o[34])/i.test(id) &&
+        !/realtime/i.test(id) &&
+        !/(whisper|audio|tts|speech|embedding|embeddings)/i.test(id)
+      )
+      const uniq = Array.from(new Set(allowed))
+      const withLabels = uniq.map((id) => ({ id, label: id }))
+      // Sort by our preferred order, then lexicographically
+      withLabels.sort((a, b) => {
+        const ia = allowPriority.findIndex((p) => a.id.startsWith(p))
+        const ib = allowPriority.findIndex((p) => b.id.startsWith(p))
+        if (ia !== ib) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
+        return a.id.localeCompare(b.id)
+      })
+      return { ok: true, models: withLabels }
+    }
+
+    if (prov === 'anthropic') {
+      const f: any = (globalThis as any).fetch
+      if (!f) return { ok: false, error: 'Fetch API unavailable in main process' }
+      const resp = await f('https://api.anthropic.com/v1/models', {
+        method: 'GET',
+        headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      })
+      if (!resp.ok) {
+        const txt = await resp.text().catch(() => '')
+        return { ok: false, error: `Anthropic models HTTP ${resp.status}: ${txt.slice(0, 300)}` }
+      }
+      const data = await resp.json().catch(() => ({}))
+      const arr = Array.isArray((data as any).data)
+        ? (data as any).data
+        : Array.isArray((data as any).models)
+          ? (data as any).models
+          : []
+      const ids: string[] = arr.map((m: any) => m?.id || m?.name).filter(Boolean)
+      // Filter to Claude 3/3.5/3.7 families suitable for agentic coding
+      const allowed = ids.filter((id) => /^(claude-3(\.7)?|claude-3-5)/i.test(id))
+      const uniq = Array.from(new Set(allowed))
+      const withLabels = uniq.map((id) => ({ id, label: id }))
+      return { ok: true, models: withLabels }
+    }
+
+    if (prov === 'gemini') {
+      const f: any = (globalThis as any).fetch
+      if (!f) return { ok: false, error: 'Fetch API unavailable in main process' }
+      const resp = await f(`https://generativelanguage.googleapis.com/v1/models?key=${encodeURIComponent(key)}`, { method: 'GET' })
+      if (!resp.ok) {
+        const txt = await resp.text().catch(() => '')
+        return { ok: false, error: `Gemini models HTTP ${resp.status}: ${txt.slice(0, 300)}` }
+      }
+      const data = await resp.json().catch(() => ({}))
+      const arr = Array.isArray((data as any).models)
+        ? (data as any).models
+        : Array.isArray((data as any).data)
+          ? (data as any).data
+          : []
+      const models = arr.map((m: any) => {
+        const full = (m?.name || m?.model || '').toString()
+        const id = full.startsWith('models/') ? full.split('/').pop() : full
+        const supported: string[] = (m?.supportedGenerationMethods || m?.supported_generation_methods || [])
+        return { id, label: id, supported }
+      }).filter((m: any) => {
+        // Only include models that support generateContent and exclude embedding/vision-only models
+        const id = m.id || ''
+        const hasGenerate = m.supported?.includes('generateContent')
+        const isNotEmbedding = !/(embedding|vision)/i.test(id)
+        // Exclude image generation preview models
+        const isNotImageGen = !/image-generation/i.test(id)
+        return hasGenerate && isNotEmbedding && isNotImageGen
+      })
+      return { ok: true, models }
+    }
+
+    return { ok: false, error: 'Unknown provider' }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) }
+  }
+})
+
+
 
 ipcMain.handle('secrets:get', async () => {
-  return keytar.getPassword(SERVICE_NAME, ACCOUNT_OPENAI_KEY)
+  const v = providerKeysMem.openai
+  return typeof v === 'string' ? v : null
 })
 
 // File system operations
@@ -279,8 +422,17 @@ async function addWatchersRecursively(root: string, onEvent: (dir: string, type:
     )
     watchers.push(watcher)
   }
+
+  let dirCount = 0
   const walk = async (dirPath: string) => {
     mkWatcher(dirPath)
+    dirCount++
+
+    // Yield to event loop every 50 directories to prevent blocking
+    if (dirCount % 50 === 0) {
+      await new Promise(resolve => setImmediate(resolve))
+    }
+
     if (!isLinux) return // recursive handles subdirs
     try {
       const entries = await fs.readdir(dirPath, { withFileTypes: true })
@@ -292,7 +444,11 @@ async function addWatchersRecursively(root: string, onEvent: (dir: string, type:
       }
     } catch {}
   }
+
+  const t0 = performance.now()
   await walk(root)
+  console.log(`[Main] addWatchersRecursively: ${dirCount} directories, ${(performance.now() - t0).toFixed(2)}ms`)
+
   return () => {
     for (const w of watchers) { try { w.close() } catch {} }
   }
@@ -335,11 +491,112 @@ function resolveWithinWorkspace(p: string): string {
 }
 
 async function atomicWrite(filePath: string, content: string) {
-  const dir = path.dirname(filePath)
-  const tmp = path.join(dir, `.tmp-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`)
-  await fs.writeFile(tmp, content, 'utf-8')
-  await fs.rename(tmp, filePath)
+  const baseDir = path.resolve(process.env.APP_ROOT || process.cwd())
+  const tmpDir = path.join(baseDir, '.hifide-private', 'tmp')
+
+  // Ensure tmp directory exists
+  try {
+    await fs.mkdir(tmpDir, { recursive: true })
+  } catch (e) {
+    console.error('[atomicWrite] Failed to create tmp directory:', e)
+    throw e
+  }
+
+  const tmpFile = path.join(tmpDir, `.tmp-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`)
+
+  try {
+    await fs.writeFile(tmpFile, content, 'utf-8')
+    await fs.rename(tmpFile, filePath)
+  } catch (error) {
+    console.error(`[atomicWrite] Failed to write ${filePath}:`, error)
+    // Clean up temp file if rename failed
+    try {
+      await fs.unlink(tmpFile)
+      console.log(`[atomicWrite] Cleaned up temp file: ${tmpFile}`)
+    } catch (cleanupError) {
+      console.error(`[atomicWrite] Failed to cleanup temp file ${tmpFile}:`, cleanupError)
+    }
+    throw error
+  }
 }
+
+// Session management - now workspace-relative
+async function getSessionsDir(): Promise<string> {
+  const baseDir = path.resolve(process.env.APP_ROOT || process.cwd())
+  const privateDir = path.join(baseDir, '.hifide-private')
+  const sessionsDir = path.join(privateDir, 'sessions')
+
+  // Ensure directories exist
+  try {
+    await fs.mkdir(privateDir, { recursive: true })
+    await fs.mkdir(sessionsDir, { recursive: true })
+  } catch (e) {
+    // Ignore if already exists
+  }
+
+  return sessionsDir
+}
+
+ipcMain.handle('sessions:list', async () => {
+  try {
+    const sessionsDir = await getSessionsDir()
+    const files = await fs.readdir(sessionsDir)
+    const sessionFiles = files.filter(f => f.endsWith('.json'))
+
+    const sessions = await Promise.all(
+      sessionFiles.map(async (file) => {
+        try {
+          const filePath = path.join(sessionsDir, file)
+          const content = await fs.readFile(filePath, 'utf-8')
+          return JSON.parse(content)
+        } catch (e) {
+          return null
+        }
+      })
+    )
+
+    // Filter out nulls and sort by updatedAt descending
+    const validSessions = sessions.filter(s => s !== null).sort((a, b) => b.updatedAt - a.updatedAt)
+
+    return { ok: true, sessions: validSessions }
+  } catch (error) {
+    return { ok: false, error: String(error) }
+  }
+})
+
+ipcMain.handle('sessions:load', async (_e, sessionId: string) => {
+  try {
+    const sessionsDir = await getSessionsDir()
+    const filePath = path.join(sessionsDir, `${sessionId}.json`)
+    const content = await fs.readFile(filePath, 'utf-8')
+    const session = JSON.parse(content)
+    return { ok: true, session }
+  } catch (error) {
+    return { ok: false, error: String(error) }
+  }
+})
+
+ipcMain.handle('sessions:save', async (_e, session: any) => {
+  try {
+    const sessionsDir = await getSessionsDir()
+    const filePath = path.join(sessionsDir, `${session.id}.json`)
+    await atomicWrite(filePath, JSON.stringify(session, null, 2))
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error: String(error) }
+  }
+})
+
+ipcMain.handle('sessions:delete', async (_e, sessionId: string) => {
+  try {
+    const sessionsDir = await getSessionsDir()
+    const filePath = path.join(sessionsDir, `${sessionId}.json`)
+    await fs.unlink(filePath)
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error: String(error) }
+  }
+})
 
 function insertAfterLine(src: string, line: number, text: string): string {
   if (line <= 0) return text + (src.startsWith('\n') ? '' : '\n') + src
@@ -356,6 +613,9 @@ function insertAfterLine(src: string, line: number, text: string): string {
     return src.endsWith('\n') ? (src + text) : (src + '\n' + text)
   }
   const before = src.slice(0, idx)
+
+
+
   const after = src.slice(idx)
   const sep = before.endsWith('\n') ? '' : '\n'
   return before + sep + text + (text.endsWith('\n') ? '' : '\n') + after
@@ -457,6 +717,9 @@ const agentTools: AgentTool[] = [
     },
     run: async ({ path: rel, content }: { path: string; content: string }) => {
       const abs = resolveWithinWorkspace(rel)
+
+
+
       await atomicWrite(abs, content)
       return { ok: true }
     },
@@ -578,29 +841,6 @@ ipcMain.handle('pty:create', async (event, opts: { shell?: string; cwd?: string;
     })
     return { sessionId }
   } catch (e: any) {
-    // Fallback: use node helper when Electron prebuild is missing (Windows conpty.node)
-    const msg = e?.message || ''
-    if (process.platform === 'win32' && (msg.includes('conpty.node') || msg.includes('MODULE_NOT_FOUND'))) {
-      ensurePtyHelper()
-      const reqId = randomUUID()
-      const sessionId = await new Promise<string>((resolve) => {
-        ptyHelperPending.set(reqId, (res: any) => resolve(res.sessionId))
-        helperSend({ type: 'create', reqId, shell, cwd, cols, rows, env })
-      })
-      ptySessions.set(sessionId, {
-        p: {
-          pid: 0,
-          onData: () => {},
-          write: (d: string) => helperSend({ type: 'write', sessionId, data: d }),
-          resize: (c: number, r: number) => helperSend({ type: 'resize', sessionId, cols: c, rows: r }),
-          kill: () => helperSend({ type: 'dispose', sessionId }),
-        },
-        wcId: wc.id,
-        log: opts.log !== false,
-      })
-      await logEvent(sessionId, 'session_create', { shell, cwd, cols, rows, via: 'helper' })
-      return { sessionId }
-    }
     throw e
   }
 })
@@ -776,6 +1016,8 @@ ipcMain.handle('index:rebuild', async () => {
     await getIndexer().rebuild((p) => { try { wc?.send('index:progress', p) } catch {} })
     // Begin watching for incremental changes after a successful rebuild
     try { getIndexer().startWatch((p) => { try { wc?.send('index:progress', p) } catch {} }) } catch {}
+    // Opportunistically (re)generate context pack; won't overwrite existing
+    try { await generateContextPack(process.env.APP_ROOT || process.cwd(), true) } catch {}
     return { ok: true, status: getIndexer().status() }
   } catch (e: any) { return { ok: false, error: e?.message || String(e) } }
 })
@@ -803,8 +1045,20 @@ ipcMain.handle('index:search', async (_e, args: { query: string; k?: number }) =
 
 ipcMain.handle('pty:write', async (_event, args: { sessionId: string; data: string }) => {
   const s = ptySessions.get(args.sessionId)
-  if (s) s.p.write(args.data)
-  return { ok: !!s }
+
+
+
+  if (!s) {
+    console.warn('[pty:write] no session', args.sessionId, 'len', args.data?.length)
+    return { ok: false }
+  }
+  try {
+    s.p.write(args.data)
+    return { ok: true }
+  } catch (e) {
+    console.error('[pty:write] error', e)
+    return { ok: false, error: (e as any)?.message || String(e) }
+  }
 })
 
 ipcMain.handle('pty:resize', async (_event, args: { sessionId: string; cols: number; rows: number }) => {
@@ -848,14 +1102,216 @@ function extractJsonObject(raw: string): any {
   }
   throw new Error('Failed to parse JSON edits from model output')
 }
+// --- Intent Router (Auto) ---
+function isEditIntentText(t: string): boolean {
+  const s = (t || '').toLowerCase()
+  const patterns: RegExp[] = [
+    /\b(create|add|insert|write|overwrite|append)\b/,
+    /\b(modify|update|change|replace|refactor|rename|move|delete)\b/,
+    /\b(fix|patch|apply)\b/,
+    /\b(import|export)\b/,
+    /\.[a-z0-9]{1,6}\b/ // looks like a filename with extension
+  ]
+  return patterns.some(re => re.test(s))
+}
+
+// Helper to send debug logs to renderer
+function sendDebugLog(level: 'info' | 'warning' | 'error', category: string, message: string, data?: any) {
+  const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents
+  wc?.send('debug:log', { level, category, message, data })
+}
+
+// Auto router (chat vs tools) registered once at startup
+ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>, model?: string, provider?: string, tools?: string[], responseSchema?: any }) => {
+  const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents
+  const providerId = (args.provider || 'openai')
+  sendDebugLog('info', 'Router', `Auto-routing request to ${providerId}`, { requestId: args.requestId, provider: providerId })
+  const key = await getProviderKey(providerId)
+  if (!key) {
+    const missingMsg = providerId === 'anthropic' ? 'Missing Anthropic API key' : providerId === 'gemini' ? 'Missing Gemini API key' : 'Missing OpenAI API key'
+    sendDebugLog('error', 'Router', missingMsg, { provider: providerId })
+    wc?.send('llm:error', { requestId: args.requestId, error: missingMsg })
+    return { ok: false }
+  }
+  const provider = providers[providerId]
+
+  // Decide intent from last user turn (fallback to chat)
+  const lastUser = [...args.messages].reverse().find(m => m.role === 'user')
+  const wantsEdits = isEditIntentText(lastUser?.content || '')
+  sendDebugLog('info', 'Router', `Intent detection: ${wantsEdits ? 'TOOLS (edit intent)' : 'CHAT'}`, {
+    hasAgentStream: !!provider.agentStream,
+    lastUserMessage: lastUser?.content?.slice(0, 100)
+  })
+
+  if (wantsEdits && provider.agentStream) {
+    sendDebugLog('info', 'Agent', 'Using agent mode with tools', { toolCount: agentTools.length })
+    // Use the same tool selection as agentStart
+    const names = Array.isArray(args.tools) && args.tools.length ? new Set(args.tools) : null
+    const selectedTools = agentTools.filter(t => !names || names.has(t.name))
+
+    // Prepend tool-usage instruction and retrieval context (reuse logic from agentStart)
+    const systemMsg = { role: 'system' as const, content: 'You are a software agent with tools. When the user asks to change files, you MUST make the changes using tools (fs.read_file, fs.write_file, edits.apply). Read the current file, apply minimal precise edits, and write the updated file. After changes, briefly summarize what changed.' }
+    let routed = [systemMsg, ...args.messages]
+    try {
+      // 1. Always include project context from .hifide-public/context.md if it exists
+      try {
+        const baseDir = path.resolve(process.env.APP_ROOT || process.cwd())
+        const contextMd = path.join(baseDir, '.hifide-public', 'context.md')
+        if (await pathExists(contextMd)) {
+          const projectContext = await fs.readFile(contextMd, 'utf-8')
+          routed = [{ role: 'user', content: `Project Context:\n\n${projectContext}` }, ...routed]
+        }
+      } catch {}
+
+      const q = lastUser?.content?.slice(0, 2000) || ''
+      if (q) {
+        sendDebugLog('info', 'Context', 'Searching codebase index for relevant context')
+        const res = await getIndexer().search(q, 6)
+        if (res?.chunks?.length) {
+          const ctx = res.chunks.map((c) => `                                                   • ${c.path}:${c.startLine}-${c.endLine}\n${(c.text||'').slice(0, 600)}`).join('\n\n')
+          routed = [{ role: 'user', content: `Context from the repository (top matches):\n\n${ctx}\n\nUse this context if relevant.` } as const, ...routed]
+        }
+      }
+    } catch {}
+
+    const model = args.model || 'gpt-5'
+    try {
+      sendDebugLog('info', 'Agent', `Starting agent stream with ${selectedTools.length} tools`)
+      let buffer = ''
+      const handle = await provider.agentStream({
+        apiKey: key,
+        model,
+        messages: routed,
+        tools: selectedTools,
+        responseSchema: args.responseSchema,
+        onChunk: (text) => { buffer += text; wc?.send('llm:chunk', { requestId: args.requestId, content: text }) },
+        onDone: async () => {
+          sendDebugLog('info', 'Agent', 'Agent stream completed')
+          // Attempt strict edits auto-apply if JSON object returned
+          try {
+            const obj = extractJsonObject(buffer)
+            const edits = Array.isArray(obj?.edits) ? obj.edits : []
+            if (edits.length) {
+              sendDebugLog('info', 'Edits', `Auto-applying ${edits.length} edits from response`)
+              const res = await applyFileEditsInternal(edits, { verify: true })
+              const summary = `\n\n[applied] edits=${res.applied} changed=${res.results.filter(r=>r.changed).length} tsc=${res.verification?.ok? 'ok':'fail'}`
+              wc?.send('llm:chunk', { requestId: args.requestId, content: summary })
+              wc?.send('agent:edits-applied', { requestId: args.requestId, ...res })
+              sendDebugLog('info', 'Edits', `Applied ${res.applied} edits, ${res.results.filter(r=>r.changed).length} files changed`)
+            }
+          } catch {}
+          wc?.send('llm:done', { requestId: args.requestId })
+        },
+        onError: (error) => {
+          sendDebugLog('error', 'Agent', `Agent stream error: ${error}`)
+          wc?.send('llm:error', { requestId: args.requestId, error })
+        },
+        onTokenUsage: (usage) => wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage }),
+      })
+      inflight.set(args.requestId, handle)
+      return { ok: true, mode: 'tools' }
+    } catch (e: any) {
+      sendDebugLog('error', 'Agent', `Failed to start agent stream: ${e?.message || String(e)}`)
+      wc?.send('llm:error', { requestId: args.requestId, error: e?.message || String(e) })
+      return { ok: false }
+    }
+  }
+
+  // Otherwise, free-form chat (with tools if provider supports it)
+  // Add project context and search results
+  try {
+    const contextMessages: Array<{ role: 'user'; content: string }> = []
+
+    // 1. Always include project context from .hifide-public/context.md if it exists
+    try {
+      const baseDir = path.resolve(process.env.APP_ROOT || process.cwd())
+      const contextMd = path.join(baseDir, '.hifide-public', 'context.md')
+      sendDebugLog('info', 'Context', `Looking for project context at: ${contextMd}`)
+      if (await pathExists(contextMd)) {
+        const projectContext = await fs.readFile(contextMd, 'utf-8')
+        sendDebugLog('info', 'Context', `Loaded project context (${projectContext.length} chars)`)
+        contextMessages.push({ role: 'user', content: `Project Context:\n\n${projectContext}` })
+      } else {
+        sendDebugLog('info', 'Context', 'No project context file found')
+      }
+    } catch (e) {
+      sendDebugLog('error', 'Context', `Error loading context: ${e}`)
+    }
+
+    // 2. Add semantic search results
+    const lastUser = [...args.messages].reverse().find(m => m.role === 'user')
+    const query = lastUser?.content?.slice(0, 2000) || ''
+    if (query) {
+      sendDebugLog('info', 'Context', 'Searching codebase index for chat context')
+      const res = await getIndexer().search(query, 6)
+      if (res?.chunks?.length) {
+        sendDebugLog('info', 'Context', `Found ${res.chunks.length} relevant code chunks`)
+        const ctx = res.chunks.map((c) => `• ${c.path}:${c.startLine}-${c.endLine}\n${(c.text||'').slice(0, 600)}`).join('\n\n')
+        contextMessages.push({ role: 'user', content: `Relevant code from repository:\n\n${ctx}` })
+      }
+    }
+
+    // Prepend all context messages
+    if (contextMessages.length) {
+      args.messages = [...contextMessages, ...args.messages]
+    }
+  } catch {}
+
+  const model = args.model || 'gpt-5'
+
+  // Use agentStream with tools if provider supports it (enables file reading in chat mode)
+  if (provider.agentStream) {
+    const names = Array.isArray(args.tools) && args.tools.length ? new Set(args.tools) : null
+    const selectedTools = agentTools.filter(t => !names || names.has(t.name))
+
+    try {
+      const handle = await provider.agentStream({
+        apiKey: key,
+        model,
+        messages: args.messages,
+        tools: selectedTools,
+        responseSchema: args.responseSchema,
+        onChunk: (text) => wc?.send('llm:chunk', { requestId: args.requestId, content: text }),
+        onDone: () => wc?.send('llm:done', { requestId: args.requestId }),
+        onError: (error) => wc?.send('llm:error', { requestId: args.requestId, error }),
+        onTokenUsage: (usage) => wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage }),
+      })
+      inflight.set(args.requestId, handle)
+      return { ok: true, mode: 'chat' }
+    } catch (e: any) {
+      wc?.send('llm:error', { requestId: args.requestId, error: e?.message || String(e) })
+      return { ok: false }
+    }
+  }
+
+  // Fallback to basic chat stream if no tool support
+  try {
+    const handle = await provider.chatStream({
+      apiKey: key,
+      model,
+      messages: args.messages,
+      onChunk: (text) => wc?.send('llm:chunk', { requestId: args.requestId, content: text }),
+      onDone: () => wc?.send('llm:done', { requestId: args.requestId }),
+      onError: (error) => wc?.send('llm:error', { requestId: args.requestId, error }),
+      onTokenUsage: (usage) => wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage }),
+    })
+    inflight.set(args.requestId, handle)
+    return { ok: true, mode: 'chat' }
+  } catch (e: any) {
+    wc?.send('llm:error', { requestId: args.requestId, error: e?.message || String(e) })
+    return { ok: false }
+  }
+})
 
 // Agent-mode LLM streaming with provider-native tools
 ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>, model?: string, provider?: string, tools?: string[], responseSchema?: any }) => {
   const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents
   const providerId = (args.provider || 'openai')
+  sendDebugLog('info', 'Agent', `Starting agent mode with ${providerId}`, { requestId: args.requestId, provider: providerId })
   const key = await getProviderKey(providerId)
   if (!key) {
     const missingMsg = providerId === 'anthropic' ? 'Missing Anthropic API key' : providerId === 'gemini' ? 'Missing Gemini API key' : 'Missing OpenAI API key'
+    sendDebugLog('error', 'Agent', missingMsg, { provider: providerId })
     wc?.send('llm:error', { requestId: args.requestId, error: missingMsg })
     return { ok: false }
   }
@@ -874,6 +1330,7 @@ ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messa
         onChunk: (t) => { buffer += t; wc?.send('llm:chunk', { requestId: args.requestId, content: t }) },
         onDone: () => wc?.send('llm:done', { requestId: args.requestId }),
         onError: (error) => wc?.send('llm:error', { requestId: args.requestId, error }),
+        onTokenUsage: (usage) => wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage }),
       })
       inflight.set(args.requestId, handle)
       return { ok: true }
@@ -887,16 +1344,42 @@ ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messa
   const names = Array.isArray(args.tools) && args.tools.length ? new Set(args.tools) : null
   const selectedTools = agentTools.filter(t => !names || names.has(t.name))
 
-  // Augment messages with index context (best-effort)
+  // Augment messages with project context and index search results
   try {
+    const contextMessages: Array<{ role: 'user'; content: string }> = []
+
+    // 1. Always include project context from .hifide-public/context.md if it exists
+    try {
+      const baseDir = path.resolve(process.env.APP_ROOT || process.cwd())
+      const contextMd = path.join(baseDir, '.hifide-public', 'context.md')
+      sendDebugLog('info', 'Context', `Looking for project context at: ${contextMd}`)
+      if (await pathExists(contextMd)) {
+        const projectContext = await fs.readFile(contextMd, 'utf-8')
+        sendDebugLog('info', 'Context', `Loaded project context (${projectContext.length} chars)`)
+        contextMessages.push({ role: 'user', content: `Project Context:\n\n${projectContext}` })
+      } else {
+        sendDebugLog('info', 'Context', 'No project context file found')
+      }
+    } catch (e) {
+      sendDebugLog('error', 'Context', `Error loading context: ${e}`)
+    }
+
+    // 2. Add semantic search results
     const lastUser = [...args.messages].reverse().find(m => m.role === 'user')
     const query = lastUser?.content?.slice(0, 2000) || ''
     if (query) {
+      sendDebugLog('info', 'Context', 'Searching codebase index for relevant context')
       const res = await getIndexer().search(query, 6)
       if (res?.chunks?.length) {
+        sendDebugLog('info', 'Context', `Found ${res.chunks.length} relevant code chunks`)
         const ctx = res.chunks.map((c) => `• ${c.path}:${c.startLine}-${c.endLine}\n${(c.text||'').slice(0, 600)}`).join('\n\n')
-        args.messages = [{ role: 'user', content: `Context from the repository (top matches):\n\n${ctx}\n\nUse this context if relevant.` }, ...args.messages]
+        contextMessages.push({ role: 'user', content: `Relevant code from repository:\n\n${ctx}` })
       }
+    }
+
+    // Prepend all context messages
+    if (contextMessages.length) {
+      args.messages = [...contextMessages, ...args.messages]
     }
   } catch {}
 
@@ -911,6 +1394,7 @@ ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messa
   args.messages = [systemMsg, ...args.messages]
 
   try {
+    sendDebugLog('info', 'Agent', `Starting agent stream with ${selectedTools.length} tools available`)
     let buffer = ''
     const handle = await provider.agentStream!({
       apiKey: key,
@@ -920,24 +1404,32 @@ ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messa
       responseSchema: args.responseSchema,
       onChunk: (text) => { buffer += text; wc?.send('llm:chunk', { requestId: args.requestId, content: text }) },
       onDone: async () => {
+        sendDebugLog('info', 'Agent', 'Agent stream completed')
         // If the model returned structured edits JSON instead of calling tools, try to apply it automatically
         try {
           const obj = extractJsonObject(buffer)
           const edits = Array.isArray(obj?.edits) ? obj.edits : []
           if (edits.length) {
+            sendDebugLog('info', 'Edits', `Applying ${edits.length} edits from structured response`)
             const res = await applyFileEditsInternal(edits, { verify: true })
             const summary = `\n\n[applied] edits=${res.applied} changed=${res.results.filter(r=>r.changed).length} tsc=${res.verification?.ok? 'ok':'fail'}`
             wc?.send('llm:chunk', { requestId: args.requestId, content: summary })
             wc?.send('agent:edits-applied', { requestId: args.requestId, ...res })
+            sendDebugLog('info', 'Edits', `Applied ${res.applied} edits, ${res.results.filter(r=>r.changed).length} files changed`)
           }
         } catch {}
         wc?.send('llm:done', { requestId: args.requestId })
       },
-      onError: (error) => wc?.send('llm:error', { requestId: args.requestId, error }),
+      onError: (error) => {
+        sendDebugLog('error', 'Agent', `Agent stream error: ${error}`)
+        wc?.send('llm:error', { requestId: args.requestId, error })
+      },
+      onTokenUsage: (usage) => wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage }),
     })
     inflight.set(args.requestId, handle)
     return { ok: true }
   } catch (e: any) {
+    sendDebugLog('error', 'Agent', `Failed to start agent stream: ${e?.message || String(e)}`)
     wc?.send('llm:error', { requestId: args.requestId, error: e?.message || String(e) })
     return { ok: false }
   }
@@ -947,6 +1439,7 @@ ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messa
 ipcMain.handle('edits:propose', async (_e, args: { instruction: string; model?: string; provider?: string; k?: number }) => {
   const providerId = (args.provider || 'openai')
   const key = await getProviderKey(providerId)
+
   if (!key) return { ok: false, error: 'Missing API key for provider' }
   const model = args.model || (providerId === 'anthropic' ? 'claude-3-5-sonnet' : providerId === 'gemini' ? 'gemini-1.5-pro' : 'gpt-5')
   const provider = providers[providerId]
@@ -994,21 +1487,36 @@ ipcMain.handle('edits:propose', async (_e, args: { instruction: string; model?: 
 ipcMain.handle('llm:start', async (_event, args: { requestId: string, messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>, model?: string, provider?: string }) => {
   const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents
   const providerId = (args.provider || 'openai')
+  sendDebugLog('info', 'LLM', `Starting chat with ${providerId}`, { requestId: args.requestId, provider: providerId })
   const key = await getProviderKey(providerId)
   if (!key) {
     const missingMsg = providerId === 'anthropic' ? 'Missing Anthropic API key' : providerId === 'gemini' ? 'Missing Gemini API key' : 'Missing OpenAI API key'
+    sendDebugLog('error', 'LLM', missingMsg, { provider: providerId })
     wc?.send('llm:error', { requestId: args.requestId, error: missingMsg })
     return { ok: false }
+  }
+
   // Encourage actionable responses: if proposing code changes, return JSON-only {edits:[...]} per schema
   args.messages = [
     { role: 'system', content: 'You can directly edit files. When you decide to change code, respond with ONLY a JSON object of the form {"edits":[{ "type":"replaceOnce"|"insertAfterLine"|"replaceRange", ... }]} using workspace-relative paths. Otherwise, reply normally.' },
     ...args.messages,
   ]
-
-  }
   const provider = providers[providerId]
-  // Augment messages with retrieved context (prefix as a user message)
+  // Augment messages with project context and index search results
   try {
+    const contextMessages: Array<{ role: 'user'; content: string }> = []
+
+    // 1. Always include project context from .hifide-public/context.md if it exists
+    try {
+      const baseDir = path.resolve(process.env.APP_ROOT || process.cwd())
+      const contextMd = path.join(baseDir, '.hifide-public', 'context.md')
+      if (await pathExists(contextMd)) {
+        const projectContext = await fs.readFile(contextMd, 'utf-8')
+        contextMessages.push({ role: 'user', content: `Project Context:\n\n${projectContext}` })
+      }
+    } catch {}
+
+    // 2. Add semantic search results
     const lastUser = [...args.messages].reverse().find((m) => m.role === 'user')
     const query = lastUser?.content?.slice(0, 2000) || ''
     if (query) {
@@ -1018,9 +1526,13 @@ ipcMain.handle('llm:start', async (_event, args: { requestId: string, messages: 
           const snippet = (c.text || '').slice(0, 600)
           return `• ${c.path}:${c.startLine}-${c.endLine}\n${snippet}`
         }).join('\n\n')
-        const ctxMsg = { role: 'user' as const, content: `Context from the repository (top matches):\n\n${ctx}\n\nUse this context if relevant.` }
-        args.messages = [ctxMsg, ...args.messages]
+        contextMessages.push({ role: 'user', content: `Relevant code from repository:\n\n${ctx}` })
       }
+    }
+
+    // Prepend all context messages
+    if (contextMessages.length) {
+      args.messages = [...contextMessages, ...args.messages]
     }
   } catch (e) {
     // best-effort; ignore retrieval errors
@@ -1050,6 +1562,7 @@ ipcMain.handle('llm:start', async (_event, args: { requestId: string, messages: 
         wc?.send('llm:done', { requestId: args.requestId })
       },
       onError: (error) => wc?.send('llm:error', { requestId: args.requestId, error }),
+      onTokenUsage: (usage) => wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage }),
     })
     inflight.set(args.requestId, handle)
     return { ok: true }
@@ -1069,18 +1582,187 @@ ipcMain.handle('llm:cancel', async (_event, args: { requestId: string }) => {
   return { ok: true }
 })
 
+// Window state management
+interface WindowState {
+  width: number
+  height: number
+  x?: number
+  y?: number
+  isMaximized: boolean
+}
+
+function getDefaultWindowState(): WindowState {
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize
+
+  // Default to 1200x800, or 80% of screen size if smaller
+  const defaultWidth = Math.min(1200, Math.floor(screenWidth * 0.8))
+  const defaultHeight = Math.min(800, Math.floor(screenHeight * 0.8))
+
+  // Center the window
+  const x = Math.floor((screenWidth - defaultWidth) / 2)
+  const y = Math.floor((screenHeight - defaultHeight) / 2)
+
+  return {
+    width: defaultWidth,
+    height: defaultHeight,
+    x,
+    y,
+    isMaximized: false,
+  }
+}
+
+function validateWindowState(state: WindowState): WindowState {
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize
+
+  // Minimum window size
+  const minWidth = 800
+  const minHeight = 600
+
+  // Validate dimensions
+  let width = Math.max(minWidth, Math.min(state.width, screenWidth))
+  let height = Math.max(minHeight, Math.min(state.height, screenHeight))
+
+  // Validate position - ensure window is visible on screen
+  let x = state.x
+  let y = state.y
+
+  if (x !== undefined && y !== undefined) {
+    // Check if window is on any available display
+    const displays = screen.getAllDisplays()
+    let isVisible = false
+
+    for (const display of displays) {
+      const { x: dx, y: dy, width: dw, height: dh } = display.bounds
+      // Check if at least part of the window title bar would be visible
+      if (
+        x + width > dx &&
+        x < dx + dw &&
+        y + 50 > dy && // At least 50px of title bar visible
+        y < dy + dh
+      ) {
+        isVisible = true
+        break
+      }
+    }
+
+    // If not visible on any display, reset to centered on primary display
+    if (!isVisible) {
+      x = Math.floor((screenWidth - width) / 2)
+      y = Math.floor((screenHeight - height) / 2)
+    }
+  } else {
+    // No position saved, center on primary display
+    x = Math.floor((screenWidth - width) / 2)
+    y = Math.floor((screenHeight - height) / 2)
+  }
+
+  return {
+    width,
+    height,
+    x,
+    y,
+    isMaximized: state.isMaximized || false,
+  }
+}
+
+function loadWindowState(): WindowState {
+  try {
+    const saved = windowStateStore.get('windowState') as WindowState | undefined
+    if (saved) {
+      console.log('[main] Loaded window state:', saved)
+      return validateWindowState(saved)
+    }
+  } catch (e) {
+    console.error('[main] Failed to load window state:', e)
+  }
+
+  const defaultState = getDefaultWindowState()
+  console.log('[main] Using default window state:', defaultState)
+  return defaultState
+}
+
+function saveWindowState() {
+  if (!win) return
+
+  try {
+    // Don't save size if maximized, only save the maximized state
+    const isMaximized = win.isMaximized()
+
+    if (isMaximized) {
+      // Only update the maximized flag, keep previous size
+      const current = windowStateStore.get('windowState') as WindowState | undefined
+      windowStateStore.set('windowState', {
+        ...current,
+        isMaximized: true,
+      })
+    } else {
+      const bounds = win.getBounds()
+      const state: WindowState = {
+        width: bounds.width,
+        height: bounds.height,
+        x: bounds.x,
+        y: bounds.y,
+        isMaximized: false,
+      }
+      windowStateStore.set('windowState', state)
+    }
+  } catch (e) {
+    console.error('[main] Failed to save window state:', e)
+  }
+}
+
+// Debounce helper for window state saving
+let saveWindowStateTimeout: NodeJS.Timeout | null = null
+function debouncedSaveWindowState() {
+  if (saveWindowStateTimeout) {
+    clearTimeout(saveWindowStateTimeout)
+  }
+  saveWindowStateTimeout = setTimeout(() => {
+    saveWindowState()
+    saveWindowStateTimeout = null
+  }, 500)
+}
+
 function createWindow() {
+  // Load saved window state
+  const windowState = loadWindowState()
+
   win = new BrowserWindow({
     icon: path.join(process.env.VITE_PUBLIC, 'hifide-logo.png'),
     frame: false,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     backgroundColor: '#1e1e1e',
+    width: windowState.width,
+    height: windowState.height,
+    x: windowState.x,
+    y: windowState.y,
     webPreferences: {
       preload: path.join(DIRNAME, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
     },
+  })
+
+  // Restore maximized state if needed
+  if (windowState.isMaximized) {
+    win.maximize()
+  }
+
+  // Set up window state tracking
+  win.on('resize', debouncedSaveWindowState)
+  win.on('move', debouncedSaveWindowState)
+  win.on('maximize', saveWindowState)
+  win.on('unmaximize', saveWindowState)
+
+  // Save state before closing
+  win.on('close', () => {
+    if (saveWindowStateTimeout) {
+      clearTimeout(saveWindowStateTimeout)
+    }
+    saveWindowState()
   })
 
   // Test active push message to Renderer-process.
@@ -1090,6 +1772,7 @@ function createWindow() {
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
+
     win.webContents.openDevTools({ mode: 'detach' })
   } else {
     // win.loadFile('dist/index.html')
@@ -1126,18 +1809,50 @@ const menuRefs: { file?: Electron.Menu; edit?: Electron.Menu; view?: Electron.Me
 
 function buildMenu() {
   const isMac = process.platform === 'darwin'
+
+  // Get recent folders from window state store
+  let recentFolders: Array<{ path: string; lastOpened: number }> = []
+  try {
+    const stored = windowStateStore.get('recentFolders')
+    if (Array.isArray(stored)) {
+      recentFolders = stored.slice(0, 10)
+    }
+  } catch {}
+
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(isMac ? [{ role: 'appMenu' as const }]: []),
     {
       label: 'File',
       submenu: [
         {
-          label: isMac ? 'Preferences…' : 'Settings…',
-          accelerator: isMac ? 'Cmd+,' : 'Ctrl+,',
+          label: 'Open Folder...',
+          accelerator: isMac ? 'Cmd+O' : 'Ctrl+O',
           click: () => {
             const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents
-            wc?.send('menu:open-settings')
+            wc?.send('menu:open-folder')
           },
+        },
+        {
+          label: 'Open Recent',
+          submenu: recentFolders.length > 0
+            ? [
+                ...recentFolders.map(folder => ({
+                  label: folder.path,
+                  click: () => {
+                    const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents
+                    wc?.send('menu:open-recent-folder', folder.path)
+                  },
+                })),
+                { type: 'separator' as const },
+                {
+                  label: 'Clear Recently Opened',
+                  click: () => {
+                    const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents
+                    wc?.send('menu:clear-recent-folders')
+                  },
+                },
+              ]
+            : [{ label: 'No Recent Folders', enabled: false }],
         },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' },
@@ -1157,6 +1872,11 @@ function buildMenu() {
           label: 'Chat',
           accelerator: isMac ? 'Cmd+1' : 'Ctrl+1',
           click: () => { const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents; wc?.send('menu:open-chat') },
+        },
+        {
+          label: 'Settings',
+          accelerator: isMac ? 'Cmd+,' : 'Ctrl+,',
+          click: () => { const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents; wc?.send('menu:open-settings') },
         },
         {
           label: 'Toggle Terminal Panel',
@@ -1213,5 +1933,218 @@ ipcMain.handle('app:set-view', (_e, view: 'agent'|'explorer'|'sourceControl'|'te
   const toggleItem = viewMenu?.items.find(i => i.label === 'Toggle Terminal Panel')
   if (toggleItem) toggleItem.enabled = view === 'explorer'
 })
+
+// Workspace bootstrap helpers and IPC
+async function pathExists(p: string) {
+  try { await fs.access(p); return true } catch { return false }
+}
+async function ensureDir(p: string) { await fs.mkdir(p, { recursive: true }) }
+async function isGitRepo(dir: string) {
+  try {
+    const { stdout } = await exec('git rev-parse --is-inside-work-tree', { cwd: dir })
+    return stdout.trim() === 'true'
+  } catch {
+    return false
+  }
+}
+async function ensureGitIgnoreHasPrivate(baseDir: string) {
+  const giPath = path.join(baseDir, '.gitignore')
+  let text = ''
+  try { text = await fs.readFile(giPath, 'utf-8') } catch { text = '' }
+  if (text.includes('.hifide-private')) return false
+  const add = `${text && !text.endsWith('\n') ? '\n' : ''}# Hifide\n.hifide-private\n`
+  await atomicWrite(giPath, text + add)
+  return true
+}
+
+async function generateContextPack(baseDir: string, preferAgent?: boolean, overwrite?: boolean): Promise<boolean> {
+  const publicDir = path.join(baseDir, '.hifide-public')
+  await ensureDir(publicDir)
+  const ctxJson = path.join(publicDir, 'context.json')
+  const ctxMd = path.join(publicDir, 'context.md')
+  if (!overwrite && await pathExists(ctxJson)) return false
+
+  // Deterministic scan
+  const pkgPath = path.join(baseDir, 'package.json')
+  let pkg: any = {}
+  try { pkg = JSON.parse(await fs.readFile(pkgPath, 'utf-8')) } catch {}
+  const has = async (rel: string) => await pathExists(path.join(baseDir, rel))
+  const docs: Record<string, string> = {}
+  const docFiles = [
+    ['readme', 'README.md'],
+    ['architecture', 'docs/architecture.md'],
+    ['implementationPlan', 'docs/implementation-plan.md'],
+    ['retrieval', 'docs/retrieval.md'],
+    ['tools', 'docs/tools.md'],
+    ['terminal', 'docs/terminal.md'],
+    ['verification', 'docs/verification.md'],
+    ['roadmap', 'docs/roadmap.md'],
+  ] as const
+  for (const [key, rel] of docFiles) { if (await has(rel)) docs[key] = rel }
+  const frameworks: string[] = []
+  if (await has('electron/main.ts')) frameworks.push('electron')
+  if (await has('vite.config.ts')) frameworks.push('vite')
+  if (await has('tsconfig.json')) frameworks.push('typescript')
+  if (await has('src/App.tsx') || await has('src/main.tsx')) frameworks.push('react')
+  const entryPoints: Record<string, string> = {}
+  const entries = [
+    ['electronMain', 'electron/main.ts'],
+    ['preload', 'electron/preload.ts'],
+    ['webMain', 'src/main.tsx'],
+    ['app', 'src/App.tsx'],
+  ] as const
+  for (const [k, rel] of entries) { if (await has(rel)) entryPoints[k] = rel }
+
+  const context: any = {
+    project: { name: pkg?.name, version: pkg?.version, description: pkg?.description },
+    frameworks,
+    entryPoints,
+    docs,
+    goals: pkg?.description ? [pkg.description] : [],
+  }
+
+  // Optional agent enrichment for goals/summary
+  if (preferAgent) {
+    const pickProvider = async () => {
+      const order = ['openai', 'anthropic', 'gemini']
+      for (const id of order) {
+        const key = await getProviderKey(id)
+        if (key) return { id, key }
+      }
+      return null
+    }
+    const sel = await pickProvider()
+    if (sel) {
+      const provider = (providers as any)[sel.id] as ProviderAdapter
+      const model = sel.id === 'anthropic' ? 'claude-3-5-sonnet' : sel.id === 'gemini' ? 'gemini-1.5-pro' : 'gpt-5'
+      // Read a few high-signal files to feed the model safely (bounded size)
+      const readText = async (rel: string) => { try { return (await fs.readFile(path.join(baseDir, rel), 'utf-8')).slice(0, 6000) } catch { return '' } }
+      const readme = docs.readme ? await readText(docs.readme) : ''
+      const impl = docs.implementationPlan ? await readText(docs.implementationPlan) : ''
+      const arch = docs.architecture ? await readText(docs.architecture) : ''
+      const prompt = `You will extract project goals and a one-paragraph summary.
+Return ONLY JSON: {"goals": string[], "summary": string}.
+Be concise and specific to this repository.`
+      const user = `README.md:\n${readme}\n\nimplementation-plan.md:\n${impl}\n\narchitecture.md:\n${arch}`.slice(0, 14000)
+      let out = ''
+      try {
+        await provider.chatStream({
+          apiKey: sel.key,
+          model,
+          messages: [
+            { role: 'system', content: prompt },
+            { role: 'user', content: user },
+          ],
+          onChunk: (t) => { out += t },
+          onDone: () => {},
+          onError: (_e) => {},
+        })
+        // Try to parse JSON from out (strip code fences if present)
+        const match = out.match(/\{[\s\S]*\}/)
+        if (match) {
+          try {
+            const extra = JSON.parse(match[0])
+            if (Array.isArray(extra.goals)) context.goals = Array.from(new Set([...(context.goals||[]), ...extra.goals]))
+            if (typeof extra.summary === 'string') context.summary = extra.summary
+          } catch {}
+        }
+      } catch {}
+    }
+  }
+
+  await atomicWrite(ctxJson, JSON.stringify(context, null, 2))
+  const md = `# Project Context\n\n- Name: ${context.project?.name || ''}\n- Version: ${context.project?.version || ''}\n- Description: ${context.project?.description || ''}\n- Frameworks: ${frameworks.join(', ')}\n\nKey Docs: ${Object.values(docs).join(', ')}\n\n${context.summary ? '## Summary\n\n' + context.summary : ''}`
+  await atomicWrite(ctxMd, md)
+  return true
+}
+
+// Workspace root management
+ipcMain.handle('workspace:get-root', async () => {
+  return process.env.APP_ROOT || process.cwd()
+})
+
+ipcMain.handle('workspace:set-root', async (_e, newRoot: string) => {
+  const t0 = performance.now()
+  console.log('[Main] workspace:set-root starting...')
+  try {
+    const t1 = performance.now()
+    const resolved = path.resolve(newRoot)
+    // Verify the directory exists
+    await fs.access(resolved)
+    console.log(`[Main] Verify directory: ${(performance.now() - t1).toFixed(2)}ms`)
+
+    // Update APP_ROOT
+    const t2 = performance.now()
+    process.env.APP_ROOT = resolved
+    console.log(`[Main] Update APP_ROOT: ${(performance.now() - t2).toFixed(2)}ms`)
+
+    // Reinitialize indexer with new root
+    const t3 = performance.now()
+    indexer = null
+    getIndexer()
+    console.log(`[Main] Reinitialize indexer: ${(performance.now() - t3).toFixed(2)}ms`)
+
+    console.log(`[Main] workspace:set-root TOTAL: ${(performance.now() - t0).toFixed(2)}ms`)
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error: String(error) }
+  }
+})
+
+// Remove any existing handler first to prevent duplicates during hot reload
+ipcMain.removeHandler('workspace:open-folder-dialog')
+ipcMain.handle('workspace:open-folder-dialog', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      title: 'Open Folder',
+      buttonLabel: 'Open'
+    })
+
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return { ok: false, canceled: true }
+    }
+
+    return { ok: true, path: result.filePaths[0] }
+  } catch (error) {
+    return { ok: false, error: String(error) }
+  }
+})
+
+// Sync recent folders from renderer to window state store and rebuild menu
+ipcMain.on('workspace:recent-folders-changed', (_e, recentFolders: Array<{ path: string; lastOpened: number }>) => {
+  try {
+    windowStateStore.set('recentFolders', recentFolders)
+  } catch (e) {
+    console.error('Failed to save recent folders:', e)
+  }
+  buildMenu()
+})
+
+ipcMain.handle('workspace:bootstrap', async (_e, args: { baseDir?: string; preferAgent?: boolean; overwrite?: boolean }) => {
+  try {
+    const baseDir = path.resolve(String(args?.baseDir || process.env.APP_ROOT || process.cwd()))
+    const publicDir = path.join(baseDir, '.hifide-public')
+    const privateDir = path.join(baseDir, '.hifide-private')
+    let createdPublic = false
+    let createdPrivate = false
+    let ensuredGitIgnore = false
+    let generatedContext = false
+
+    if (!(await pathExists(publicDir))) { await ensureDir(publicDir); createdPublic = true }
+    if (!(await pathExists(privateDir))) { await ensureDir(privateDir); createdPrivate = true }
+
+    if (await isGitRepo(baseDir)) {
+      try { ensuredGitIgnore = await ensureGitIgnoreHasPrivate(baseDir) } catch {}
+    }
+
+    try { generatedContext = await generateContextPack(baseDir, !!args?.preferAgent, !!args?.overwrite) } catch {}
+
+    return { ok: true, createdPublic, createdPrivate, ensuredGitIgnore, generatedContext }
+  } catch (error) {
+    return { ok: false, error: String(error) }
+  }
+})
+
 
 app.whenReady().then(() => { createWindow(); buildMenu() })
