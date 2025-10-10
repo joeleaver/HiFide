@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { Group, Stack, Textarea, Card, ScrollArea, Text, Loader, ActionIcon } from '@mantine/core'
 import { IconPlayerStop } from '@tabler/icons-react'
-import { useAppStore } from './store/app'
+import { useAppStore, type ActivityEvent } from './store/app'
 import Markdown from './components/Markdown'
 import StreamingMarkdown from './components/StreamingMarkdown'
+
+// Use a shared empty array to keep selector output stable when no activity is present
+const EMPTY_ACTIVITY: ReadonlyArray<ActivityEvent> = Object.freeze([])
 
 export default function ChatPane() {
   const [input, setInput] = useState('')
@@ -11,7 +14,12 @@ export default function ChatPane() {
   const currentId = useAppStore((s) => s.currentId)
   const currentRequestId = useAppStore((s) => s.currentRequestId)
   const streamingText = useAppStore((s) => s.streamingText)
-  const activity = useAppStore((s) => s.getActivityForRequest(s.currentRequestId || ''))
+  // Select activity directly from map with a stable empty fallback to avoid infinite loop warnings
+  const activity: ReadonlyArray<ActivityEvent> = useAppStore((s) => {
+    const rid = s.currentRequestId || ''
+    const arr = s.activityByRequestId[rid]
+    return arr ? arr : EMPTY_ACTIVITY
+  })
   const startChatRequest = useAppStore((s) => s.startChatRequest)
   const stopCurrentRequest = useAppStore((s) => s.stopCurrentRequest)
   const ensureLlmIpcSubscription = useAppStore((s) => s.ensureLlmIpcSubscription)
@@ -92,7 +100,7 @@ export default function ChatPane() {
               {/* Inline activity badges (MVP) */}
               {activity.length > 0 && (
                 <Stack gap={4} mt="sm">
-                  {activity.map((ev, idx) => (
+                  {activity.map((ev: ActivityEvent, idx) => (
                     <Text key={idx} size="xs" c={ev.kind === 'ToolFailed' ? 'red.4' : 'dimmed'}>
                       {ev.kind === 'ToolStarted' && `🛠️ ${ev.tool} started`}
                       {ev.kind === 'ToolCompleted' && `✅ ${ev.tool} completed`}

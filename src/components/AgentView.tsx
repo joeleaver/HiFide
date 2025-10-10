@@ -24,6 +24,10 @@ export default function AgentView() {
 
   const newSession = useAppStore((s) => s.newSession)
 
+  // Token usage selectors used in meta panel
+  const lastRequest = useAppStore((s) => s.lastRequestTokenUsage)
+  const calculateCost = useAppStore((s) => s.calculateCost)
+
   // Debug panel resize state
   const [debugPanelHeight, setDebugPanelHeight] = useState(300)
   const { onMouseDown, isResizingRef } = usePanelResize({
@@ -273,31 +277,31 @@ export default function AgentView() {
 
                         {/* Last Request */}
                         {(() => {
-                          const lastRequest = useAppStore.getState().lastRequestTokenUsage
-                          if (!lastRequest) return null
+                          const lr = lastRequest
+                          if (!lr) return null
 
-                          const cost = useAppStore.getState().calculateCost(
-                            lastRequest.provider,
-                            lastRequest.model,
-                            lastRequest.usage
+                          const cost = calculateCost(
+                            lr.provider,
+                            lr.model,
+                            lr.usage
                           )
 
                           return (
                             <div>
                               <Text size="xs" fw={600} c="orange" mb={4}>LAST REQUEST</Text>
                               <Text size="xs" c="#888" mb={2}>
-                                {lastRequest.provider} / {lastRequest.model}
+                                {lr.provider} / {lr.model}
                               </Text>
                               <Group gap="xs" ml="md">
                                 <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Tokens:</Text>
                                 <Text size="xs">
-                                  <span style={{ color: '#4fc3f7' }}>{lastRequest.usage.inputTokens.toLocaleString()}</span>
+                                  <span style={{ color: '#4fc3f7' }}>{lr.usage.inputTokens.toLocaleString()}</span>
                                   <span style={{ color: '#666' }}> in</span>
                                   <span style={{ color: '#666' }}> + </span>
-                                  <span style={{ color: '#81c784' }}>{lastRequest.usage.outputTokens.toLocaleString()}</span>
+                                  <span style={{ color: '#81c784' }}>{lr.usage.outputTokens.toLocaleString()}</span>
                                   <span style={{ color: '#666' }}> out</span>
                                   <span style={{ color: '#666' }}> = </span>
-                                  <span style={{ color: '#ccc' }}>{lastRequest.usage.totalTokens.toLocaleString()}</span>
+                                  <span style={{ color: '#ccc' }}>{lr.usage.totalTokens.toLocaleString()}</span>
                                 </Text>
                               </Group>
                               <Group gap="xs" ml="md">

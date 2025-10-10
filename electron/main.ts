@@ -1874,6 +1874,12 @@ ipcMain.handle('tsrefactor:defaultToNamed', async (_e, args: { filePath: string;
   try {
     const result = await tsDefaultToNamed(args)
 
+	const verification = args.verify ? tsVerify(args.tsconfigPath) : undefined
+	return { ok: true, ...result, verification }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) }
+  }
+})
 // Agent-managed PTY sessions (no UI streaming): ring buffer + per-command capture
 // Keeps memory bounded and enables searchable command outputs for the agent
 
@@ -1982,12 +1988,7 @@ async function getOrCreateAgentPtyFor(requestId: string, opts?: { shell?: string
 ;(globalThis as any).__beginAgentCommand = beginCommand
 
 
-    const verification = args.verify ? tsVerify(args.tsconfigPath) : undefined
-    return { ok: true, ...result, verification }
-  } catch (e: any) {
-    return { ok: false, error: e?.message || String(e) }
-  }
-})
+
 
 ipcMain.handle('tsrefactor:namedToDefault', async (_e, args: { filePath: string; name: string; apply?: boolean; verify?: boolean; tsconfigPath?: string }) => {
   try {
