@@ -76,7 +76,7 @@ export const OpenAIProvider: ProviderAdapter = {
   },
 
   // Agent loop with tool-calling via Responses API
-  async agentStream({ apiKey, model, messages, tools, responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, messages, tools, responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey })
 
     // Validate tools array
@@ -260,8 +260,10 @@ export const OpenAIProvider: ProviderAdapter = {
                   continue
                 }
 
-                // Pass toolMeta to tool.run()
+                // Notify start, then execute tool (pass toolMeta)
+                try { onToolStart?.({ callId: tc.id, name: String(name), arguments: args }) } catch {}
                 const result = await Promise.resolve(tool.run(args, toolMeta))
+                try { onToolEnd?.({ callId: tc.id, name: String(name), result }) } catch {}
 
                 // Check if tool requested pruning
                 if (result?._meta?.trigger_pruning) {
@@ -276,6 +278,7 @@ export const OpenAIProvider: ProviderAdapter = {
                   output
                 })
               } catch (e: any) {
+                try { onToolError?.({ callId: tc.id, name: String(name), error: e?.message || String(e) }) } catch {}
                 conv.push({
                   type: 'function_call_output',
                   call_id: tc.id,

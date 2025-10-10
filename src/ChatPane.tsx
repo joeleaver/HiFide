@@ -11,6 +11,7 @@ export default function ChatPane() {
   const currentId = useAppStore((s) => s.currentId)
   const currentRequestId = useAppStore((s) => s.currentRequestId)
   const streamingText = useAppStore((s) => s.streamingText)
+  const activity = useAppStore((s) => s.getActivityForRequest(s.currentRequestId || ''))
   const startChatRequest = useAppStore((s) => s.startChatRequest)
   const stopCurrentRequest = useAppStore((s) => s.stopCurrentRequest)
   const ensureLlmIpcSubscription = useAppStore((s) => s.ensureLlmIpcSubscription)
@@ -88,6 +89,20 @@ export default function ChatPane() {
           {currentRequestId && (
             <Card withBorder style={{ backgroundColor: '#252526', position: 'relative' }}>
               <StreamingMarkdown content={streamingText} />
+              {/* Inline activity badges (MVP) */}
+              {activity.length > 0 && (
+                <Stack gap={4} mt="sm">
+                  {activity.map((ev, idx) => (
+                    <Text key={idx} size="xs" c={ev.kind === 'ToolFailed' ? 'red.4' : 'dimmed'}>
+                      {ev.kind === 'ToolStarted' && `🛠️ ${ev.tool} started`}
+                      {ev.kind === 'ToolCompleted' && `✅ ${ev.tool} completed`}
+                      {ev.kind === 'ToolFailed' && `❌ ${ev.tool} failed: ${ev.error}`}
+                      {ev.kind === 'FileEditApplied' && `✏️ files: ${(ev.files || []).join(', ')}`}
+                      {ev.summary ? ` — ${ev.summary}` : ''}
+                    </Text>
+                  ))}
+                </Stack>
+              )}
               <Group
                 gap="xs"
                 style={{

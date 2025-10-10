@@ -70,6 +70,18 @@ export type TokenCost = {
 // Re-export pricing types
 export type { ModelPricing, ProviderPricing, PricingConfig }
 
+
+// Activity events for tool/badge system
+export type ActivityEvent = {
+  kind: 'ToolStarted' | 'ToolProgress' | 'ToolCompleted' | 'ToolFailed' | 'FileEditApplied'
+  opId?: string
+  tool?: string
+  summary?: string
+  error?: string
+  files?: string[]
+  timestamp?: number
+}
+
 export type Session = {
   id: string
   title: string
@@ -338,6 +350,11 @@ const chatInitial = {
 	  retryCount: number
 	  llmIpcSubscribed: boolean
 	  ensureLlmIpcSubscription: () => void
+
+      // Activity/badge state
+      activityByRequestId: Record<string, ActivityEvent[]>
+      getActivityForRequest: (requestId: string) => ActivityEvent[]
+
 	  buildResponseSchemaForInput: (userText: string) => any | undefined
 	  startChatRequest: (userText: string) => Promise<void>
 	  stopCurrentRequest: () => Promise<void>
@@ -1822,6 +1839,8 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 	      const res = await window.fs.readFile(filePath)
 	      if (res?.success && res.content) {
 	        const name = filePath.split(/[/\\]/).pop() || filePath
+
+
 	        const ext = name.split('.').pop()?.toLowerCase()
 	        const map: Record<string, string> = { ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript', json: 'json', css: 'css', html: 'html', md: 'markdown', py: 'python', rs: 'rust', go: 'go', java: 'java', c: 'c', cpp: 'cpp', cs: 'csharp', php: 'php', rb: 'ruby', sh: 'shell', yaml: 'yaml', yml: 'yaml', xml: 'xml', sql: 'sql' }
 	        const language = map[ext || ''] || 'plaintext'
@@ -1838,6 +1857,11 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 	  chunkStats: { count: 0, totalChars: 0 },
 	  retryCount: 0,
 	  llmIpcSubscribed: false,
+
+		  // Activity/badge state
+		  activityByRequestId: {},
+		  getActivityForRequest: (rid) => ((get().activityByRequestId as any)?.[rid] || []) as ActivityEvent[],
+
 	  ensureLlmIpcSubscription: () => {
 	    const s = get(); if (s.llmIpcSubscribed) return
 	    const ipc = window.ipcRenderer; if (!ipc) return
@@ -1863,12 +1887,16 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 	      const rid = get().currentRequestId; if (!rid) return
 	      const prev = get().getCurrentMessages()
 	      const cs = get().chunkStats
+
+
 	      set({ currentRequestId: null, streamingText: '', chunkStats: { count: 0, totalChars: 0 } })
 	      if (cs.count > 0) get().addDebugLog('info', 'LLM', `Received ${cs.count} chunks (${cs.totalChars} chars total) before error`)
 	      get().addDebugLog('error', 'LLM', `Error: ${payload?.error}`, { error: payload?.error })
 	      const { autoRetry, selectedModel, selectedProvider } = get()
 	      if (autoRetry && get().retryCount < 1) {
 	        const rid2 = crypto.randomUUID()
+
+
 	        set({ retryCount: get().retryCount + 1, currentRequestId: rid2 })
 	        get().addDebugLog('info', 'LLM', 'Auto-retrying request')
 	        const res = await window.llm?.auto?.(rid2, prev, selectedModel, selectedProvider)
@@ -1881,6 +1909,20 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 	      if (!rid || payload?.requestId !== rid) return
 	      try { get().recordTokenUsage(payload.provider, payload.model, payload.usage) } catch {}
 	      get().addDebugLog('info', 'Tokens', `Usage: ${payload.usage?.totalTokens} tokens (${payload.provider}/${payload.model})`, payload.usage)
+
+		    // Activity events
+		    const onActivity = (_: any, payload: any) => {
+		      const rid = payload?.requestId; if (!rid) return
+		      const ev: ActivityEvent = { ...payload, timestamp: Date.now() }
+		      set((st) => {
+		        const map = { ...(st.activityByRequestId || {}) } as Record<string, ActivityEvent[]>
+		        const arr = Array.isArray(map[rid]) ? [...map[rid], ev] : [ev]
+		        map[rid] = arr
+		        return { activityByRequestId: map }
+		      })
+		    }
+		    ipc.on('activity:event', onActivity)
+
 	    }
 	    ipc.on('llm:chunk', onChunk)
 	    ipc.on('llm:done', onDone)

@@ -47,6 +47,10 @@ export interface ProviderAdapter {
     onDone: () => void
     onError: (error: string) => void
     onTokenUsage?: (usage: TokenUsage) => void
+    // Tool lifecycle callbacks (optional)
+    onToolStart?: (ev: { callId?: string; name: string; arguments?: any }) => void
+    onToolEnd?: (ev: { callId?: string; name: string; result?: any }) => void
+    onToolError?: (ev: { callId?: string; name: string; error: string }) => void
     // Optional metadata passed to tools (e.g., requestId for session tracking)
     toolMeta?: { requestId?: string; [key: string]: any }
   }) => Promise<StreamHandle>

@@ -845,6 +845,230 @@ const agentTools: AgentTool[] = [
     },
   },
   {
+    name: 'fs.create_dir',
+    description: 'Create a directory inside the workspace (recursive by default)',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Workspace-relative directory path' },
+        recursive: { type: 'boolean', default: true },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    run: async ({ path: rel, recursive = true }: { path: string; recursive?: boolean }) => {
+      const abs = resolveWithinWorkspace(rel)
+      await fs.mkdir(abs, { recursive })
+      return { ok: true }
+    },
+  },
+  {
+    name: 'fs.delete_dir',
+    description: 'Delete a directory from the workspace (recursive, force by default). USE WITH CARE.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Workspace-relative directory path' },
+        recursive: { type: 'boolean', default: true },
+        force: { type: 'boolean', default: true },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    run: async ({ path: rel, recursive = true, force = true }: { path: string; recursive?: boolean; force?: boolean }) => {
+      const abs = resolveWithinWorkspace(rel)
+      await fs.rm(abs, { recursive, force })
+      return { ok: true }
+    },
+  },
+  {
+    name: 'fs.delete_file',
+    description: 'Delete a file from the workspace. If force=true, succeeds when the file is missing.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Workspace-relative file path' },
+        force: { type: 'boolean', default: true },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    run: async ({ path: rel, force = true }: { path: string; force?: boolean }) => {
+      const abs = resolveWithinWorkspace(rel)
+      try { await fs.unlink(abs) } catch (e: any) {
+        if (!force) throw e
+      }
+      return { ok: true }
+    },
+  },
+  {
+    name: 'fs.exists',
+    description: 'Check if a workspace-relative path exists',
+    parameters: {
+      type: 'object',
+      properties: { path: { type: 'string', description: 'Workspace-relative path' } },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    run: async ({ path: rel }: { path: string }) => {
+      const abs = resolveWithinWorkspace(rel)
+      try { await fs.access(abs); return { ok: true, exists: true } } catch { return { ok: true, exists: false } }
+    },
+  },
+  {
+    name: 'fs.stat',
+    description: 'Get basic stat info for a workspace-relative path',
+    parameters: {
+      type: 'object',
+      properties: { path: { type: 'string', description: 'Workspace-relative path' } },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    run: async ({ path: rel }: { path: string }) => {
+      const abs = resolveWithinWorkspace(rel)
+      const s = await fs.stat(abs)
+      return { ok: true, isFile: s.isFile(), isDirectory: s.isDirectory(), size: s.size, mtimeMs: s.mtimeMs, ctimeMs: s.ctimeMs }
+    },
+  },
+  {
+    name: 'fs.append_file',
+    description: 'Append UTF-8 text to a file in the workspace (creates file if missing)',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Workspace-relative file path' },
+        content: { type: 'string', description: 'Text to append' },
+      },
+      required: ['path', 'content'],
+      additionalProperties: false,
+    },
+    run: async ({ path: rel, content }: { path: string; content: string }) => {
+      const abs = resolveWithinWorkspace(rel)
+      await fs.appendFile(abs, content, 'utf-8')
+      return { ok: true }
+    },
+  },
+  {
+    name: 'fs.move',
+    description: 'Move/rename a file or directory within the workspace',
+    parameters: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Source workspace-relative path' },
+        to: { type: 'string', description: 'Destination workspace-relative path' },
+        overwrite: { type: 'boolean', default: true },
+      },
+      required: ['from', 'to'],
+      additionalProperties: false,
+    },
+    run: async ({ from, to, overwrite = true }: { from: string; to: string; overwrite?: boolean }) => {
+      const src = resolveWithinWorkspace(from)
+      const dst = resolveWithinWorkspace(to)
+      if (overwrite) {
+        try { await fs.rm(dst, { recursive: true, force: true }) } catch {}
+      }
+      await fs.rename(src, dst)
+      return { ok: true }
+    },
+  },
+  {
+    name: 'fs.copy',
+    description: 'Copy a file or directory within the workspace',
+    parameters: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Source workspace-relative path' },
+        to: { type: 'string', description: 'Destination workspace-relative path' },
+        recursive: { type: 'boolean', default: true },
+        overwrite: { type: 'boolean', default: true },
+      },
+      required: ['from', 'to'],
+      additionalProperties: false,
+    },
+    run: async ({ from, to, recursive = true, overwrite = true }: { from: string; to: string; recursive?: boolean; overwrite?: boolean }) => {
+      const src = resolveWithinWorkspace(from)
+      const dst = resolveWithinWorkspace(to)
+      // Prefer fs.cp if available (Node 16.7+)
+      const anyFs: any = fs as any
+      if (overwrite) {
+        try { await fs.rm(dst, { recursive: true, force: true }) } catch {}
+      }
+      if (typeof anyFs.cp === 'function') {
+        await anyFs.cp(src, dst, { recursive, force: true })
+      } else {
+        // Fallback: try copyFile (files only)
+        await fs.copyFile(src, dst)
+      }
+      return { ok: true }
+    },
+  },
+  {
+    name: 'fs.remove',
+    description: 'Remove a file or directory from the workspace (recursive/force by default). USE WITH CARE.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Workspace-relative path to remove' },
+        recursive: { type: 'boolean', default: true },
+        force: { type: 'boolean', default: true },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    run: async ({ path: rel, recursive = true, force = true }: { path: string; recursive?: boolean; force?: boolean }) => {
+      const abs = resolveWithinWorkspace(rel)
+      await fs.rm(abs, { recursive, force })
+      return { ok: true }
+    },
+  },
+  {
+    name: 'fs.truncate_file',
+    description: 'Truncate a file to zero length (optionally create if missing).',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Workspace-relative file path' },
+        create: { type: 'boolean', default: true },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    run: async ({ path: rel, create = true }: { path: string; create?: boolean }) => {
+      const abs = resolveWithinWorkspace(rel)
+      if (create) {
+        await fs.writeFile(abs, '', 'utf-8')
+      } else {
+        await fs.truncate(abs, 0)
+      }
+      return { ok: true }
+    },
+  },
+  {
+    name: 'fs.truncate_dir',
+    description: 'Empty a directory without deleting the directory itself (recursive remove of contents).',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Workspace-relative directory path' },
+        ensureExists: { type: 'boolean', default: true },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    run: async ({ path: rel, ensureExists = true }: { path: string; ensureExists?: boolean }) => {
+      const abs = resolveWithinWorkspace(rel)
+      if (ensureExists) {
+        await fs.mkdir(abs, { recursive: true })
+      }
+      const entries = await fs.readdir(abs, { withFileTypes: true })
+      await Promise.all(entries.map(async (e) => {
+        const child = path.join(abs, e.name)
+        await fs.rm(child, { recursive: true, force: true })
+      }))
+      return { ok: true }
+    },
+  },
+  {
     name: 'edits.apply',
     description: 'Apply a list of precise edits (verify with TypeScript when possible)',
     parameters: {
@@ -2012,6 +2236,31 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
         responseSchema: args.responseSchema,
         toolMeta: { requestId: args.requestId },
         onChunk: (text) => { buffer += text; wc?.send('llm:chunk', { requestId: args.requestId, content: text }) },
+        onToolStart: (ev) => {
+          try {
+            const opId = ev.callId || `${ev.name}-${Date.now()}`
+            let summary: string | undefined
+            try { const s = JSON.stringify(ev.arguments); summary = s && s.length > 200 ? s.slice(0, 200) + '\u2026' : s } catch {}
+            wc?.send('activity:event', { requestId: args.requestId, kind: 'ToolStarted', opId, tool: ev.name, summary })
+          } catch {}
+        },
+        onToolEnd: (ev) => {
+          try {
+            const opId = ev.callId || `${ev.name}-${Date.now()}`
+            wc?.send('activity:event', { requestId: args.requestId, kind: 'ToolCompleted', opId, tool: ev.name })
+            if (ev?.name === 'edits.apply' && ev?.result && Array.isArray(ev.result.results)) {
+              const changed = ev.result.results.filter((r: any) => r?.changed)
+              const files = changed.map((r: any) => r?.path).filter(Boolean)
+              if (files.length) wc?.send('activity:event', { requestId: args.requestId, kind: 'FileEditApplied', opId, files })
+            }
+          } catch {}
+        },
+        onToolError: (ev) => {
+          try {
+            const opId = ev.callId || `${ev.name}-${Date.now()}`
+            wc?.send('activity:event', { requestId: args.requestId, kind: 'ToolFailed', opId, tool: ev.name, error: ev.error })
+          } catch {}
+        },
         onDone: async () => {
           sendDebugLog('info', 'Agent', 'Agent stream completed')
           // Attempt strict edits auto-apply if JSON object returned
@@ -2024,6 +2273,10 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
               const summary = `\n\n[applied] edits=${res.applied} changed=${res.results.filter(r=>r.changed).length} tsc=${res.verification?.ok? 'ok':'fail'}`
               wc?.send('llm:chunk', { requestId: args.requestId, content: summary })
               wc?.send('agent:edits-applied', { requestId: args.requestId, ...res })
+              try {
+                const files = res.results.filter((r: any) => r?.changed).map((r: any) => r?.path).filter(Boolean)
+                if (files.length) wc?.send('activity:event', { requestId: args.requestId, kind: 'FileEditApplied', opId: `structured-edits-${Date.now()}`, files })
+              } catch {}
               sendDebugLog('info', 'Edits', `Applied ${res.applied} edits, ${res.results.filter(r=>r.changed).length} files changed`)
             }
           } catch {}
@@ -2083,6 +2336,31 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
         responseSchema: args.responseSchema,
         toolMeta: { requestId: args.requestId },
         onChunk: (text) => wc?.send('llm:chunk', { requestId: args.requestId, content: text }),
+        onToolStart: (ev) => {
+          try {
+            const opId = ev.callId || `${ev.name}-${Date.now()}`
+            let summary: string | undefined
+            try { const s = JSON.stringify(ev.arguments); summary = s && s.length > 200 ? s.slice(0, 200) + '\u2026' : s } catch {}
+            wc?.send('activity:event', { requestId: args.requestId, kind: 'ToolStarted', opId, tool: ev.name, summary })
+          } catch {}
+        },
+        onToolEnd: (ev) => {
+          try {
+            const opId = ev.callId || `${ev.name}-${Date.now()}`
+            wc?.send('activity:event', { requestId: args.requestId, kind: 'ToolCompleted', opId, tool: ev.name })
+            if (ev?.name === 'edits.apply' && ev?.result && Array.isArray(ev.result.results)) {
+              const changed = ev.result.results.filter((r: any) => r?.changed)
+              const files = changed.map((r: any) => r?.path).filter(Boolean)
+              if (files.length) wc?.send('activity:event', { requestId: args.requestId, kind: 'FileEditApplied', opId, files })
+            }
+          } catch {}
+        },
+        onToolError: (ev) => {
+          try {
+            const opId = ev.callId || `${ev.name}-${Date.now()}`
+            wc?.send('activity:event', { requestId: args.requestId, kind: 'ToolFailed', opId, tool: ev.name, error: ev.error })
+          } catch {}
+        },
         onDone: () => wc?.send('llm:done', { requestId: args.requestId }),
         onError: (error) => wc?.send('llm:error', { requestId: args.requestId, error }),
         onTokenUsage: (usage) => {
@@ -2194,6 +2472,32 @@ ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messa
       responseSchema: args.responseSchema,
       toolMeta: { requestId: args.requestId },
       onChunk: (text) => { buffer += text; wc?.send('llm:chunk', { requestId: args.requestId, content: text }) },
+      onToolStart: (ev) => {
+        try {
+          const opId = ev.callId || `${ev.name}-${Date.now()}`
+          let summary: string | undefined
+          try { const s = JSON.stringify(ev.arguments); summary = s && s.length > 200 ? s.slice(0, 200) + '…' : s } catch {}
+          wc?.send('activity:event', { requestId: args.requestId, kind: 'ToolStarted', opId, tool: ev.name, summary })
+        } catch {}
+      },
+      onToolEnd: (ev) => {
+        try {
+          const opId = ev.callId || `${ev.name}-${Date.now()}`
+          wc?.send('activity:event', { requestId: args.requestId, kind: 'ToolCompleted', opId, tool: ev.name })
+          // If edits.apply returned results, emit a FileEditApplied event
+          if (ev?.name === 'edits.apply' && ev?.result && Array.isArray(ev.result.results)) {
+            const changed = ev.result.results.filter((r: any) => r?.changed)
+            const files = changed.map((r: any) => r?.path).filter(Boolean)
+            if (files.length) wc?.send('activity:event', { requestId: args.requestId, kind: 'FileEditApplied', opId, files })
+          }
+        } catch {}
+      },
+      onToolError: (ev) => {
+        try {
+          const opId = ev.callId || `${ev.name}-${Date.now()}`
+          wc?.send('activity:event', { requestId: args.requestId, kind: 'ToolFailed', opId, tool: ev.name, error: ev.error })
+        } catch {}
+      },
       onDone: async () => {
         sendDebugLog('info', 'Agent', 'Agent stream completed')
         // If the model returned structured edits JSON instead of calling tools, try to apply it automatically
@@ -2206,6 +2510,11 @@ ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messa
             const summary = `\n\n[applied] edits=${res.applied} changed=${res.results.filter(r=>r.changed).length} tsc=${res.verification?.ok? 'ok':'fail'}`
             wc?.send('llm:chunk', { requestId: args.requestId, content: summary })
             wc?.send('agent:edits-applied', { requestId: args.requestId, ...res })
+            // Emit activity event for applied edits
+            try {
+              const files = res.results.filter((r: any) => r?.changed).map((r: any) => r?.path).filter(Boolean)
+              if (files.length) wc?.send('activity:event', { requestId: args.requestId, kind: 'FileEditApplied', opId: `structured-edits-${Date.now()}`, files })
+            } catch {}
             sendDebugLog('info', 'Edits', `Applied ${res.applied} edits, ${res.results.filter(r=>r.changed).length} files changed`)
           }
         } catch {}
