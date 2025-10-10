@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 import { Group, Stack, Text, UnstyledButton, ScrollArea, Card, Select, Button, Badge } from '@mantine/core'
 import { IconChevronLeft, IconChevronRight, IconPlus } from '@tabler/icons-react'
 import { useAppStore } from '../store/app'
-import { useChatStore } from '../store/chat'
+import { usePanelResize } from '../hooks/usePanelResize'
 import ChatPane from '../ChatPane'
 import TerminalPanel from './TerminalPanel'
 import AgentDebugPanel from './AgentDebugPanel'
@@ -14,52 +14,24 @@ export default function AgentView() {
   const setMetaPanelOpen = useAppStore((s) => s.setMetaPanelOpen)
   const debugPanelCollapsed = useAppStore((s) => s.debugPanelCollapsed)
 
-  const sessions = useChatStore((s) => s.sessions)
-  const currentId = useChatStore((s) => s.currentId)
-  const select = useChatStore((s) => s.select)
+  const sessions = useAppStore((s) => s.sessions)
+  const currentId = useAppStore((s) => s.currentId)
+  const select = useAppStore((s) => s.select)
   const workspaceRoot = useAppStore((s) => s.workspaceRoot)
   const ctxRefreshing = useAppStore((s) => s.ctxRefreshing)
   const ctxResult = useAppStore((s) => s.ctxResult)
   const refreshContext = useAppStore((s) => s.refreshContext)
 
-  const newSession = useChatStore((s) => s.newSession)
+  const newSession = useAppStore((s) => s.newSession)
 
   // Debug panel resize state
   const [debugPanelHeight, setDebugPanelHeight] = useState(300)
-  const isResizingRef = useRef(false)
-  const startYRef = useRef(0)
-  const startHeightRef = useRef(0)
-
-  const handleResizeStart = (e: React.MouseEvent) => {
-    isResizingRef.current = true
-    startYRef.current = e.clientY
-    startHeightRef.current = debugPanelHeight
-    document.body.style.cursor = 'ns-resize'
-    document.body.style.userSelect = 'none'
-  }
-
-  const handleResizeMove = (e: MouseEvent) => {
-    if (!isResizingRef.current) return
-    const deltaY = startYRef.current - e.clientY
-    const newHeight = Math.max(150, Math.min(600, startHeightRef.current + deltaY))
-    setDebugPanelHeight(newHeight)
-  }
-
-  const handleResizeEnd = () => {
-    isResizingRef.current = false
-    document.body.style.cursor = ''
-    document.body.style.userSelect = ''
-  }
-
-  // Add/remove mouse event listeners
-  useEffect(() => {
-    document.addEventListener('mousemove', handleResizeMove)
-    document.addEventListener('mouseup', handleResizeEnd)
-    return () => {
-      document.removeEventListener('mousemove', handleResizeMove)
-      document.removeEventListener('mouseup', handleResizeEnd)
-    }
-  }, [])
+  const { onMouseDown, isResizingRef } = usePanelResize({
+    getHeight: () => debugPanelHeight,
+    setHeight: setDebugPanelHeight,
+    min: 150,
+    max: 600,
+  })
 
   return (
     <Group
@@ -301,7 +273,7 @@ export default function AgentView() {
 
                         {/* Last Request */}
                         {(() => {
-                          const lastRequest = useChatStore.getState().lastRequestTokenUsage
+                          const lastRequest = useAppStore.getState().lastRequestTokenUsage
                           if (!lastRequest) return null
 
                           const cost = useAppStore.getState().calculateCost(
@@ -363,7 +335,7 @@ export default function AgentView() {
             {/* Resize handle - only show when not collapsed */}
             {!debugPanelCollapsed && (
               <div
-                onMouseDown={handleResizeStart}
+                onMouseDown={onMouseDown}
                 style={{
                   position: 'absolute',
                   top: 0,

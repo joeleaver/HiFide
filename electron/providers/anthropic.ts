@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { ProviderAdapter, StreamHandle, ChatMessage, AgentTool } from './provider'
 import { validateJson } from './jsonschema'
 import { withRetries } from './retry'
+import { formatSummary } from '../agent/types'
 
 export const AnthropicProvider: ProviderAdapter = {
   id: 'anthropic',
@@ -62,7 +63,7 @@ export const AnthropicProvider: ProviderAdapter = {
   },
 
   // Agent streaming with tool-calling using Anthropic Messages API
-  async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta }): Promise<StreamHandle> {
     const client = new Anthropic({ apiKey })
 
     // Map tools to Anthropic format
@@ -73,14 +74,29 @@ export const AnthropicProvider: ProviderAdapter = {
     }) as any
 
     const system = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
-    const conv: any[] = messages.filter(m => m.role !== 'system').map((m: any) => ({ role: m.role, content: m.content }))
+    let conv: any[] = messages.filter(m => m.role !== 'system').map((m: any) => ({ role: m.role, content: m.content }))
     let cancelled = false
+    let iteration = 0
+    
+    // Helper to prune conversation when agent requests it
+    const pruneConversation = (summary: any) => {
+            const recent = conv.slice(-5) // Keep last 5 messages
+
+      const summaryMsg = {
+        role: 'user' as const,
+        content: formatSummary(summary),
+      }
+
+      // Rebuild conversation: system + summary + recent
+      conv = [summaryMsg, ...recent]
+    }
 
     const run = async () => {
       try {
         let totalUsage: any = null
 
-        while (!cancelled) {
+        while (!cancelled && iteration < 50) { // Hard limit of 50 iterations as safety
+          iteration++
           // Stream an assistant turn and capture any tool_use blocks while streaming
           const stream: any = await withRetries(() => client.messages.create({
             model: model as any,
@@ -146,6 +162,9 @@ export const AnthropicProvider: ProviderAdapter = {
 
             // Execute tools and add tool_result blocks
             const results: any[] = []
+            let shouldPrune = false
+            let pruneSummary: any = null
+
             for (const tu of completed) {
               try {
                 const tool = toolMap.get(tu.name)
@@ -159,13 +178,28 @@ export const AnthropicProvider: ProviderAdapter = {
                   results.push({ type: 'tool_result', tool_use_id: tu.id, content: `Validation error: ${v.errors || 'invalid input'}`, is_error: true })
                   continue
                 }
-                const result = await Promise.resolve(tool.run(tu.input))
+
+                // Pass toolMeta to tool.run()
+                const result = await Promise.resolve(tool.run(tu.input, toolMeta))
+
+                // Check if tool requested pruning
+                if (result?._meta?.trigger_pruning) {
+                  shouldPrune = true
+                  pruneSummary = result._meta.summary
+                }
+
                 results.push({ type: 'tool_result', tool_use_id: tu.id, content: typeof result === 'string' ? result : JSON.stringify(result) })
               } catch (e: any) {
                 results.push({ type: 'tool_result', tool_use_id: tu.id, content: `Error: ${e?.message || String(e)}`, is_error: true })
               }
             }
             conv.push({ role: 'user', content: results })
+
+            // Prune conversation if requested
+            if (shouldPrune && pruneSummary) {
+              pruneConversation(pruneSummary)
+            }
+
             continue
           }
 

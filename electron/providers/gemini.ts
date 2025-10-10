@@ -1,4 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { formatSummary } from '../agent/types'
+
 import type { ProviderAdapter, StreamHandle, ChatMessage } from './provider'
 import { validateJson } from './jsonschema'
 import { withRetries } from './retry'
@@ -116,13 +118,13 @@ export const GeminiProvider: ProviderAdapter = {
   },
 
   // Agent streaming with Gemini function calling
-  async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, toolMeta, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
     const genAI = new GoogleGenerativeAI(apiKey)
     const systemInstruction = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
     const m: any = genAI.getGenerativeModel({ model, systemInstruction })
 
     // Map tools to Gemini function declarations
-    const toolMap = new Map<string, { run: (input: any) => any }>()
+    const toolMap = new Map<string, { run: (input: any, meta?: any) => any }>()
     const functionDeclarations = tools.map((t) => {
       toolMap.set(t.name, { run: t.run })
       return {
@@ -137,6 +139,9 @@ export const GeminiProvider: ProviderAdapter = {
       .map((msg: ChatMessage) => ({ role: msg.role === 'assistant' ? 'model' : msg.role, parts: [{ text: msg.content }] }))
 
     // We'll iteratively stream until no functionCalls appear in a streamed turn
+    let shouldPrune = false
+    let pruneData: any = null
+
     let cancelled = false
     let totalUsage: any = null
 
@@ -213,13 +218,25 @@ export const GeminiProvider: ProviderAdapter = {
                   toolResponses.push({ functionResponse: { name, response: { content: `Validation error: ${v.errors || 'invalid input'}` } } })
                   continue
                 }
-                const result = await Promise.resolve(tool?.run(args))
+                const result = await Promise.resolve(tool?.run(args, toolMeta))
+                if (result && result._meta && result._meta.trigger_pruning) {
+                  shouldPrune = true
+                  pruneData = result._meta.summary
+                }
                 toolResponses.push({ functionResponse: { name, response: { content: typeof result === 'string' ? result : JSON.stringify(result) } } })
               } catch (e: any) {
                 toolResponses.push({ functionResponse: { name, response: { content: `Error: ${e?.message || String(e)}` } } })
               }
             }
             contents.push({ role: 'user', parts: toolResponses })
+            if (shouldPrune && pruneData) {
+              const summaryText = formatSummary(pruneData)
+              const recent = contents.slice(-5)
+              contents.length = 0
+              contents.push({ role: 'user', parts: [{ text: summaryText }] }, ...recent)
+              shouldPrune = false
+              pruneData = null
+            }
             continue
           }
 

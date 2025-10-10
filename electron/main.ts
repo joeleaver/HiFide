@@ -19,6 +19,13 @@ import { renameSymbol as tsRenameSymbol, organizeImports as tsOrganizeImports, v
 
 
 import { Indexer } from './indexing/indexer'
+import type { TaskAssessment, TaskType } from './agent/types'
+import { calculateBudget, getResourceRecommendation } from './agent/types'
+
+import { buildSystemPrompt } from './app/ipc/prompt'
+import { getOrCreateSession, initAgentSessionsCleanup } from './session/agentSessions'
+import { buildContextMessages } from './app/context/contextBuilder'
+
 
 import { exec as execCb } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -99,6 +106,9 @@ function getIndexer(): Indexer {
   if (!indexer) indexer = new Indexer(process.env.APP_ROOT || process.cwd())
   return indexer
 }
+
+// Agent session state management moved to session/agentSessions
+initAgentSessionsCleanup()
 
 async function logEvent(sessionId: string, type: string, payload: any) {
   try {
@@ -491,33 +501,7 @@ function resolveWithinWorkspace(p: string): string {
 }
 
 async function atomicWrite(filePath: string, content: string) {
-  const baseDir = path.resolve(process.env.APP_ROOT || process.cwd())
-  const tmpDir = path.join(baseDir, '.hifide-private', 'tmp')
-
-  // Ensure tmp directory exists
-  try {
-    await fs.mkdir(tmpDir, { recursive: true })
-  } catch (e) {
-    console.error('[atomicWrite] Failed to create tmp directory:', e)
-    throw e
-  }
-
-  const tmpFile = path.join(tmpDir, `.tmp-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`)
-
-  try {
-    await fs.writeFile(tmpFile, content, 'utf-8')
-    await fs.rename(tmpFile, filePath)
-  } catch (error) {
-    console.error(`[atomicWrite] Failed to write ${filePath}:`, error)
-    // Clean up temp file if rename failed
-    try {
-      await fs.unlink(tmpFile)
-      console.log(`[atomicWrite] Cleaned up temp file: ${tmpFile}`)
-    } catch (cleanupError) {
-      console.error(`[atomicWrite] Failed to cleanup temp file ${tmpFile}:`, cleanupError)
-    }
-    throw error
-  }
+  await fs.writeFile(filePath, content, 'utf-8')
 }
 
 // Session management - now workspace-relative
@@ -668,8 +652,143 @@ async function applyFileEditsInternal(edits: FileEdit[] = [], opts: { dryRun?: b
 }
 
 // Agent tool registry (provider-native tool-calling)
-// Minimal set to read, edit, and write files, plus index search
+// Includes self-regulation tools and file/index operations
 const agentTools: AgentTool[] = [
+  // Self-regulation tools - allow agent to manage its own resources
+  {
+    name: 'agent.assess_task',
+    description: 'Analyze the user request to determine scope and plan your approach. Call this FIRST before taking other actions to understand your resource budget.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task_type: {
+          type: 'string',
+          enum: ['simple_query', 'file_edit', 'multi_file_refactor', 'codebase_audit', 'exploration'],
+          description: 'What type of task is this? simple_query=read 1 file, file_edit=edit 1-3 files, multi_file_refactor=edit 4+ files, codebase_audit=analyze entire codebase, exploration=understand structure',
+        },
+        estimated_files: {
+          type: 'number',
+          description: 'How many files will you likely need to examine?',
+        },
+        estimated_iterations: {
+          type: 'number',
+          description: 'How many tool-calling rounds do you estimate?',
+        },
+        strategy: {
+          type: 'string',
+          description: 'Brief description of your approach (1-2 sentences)',
+        },
+      },
+      required: ['task_type', 'estimated_files', 'estimated_iterations', 'strategy'],
+      additionalProperties: false,
+    },
+    run: async (input: { task_type: TaskType; estimated_files: number; estimated_iterations: number; strategy: string }, meta?: { requestId?: string }) => {
+      const requestId = meta?.requestId || 'unknown'
+      const session = getOrCreateSession(requestId)
+
+      const budget = calculateBudget(input.task_type, input.estimated_files)
+
+      const assessment: TaskAssessment = {
+        task_type: input.task_type,
+        estimated_files: input.estimated_files,
+        estimated_iterations: input.estimated_iterations,
+        strategy: input.strategy,
+        token_budget: budget.tokens,
+        max_iterations: budget.iterations,
+        timestamp: Date.now(),
+      }
+
+      session.assessment = assessment
+
+      return {
+        ok: true,
+        assessment,
+        guidance: `Task assessed as "${input.task_type}". You have a budget of ${budget.tokens.toLocaleString()} tokens and ${budget.iterations} iterations. Strategy: ${input.strategy}`,
+      }
+    },
+  },
+  {
+    name: 'agent.check_resources',
+    description: 'Check your current token usage and remaining budget. Use this periodically to stay aware of resource constraints.',
+    parameters: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+    run: async (_input: any, meta?: { requestId?: string }) => {
+      const requestId = meta?.requestId || 'unknown'
+      const session = getOrCreateSession(requestId)
+
+      const tokenBudget = session.assessment?.token_budget || 50000
+      const maxIterations = session.assessment?.max_iterations || 10
+
+      const stats = {
+        tokens_used: session.cumulativeTokens,
+        tokens_budget: tokenBudget,
+        tokens_remaining: tokenBudget - session.cumulativeTokens,
+        percentage_used: parseFloat(((session.cumulativeTokens / tokenBudget) * 100).toFixed(1)),
+        iterations_used: session.iterationCount,
+        iterations_max: maxIterations,
+        iterations_remaining: maxIterations - session.iterationCount,
+      }
+
+      const recommendation = getResourceRecommendation(stats)
+
+      return {
+        ok: true,
+        ...stats,
+        recommendation,
+      }
+    },
+  },
+  {
+    name: 'agent.summarize_progress',
+    description: 'Summarize what you have learned so far to compress context. Use this when you notice the conversation getting long (>10 tool calls) or before reading many more files.',
+    parameters: {
+      type: 'object',
+      properties: {
+        key_findings: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'List of key findings from your investigation so far',
+        },
+        files_examined: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Files you have already read (so you don\'t re-read them)',
+        },
+        next_steps: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'What you still need to investigate',
+        },
+      },
+      required: ['key_findings', 'files_examined', 'next_steps'],
+      additionalProperties: false,
+    },
+    run: async (input: { key_findings: string[]; files_examined: string[]; next_steps: string[] }, meta?: { requestId?: string }) => {
+      const requestId = meta?.requestId || 'unknown'
+      const session = getOrCreateSession(requestId)
+
+      const summary = {
+        key_findings: input.key_findings,
+        files_examined: input.files_examined,
+        next_steps: input.next_steps,
+        timestamp: Date.now(),
+      }
+
+      session.summaries.push(summary)
+
+      return {
+        ok: true,
+        summary,
+        message: 'Progress summarized. Previous tool outputs will be compressed to save tokens.',
+        _meta: { trigger_pruning: true, summary },
+      }
+    },
+  },
+
+  // File system tools
   {
     name: 'fs.read_file',
     description: 'Read a UTF-8 text file from the workspace',
@@ -1150,29 +1269,16 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
     const selectedTools = agentTools.filter(t => !names || names.has(t.name))
 
     // Prepend tool-usage instruction and retrieval context (reuse logic from agentStart)
-    const systemMsg = { role: 'system' as const, content: 'You are a software agent with tools. When the user asks to change files, you MUST make the changes using tools (fs.read_file, fs.write_file, edits.apply). Read the current file, apply minimal precise edits, and write the updated file. After changes, briefly summarize what changed.' }
+    const systemMsg = { role: 'system' as const, content: buildSystemPrompt(true) }
     let routed = [systemMsg, ...args.messages]
-    try {
-      // 1. Always include project context from .hifide-public/context.md if it exists
-      try {
-        const baseDir = path.resolve(process.env.APP_ROOT || process.cwd())
-        const contextMd = path.join(baseDir, '.hifide-public', 'context.md')
-        if (await pathExists(contextMd)) {
-          const projectContext = await fs.readFile(contextMd, 'utf-8')
-          routed = [{ role: 'user', content: `Project Context:\n\n${projectContext}` }, ...routed]
-        }
-      } catch {}
 
-      const q = lastUser?.content?.slice(0, 2000) || ''
-      if (q) {
-        sendDebugLog('info', 'Context', 'Searching codebase index for relevant context')
-        const res = await getIndexer().search(q, 6)
-        if (res?.chunks?.length) {
-          const ctx = res.chunks.map((c) => `                                                   • ${c.path}:${c.startLine}-${c.endLine}\n${(c.text||'').slice(0, 600)}`).join('\n\n')
-          routed = [{ role: 'user', content: `Context from the repository (top matches):\n\n${ctx}\n\nUse this context if relevant.` } as const, ...routed]
-        }
+
+      // Override with centralized context injection to avoid duplicate logic
+      {
+        const lastUser2 = [...args.messages].reverse().find(m => m.role === 'user')
+        const injected2 = await buildContextMessages(lastUser2?.content || '', 6)
+        routed = [...injected2, ...[systemMsg, ...args.messages]]
       }
-    } catch {}
 
     const model = args.model || 'gpt-5'
     try {
@@ -1184,6 +1290,7 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
         messages: routed,
         tools: selectedTools,
         responseSchema: args.responseSchema,
+        toolMeta: { requestId: args.requestId },
         onChunk: (text) => { buffer += text; wc?.send('llm:chunk', { requestId: args.requestId, content: text }) },
         onDone: async () => {
           sendDebugLog('info', 'Agent', 'Agent stream completed')
@@ -1206,7 +1313,22 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
           sendDebugLog('error', 'Agent', `Agent stream error: ${error}`)
           wc?.send('llm:error', { requestId: args.requestId, error })
         },
-        onTokenUsage: (usage) => wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage }),
+        onTokenUsage: (usage) => {
+          const session = getOrCreateSession(args.requestId)
+          session.cumulativeTokens += usage.totalTokens
+          session.iterationCount++
+          const tokenBudget = session.assessment?.token_budget || 50000
+          const maxIterations = session.assessment?.max_iterations || 10
+          wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage })
+          wc?.send('agent:metrics', {
+            requestId: args.requestId,
+            tokensUsed: session.cumulativeTokens,
+            tokenBudget,
+            iterationsUsed: session.iterationCount,
+            maxIterations,
+            percentageUsed: Math.round((session.cumulativeTokens / tokenBudget) * 1000) / 10
+          })
+        },
       })
       inflight.set(args.requestId, handle)
       return { ok: true, mode: 'tools' }
@@ -1220,41 +1342,9 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
   // Otherwise, free-form chat (with tools if provider supports it)
   // Add project context and search results
   try {
-    const contextMessages: Array<{ role: 'user'; content: string }> = []
-
-    // 1. Always include project context from .hifide-public/context.md if it exists
-    try {
-      const baseDir = path.resolve(process.env.APP_ROOT || process.cwd())
-      const contextMd = path.join(baseDir, '.hifide-public', 'context.md')
-      sendDebugLog('info', 'Context', `Looking for project context at: ${contextMd}`)
-      if (await pathExists(contextMd)) {
-        const projectContext = await fs.readFile(contextMd, 'utf-8')
-        sendDebugLog('info', 'Context', `Loaded project context (${projectContext.length} chars)`)
-        contextMessages.push({ role: 'user', content: `Project Context:\n\n${projectContext}` })
-      } else {
-        sendDebugLog('info', 'Context', 'No project context file found')
-      }
-    } catch (e) {
-      sendDebugLog('error', 'Context', `Error loading context: ${e}`)
-    }
-
-    // 2. Add semantic search results
     const lastUser = [...args.messages].reverse().find(m => m.role === 'user')
-    const query = lastUser?.content?.slice(0, 2000) || ''
-    if (query) {
-      sendDebugLog('info', 'Context', 'Searching codebase index for chat context')
-      const res = await getIndexer().search(query, 6)
-      if (res?.chunks?.length) {
-        sendDebugLog('info', 'Context', `Found ${res.chunks.length} relevant code chunks`)
-        const ctx = res.chunks.map((c) => `• ${c.path}:${c.startLine}-${c.endLine}\n${(c.text||'').slice(0, 600)}`).join('\n\n')
-        contextMessages.push({ role: 'user', content: `Relevant code from repository:\n\n${ctx}` })
-      }
-    }
-
-    // Prepend all context messages
-    if (contextMessages.length) {
-      args.messages = [...contextMessages, ...args.messages]
-    }
+    const injected = await buildContextMessages(lastUser?.content || '', 6)
+    if (injected.length) args.messages = [...injected, ...args.messages]
   } catch {}
 
   const model = args.model || 'gpt-5'
@@ -1271,10 +1361,26 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
         messages: args.messages,
         tools: selectedTools,
         responseSchema: args.responseSchema,
+        toolMeta: { requestId: args.requestId },
         onChunk: (text) => wc?.send('llm:chunk', { requestId: args.requestId, content: text }),
         onDone: () => wc?.send('llm:done', { requestId: args.requestId }),
         onError: (error) => wc?.send('llm:error', { requestId: args.requestId, error }),
-        onTokenUsage: (usage) => wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage }),
+        onTokenUsage: (usage) => {
+          const session = getOrCreateSession(args.requestId)
+          session.cumulativeTokens += usage.totalTokens
+          session.iterationCount++
+          const tokenBudget = session.assessment?.token_budget || 50000
+          const maxIterations = session.assessment?.max_iterations || 10
+          wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage })
+          wc?.send('agent:metrics', {
+            requestId: args.requestId,
+            tokensUsed: session.cumulativeTokens,
+            tokenBudget,
+            iterationsUsed: session.iterationCount,
+            maxIterations,
+            percentageUsed: Math.round((session.cumulativeTokens / tokenBudget) * 1000) / 10
+          })
+        },
       })
       inflight.set(args.requestId, handle)
       return { ok: true, mode: 'chat' }
@@ -1346,51 +1452,15 @@ ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messa
 
   // Augment messages with project context and index search results
   try {
-    const contextMessages: Array<{ role: 'user'; content: string }> = []
-
-    // 1. Always include project context from .hifide-public/context.md if it exists
-    try {
-      const baseDir = path.resolve(process.env.APP_ROOT || process.cwd())
-      const contextMd = path.join(baseDir, '.hifide-public', 'context.md')
-      sendDebugLog('info', 'Context', `Looking for project context at: ${contextMd}`)
-      if (await pathExists(contextMd)) {
-        const projectContext = await fs.readFile(contextMd, 'utf-8')
-        sendDebugLog('info', 'Context', `Loaded project context (${projectContext.length} chars)`)
-        contextMessages.push({ role: 'user', content: `Project Context:\n\n${projectContext}` })
-      } else {
-        sendDebugLog('info', 'Context', 'No project context file found')
-      }
-    } catch (e) {
-      sendDebugLog('error', 'Context', `Error loading context: ${e}`)
-    }
-
-    // 2. Add semantic search results
     const lastUser = [...args.messages].reverse().find(m => m.role === 'user')
-    const query = lastUser?.content?.slice(0, 2000) || ''
-    if (query) {
-      sendDebugLog('info', 'Context', 'Searching codebase index for relevant context')
-      const res = await getIndexer().search(query, 6)
-      if (res?.chunks?.length) {
-        sendDebugLog('info', 'Context', `Found ${res.chunks.length} relevant code chunks`)
-        const ctx = res.chunks.map((c) => `• ${c.path}:${c.startLine}-${c.endLine}\n${(c.text||'').slice(0, 600)}`).join('\n\n')
-        contextMessages.push({ role: 'user', content: `Relevant code from repository:\n\n${ctx}` })
-      }
-    }
-
-    // Prepend all context messages
-    if (contextMessages.length) {
-      args.messages = [...contextMessages, ...args.messages]
-    }
+    const injected = await buildContextMessages(lastUser?.content || '', 6)
+    if (injected.length) args.messages = [...injected, ...args.messages]
   } catch {}
 
   const model = args.model || 'gpt-5'
 
   // Prepend a system instruction to actually use tools for file changes
-  const systemMsg = {
-    role: 'system' as const,
-    content:
-      'You are a software agent with tools. When the user asks to change files (e.g., update README.md), you MUST make the changes using tools (fs.read_file, fs.write_file, edits.apply). Do not just describe changes. Read the current file, apply minimal precise edits, and write the updated file. After changes, briefly summarize what changed. Keep paths workspace-relative.'
-  }
+  const systemMsg = { role: 'system' as const, content: buildSystemPrompt(true) }
   args.messages = [systemMsg, ...args.messages]
 
   try {
@@ -1402,6 +1472,7 @@ ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messa
       messages: args.messages,
       tools: selectedTools,
       responseSchema: args.responseSchema,
+      toolMeta: { requestId: args.requestId },
       onChunk: (text) => { buffer += text; wc?.send('llm:chunk', { requestId: args.requestId, content: text }) },
       onDone: async () => {
         sendDebugLog('info', 'Agent', 'Agent stream completed')
@@ -1424,7 +1495,22 @@ ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messa
         sendDebugLog('error', 'Agent', `Agent stream error: ${error}`)
         wc?.send('llm:error', { requestId: args.requestId, error })
       },
-      onTokenUsage: (usage) => wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage }),
+      onTokenUsage: (usage) => {
+        const session = getOrCreateSession(args.requestId)
+        session.cumulativeTokens += usage.totalTokens
+        session.iterationCount++
+        const tokenBudget = session.assessment?.token_budget || 50000
+        const maxIterations = session.assessment?.max_iterations || 10
+        wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage })
+        wc?.send('agent:metrics', {
+          requestId: args.requestId,
+          tokensUsed: session.cumulativeTokens,
+          tokenBudget,
+          iterationsUsed: session.iterationCount,
+          maxIterations,
+          percentageUsed: Math.round((session.cumulativeTokens / tokenBudget) * 1000) / 10
+        })
+      },
     })
     inflight.set(args.requestId, handle)
     return { ok: true }
@@ -1504,36 +1590,9 @@ ipcMain.handle('llm:start', async (_event, args: { requestId: string, messages: 
   const provider = providers[providerId]
   // Augment messages with project context and index search results
   try {
-    const contextMessages: Array<{ role: 'user'; content: string }> = []
-
-    // 1. Always include project context from .hifide-public/context.md if it exists
-    try {
-      const baseDir = path.resolve(process.env.APP_ROOT || process.cwd())
-      const contextMd = path.join(baseDir, '.hifide-public', 'context.md')
-      if (await pathExists(contextMd)) {
-        const projectContext = await fs.readFile(contextMd, 'utf-8')
-        contextMessages.push({ role: 'user', content: `Project Context:\n\n${projectContext}` })
-      }
-    } catch {}
-
-    // 2. Add semantic search results
     const lastUser = [...args.messages].reverse().find((m) => m.role === 'user')
-    const query = lastUser?.content?.slice(0, 2000) || ''
-    if (query) {
-      const res = await getIndexer().search(query, 6)
-      if (res?.chunks?.length) {
-        const ctx = res.chunks.map((c) => {
-          const snippet = (c.text || '').slice(0, 600)
-          return `• ${c.path}:${c.startLine}-${c.endLine}\n${snippet}`
-        }).join('\n\n')
-        contextMessages.push({ role: 'user', content: `Relevant code from repository:\n\n${ctx}` })
-      }
-    }
-
-    // Prepend all context messages
-    if (contextMessages.length) {
-      args.messages = [...contextMessages, ...args.messages]
-    }
+    const injected = await buildContextMessages(lastUser?.content || '', 6)
+    if (injected.length) args.messages = [...injected, ...args.messages]
   } catch (e) {
     // best-effort; ignore retrieval errors
   }

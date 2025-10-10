@@ -9,6 +9,24 @@ import { FitAddon } from 'xterm-addon-fit'
 
 export type ViewType = 'agent' | 'explorer' | 'sourceControl' | 'terminal' | 'settings'
 
+// LocalStorage keys (centralized)
+const LS_KEYS = {
+  app: 'hifide:app',
+  model: 'hifide:model',
+  provider: 'hifide:provider',
+  view: 'hifide:view',
+  folder: 'hifide:folder',
+  defaultModels: 'hifide:defaultModels',
+  autoApproveEnabled: 'hifide:autoApproveEnabled',
+  autoApproveThreshold: 'hifide:autoApproveThreshold',
+  autoEnforceEditsSchema: 'hifide:autoEnforceEditsSchema',
+  pricing: 'hifide:pricing',
+  sessionsCurrent: 'hifide:sessions:current',
+  conversations: 'hifide:conversations',
+  conversationsCurrent: 'hifide:conversations:current',
+} as const
+
+
 type PtySession = { tabId: string; sessionId: string; cols: number; rows: number; cwd?: string; shell?: string; context: 'agent' | 'explorer' }
 
 type TerminalInstance = {
@@ -89,7 +107,7 @@ async function loadSessions(): Promise<{ sessions: Session[]; currentId: string 
         costs: sess.costs || { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }
       }))
       // Get current session ID from localStorage (temporary until we have a better solution)
-      const currentId = localStorage.getItem('hifide:sessions:current') || sessions[0].id
+      const currentId = localStorage.getItem(LS_KEYS.sessionsCurrent) || sessions[0].id
       return { sessions, currentId }
     }
   } catch (e) {
@@ -157,6 +175,10 @@ const chatInitial = {
   setSelectedProvider: (p: string) => void
   autoRetry: boolean
   setAutoRetry: (v: boolean) => void
+
+
+	  // Keep provider/model selections valid based on validated providers and available models
+	  ensureProviderModelConsistency: () => void,
 
   // Provider validation state (controls provider visibility in UI)
   providerValid: Record<string, boolean>
@@ -264,9 +286,12 @@ const chatInitial = {
   disposePty: (tabId: string) => Promise<{ ok: boolean }>
   subscribePtyData: (tabId: string, fn: (data: string) => void) => () => void
 
+
+	  // Open a file into the editor, inferring language
+	  openFile: (path: string) => Promise<void>
+
   // Editor state
   openedFile: { path: string; content: string; language: string } | null
-  setOpenedFile: (file: { path: string; content: string; language: string } | null) => void
 
   // Session state (centralized) - renamed from conversations
   sessions: Session[]
@@ -286,6 +311,22 @@ const chatInitial = {
   lastRequestTokenUsage: { provider: string; model: string; usage: TokenUsage } | null
   recordTokenUsage: (provider: string, model: string, usage: TokenUsage) => void
 
+  // Agent metrics (from main process)
+  agentMetrics: null | { requestId: string; tokensUsed: number; tokenBudget: number; iterationsUsed: number; maxIterations: number; percentageUsed: number }
+  ensureAgentMetricsSubscription: () => void
+
+
+	  // LLM request lifecycle/streaming (centralized)
+	  currentRequestId: string | null
+	  streamingText: string
+	  chunkStats: { count: number; totalChars: number }
+	  retryCount: number
+	  llmIpcSubscribed: boolean
+	  ensureLlmIpcSubscription: () => void
+	  buildResponseSchemaForInput: (userText: string) => any | undefined
+	  startChatRequest: (userText: string) => Promise<void>
+	  stopCurrentRequest: () => Promise<void>
+
   // Pricing configuration
   pricingConfig: PricingConfig
   setPricingForModel: (provider: string, model: string, pricing: ModelPricing) => void
@@ -302,13 +343,13 @@ const chatInitial = {
 
 }
 
-const defaultModel = typeof localStorage !== 'undefined' && localStorage.getItem('hifide:model')
-  ? localStorage.getItem('hifide:model')!
+const defaultModel = typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEYS.model)
+  ? localStorage.getItem(LS_KEYS.model)!
   : 'gpt-5'
 const defaultProviderValid: Record<string, boolean> = { openai: false, anthropic: false, gemini: false }
 const defaultDefaultModels: Record<string, string> = (() => {
   try {
-    const j = typeof localStorage !== 'undefined' ? localStorage.getItem('hifide:defaultModels') : null
+    const j = typeof localStorage !== 'undefined' ? localStorage.getItem(LS_KEYS.defaultModels) : null
     return j ? JSON.parse(j) : {}
   } catch {
     return {}
@@ -318,17 +359,17 @@ const defaultDefaultModels: Record<string, string> = (() => {
 const defaultProvider = typeof localStorage !== 'undefined' && localStorage.getItem('hifide:provider')
   ? localStorage.getItem('hifide:provider')!
   : 'openai'
-const defaultView = (typeof localStorage !== 'undefined' && localStorage.getItem('hifide:view') as ViewType)
+const defaultView = (typeof localStorage !== 'undefined' && (localStorage.getItem(LS_KEYS.view) as ViewType))
   || 'agent'
-const defaultFolder = typeof localStorage !== 'undefined' && localStorage.getItem('hifide:folder')
-  ? localStorage.getItem('hifide:folder')
+const defaultFolder = typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEYS.folder)
+  ? localStorage.getItem(LS_KEYS.folder)
   : null
-const defaultAutoApproveEnabled = (() => { try { return typeof localStorage !== 'undefined' && localStorage.getItem('hifide:autoApproveEnabled') === '1' } catch { return false } })()
-const defaultAutoApproveThreshold = (() => { try { const v = typeof localStorage !== 'undefined' ? localStorage.getItem('hifide:autoApproveThreshold') : null; return v ? parseFloat(v) : 0.8 } catch { return 0.8 } })()
-const defaultAutoEnforceEditsSchema = (() => { try { return typeof localStorage !== 'undefined' && localStorage.getItem('hifide:autoEnforceEditsSchema') === '1' } catch { return false } })()
+const defaultAutoApproveEnabled = (() => { try { return typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEYS.autoApproveEnabled) === '1' } catch { return false } })()
+const defaultAutoApproveThreshold = (() => { try { const v = typeof localStorage !== 'undefined' ? localStorage.getItem(LS_KEYS.autoApproveThreshold) : null; return v ? parseFloat(v) : 0.8 } catch { return 0.8 } })()
+const defaultAutoEnforceEditsSchema = (() => { try { return typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEYS.autoEnforceEditsSchema) === '1' } catch { return false } })()
 const defaultPricingConfig = (() => {
   try {
-    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('hifide:pricing') : null
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(LS_KEYS.pricing) : null
     return saved ? JSON.parse(saved) : DEFAULT_PRICING
   } catch {
     return DEFAULT_PRICING
@@ -506,10 +547,6 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
       // Consider it "unsaved" if there are messages (user might want to keep them)
       return true
     }
-    // Check if there's an opened file with unsaved changes
-    if (s.openedFile && s.openedFileContent !== s.openedFileOriginalContent) {
-      return true
-    }
     return false
   },
 
@@ -623,6 +660,22 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
         explorerOpenFolders: new Set([folderPath]),
         explorerChildrenByDir: {}
       })
+
+	      // 10b. Check index status and build if needed; then refresh context
+	      try {
+	        set({ startupMessage: 'Checking code index...' })
+	        await get().refreshIndexStatus()
+	        const st = get().idxStatus
+	        const ready = !!st?.ready
+	        const chunks = st?.chunks ?? 0
+	        if (!ready && chunks === 0) {
+	          await get().rebuildIndex()
+	        }
+	      } catch {}
+	      try {
+	        await get().refreshContext()
+	      } catch {}
+
 
       // Load the initial file tree directly
       try {
@@ -760,6 +813,29 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   setSelectedModel: (m) => {
     /* persisted via zustand */
     set({ selectedModel: m })
+  },
+
+  ensureProviderModelConsistency: () => {
+    const s = get()
+    const validMap = s.providerValid || {}
+    const anyValidated = Object.values(validMap).some(Boolean)
+    const providerOptions = anyValidated ? (['openai','anthropic','gemini'] as const).filter((p) => validMap[p]) : (['openai','anthropic','gemini'] as const)
+    let provider = s.selectedProvider
+    if (!providerOptions.includes(provider as any) && providerOptions.length > 0) {
+      provider = providerOptions[0]
+      set({ selectedProvider: provider })
+    }
+    const models = s.modelsByProvider[provider] || []
+    const preferred = s.defaultModels?.[provider]
+    const hasPreferred = preferred && models.some((m) => m.value === preferred)
+    if (hasPreferred) {
+      if (s.selectedModel !== preferred) set({ selectedModel: preferred })
+      return
+    }
+    if (!models.find((m) => m.value === s.selectedModel)) {
+      const first = models[0]
+      if (first?.value) set({ selectedModel: first.value })
+    }
   },
   selectedProvider: defaultProvider,
   setSelectedProvider: (p) => {
@@ -1338,7 +1414,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     try {
       await window.sessions.save(current)
       // Also save current session ID to localStorage
-      localStorage.setItem('hifide:sessions:current', current.id)
+      localStorage.setItem(LS_KEYS.sessionsCurrent, current.id)
     } catch (e) {
       console.error('Failed to save session:', e)
     }
@@ -1347,7 +1423,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   select: (id) => {
     set(() => ({ currentId: id }))
     // Save current session ID to localStorage
-    localStorage.setItem('hifide:sessions:current', id)
+    localStorage.setItem(LS_KEYS.sessionsCurrent, id)
   },
 
   newSession: (title = 'New Chat') => {
@@ -1372,7 +1448,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     if (window.sessions) {
       window.sessions.save(session).catch(e => console.error('Failed to save new session:', e))
     }
-    localStorage.setItem('hifide:sessions:current', session.id)
+    localStorage.setItem(LS_KEYS.sessionsCurrent, session.id)
     return session.id
   },
 
@@ -1501,6 +1577,22 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     get().saveCurrentSession()
   },
 
+  // Agent metrics (main-process events)
+  agentMetrics: null,
+  ensureAgentMetricsSubscription: (() => {
+    let subscribed = false
+    return () => {
+      if (subscribed) return
+      subscribed = true
+      try {
+        window.ipcRenderer?.on('agent:metrics', (_: any, payload: any) => {
+          set({ agentMetrics: payload })
+        })
+      } catch {}
+    }
+  })(),
+
+
   // Pricing configuration
   pricingConfig: defaultPricingConfig,
 
@@ -1519,7 +1611,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 
   resetPricingToDefaults: () => {
     set({ pricingConfig: DEFAULT_PRICING })
-    localStorage.removeItem('hifide:pricing')
+    localStorage.removeItem(LS_KEYS.pricing)
   },
 
   resetProviderPricing: (provider) => {
@@ -1561,7 +1653,137 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 
   // Editor state
   openedFile: null,
-  setOpenedFile: (file) => set({ openedFile: file }),
+
+
+	  openFile: async (filePath) => {
+	    if (!window.fs) return
+	    try {
+	      const res = await window.fs.readFile(filePath)
+	      if (res?.success && res.content) {
+	        const name = filePath.split(/[/\\]/).pop() || filePath
+	        const ext = name.split('.').pop()?.toLowerCase()
+	        const map: Record<string, string> = { ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript', json: 'json', css: 'css', html: 'html', md: 'markdown', py: 'python', rs: 'rust', go: 'go', java: 'java', c: 'c', cpp: 'cpp', cs: 'csharp', php: 'php', rb: 'ruby', sh: 'shell', yaml: 'yaml', yml: 'yaml', xml: 'xml', sql: 'sql' }
+	        const language = map[ext || ''] || 'plaintext'
+	        set({ openedFile: { path: filePath, content: res.content, language } })
+	      }
+	    } catch (e) {
+	      console.error('openFile failed:', e)
+	    }
+	  },
+
+	  // LLM request lifecycle/streaming (centralized)
+	  currentRequestId: null,
+	  streamingText: '',
+	  chunkStats: { count: 0, totalChars: 0 },
+	  retryCount: 0,
+	  llmIpcSubscribed: false,
+	  ensureLlmIpcSubscription: () => {
+	    const s = get(); if (s.llmIpcSubscribed) return
+	    const ipc = window.ipcRenderer; if (!ipc) return
+	    const onChunk = (_: any, payload: any) => {
+	      const { requestId, content } = payload || {}
+	      if (!requestId || requestId !== get().currentRequestId) return
+	      set((st) => ({
+	        streamingText: st.streamingText + (content || ''),
+	        chunkStats: { count: st.chunkStats.count + 1, totalChars: st.chunkStats.totalChars + (content?.length || 0) }
+	      }))
+	    }
+	    const onDone = () => {
+	      const rid = get().currentRequestId; if (!rid) return
+	      const text = get().streamingText
+	      try { get().addAssistantMessage(text) } catch {}
+	      // log chunk stats
+	      const cs = get().chunkStats
+	      if (cs.count > 0) get().addDebugLog('info', 'LLM', `Received ${cs.count} chunks (${cs.totalChars} chars total)`)
+	      set({ currentRequestId: null, streamingText: '', chunkStats: { count: 0, totalChars: 0 }, retryCount: 0 })
+	      get().addDebugLog('info', 'LLM', 'Stream completed')
+	    }
+	    const onErr = async (_: any, payload: any) => {
+	      const rid = get().currentRequestId; if (!rid) return
+	      const prev = get().getCurrentMessages()
+	      const cs = get().chunkStats
+	      set({ currentRequestId: null, streamingText: '', chunkStats: { count: 0, totalChars: 0 } })
+	      if (cs.count > 0) get().addDebugLog('info', 'LLM', `Received ${cs.count} chunks (${cs.totalChars} chars total) before error`)
+	      get().addDebugLog('error', 'LLM', `Error: ${payload?.error}`, { error: payload?.error })
+	      const { autoRetry, selectedModel, selectedProvider } = get()
+	      if (autoRetry && get().retryCount < 1) {
+	        const rid2 = crypto.randomUUID()
+	        set({ retryCount: get().retryCount + 1, currentRequestId: rid2 })
+	        get().addDebugLog('info', 'LLM', 'Auto-retrying request')
+	        const res = await window.llm?.auto?.(rid2, prev, selectedModel, selectedProvider)
+	        try { get().pushRouteRecord?.({ requestId: rid2, mode: (res as any)?.mode || 'chat', provider: selectedProvider, model: selectedModel, timestamp: Date.now() }) } catch {}
+	        return
+	      }
+	    }
+	    const onToken = (_: any, payload: any) => {
+	      const rid = get().currentRequestId
+	      if (!rid || payload?.requestId !== rid) return
+	      try { get().recordTokenUsage(payload.provider, payload.model, payload.usage) } catch {}
+	      get().addDebugLog('info', 'Tokens', `Usage: ${payload.usage?.totalTokens} tokens (${payload.provider}/${payload.model})`, payload.usage)
+	    }
+	    ipc.on('llm:chunk', onChunk)
+	    ipc.on('llm:done', onDone)
+	    ipc.on('llm:error', onErr)
+	    ipc.on('llm:token-usage', onToken)
+	    set({ llmIpcSubscribed: true })
+	  },
+	  buildResponseSchemaForInput: (userText) => {
+	    const isCodeChangeIntent = (t: string) => /\b(edit|change|modify|refactor|fix|update|replace)\b/i.test(t)
+	    const autoEnforce = get().autoEnforceEditsSchema
+	    if (!(autoEnforce && isCodeChangeIntent(userText))) return undefined
+	    return {
+	      name: 'edits_response',
+	      schema: {
+	        type: 'object',
+	        additionalProperties: false,
+	        properties: {
+	          explanation: { type: 'string' },
+	          edits: {
+	            type: 'array',
+	            items: {
+	              type: 'object',
+	              additionalProperties: false,
+	              properties: {
+	                type: { type: 'string', enum: ['replaceOnce', 'insertAfterLine', 'replaceRange'] },
+	                path: { type: 'string' },
+	                oldText: { type: 'string' },
+	                newText: { type: 'string' },
+	                line: { type: 'integer' },
+	                start: { type: 'integer' },
+	                end: { type: 'integer' },
+	                text: { type: 'string' },
+	              },
+	              required: ['type', 'path'],
+	            },
+	          },
+	        },
+	        required: ['edits'],
+	      },
+	      strict: false,
+	    }
+	  },
+	  startChatRequest: async (userText) => {
+	    const { currentRequestId } = get(); if (currentRequestId) return
+	    const rid = crypto.randomUUID()
+	    const prev = get().getCurrentMessages()
+	    const toSend = [...prev, { role: 'user' as const, content: userText }]
+	    get().addUserMessage(userText)
+	    set({ currentRequestId: rid, streamingText: '', chunkStats: { count: 0, totalChars: 0 }, retryCount: 0 })
+	    const { selectedModel, selectedProvider } = get()
+	    get().addDebugLog('info', 'LLM', `Sending request to ${selectedProvider}/${selectedModel}`, { requestId: rid, provider: selectedProvider, model: selectedModel, messageCount: toSend.length })
+	    const schema = get().buildResponseSchemaForInput(userText)
+	    const res = await window.llm?.auto?.(rid, toSend, selectedModel, selectedProvider, undefined, schema)
+	    try { get().pushRouteRecord?.({ requestId: rid, mode: (res as any)?.mode || 'chat', provider: selectedProvider, model: selectedModel, timestamp: Date.now() }) } catch {}
+	  },
+	  stopCurrentRequest: async () => {
+	    const rid = get().currentRequestId; if (!rid) return
+	    await window.llm?.cancel?.(rid)
+	    const cs = get().chunkStats
+	    set({ currentRequestId: null, streamingText: '', chunkStats: { count: 0, totalChars: 0 } })
+	    if (cs.count > 0) get().addDebugLog('info', 'LLM', `Received ${cs.count} chunks (${cs.totalChars} chars total) before stop`)
+	    get().addDebugLog('info', 'LLM', 'Stream stopped by user')
+	  },
+
 
   // Debug logging
   debugLogs: [],
@@ -1573,7 +1795,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   },
   clearDebugLogs: () => set({ debugLogs: [] }),
 }), {
-  name: 'hifide:app',
+  name: LS_KEYS.app,
   storage: createJSONStorage(() => localStorage),
   version: 1,
   partialize: (s) => ({
@@ -1601,8 +1823,8 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     if (!p) p = {}
     try {
       // Migrate old conversations from localStorage to session files
-      const convRaw = localStorage.getItem('hifide:conversations')
-      const curId = localStorage.getItem('hifide:conversations:current')
+      const convRaw = localStorage.getItem(LS_KEYS.conversations)
+      const curId = localStorage.getItem(LS_KEYS.conversationsCurrent)
       if (convRaw && window.sessions) {
         try {
           const oldConversations = JSON.parse(convRaw)
@@ -1625,12 +1847,12 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 
           // Save current session ID
           if (curId) {
-            localStorage.setItem('hifide:sessions:current', curId)
+            localStorage.setItem(LS_KEYS.sessionsCurrent, curId)
           }
 
           // Clear old localStorage data
-          localStorage.removeItem('hifide:conversations')
-          localStorage.removeItem('hifide:conversations:current')
+          localStorage.removeItem(LS_KEYS.conversations)
+          localStorage.removeItem(LS_KEYS.conversationsCurrent)
 
           console.log(`Migrated ${sessions.length} conversations to session files`)
         } catch (e) {
@@ -1638,21 +1860,21 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
         }
       }
 
-      const model = localStorage.getItem('hifide:model')
+      const model = localStorage.getItem(LS_KEYS.model)
       if (model && !p.selectedModel) p.selectedModel = model
-      const provider = localStorage.getItem('hifide:provider')
+      const provider = localStorage.getItem(LS_KEYS.provider)
       if (provider && !p.selectedProvider) p.selectedProvider = provider
-      const view = localStorage.getItem('hifide:view')
+      const view = localStorage.getItem(LS_KEYS.view)
       if (view && !p.currentView) p.currentView = view
-      const folder = localStorage.getItem('hifide:folder')
+      const folder = localStorage.getItem(LS_KEYS.folder)
       if (folder && p.workspaceRoot == null) p.workspaceRoot = folder
-      const defaults = localStorage.getItem('hifide:defaultModels')
+      const defaults = localStorage.getItem(LS_KEYS.defaultModels)
       if (defaults && !p.defaultModels) p.defaultModels = JSON.parse(defaults)
-      const aae = localStorage.getItem('hifide:autoApproveEnabled')
+      const aae = localStorage.getItem(LS_KEYS.autoApproveEnabled)
       if (aae && p.autoApproveEnabled == null) p.autoApproveEnabled = aae === '1'
-      const aat = localStorage.getItem('hifide:autoApproveThreshold')
+      const aat = localStorage.getItem(LS_KEYS.autoApproveThreshold)
       if (aat && p.autoApproveThreshold == null) p.autoApproveThreshold = parseFloat(aat)
-      const aes = localStorage.getItem('hifide:autoEnforceEditsSchema')
+      const aes = localStorage.getItem(LS_KEYS.autoEnforceEditsSchema)
       if (aes && p.autoEnforceEditsSchema == null) p.autoEnforceEditsSchema = aes === '1'
     } catch {}
     return p

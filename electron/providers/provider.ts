@@ -18,7 +18,8 @@ export interface AgentTool {
   // JSON Schema for tool input parameters
   parameters: any
   // Executes the tool with already-validated input
-  run: (input: any) => Promise<any> | any
+  // Second parameter is optional metadata (e.g., requestId for session tracking)
+  run: (input: any, meta?: { requestId?: string; [key: string]: any }) => Promise<any> | any
 }
 
 export interface ProviderAdapter {
@@ -46,5 +47,7 @@ export interface ProviderAdapter {
     onDone: () => void
     onError: (error: string) => void
     onTokenUsage?: (usage: TokenUsage) => void
+    // Optional metadata passed to tools (e.g., requestId for session tracking)
+    toolMeta?: { requestId?: string; [key: string]: any }
   }) => Promise<StreamHandle>
 }

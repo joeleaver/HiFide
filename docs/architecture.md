@@ -9,10 +9,10 @@ This app is an Electron desktop application with a React renderer. It is being e
 
 
 ## State management (simplified)
-- Single source of truth: a single Zustand store in `src/store/app.ts` now contains both UI and chat/conversation state.
-- Facades only: `useChatStore` is a typed facade that binds to the same underlying store for convenience, but it does not own state.
-- Reads via selectors, writes via store actions. Components must not mutate local state that duplicates store values.
-- Persistence: important preferences and conversations persist via explicit `localStorage` writes in actions (migrateable to `zustand/middleware` persist later).
+- Single source of truth: a single Zustand store in `src/store/app.ts` contains both UI and chat/session state.
+- Deprecated facades: `useChatStore` was removed; use `useAppStore` everywhere.
+- Reads via selectors, writes via store actions. Components must not duplicate business state in local React state.
+- Persistence: we use `zustand/middleware` persist; some legacy keys are mirrored in `localStorage` for migration/back-compat.
 - Side effects: IPC calls (e.g., PTY, view switching, model refresh) are triggered inside store actions to keep component code declarative.
 - Dev tooling: the store remains available on `window.__appStore` for automation/e2e.
 

@@ -1,7 +1,7 @@
-import { useRef } from 'react'
 import { Group, Text, UnstyledButton, Badge } from '@mantine/core'
 import { IconPlus, IconX, IconChevronUp, IconChevronDown } from '@tabler/icons-react'
 import { useAppStore } from '../store/app'
+import { usePanelResize } from '../hooks/usePanelResize'
 import TerminalView from './TerminalView'
 
 export default function TerminalPanel({ context }: { context: 'agent' | 'explorer' }) {
@@ -33,37 +33,13 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
     else if (context === 'agent') setAgentOpen(!open)
   }
 
-  const isResizingRef = useRef(false)
-
-  const handleResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault()
-    isResizingRef.current = true
-    const startY = e.clientY
-    const startH = height
-
-    document.body.style.cursor = 'ns-resize'
-    document.body.style.userSelect = 'none'
-
-    const onMove = (ev: MouseEvent) => {
-      const dy = startY - ev.clientY
-      const next = Math.min(800, Math.max(160, startH + dy))
-      setHeight(next)
-    }
-
-    const onUp = () => {
-      isResizingRef.current = false
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-
-      // Fit all terminals after resize completes
-      fitAllTerminals(context)
-    }
-
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }
+  const { onMouseDown, isResizingRef } = usePanelResize({
+    getHeight: () => height,
+    setHeight,
+    min: 160,
+    max: 800,
+    onEnd: () => fitAllTerminals(context),
+  })
 
   return (
     <div
@@ -78,7 +54,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
       {/* Resize handle */}
       {open && (
         <div
-          onMouseDown={handleResizeStart}
+          onMouseDown={onMouseDown}
           style={{
             height: '4px',
             cursor: 'ns-resize',

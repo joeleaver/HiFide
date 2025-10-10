@@ -2,6 +2,7 @@ import OpenAI from 'openai'
 import type { ProviderAdapter, StreamHandle, ChatMessage, AgentTool } from './provider'
 import { validateJson } from './jsonschema'
 import { withRetries } from './retry'
+import { formatSummary } from '../agent/types'
 
 // Helper to map our ChatMessage[] to Responses API input format
 function toResponsesInput(messages: ChatMessage[]) {
@@ -75,7 +76,7 @@ export const OpenAIProvider: ProviderAdapter = {
   },
 
   // Agent loop with tool-calling via Responses API
-  async agentStream({ apiKey, model, messages, tools, responseSchema, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, messages, tools, responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey })
 
     // Validate tools array
@@ -123,15 +124,32 @@ export const OpenAIProvider: ProviderAdapter = {
 
     // Responses API uses a different format than Chat Completions
     // Input can be: { role, content } OR { type, call_id, output } for function results
-    const conv: Array<any> = messages
+    let conv: Array<any> = messages
       .map((m) => ({ role: m.role, content: m.content || '' }))
       .filter(m => m.content !== '') // Remove messages with empty content
 
     let cancelled = false
+    let iteration = 0
+    let cumulativeTokens = 0
+
+    // Helper to prune conversation when agent requests it
+    const pruneConversation = (summary: any) => {
+      const systemMsgs = messages.filter(m => m.role === 'system')
+      const recent = conv.slice(-5) // Keep last 5 messages
+
+      const summaryMsg = {
+        role: 'user' as const,
+        content: formatSummary(summary),
+      }
+
+      // Rebuild conversation: system + summary + recent
+      conv = [...systemMsgs.map(m => ({ role: m.role, content: m.content })), summaryMsg, ...recent]
+    }
 
     const run = async () => {
       try {
-        while (!cancelled) {
+        while (!cancelled && iteration < 50) { // Hard limit of 50 iterations as safety
+          iteration++
           // Start a streaming turn; stream user-visible text as it comes, while accumulating any tool calls
           let useResponseFormat = !!responseSchema
           const mkOpts = (strict: boolean) => {
@@ -215,6 +233,9 @@ export const OpenAIProvider: ProviderAdapter = {
 
           if (toolCalls.length > 0) {
             // Execute tool calls sequentially to avoid rate limits
+            let shouldPrune = false
+            let pruneSummary: any = null
+
             for (const tc of toolCalls) {
               try {
                 const name = tc.name
@@ -238,7 +259,16 @@ export const OpenAIProvider: ProviderAdapter = {
                   })
                   continue
                 }
-                const result = await Promise.resolve(tool.run(args))
+
+                // Pass toolMeta to tool.run()
+                const result = await Promise.resolve(tool.run(args, toolMeta))
+
+                // Check if tool requested pruning
+                if (result?._meta?.trigger_pruning) {
+                  shouldPrune = true
+                  pruneSummary = result._meta.summary
+                }
+
                 const output = typeof result === 'string' ? result : JSON.stringify(result)
                 conv.push({
                   type: 'function_call_output',
@@ -253,6 +283,12 @@ export const OpenAIProvider: ProviderAdapter = {
                 })
               }
             }
+
+            // Prune conversation if requested
+            if (shouldPrune && pruneSummary) {
+              pruneConversation(pruneSummary)
+            }
+
             // Continue loop to request next streamed assistant turn
             continue
           }
@@ -261,11 +297,13 @@ export const OpenAIProvider: ProviderAdapter = {
           // Extract token usage from final response
           try {
             if (finalResponse?.usage && onTokenUsage) {
-              onTokenUsage({
+              const usage = {
                 inputTokens: finalResponse.usage.input_tokens || 0,
                 outputTokens: finalResponse.usage.output_tokens || 0,
                 totalTokens: finalResponse.usage.total_tokens || 0,
-              })
+              }
+              cumulativeTokens += usage.totalTokens
+              onTokenUsage(usage)
             }
           } catch (e) {
             // Token usage extraction failed, continue anyway

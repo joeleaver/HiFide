@@ -66,39 +66,9 @@ function FileTreeItem({ name, type, level, path, isOpen, onToggle, onFileClick }
   )
 }
 
-// Helper to detect language from file extension
-function getLanguageFromFilename(filename: string): string {
-  const ext = filename.split('.').pop()?.toLowerCase()
-  const languageMap: Record<string, string> = {
-    ts: 'typescript',
-    tsx: 'typescript',
-    js: 'javascript',
-    jsx: 'javascript',
-    json: 'json',
-    css: 'css',
-    html: 'html',
-    md: 'markdown',
-    py: 'python',
-    rs: 'rust',
-    go: 'go',
-    java: 'java',
-    c: 'c',
-    cpp: 'cpp',
-    cs: 'csharp',
-    php: 'php',
-    rb: 'ruby',
-    sh: 'shell',
-    yaml: 'yaml',
-    yml: 'yaml',
-    xml: 'xml',
-    sql: 'sql',
-  }
-  return languageMap[ext || ''] || 'plaintext'
-}
 
 export default function ExplorerView() {
   const openedFile = useAppStore((s) => s.openedFile)
-  const setOpenedFile = useAppStore((s) => s.setOpenedFile)
   const workspaceRoot = useAppStore((s) => s.workspaceRoot)
   const openFolders = useAppStore((s) => s.explorerOpenFolders)
   const childrenByDir = useAppStore((s) => s.explorerChildrenByDir)
@@ -106,6 +76,7 @@ export default function ExplorerView() {
   // Subscribe to terminal panel state to ensure layout updates when it changes
   const explorerTerminalPanelOpen = useAppStore((s) => s.explorerTerminalPanelOpen)
   const explorerTerminalPanelHeight = useAppStore((s) => s.explorerTerminalPanelHeight)
+  const openFile = useAppStore((s) => s.openFile)
 
   // Render a directory's entries recursively
   const renderDir = (dirPath: string, level: number) => {
@@ -141,18 +112,8 @@ export default function ExplorerView() {
 
 
 
-  const handleFileClick = async (filePath: string, fileName: string) => {
-    if (!window.fs) return
-
-    const result = await window.fs.readFile(filePath)
-    if (result.success && result.content) {
-      const language = getLanguageFromFilename(fileName)
-      setOpenedFile({
-        path: filePath,
-        content: result.content,
-        language,
-      })
-    }
+  const handleFileClick = async (filePath: string, _fileName: string) => {
+    try { await openFile(filePath) } catch {}
   }
 
   return (

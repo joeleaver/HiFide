@@ -15,8 +15,6 @@ export default function StatusBar() {
   const providerValid = useAppStore((s) => s.providerValid)
 
   // Centralized indexing actions
-  const refreshIndexStatus = useAppStore((s) => s.refreshIndexStatus)
-  const rebuildIndex = useAppStore((s) => s.rebuildIndex)
   const ensureIndexProgressSubscription = useAppStore((s) => s.ensureIndexProgressSubscription)
 
   const providerOptions = useMemo(() => {
@@ -28,71 +26,26 @@ export default function StatusBar() {
     const anyValidated = Object.values(providerValid || {}).some(Boolean)
     return anyValidated ? all.filter((p) => providerValid[p.value]) : all
   }, [providerValid])
-  // Ensure selected provider is one of the validated ones
-  useEffect(() => {
-    if (!providerOptions.find((p) => p.value === selectedProvider) && providerOptions.length > 0) {
-      setSelectedProvider(providerOptions[0].value as string)
-    }
-  }, [JSON.stringify(providerOptions), selectedProvider])
 
+  // Agent metrics subscription + state
+  const ensureAgentMetricsSubscription = useAppStore((s) => s.ensureAgentMetricsSubscription)
+  const agentMetrics = useAppStore((s) => s.agentMetrics)
+  useEffect(() => { try { ensureAgentMetricsSubscription() } catch {} }, [ensureAgentMetricsSubscription])
+  const ensureProviderModelConsistency = useAppStore((s) => s.ensureProviderModelConsistency)
 
   const defaultModels = useAppStore((s) => s.defaultModels)
 
   // Models come from centralized store (no direct window.models calls here)
   const modelsByProvider = useAppStore((s) => s.modelsByProvider)
   const modelOptions = useMemo(() => modelsByProvider[selectedProvider] || [], [modelsByProvider, selectedProvider])
-  // Models are refreshed during app init and when API keys are saved - no need to refresh on provider change
 
-  // Default model when provider changes: prefer configured default; else first available
-  useEffect(() => {
-    const preferred = defaultModels?.[selectedProvider]
-    const hasPreferred = preferred && modelOptions.some((m) => m.value === preferred)
-    if (hasPreferred) {
-      if (selectedModel !== preferred) setSelectedModel(preferred)
-      return
-    }
-    if (!modelOptions.find((m) => m.value === selectedModel)) {
-      const first = modelOptions[0]
-      if (first?.value) setSelectedModel(first.value)
-    }
-  }, [selectedProvider, JSON.stringify(modelOptions), defaultModels?.[selectedProvider], selectedModel])
+  // Keep provider/model consistent using centralized store logic
+  useEffect(() => { try { ensureProviderModelConsistency() } catch {} }, [providerValid, modelsByProvider, selectedProvider, selectedModel, defaultModels])
 
   // Ensure index progress subscription is active (StatusBar is always mounted)
   useEffect(() => {
     try { ensureIndexProgressSubscription() } catch {}
   }, [ensureIndexProgressSubscription])
-
-  // Auto (re)build local index when a folder is opened and no index exists yet
-  useEffect(() => {
-    let cancelled = false
-    const maybeBuildIndex = async () => {
-      try {
-        await refreshIndexStatus()
-        const s = useAppStore.getState().idxStatus
-        const ready = !!s?.ready
-        const chunks = s?.chunks ?? 0
-        if (!ready && chunks === 0) {
-          await rebuildIndex()
-        }
-      } catch {}
-      if (cancelled) return
-    }
-    // Trigger when a folder is selected
-    if (workspaceRoot) {
-      void maybeBuildIndex()
-    }
-    return () => { cancelled = true }
-  }, [workspaceRoot, refreshIndexStatus, rebuildIndex])
-
-  // Bootstrap workspace context on folder selection (via store action)
-  useEffect(() => {
-    if (!workspaceRoot) return
-    ;(async () => {
-      try {
-        await useAppStore.getState().refreshContext()
-      } catch {}
-    })()
-  }, [workspaceRoot])
 
   const handleFolderClick = async () => {
     const result = await window.workspace?.openFolderDialog?.()
@@ -144,9 +97,15 @@ export default function StatusBar() {
         </UnstyledButton>
       </Group>
 
-      {/* Right side - Provider + Model selectors */}
+      {/* Right side - Metrics + Provider + Model selectors */}
       <Group gap={8}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 8px', height: STATUS_BAR_HEIGHT }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 8px', height: STATUS_BAR_HEIGHT }}>
+          {/* Agent metrics compact display */}
+          {agentMetrics && (
+            <Text size="xs" style={{ color: '#fff', opacity: 0.9 }}>
+              {`Tokens ${agentMetrics.tokensUsed}/${agentMetrics.tokenBudget} (${agentMetrics.percentageUsed}%)} · Iters ${agentMetrics.iterationsUsed}/${agentMetrics.maxIterations}`}
+            </Text>
+          )}
           <Select
             value={providerOptions.find((p) => p.value === selectedProvider) ? selectedProvider : undefined}
             onChange={(v) => v && setSelectedProvider(v)}

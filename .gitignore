@@ -30,3 +30,6 @@ api_key.txt
 
 # Hifide
 .hifide-private
+
+*.exe
+*.exe*
