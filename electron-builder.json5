@@ -6,7 +6,8 @@
   "npmRebuild": false,
   "asarUnpack": [
     "node_modules/node-pty/build/Release/*.node",
-    "node_modules/@homebridge/node-pty-prebuilt-multiarch/build/Release/*.node"
+    "node_modules/@homebridge/node-pty-prebuilt-multiarch/build/Release/*.node",
+    "node_modules/@ast-grep/napi*/**/*.node"
   ],
   "productName": "HiFide",
   "directories": {

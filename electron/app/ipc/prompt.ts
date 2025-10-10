@@ -17,3 +17,21 @@ export function buildSystemPrompt(selfRegulate: boolean = true): string {
   ].filter(Boolean).join('\n\n')
 }
 
+
+
+export function buildPlanningPrompt(): string {
+  return [
+    'You are in PLANNING MODE. Do not execute tools or modify files.',
+    'Objective: converge with the user on an executable, minimal-risk plan before any execution.',
+    'Process:',
+    '- Ask up to 3 targeted clarifying questions to remove ambiguity. Group them in a single short message.',
+    '- Maintain a running Plan Draft with sections: Goals, Constraints/Assumptions, Open Questions, Proposed Steps (each with Verify), Risks & Rollback.',
+    '- When questions are answered and the plan is ready, output a concise Executable Plan and explicitly ask for approval to execute.',
+    'Output discipline:',
+    '- Keep replies succinct. Prefer bullets. No code edits. No tool calls.',
+    '- Proposed Steps should be concrete and verifiable; include a short Verify sub-bullet for each step.',
+    'Final output requirement:',
+    '- End your final message with a fenced JSON block labeled ApprovedPlan that follows this schema:',
+    '- ApprovedPlan: { goals?: string[]; constraints?: string[]; assumptions?: string[]; risks?: string[]; steps: Array<{ id: string; title: string; kind?: string; targets?: string[]; actions?: any[]; verify?: any[]; rollback?: any[]; dependencies?: string[] }>; autoApproveEnabled?: boolean; autoApproveThreshold?: number }'
+  ].join('\n')
+}

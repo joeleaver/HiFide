@@ -18,11 +18,12 @@ import { randomUUID } from 'node:crypto'
 import { renameSymbol as tsRenameSymbol, organizeImports as tsOrganizeImports, verifyTypecheck as tsVerify, addNamedExport as tsAddNamedExport, moveFileWithImports as tsMoveFile, ensureDefaultExport as tsEnsureDefault, addNamedExportFrom as tsAddExportFrom, extractFunction as tsExtractFunction, suggestParams as tsSuggestParams, inlineVariable as tsInlineVar, inlineFunction as tsInlineFn, convertDefaultToNamed as tsDefaultToNamed, convertNamedToDefault as tsNamedToDefault } from './refactors/ts'
 
 
+import { astGrepSearch, astGrepRewrite } from './tools/astGrep'
 import { Indexer } from './indexing/indexer'
 import type { TaskAssessment, TaskType } from './agent/types'
 import { calculateBudget, getResourceRecommendation } from './agent/types'
 
-import { buildSystemPrompt } from './app/ipc/prompt'
+import { buildSystemPrompt, buildPlanningPrompt } from './app/ipc/prompt'
 import { getOrCreateSession, initAgentSessionsCleanup } from './session/agentSessions'
 import { buildContextMessages } from './app/context/contextBuilder'
 
@@ -902,10 +903,546 @@ const agentTools: AgentTool[] = [
       } catch (e: any) {
         return { ok: false, error: e?.message || String(e) }
       }
+    }
 
+
+  },
+  {
+    name: 'terminal.run',
+    description: 'Run a shell command non-interactively and return stdout/stderr. Applies risk gating for installs/deletes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'Command to run' },
+        cwd: { type: 'string', description: 'Working directory (workspace-relative or absolute)' },
+        timeoutMs: { type: 'integer', minimum: 1000, maximum: 600000, description: 'Timeout in ms (default 120000)' },
+        env: { type: 'object', additionalProperties: { type: 'string' } },
+        shell: { type: 'string', description: 'Shell executable to use (optional)' },
+        autoApproveEnabled: { type: 'boolean', description: 'Allow auto-approve of risky commands when confidence >= threshold' },
+        autoApproveThreshold: { type: 'number', description: 'Confidence threshold for auto-approval' },
+        confidence: { type: 'number', description: 'Model confidence in the action (0-1)' }
+      },
+      required: ['command'],
+      additionalProperties: false,
+    },
+    run: async (
+      args: {
+        command: string
+        cwd?: string
+        timeoutMs?: number
+        env?: Record<string, string>
+        shell?: string
+        autoApproveEnabled?: boolean
+        autoApproveThreshold?: number
+        confidence?: number
+      },
+      meta?: { requestId?: string }
+    ) => {
+      const sessionId = meta?.requestId || 'terminal'
+      // Resolve cwd safely within workspace when relative
+      const cwd = (() => {
+        if (!args.cwd) return process.cwd()
+        try {
+          const root = path.resolve(process.env.APP_ROOT || process.cwd())
+          const abs = path.isAbsolute(args.cwd) ? args.cwd : path.join(root, args.cwd)
+          return abs
+        } catch {
+          return process.cwd()
+        }
+      })()
+
+      const { risky, reason } = isRiskyCommand(args.command || '')
+      await logEvent(sessionId, 'terminal_run_attempt', { command: args.command, cwd, risky, reason })
+      if (risky) {
+        const autoEnabled = !!args.autoApproveEnabled
+        const threshold = typeof args.autoApproveThreshold === 'number' ? args.autoApproveThreshold : 1.1 // impossible by design
+        const conf = typeof args.confidence === 'number' ? args.confidence : -1
+        const shouldAutoApprove = autoEnabled && conf >= threshold
+        if (!shouldAutoApprove) {
+          await logEvent(sessionId, 'terminal_run_blocked', { command: args.command, reason, confidence: conf, threshold })
+          return { ok: false, blocked: true, reason }
+        } else {
+          await logEvent(sessionId, 'terminal_run_auto_approved', { command: args.command, reason, confidence: conf, threshold })
+        }
+      }
+
+      const start = Date.now()
+      try {
+        const { stdout, stderr } = await exec(args.command, {
+          cwd,
+          env: { ...process.env, ...(args.env || {}) },
+          shell: args.shell,
+          timeout: Math.max(1000, Math.min(600000, args.timeoutMs || 120000)),
+          maxBuffer: 5 * 1024 * 1024,
+        } as any)
+        const outR = redactOutput((stdout || '').toString())
+        const errR = redactOutput((stderr || '').toString())
+        const durationMs = Date.now() - start
+        await logEvent(sessionId, 'terminal_run_result', { command: args.command, exitCode: 0, durationMs, bytesRedacted: outR.bytesRedacted + errR.bytesRedacted })
+        return { ok: true, exitCode: 0, stdout: outR.redacted, stderr: errR.redacted, durationMs }
+      } catch (e: any) {
+        const outR = redactOutput((e?.stdout || '').toString())
+        const errR = redactOutput((e?.stderr || '').toString())
+        const code = typeof e?.code === 'number' ? e.code : (e?.killed ? -1 : 1)
+        const timedOut = !!e?.killed || /timed out|ETIMEDOUT/i.test(e?.message || '')
+        const durationMs = Date.now() - start
+        await logEvent(sessionId, 'terminal_run_result', { command: args.command, exitCode: code, timedOut, durationMs, error: e?.message, bytesRedacted: outR.bytesRedacted + errR.bytesRedacted })
+        return { ok: false, exitCode: code, timedOut, error: e?.message || String(e), stdout: outR.redacted, stderr: errR.redacted, durationMs }
+      }
+    }
+
+
+  },
+  {
+    name: 'terminal.session_present',
+    description: 'Present a reusable terminal session bound to the agent request. Returns metadata and tiny tails; does not stream large output.',
+    parameters: {
+      type: 'object',
+      properties: {
+        ensureCwd: { type: 'string', description: 'Optional desired working directory (workspace-relative or absolute)' },
+        shell: { type: 'string' },
+        cols: { type: 'integer', minimum: 20, maximum: 400 },
+        rows: { type: 'integer', minimum: 10, maximum: 200 }
+      },
+      additionalProperties: false,
+    },
+    run: async (
+      args: { ensureCwd?: string; shell?: string; cols?: number; rows?: number },
+      meta?: { requestId?: string }
+    ) => {
+      const req = meta?.requestId || 'terminal'
+      const root = path.resolve(process.env.APP_ROOT || process.cwd())
+      const desiredCwd = args.ensureCwd ? (path.isAbsolute(args.ensureCwd) ? args.ensureCwd : path.join(root, args.ensureCwd)) : undefined
+      const sid = await (globalThis as any).__getOrCreateAgentPtyFor(req, { shell: args.shell, cwd: desiredCwd, cols: args.cols, rows: args.rows })
+      const rec = (globalThis as any).__agentPtySessions.get(sid)
+      if (!rec) return { ok: false, error: 'no-session' }
+      const state = rec.state
+      const lastCmds = state.commands.slice(-5).map((c: any) => ({ id: c.id, command: c.command.slice(0, 200), startedAt: c.startedAt, endedAt: c.endedAt, bytes: c.bytes, tail: c.data.slice(-200) }))
+      return {
+        ok: true,
+        sessionId: sid,
+        shell: rec.shell,
+        cwd: rec.cwd,
+        cols: rec.cols,
+        rows: rec.rows,
+        commandCount: state.commands.length,
+        lastCommands: lastCmds,
+        liveTail: state.ring.slice(-400)
+      }
+    }
+  },
+  {
+    name: 'terminal.session_exec',
+    description: 'Write a command to the presented terminal (adds a newline). Records output into a new command record. Risk gating applies to destructive installs/deletes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: { type: 'string' },
+        autoApproveEnabled: { type: 'boolean' },
+        autoApproveThreshold: { type: 'number' },
+        confidence: { type: 'number' }
+      },
+      required: ['command'],
+      additionalProperties: false,
+    },
+    run: async (
+      args: { command: string; autoApproveEnabled?: boolean; autoApproveThreshold?: number; confidence?: number },
+      meta?: { requestId?: string }
+    ) => {
+      const req = meta?.requestId || 'terminal'
+      const sid = await (globalThis as any).__getOrCreateAgentPtyFor(req)
+      const rec = (globalThis as any).__agentPtySessions.get(sid)
+      if (!rec) return { ok: false, error: 'no-session' }
+      const { risky, reason } = isRiskyCommand(args.command)
+      await logEvent(sid, 'agent_pty_command_attempt', { command: args.command, risky, reason })
+      if (risky) {
+        const autoEnabled = !!args.autoApproveEnabled
+        const threshold = typeof args.autoApproveThreshold === 'number' ? args.autoApproveThreshold : 1.1
+        const conf = typeof args.confidence === 'number' ? args.confidence : -1
+        if (!(autoEnabled && conf >= threshold)) {
+          await logEvent(sid, 'agent_pty_command_blocked', { command: args.command, reason, confidence: conf, threshold })
+          return { ok: false, blocked: true, reason }
+        }
+      }
+      await (globalThis as any).__beginAgentCommand(rec.state, args.command)
+      try {
+        rec.p.write(args.command + (process.platform === 'win32' ? '\r\n' : '\n'))
+        return { ok: true, sessionId: sid }
+      } catch (e: any) {
+        return { ok: false, error: e?.message || String(e) }
+      }
+    }
+  },
+  {
+    name: 'terminal.session_search_output',
+    description: 'Search the session\'s captured command outputs and/or live buffer for a substring; returns compact snippets.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        caseSensitive: { type: 'boolean' },
+        in: { type: 'string', enum: ['commands','live','all'], default: 'all' },
+        maxResults: { type: 'integer', minimum: 1, maximum: 200, default: 30 }
+      },
+      required: ['query'],
+      additionalProperties: false,
+    },
+    run: async (
+      args: { query: string; caseSensitive?: boolean; in?: 'commands'|'live'|'all'; maxResults?: number },
+      meta?: { requestId?: string }
+    ) => {
+      const req = meta?.requestId || 'terminal'
+      const sid = (globalThis as any).__agentPtyAssignments.get(req)
+      const rec = sid ? (globalThis as any).__agentPtySessions.get(sid) : undefined
+      if (!sid || !rec) return { ok: false, error: 'no-session' }
+      const st = rec.state
+      const q = args.caseSensitive ? args.query : args.query.toLowerCase()
+      const max = Math.min(200, Math.max(1, args.maxResults || 30))
+      const where = args.in || 'all'
+      const results: any[] = []
+      function findIn(text: string, source: any) {
+        const hay = args.caseSensitive ? text : text.toLowerCase()
+        let idx = 0
+        while (results.length < max) {
+          const pos = hay.indexOf(q, idx)
+          if (pos === -1) break
+          const start = Math.max(0, pos - 80)
+          const end = Math.min(text.length, pos + q.length + 80)
+          const snippet = text.slice(start, end)
+          results.push({ ...source, pos, snippet })
+          idx = pos + q.length
+        }
+      }
+      if (where === 'all' || where === 'commands') {
+        for (let i = st.commands.length - 1; i >= 0 && results.length < max; i--) {
+          const c = st.commands[i]
+          findIn(c.data, { type: 'command', id: c.id, command: c.command.slice(0, 200), startedAt: c.startedAt, endedAt: c.endedAt })
+        }
+      }
+      if (where === 'all' || where === 'live') {
+        findIn(st.ring, { type: 'live' })
+      }
+      return { ok: true, sessionId: sid, hits: results }
+    }
+  },
+  {
+    name: 'terminal.session_tail',
+    description: 'Return the last part of the live buffer (small tail only) to inspect recent output without flooding tokens.',
+    parameters: {
+      type: 'object',
+      properties: { maxBytes: { type: 'integer', minimum: 100, maximum: 10000, default: 2000 } },
+      additionalProperties: false,
+    },
+    run: async (args: { maxBytes?: number }, meta?: { requestId?: string }) => {
+      const req = meta?.requestId || 'terminal'
+      const sid = (globalThis as any).__agentPtyAssignments.get(req)
+      const rec = sid ? (globalThis as any).__agentPtySessions.get(sid) : undefined
+      if (!sid || !rec) return { ok: false, error: 'no-session' }
+      const n = Math.max(100, Math.min(10000, args.maxBytes || 2000))
+      const tail = rec.state.ring.slice(-n)
+      const { redacted } = redactOutput(tail)
+      return { ok: true, sessionId: sid, tail: redacted }
+    }
+  },
+  {
+    name: 'terminal.session_restart',
+    description: 'Restart the presented terminal session (kills and recreates).',
+    parameters: { type: 'object', properties: { shell: { type: 'string' }, cwd: { type: 'string' }, cols: { type: 'integer' }, rows: { type: 'integer' } }, additionalProperties: false },
+    run: async (args: { shell?: string; cwd?: string; cols?: number; rows?: number }, meta?: { requestId?: string }) => {
+      const req = meta?.requestId || 'terminal'
+      const old = (globalThis as any).__agentPtyAssignments.get(req)
+      if (old) {
+        try { (globalThis as any).__agentPtySessions.get(old)?.p.kill() } catch {}
+        (globalThis as any).__agentPtySessions.delete(old)
+      }
+      const root = path.resolve(process.env.APP_ROOT || process.cwd())
+      const desiredCwd = args.cwd ? (path.isAbsolute(args.cwd) ? args.cwd : path.join(root, args.cwd)) : undefined
+      const tmpSid = await (globalThis as any).__createAgentPtySession({ shell: args.shell, cwd: desiredCwd, cols: args.cols, rows: args.rows }) as string
+      ;(globalThis as any).__agentPtyAssignments.set(req, tmpSid)
+      return { ok: true, sessionId: tmpSid }
+    }
+  },
+  {
+    name: 'terminal.session_close',
+    description: 'Close the presented terminal session and clear assignment.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    run: async (_args: {}, meta?: { requestId?: string }) => {
+      const req = meta?.requestId || 'terminal'
+      const sid = (globalThis as any).__agentPtyAssignments.get(req)
+      if (!sid) return { ok: true }
+      try { (globalThis as any).__agentPtySessions.get(sid)?.p.kill() } catch {}
+      (globalThis as any).__agentPtySessions.delete(sid)
+      (globalThis as any).__agentPtyAssignments.delete(req)
+      return { ok: true }
+    }
+  },
+  {
+    name: 'code.search_ast',
+    description: 'Structural AST search using @ast-grep/napi (inline patterns only)',
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'ast-grep inline pattern, e.g., console.log($VAL)' },
+        languages: { type: 'array', items: { type: 'string' }, description: "Optional languages. Use 'auto' by file extension if omitted" },
+        includeGlobs: { type: 'array', items: { type: 'string' } },
+        excludeGlobs: { type: 'array', items: { type: 'string' } },
+        maxMatches: { type: 'integer', minimum: 1, maximum: 5000, default: 500 },
+        contextLines: { type: 'integer', minimum: 0, maximum: 20, default: 2 },
+        maxFileBytes: { type: 'integer', minimum: 1, default: 1000000 },
+        concurrency: { type: 'integer', minimum: 1, maximum: 32, default: 6 },
+      },
+      required: ['pattern'],
+      additionalProperties: false,
+    },
+    run: async (args: { pattern: string; languages?: string[]; includeGlobs?: string[]; excludeGlobs?: string[]; maxMatches?: number; contextLines?: number; maxFileBytes?: number; concurrency?: number }) => {
+      try {
+        const res = await astGrepSearch({
+          pattern: args.pattern,
+          languages: (args.languages && args.languages.length) ? args.languages : 'auto',
+          includeGlobs: args.includeGlobs,
+          excludeGlobs: args.excludeGlobs,
+          maxMatches: args.maxMatches,
+          contextLines: args.contextLines,
+          maxFileBytes: args.maxFileBytes,
+          concurrency: args.concurrency,
+        })
+        return { ok: true, ...res }
+      } catch (e: any) {
+        return { ok: false, error: e?.message || String(e) }
+      }
     },
   },
-]
+  {
+    name: 'code.apply_edits_targeted',
+    description: 'Apply targeted edits: simple text edits and/or cross-language AST rewrites via ast-grep. Supports dryRun and ranges-only modes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        textEdits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            oneOf: [
+              {
+                type: 'object',
+                properties: { type: { const: 'replaceOnce' }, path: { type: 'string' }, oldText: { type: 'string' }, newText: { type: 'string' } },
+                required: ['type', 'path', 'oldText', 'newText'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: { type: { const: 'insertAfterLine' }, path: { type: 'string' }, line: { type: 'integer' }, text: { type: 'string' } },
+                required: ['type', 'path', 'line', 'text'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: { type: { const: 'replaceRange' }, path: { type: 'string' }, start: { type: 'integer' }, end: { type: 'integer' }, text: { type: 'string' } },
+                required: ['type', 'path', 'start', 'end', 'text'],
+                additionalProperties: false,
+              },
+            ],
+          },
+        },
+        astRewrites: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              pattern: { type: 'string' },
+              rewrite: { type: 'string' },
+              languages: { type: 'array', items: { type: 'string' } },
+              includeGlobs: { type: 'array', items: { type: 'string' } },
+              excludeGlobs: { type: 'array', items: { type: 'string' } },
+              perFileLimit: { type: 'integer', minimum: 1, maximum: 1000 },
+              totalLimit: { type: 'integer', minimum: 1, maximum: 100000 },
+              maxFileBytes: { type: 'integer', minimum: 1 },
+              concurrency: { type: 'integer', minimum: 1, maximum: 32 },
+            },
+            required: ['pattern', 'rewrite'],
+            additionalProperties: false,
+          },
+        },
+        advancedTextEdits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string' },
+              guard: {
+                type: 'object',
+                properties: { expectedBefore: { type: 'string' }, checksum: { type: 'string' } },
+                additionalProperties: false
+              },
+              selector: {
+                oneOf: [
+                  { type: 'object', properties: { range: { type: 'object', properties: { start: { type: 'object', properties: { line: { type: 'integer' }, column: { type: 'integer' } }, required: ['line','column'] }, end: { type: 'object', properties: { line: { type: 'integer' }, column: { type: 'integer' } }, required: ['line','column'] } }, required: ['start','end'] } }, required: ['range'] },
+                  { type: 'object', properties: { anchors: { type: 'object', properties: { before: { type: 'string' }, after: { type: 'string' }, occurrence: { type: 'integer', minimum: 1 } } } }, required: ['anchors'] },
+                  { type: 'object', properties: { regex: { type: 'object', properties: { pattern: { type: 'string' }, flags: { type: 'string' }, occurrence: { type: 'integer', minimum: 1 } }, required: ['pattern'] } }, required: ['regex'] },
+                  { type: 'object', properties: { structuralMatch: { type: 'object', properties: { file: { type: 'string' }, start: { type: 'object', properties: { line: { type: 'integer' }, column: { type: 'integer' } }, required: ['line','column'] }, end: { type: 'object', properties: { line: { type: 'integer' }, column: { type: 'integer' } }, required: ['line','column'] } }, required: ['file','start','end'] } }, required: ['structuralMatch'] }
+                ]
+              },
+              action: {
+                oneOf: [
+                  { type: 'object', properties: { 'text.replace': { type: 'object', properties: { newText: { type: 'string' } }, required: ['newText'] } }, required: ['text.replace'] },
+                  { type: 'object', properties: { 'text.insert': { type: 'object', properties: { position: { enum: ['before','after','start','end'] }, text: { type: 'string' } }, required: ['position','text'] } }, required: ['text.insert'] },
+                  { type: 'object', properties: { 'text.delete': { type: 'object' } }, required: ['text.delete'] },
+                  { type: 'object', properties: { 'text.wrap': { type: 'object', properties: { prefix: { type: 'string' }, suffix: { type: 'string' } }, required: ['prefix','suffix'] } }, required: ['text.wrap'] }
+                ]
+              }
+            },
+            required: ['path','selector','action'],
+            additionalProperties: false
+          }
+        },
+        dryRun: { type: 'boolean', default: false },
+        rangesOnly: { type: 'boolean', default: false },
+        verify: { type: 'boolean', default: true },
+        tsconfigPath: { type: 'string' }
+      },
+      additionalProperties: false,
+    },
+    run: async (args: { textEdits?: any[]; astRewrites?: any[]; advancedTextEdits?: any[]; dryRun?: boolean; rangesOnly?: boolean; verify?: boolean; tsconfigPath?: string }) => {
+      const dryRun = !!args.dryRun
+      const rangesOnly = !!args.rangesOnly
+      const verify = args.verify !== false
+      const textEdits = Array.isArray(args.textEdits) ? args.textEdits : []
+      const astOps = Array.isArray(args.astRewrites) ? args.astRewrites : []
+      const advOps = Array.isArray(args.advancedTextEdits) ? args.advancedTextEdits : []
+      try {
+        const resText = textEdits.length ? await applyFileEditsInternal(textEdits, { dryRun, verify: false }) : { applied: 0, results: [] as any[] }
+        const astResults: any[] = []
+        let astApplied = 0
+        for (const op of astOps) {
+          const r = await astGrepRewrite({
+            pattern: op.pattern,
+            rewrite: op.rewrite,
+            languages: (op.languages && op.languages.length) ? op.languages : 'auto',
+            includeGlobs: op.includeGlobs,
+            excludeGlobs: op.excludeGlobs,
+            perFileLimit: op.perFileLimit,
+            totalLimit: op.totalLimit,
+            maxFileBytes: op.maxFileBytes,
+            concurrency: op.concurrency,
+            dryRun,
+            rangesOnly,
+          })
+          astResults.push(r)
+          astApplied += r.changes.reduce((acc, c) => acc + (c.applied ? c.count : 0), 0)
+        }
+
+        // Advanced text edits
+        const advResults: any[] = []
+        let advApplied = 0
+        const byFile: Record<string, any[]> = {}
+        for (const ed of advOps) {
+          if (!byFile[ed.path]) byFile[ed.path] = []
+          byFile[ed.path].push(ed)
+        }
+        const crypto = await import('node:crypto')
+        for (const [p, ops] of Object.entries(byFile)) {
+          const abs = resolveWithinWorkspace(p)
+          let content = ''
+          try { content = await fs.readFile(abs, 'utf-8') } catch { advResults.push({ path: p, changed: false, message: 'read-failed' }); continue }
+          const origChecksum = crypto.createHash('sha1').update(content, 'utf8').digest('hex')
+          let changed = false
+          const lines = content.split(/\r?\n/)
+          const idx: number[] = [0]; for (let i=0;i<lines.length;i++) idx.push(idx[i] + lines[i].length + 1)
+          function off(line1: number, col1: number) { const l0 = Math.max(0, Math.min(idx.length-2, (line1|0)-1)); return idx[l0] + Math.max(0, (col1|0)-1) }
+
+          for (const op of ops) {
+            // Resolve selection
+            let s = 0, e = 0
+            if (op.selector?.range) {
+              s = off(op.selector.range.start.line, op.selector.range.start.column)
+              e = off(op.selector.range.end.line, op.selector.range.end.column)
+            } else if (op.selector?.anchors) {
+              const before = op.selector.anchors.before || ''
+              const after = op.selector.anchors.after || ''
+              const occ = Math.max(1, op.selector.anchors.occurrence || 1)
+              if (before) {
+                let pos = -1, from = 0
+                for (let i=0;i<occ;i++) { pos = content.indexOf(before, from); if (pos === -1) break; from = pos + before.length }
+                if (pos !== -1) s = pos + before.length
+              }
+              if (after) {
+                const pos = content.indexOf(after, s)
+                if (pos !== -1) e = pos
+              } else { e = s }
+            } else if (op.selector?.regex) {
+              const re = new RegExp(op.selector.regex.pattern, op.selector.regex.flags || 'g')
+              const occ = Math.max(1, op.selector.regex.occurrence || 1)
+              let m: RegExpExecArray | null = null
+              let count = 0
+              while ((m = re.exec(content))) { count++; if (count === occ) { s = m.index; e = m.index + m[0].length; break } if (!re.global) break }
+            } else if (op.selector?.structuralMatch) {
+              s = off(op.selector.structuralMatch.start.line, op.selector.structuralMatch.start.column)
+              e = off(op.selector.structuralMatch.end.line, op.selector.structuralMatch.end.column)
+            } else {
+              advResults.push({ path: p, changed: false, message: 'bad-selector' }); continue
+            }
+
+            const selected = content.slice(s, e)
+            // Guards
+            if (op.guard?.expectedBefore && !selected.includes(op.guard.expectedBefore)) { advResults.push({ path: p, changed: false, message: 'guard-mismatch' }); continue }
+            if (op.guard?.checksum && op.guard.checksum !== origChecksum) { advResults.push({ path: p, changed: false, message: 'stale-file' }); continue }
+
+            // Action
+            let next = content
+            if (op.action['text.replace']) {
+              next = content.slice(0, s) + op.action['text.replace'].newText + content.slice(e)
+            } else if (op.action['text.insert']) {
+              const pos = op.action['text.insert'].position
+              const ins = op.action['text.insert'].text
+              if (pos === 'before') next = content.slice(0, s) + ins + content.slice(s)
+              else if (pos === 'after') next = content.slice(0, e) + ins + content.slice(e)
+              else if (pos === 'start') next = ins + content
+              else next = content + ins
+            } else if (op.action['text.delete']) {
+              next = content.slice(0, s) + content.slice(e)
+            } else if (op.action['text.wrap']) {
+              const pre = op.action['text.wrap'].prefix, suf = op.action['text.wrap'].suffix
+              next = content.slice(0, s) + pre + selected + suf + content.slice(e)
+            } else {
+              advResults.push({ path: p, changed: false, message: 'bad-action' }); continue
+            }
+
+            const start = (()=>{ // recalc start/end lines
+              const lines2 = content.slice(0, s).split(/\r?\n/); return { line: lines2.length, column: lines2[lines2.length-1].length + 1 }
+            })()
+            const end = (()=>{ const lines2 = content.slice(0, e).split(/\r?\n/); return { line: lines2.length, column: lines2[lines2.length-1].length + 1 } })()
+            advResults.push({ path: p, changed: !dryRun && !rangesOnly && next !== content, ranges: [{ startLine: start.line, startCol: start.column, endLine: end.line, endCol: end.column }] })
+            if (!dryRun && !rangesOnly && next !== content) { content = next; changed = true }
+          }
+
+          if (!dryRun && !rangesOnly && changed) {
+            await atomicWrite(abs, content)
+            advApplied += 1
+          }
+        }
+
+        let verification: any = undefined
+        if (verify && !dryRun && !rangesOnly) {
+          try { verification = tsVerify(args.tsconfigPath) } catch {}
+        }
+        return {
+          ok: true,
+          applied: (resText.applied || 0) + astApplied + advApplied,
+          results: [
+            ...(resText.results || []),
+            ...astResults.flatMap((r) => r.changes.map((c: any) => ({ path: c.filePath, changed: !!c.applied, ranges: c.ranges, count: c.count }))),
+            ...advResults
+          ],
+          dryRun,
+          rangesOnly,
+          verification,
+        }
+      } catch (e: any) {
+        return { ok: false, error: e?.message || String(e) }
+      }
+    },
+  }
+];
 
 ipcMain.handle('edits:apply', async (_e, args: { edits: FileEdit[]; dryRun?: boolean; verify?: boolean; tsconfigPath?: string }) => {
   try {
@@ -926,6 +1463,7 @@ type IPty = {
   write: (data: string) => void
   kill: () => void
   pid: number
+  onExit: (cb: (ev: { exitCode: number }) => void) => void
 }
 
 const ptySessions = new Map<string, { p: IPty; wcId: number; log?: boolean }>()
@@ -1111,6 +1649,115 @@ ipcMain.handle('tsrefactor:inlineFunction', async (_e, args: { filePath: string;
 ipcMain.handle('tsrefactor:defaultToNamed', async (_e, args: { filePath: string; newName: string; apply?: boolean; verify?: boolean; tsconfigPath?: string }) => {
   try {
     const result = await tsDefaultToNamed(args)
+
+// Agent-managed PTY sessions (no UI streaming): ring buffer + per-command capture
+// Keeps memory bounded and enables searchable command outputs for the agent
+
+type AgentTerminalState = {
+  ring: string
+  ringLimit: number
+  commands: Array<{ id: number; command: string; startedAt: number; endedAt?: number; bytes: number; data: string }>
+  maxCommands: number
+  activeIndex: number | null
+}
+
+const agentPtySessions = new Map<string, { p: IPty; shell: string; cwd: string; cols: number; rows: number; state: AgentTerminalState; attachedWcIds: Set<number> }>()
+const agentPtyAssignments = new Map<string, string>() // requestId -> sessionId
+
+function trimRing(s: string, limit: number) {
+  if (s.length <= limit) return s
+  return s.slice(s.length - limit)
+}
+
+function pushDataToState(st: AgentTerminalState, chunk: string) {
+  const { redacted } = redactOutput(chunk)
+  st.ring = trimRing(st.ring + redacted, st.ringLimit)
+  if (st.activeIndex != null) {
+    const rec = st.commands[st.activeIndex]
+    if (rec) {
+      rec.data = trimRing(rec.data + redacted, Math.min(st.ringLimit, 500_000))
+      rec.bytes += Buffer.byteLength(redacted, 'utf8')
+    }
+  }
+}
+
+async function beginCommand(st: AgentTerminalState, cmd: string) {
+  // finalize previous
+  if (st.activeIndex != null && st.commands[st.activeIndex]) {
+    st.commands[st.activeIndex].endedAt = Date.now()
+  }
+  // cull old
+  if (st.commands.length >= st.maxCommands) st.commands.shift()
+  const rec = { id: (st.commands.at(-1)?.id ?? 0) + 1, command: cmd, startedAt: Date.now(), bytes: 0, data: '' }
+  st.commands.push(rec)
+  st.activeIndex = st.commands.length - 1
+}
+
+async function createAgentPtySession(opts: { shell?: string; cwd?: string; cols?: number; rows?: number }) {
+  const isWin = process.platform === 'win32'
+  const shell = opts.shell || (isWin ? (process.env.COMSPEC || 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe') : (process.env.SHELL || '/bin/bash'))
+  const cols = opts.cols || 80
+  const rows = opts.rows || 24
+  const cwd = opts.cwd || process.cwd()
+  const ptyModule = require('@homebridge/node-pty-prebuilt-multiarch')
+  const p: IPty = (ptyModule as any).spawn(shell, [], { name: 'xterm-color', cols, rows, cwd, env: process.env })
+  const sessionId = randomUUID()
+  const state: AgentTerminalState = { ring: '', ringLimit: 1_000_000, commands: [], maxCommands: 50, activeIndex: null }
+  agentPtySessions.set(sessionId, { p, shell, cwd, cols, rows, state, attachedWcIds: new Set<number>() })
+  await logEvent(sessionId, 'agent_pty_create', { shell, cwd, cols, rows })
+  p.onData(async (data: string) => {
+    try {
+      const { redacted, bytesRedacted } = redactOutput(data)
+      if (bytesRedacted > 0) { await logEvent(sessionId, 'data_redacted', { bytesRedacted }) }
+      // Update in-memory buffers (safe to re-redact downstream if needed)
+      pushDataToState(state, redacted)
+      // Fanout to any attached renderer terminals
+      const rec = agentPtySessions.get(sessionId)
+      const ids = rec?.attachedWcIds
+      if (ids && ids.size > 0) {
+        for (const id of ids) {
+          try {
+            const wc = BrowserWindow.fromId(id)?.webContents
+            if (wc) wc.send('pty:data', { sessionId, data: redacted })
+          } catch {}
+        }
+      }
+    } catch {}
+  })
+  p.onExit(async ({ exitCode }: { exitCode: number }) => {
+    await logEvent(sessionId, 'agent_pty_exit', { exitCode })
+    // Notify any attached renderers
+    const rec = agentPtySessions.get(sessionId)
+    const ids = rec?.attachedWcIds
+    if (ids && ids.size > 0) {
+      for (const id of ids) {
+        try { BrowserWindow.fromId(id)?.webContents?.send('pty:exit', { sessionId, exitCode }) } catch {}
+      }
+    }
+    agentPtySessions.delete(sessionId)
+    // detach assignment if any
+    for (const [req, sid] of agentPtyAssignments.entries()) if (sid === sessionId) agentPtyAssignments.delete(req)
+  })
+
+  return sessionId
+}
+
+async function getOrCreateAgentPtyFor(requestId: string, opts?: { shell?: string; cwd?: string; cols?: number; rows?: number }) {
+  let sid = agentPtyAssignments.get(requestId)
+  if (sid && agentPtySessions.has(sid)) return sid
+  sid = await createAgentPtySession(opts || {})
+  agentPtyAssignments.set(requestId, sid)
+  return sid
+}
+
+// Expose agent PTY helpers for use in earlier-declared tool handlers
+;(globalThis as any).__agentPtySessions = agentPtySessions
+;(globalThis as any).__agentPtyAssignments = agentPtyAssignments
+;(globalThis as any).__createAgentPtySession = createAgentPtySession
+;(globalThis as any).__getOrCreateAgentPtyFor = getOrCreateAgentPtyFor
+;(globalThis as any).__beginAgentCommand = beginCommand
+
+
     const verification = args.verify ? tsVerify(args.tsconfigPath) : undefined
     return { ok: true, ...result, verification }
   } catch (e: any) {
@@ -1129,6 +1776,34 @@ ipcMain.handle('tsrefactor:namedToDefault', async (_e, args: { filePath: string;
 })
 
 // Indexing IPC
+
+// Attach a renderer window to an agent-managed PTY session so it streams into the existing xterm UI
+ipcMain.handle('agent-pty:attach', async (event, args: { requestId?: string; sessionId?: string; tailBytes?: number } = {}) => {
+  const wc = event.sender
+  let sid = args.sessionId
+  if (!sid) {
+    const req = args.requestId || 'terminal'
+    sid = await (globalThis as any).__getOrCreateAgentPtyFor(req)
+  }
+  const rec = sid ? (globalThis as any).__agentPtySessions.get(sid) : undefined
+  if (!sid || !rec) return { ok: false, error: 'no-session' }
+  rec.attachedWcIds.add(wc.id)
+  // Optionally seed terminal with current tail (already redacted in state)
+  const n = Math.max(0, Math.min(10000, args.tailBytes || 0))
+  if (n > 0) {
+    try { wc.send('pty:data', { sessionId: sid, data: rec.state.ring.slice(-n) }) } catch {}
+  }
+  return { ok: true, sessionId: sid }
+})
+
+ipcMain.handle('agent-pty:detach', async (event, args: { sessionId: string }) => {
+  const wc = event.sender
+  const rec = (globalThis as any).__agentPtySessions.get(args.sessionId)
+  if (!rec) return { ok: true }
+  rec.attachedWcIds.delete(wc.id)
+  return { ok: true }
+})
+
 ipcMain.handle('index:rebuild', async () => {
   try {
     const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents
@@ -1234,6 +1909,18 @@ function isEditIntentText(t: string): boolean {
   return patterns.some(re => re.test(s))
 }
 
+
+function isPlanIntentText(t: string): boolean {
+  const s = (t || '').toLowerCase()
+  const patterns: RegExp[] = [
+    /\b(plan|planning|roadmap|strategy|approach|design|proposal|rfc)\b/,
+    /\b(implementation plan|migration plan|rollout plan|outline steps|how should we|what's the plan)\b/,
+    /\b(break\s?down|milestones|acceptance criteria|estimate|estimation)\b/,
+  ]
+  return patterns.some(re => re.test(s))
+}
+
+
 // Helper to send debug logs to renderer
 function sendDebugLog(level: 'info' | 'warning' | 'error', category: string, message: string, data?: any) {
   const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents
@@ -1256,11 +1943,44 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
 
   // Decide intent from last user turn (fallback to chat)
   const lastUser = [...args.messages].reverse().find(m => m.role === 'user')
-  const wantsEdits = isEditIntentText(lastUser?.content || '')
-  sendDebugLog('info', 'Router', `Intent detection: ${wantsEdits ? 'TOOLS (edit intent)' : 'CHAT'}`, {
+  const wantsPlan = isPlanIntentText(lastUser?.content || '')
+  const wantsEdits = !wantsPlan && isEditIntentText(lastUser?.content || '')
+  const intent = wantsPlan ? 'PLAN' : wantsEdits ? 'TOOLS (edit intent)' : 'CHAT'
+  sendDebugLog('info', 'Router', `Intent detection: ${intent}`, {
     hasAgentStream: !!provider.agentStream,
     lastUserMessage: lastUser?.content?.slice(0, 100)
   })
+
+  // Planning intent branch: run a planning conversation (no tools, no edits)
+  if (isPlanIntentText(lastUser?.content || '')) {
+    try {
+      const lastUser2 = [...args.messages].reverse().find(m => m.role === 'user')
+      const injected = await buildContextMessages(lastUser2?.content || '', 6)
+      if (injected.length) args.messages = [...injected, ...args.messages]
+    } catch {}
+
+    const model = args.model || 'gpt-5'
+    const systemMsg = { role: 'system' as const, content: buildPlanningPrompt() }
+    const routed = [systemMsg, ...args.messages]
+
+    try {
+      const handle = await provider.chatStream({
+        apiKey: key,
+        model,
+        messages: routed,
+        onChunk: (text) => wc?.send('llm:chunk', { requestId: args.requestId, content: text }),
+        onDone: () => wc?.send('llm:done', { requestId: args.requestId }),
+        onError: (error) => wc?.send('llm:error', { requestId: args.requestId, error }),
+        onTokenUsage: (usage) => wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage }),
+      })
+      inflight.set(args.requestId, handle)
+      return { ok: true, mode: 'plan' }
+    } catch (e: any) {
+      wc?.send('llm:error', { requestId: args.requestId, error: e?.message || String(e) })
+      return { ok: false }
+    }
+  }
+
 
   if (wantsEdits && provider.agentStream) {
     sendDebugLog('info', 'Agent', 'Using agent mode with tools', { toolCount: agentTools.length })
@@ -2200,6 +2920,32 @@ ipcMain.handle('workspace:bootstrap', async (_e, args: { baseDir?: string; prefe
     try { generatedContext = await generateContextPack(baseDir, !!args?.preferAgent, !!args?.overwrite) } catch {}
 
     return { ok: true, createdPublic, createdPrivate, ensuredGitIgnore, generatedContext }
+  } catch (error) {
+    return { ok: false, error: String(error) }
+  }
+})
+
+// Planning: save/load ApprovedPlan in .hifide-private
+ipcMain.handle('planning:save-approved', async (_e, plan: any) => {
+  try {
+    const baseDir = path.resolve(String(process.env.APP_ROOT || process.cwd()))
+    const privateDir = path.join(baseDir, '.hifide-private')
+    await ensureDir(privateDir)
+    const file = path.join(privateDir, 'approved-plan.json')
+    await atomicWrite(file, JSON.stringify(plan ?? {}, null, 2))
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error: String(error) }
+  }
+})
+
+ipcMain.handle('planning:load-approved', async () => {
+  try {
+    const baseDir = path.resolve(String(process.env.APP_ROOT || process.cwd()))
+    const file = path.join(baseDir, '.hifide-private', 'approved-plan.json')
+    const text = await fs.readFile(file, 'utf-8').catch(() => '')
+    if (!text) return { ok: true, plan: null }
+    try { return { ok: true, plan: JSON.parse(text) } } catch { return { ok: true, plan: null } }
   } catch (error) {
     return { ok: false, error: String(error) }
   }

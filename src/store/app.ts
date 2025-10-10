@@ -37,7 +37,12 @@ type TerminalInstance = {
   resizeTimeout: NodeJS.Timeout | null
 }
 
-export type RouteRecord = { requestId: string; mode: 'chat'|'tools'; provider: string; model: string; timestamp: number }
+export type RouteRecord = { requestId: string; mode: 'chat'|'tools'|'plan'; provider: string; model: string; timestamp: number }
+
+
+// Planning types
+export type PlanStep = { id: string; title: string; kind?: string; targets?: string[]; actions?: any[]; verify?: any[]; rollback?: any[]; dependencies?: string[] }
+export type ApprovedPlan = { goals?: string[]; constraints?: string[]; assumptions?: string[]; risks?: string[]; steps: PlanStep[]; autoApproveEnabled?: boolean; autoApproveThreshold?: number }
 
 export type DebugLogEntry = { timestamp: number; level: 'info' | 'warning' | 'error'; category: string; message: string; data?: any }
 
@@ -214,6 +219,14 @@ const chatInitial = {
   autoEnforceEditsSchema: boolean
   setAutoEnforceEditsSchema: (v: boolean) => void
 
+  // Planning state
+  approvedPlan: ApprovedPlan | null
+  setApprovedPlan: (p: ApprovedPlan | null) => void
+  saveApprovedPlan: () => Promise<{ ok: boolean } | undefined>
+  loadApprovedPlan: () => Promise<{ ok: boolean } | undefined>
+  executeApprovedPlanAutonomous: () => Promise<void>
+  executeApprovedPlanFirstStep: () => Promise<void>
+
   // UI state
   metaPanelOpen: boolean
   setMetaPanelOpen: (open: boolean) => void
@@ -298,6 +311,8 @@ const chatInitial = {
   currentId: string | null
   sessionsLoaded: boolean
   loadSessions: () => Promise<void>
+  ensureSessionPresent: () => void
+
   saveCurrentSession: () => Promise<void>
   select: (id: string) => void
   newSession: (title?: string) => string
@@ -385,13 +400,19 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   initializeApp: async () => {
     set({ appBootstrapping: true, startupMessage: null })
     try {
-      // 1. Get workspace root from main process
+      // 1. Restore last workspace folder if available; otherwise fall back to main's root
       try {
-        const root = await window.workspace?.getRoot?.()
-        if (root) {
-          set({ workspaceRoot: root })
-          // Bootstrap workspace folders
-          await window.workspace?.bootstrap?.(root, true, false)
+        const saved = get().workspaceRoot || (typeof localStorage !== 'undefined' ? localStorage.getItem(LS_KEYS.folder) : null)
+        if (saved) {
+          await window.workspace?.setRoot?.(saved)
+          set({ workspaceRoot: saved })
+          await window.workspace?.bootstrap?.(saved, true, false)
+        } else {
+          const root = await window.workspace?.getRoot?.()
+          if (root) {
+            set({ workspaceRoot: root })
+            await window.workspace?.bootstrap?.(root, true, false)
+          }
         }
       } catch (e) {
         console.error('Failed to initialize workspace:', e)
@@ -453,6 +474,8 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
       // Load sessions from files
       try {
         await get().loadSessions()
+        try { get().ensureSessionPresent() } catch {}
+
       } catch (e) {
         console.error('Failed to load sessions during init:', e)
       }
@@ -464,6 +487,9 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   currentView: defaultView,
   setCurrentView: (view) => {
     /* persisted via zustand */
+    if (view === 'agent') {
+      try { get().ensureSessionPresent() } catch {}
+    }
     set({ currentView: view })
     setAppView(view)
   },
@@ -472,6 +498,12 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   workspaceRoot: defaultFolder,
   setWorkspaceRoot: (folder) => {
     set({ workspaceRoot: folder })
+    try {
+      if (typeof localStorage !== 'undefined') {
+        if (folder) localStorage.setItem(LS_KEYS.folder, folder)
+        else localStorage.removeItem(LS_KEYS.folder)
+      }
+    } catch {}
   },
   recentFolders: [],
   addRecentFolder: (path) => {
@@ -639,6 +671,9 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
       console.log(`[openFolder] Load sessions: ${(performance.now() - t8).toFixed(2)}ms`)
 
       // 9. Start a new explorer terminal
+      // Ensure a session is present after switching folders
+      try { s.ensureSessionPresent() } catch {}
+
       const t9 = performance.now()
       set({ startupMessage: 'Setting up terminal...' })
       try {
@@ -660,6 +695,8 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
         explorerOpenFolders: new Set([folderPath]),
         explorerChildrenByDir: {}
       })
+      // Persist last opened workspace folder for next app start
+      try { if (typeof localStorage !== 'undefined') localStorage.setItem(LS_KEYS.folder, folderPath) } catch {}
 
 	      // 10b. Check index status and build if needed; then refresh context
 	      try {
@@ -991,6 +1028,102 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     set({ defaultModels: next })
   },
 
+  // Planning defaults
+  approvedPlan: null,
+  setApprovedPlan: (p) => set({ approvedPlan: p }),
+  saveApprovedPlan: async () => {
+    try {
+      const plan = get().approvedPlan
+      const res = await window.planning?.saveApproved?.(plan)
+      if (!res?.ok) get().addDebugLog('error', 'Planning', 'Failed to save ApprovedPlan', res)
+      else get().addDebugLog('info', 'Planning', 'ApprovedPlan saved')
+      return res
+    } catch (e) {
+      get().addDebugLog('error', 'Planning', 'Error saving ApprovedPlan', { error: String(e) })
+    }
+  },
+  loadApprovedPlan: async () => {
+    try {
+      const res = await window.planning?.loadApproved?.()
+      if (res?.ok) set({ approvedPlan: (res as any)?.plan ?? null })
+      else get().addDebugLog('error', 'Planning', 'Failed to load ApprovedPlan', res)
+      return res
+    } catch (e) {
+      get().addDebugLog('error', 'Planning', 'Error loading ApprovedPlan', { error: String(e) })
+    }
+  },
+  executeApprovedPlanFirstStep: async () => {
+    const plan = get().approvedPlan
+    if (!plan || !Array.isArray(plan.steps) || plan.steps.length === 0) {
+      get().addDebugLog('warning', 'Planning', 'No ApprovedPlan or steps to execute')
+      return
+    }
+    const first = plan.steps[0]
+    const rid = crypto.randomUUID()
+    const { selectedModel, selectedProvider, autoApproveEnabled, autoApproveThreshold } = get()
+    const autoEnabled = plan.autoApproveEnabled ?? autoApproveEnabled
+    const autoThresh = typeof plan.autoApproveThreshold === 'number' ? plan.autoApproveThreshold : autoApproveThreshold
+    const sys1 = 'EXECUTION MODE. Execute exactly the indicated step then stop and report. Verify per plan. Respect auto-approve policy.'
+    const sys2 = `ApprovedPlan:\n\`\`\`json\n${JSON.stringify(plan)}\n\`\`\``
+    const user = `Execute exactly step ${first.id} only. Stop after verification with a brief report.`
+    set({ currentRequestId: rid, streamingText: '', chunkStats: { count: 0, totalChars: 0 }, retryCount: 0 })
+    get().addDebugLog('info', 'LLM', `Executing ApprovedPlan first step (${first.id}) via tools`, { requestId: rid, provider: selectedProvider, model: selectedModel })
+    const msgs = [
+      { role: 'system' as const, content: sys1 + ` AutoApprove: enabled=${autoEnabled} threshold=${autoThresh}.` },
+      { role: 'system' as const, content: sys2 },
+      ...get().getCurrentMessages(),
+      { role: 'user' as const, content: user },
+    ]
+    try {
+      const res = await window.llm?.agentStart?.(rid, msgs, selectedModel, selectedProvider)
+      try { get().pushRouteRecord?.({ requestId: rid, mode: 'tools', provider: selectedProvider, model: selectedModel, timestamp: Date.now() }) } catch {}
+      if (!res?.ok) get().addDebugLog('error', 'LLM', 'agentStart failed for ApprovedPlan execution', res)
+    } catch (e) {
+      get().addDebugLog('error', 'LLM', 'agentStart threw for ApprovedPlan execution', { error: String(e) })
+      set({ currentRequestId: null })
+    }
+  },
+  executeApprovedPlanAutonomous: async () => {
+    const plan = get().approvedPlan
+    if (!plan || !Array.isArray(plan.steps) || plan.steps.length === 0) {
+      get().addDebugLog('warning', 'Planning', 'No ApprovedPlan or steps to execute')
+      return
+    }
+    const rid = crypto.randomUUID()
+    const { selectedModel, selectedProvider, autoApproveEnabled, autoApproveThreshold } = get()
+    const autoEnabled = plan.autoApproveEnabled ?? autoApproveEnabled
+    const autoThresh = typeof plan.autoApproveThreshold === 'number' ? plan.autoApproveThreshold : autoApproveThreshold
+
+    const sys1 = [
+      'EXECUTION MODE. Execute the ApprovedPlan steps in order, autonomously.',
+      'After each step: run Verify, summarize the result briefly.',
+      'If verification passes, proceed to the next step automatically.',
+      'If verification fails or you detect risk beyond auto-approve policy, STOP and report.',
+      'Respect auto-approve policy for risky operations; ask only when required.'
+    ].join(' ')
+    const sys2 = `ApprovedPlan:\n\`\`\`json\n${JSON.stringify(plan)}\n\`\`\``
+    const user = 'Begin executing the plan from the first step and continue through all steps unless verification fails. Keep outputs concise.'
+
+    set({ currentRequestId: rid, streamingText: '', chunkStats: { count: 0, totalChars: 0 }, retryCount: 0 })
+    get().addDebugLog('info', 'LLM', 'Executing ApprovedPlan autonomously via tools', { requestId: rid, provider: selectedProvider, model: selectedModel })
+    const msgs = [
+      { role: 'system' as const, content: sys1 + ` AutoApprove: enabled=${autoEnabled} threshold=${autoThresh}.` },
+      { role: 'system' as const, content: sys2 },
+      ...get().getCurrentMessages(),
+      { role: 'user' as const, content: user },
+    ]
+
+    try {
+      const res = await window.llm?.agentStart?.(rid, msgs, selectedModel, selectedProvider)
+      try { get().pushRouteRecord?.({ requestId: rid, mode: 'tools', provider: selectedProvider, model: selectedModel, timestamp: Date.now() }) } catch {}
+      if (!res?.ok) get().addDebugLog('error', 'LLM', 'agentStart failed for autonomous ApprovedPlan execution', res)
+    } catch (e) {
+      get().addDebugLog('error', 'LLM', 'agentStart threw for autonomous ApprovedPlan execution', { error: String(e) })
+      set({ currentRequestId: null })
+    }
+  },
+
+
   // Agent behavior settings
   autoEnforceEditsSchema: defaultAutoEnforceEditsSchema,
   setAutoEnforceEditsSchema: (v) => {
@@ -1021,14 +1154,15 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   setExplorerTerminalPanelHeight: (h) => set({ explorerTerminalPanelHeight: h }),
 
   // Terminal tabs (per context)
-  agentTerminalTabs: [],
-  agentActiveTerminal: null,
   ...(() => {
-    // Create one explorer terminal on startup
-    const id = `e${crypto.randomUUID().slice(0, 7)}`
+    // Create one agent and one explorer terminal on startup
+    const aid = `a${crypto.randomUUID().slice(0, 7)}`
+    const eid = `e${crypto.randomUUID().slice(0, 7)}`
     return {
-      explorerTerminalTabs: [id],
-      explorerActiveTerminal: id,
+      agentTerminalTabs: [aid],
+      agentActiveTerminal: aid,
+      explorerTerminalTabs: [eid],
+      explorerActiveTerminal: eid,
     }
   })(),
   agentSessionTerminals: {},
@@ -1345,17 +1479,28 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     const rows = opts?.rows ?? 24
     const context = opts?.context ?? 'explorer' // Default to explorer for backward compatibility
     try {
-      const res = await ptySvc.create({ cwd: opts?.cwd, shell: opts?.shell, cols, rows })
-      if (!res?.sessionId) {
-        console.error('[PTY] create returned no sessionId:', res)
-        throw new Error('PTY create failed: no sessionId returned')
+      let sessionId: string | null = null
+      if (context === 'agent') {
+        const requestId = get().currentRequestId || 'agent'
+        const res = await ptySvc.attachAgent({ requestId, tailBytes: 400 })
+        if (!res?.sessionId) {
+          console.error('[PTY] attachAgent returned no sessionId:', res)
+          throw new Error('PTY attach failed: no sessionId returned')
+        }
+        sessionId = res.sessionId
+      } else {
+        const res = await ptySvc.create({ cwd: opts?.cwd, shell: opts?.shell, cols, rows })
+        if (!res?.sessionId) {
+          console.error('[PTY] create returned no sessionId:', res)
+          throw new Error('PTY create failed: no sessionId returned')
+        }
+        sessionId = res.sessionId
       }
-      const sessionId = res.sessionId
       const rec: PtySession = { tabId, sessionId, cols, rows, cwd: opts?.cwd, shell: opts?.shell, context }
       set({ ptySessions: { ...get().ptySessions, [tabId]: rec }, ptyBySessionId: { ...get().ptyBySessionId, [sessionId]: tabId } })
       return { sessionId }
     } catch (e: any) {
-      console.error('[PTY] Failed to create session for', tabId, ':', e)
+      console.error('[PTY] Failed to ensure session for', tabId, ':', e)
       throw e
     }
   },
@@ -1380,7 +1525,10 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   disposePty: async (tabId) => {
     const rec = get().ptySessions[tabId]
     if (!rec) return { ok: true }
-    try { await ptySvc.dispose(rec.sessionId) } catch {}
+    try {
+      if (rec.context === 'agent') { await ptySvc.detachAgent(rec.sessionId) }
+      else { await ptySvc.dispose(rec.sessionId) }
+    } catch {}
     const { [tabId]: _, ...rest } = get().ptySessions
     const { [rec.sessionId]: __, ...restIdx } = get().ptyBySessionId
     set({ ptySessions: rest, ptyBySessionId: restIdx })
@@ -1404,6 +1552,19 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   loadSessions: async () => {
     const { sessions, currentId } = await loadSessions()
     set({ sessions, currentId, sessionsLoaded: true })
+  },
+
+  ensureSessionPresent: () => {
+    const s = get()
+    if (!s.sessions || s.sessions.length === 0) {
+      get().newSession()
+      return
+    }
+    if (!s.currentId) {
+      const id = s.sessions[0].id
+      set({ currentId: id })
+      try { localStorage.setItem(LS_KEYS.sessionsCurrent, id) } catch {}
+    }
   },
 
   saveCurrentSession: async () => {

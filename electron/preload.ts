@@ -122,6 +122,11 @@ contextBridge.exposeInMainWorld('pty', {
   // Agent-only: gated execution path
   execAgent: (sessionId: string, command: string, opts?: { confidence?: number; autoApproveEnabled?: boolean; autoApproveThreshold?: number }) =>
     ipcRenderer.invoke('pty:exec-agent', { sessionId, command, ...(opts || {}) }),
+	  attachAgent: (opts?: { requestId?: string; sessionId?: string; tailBytes?: number }) =>
+	    ipcRenderer.invoke('agent-pty:attach', opts || {}),
+	  detachAgent: (sessionId: string) =>
+	    ipcRenderer.invoke('agent-pty:detach', { sessionId }),
+
   onData: (listener: (payload: { sessionId: string; data: string }) => void) => {
     const fn = (_: any, payload: any) => listener(payload)
     ipcRenderer.on('pty:data', fn)

@@ -23,7 +23,7 @@ export default defineConfig({
               fileName: () => 'main.mjs',
             },
             rollupOptions: {
-              external: ['keytar', 'openai', '@homebridge/node-pty-prebuilt-multiarch', 'ts-morph', 'typescript'],
+              external: ['keytar', 'openai', '@homebridge/node-pty-prebuilt-multiarch', '@ast-grep/napi', '@ast-grep/napi-win32-x64-msvc', 'ts-morph', 'typescript'],
               output: {
                 format: 'es',
                 entryFileNames: 'main.mjs',

@@ -38,6 +38,7 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@ast-grep/napi": "^0.39.6",
     "@electron/rebuild": "^4.0.1",
     "@tabler/icons-react": "^3.35.0",
     "@types/markdown-it": "^14.1.2",
@@ -51,6 +52,7 @@
     "eslint": "^8.57.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
+    "fast-glob": "^3.3.3",
     "node-gyp": "^10.3.1",
     "typescript": "^5.2.2",
     "vite": "^5.1.6",

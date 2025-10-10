@@ -22,3 +22,12 @@ export function onExit(listener: (payload: { sessionId: string; exitCode: number
   return window.pty?.onExit?.(listener) || (() => {})
 }
 
+
+
+export async function attachAgent(opts?: { requestId?: string; sessionId?: string; tailBytes?: number }) {
+  return await window.pty!.attachAgent(opts)
+}
+
+export async function detachAgent(sessionId: string) {
+  return await window.pty!.detachAgent(sessionId)
+}

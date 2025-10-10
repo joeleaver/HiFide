@@ -36,7 +36,7 @@ declare global {
         provider?: string,
         tools?: string[],
         responseSchema?: any,
-      ) => Promise<{ ok: boolean; mode?: 'chat'|'tools' }>;
+      ) => Promise<{ ok: boolean; mode?: 'chat'|'tools'|'plan' }>;
       cancel: (requestId: string) => Promise<{ ok: boolean }>;
     };
     ipcRenderer: {
@@ -71,6 +71,9 @@ declare global {
       execAgent: (sessionId: string, command: string, opts?: { confidence?: number; autoApproveEnabled?: boolean; autoApproveThreshold?: number }) => Promise<{ ok: boolean; blocked?: boolean; error?: string }>;
       onData: (listener: (payload: { sessionId: string; data: string }) => void) => () => void;
       onExit: (listener: (payload: { sessionId: string; exitCode: number }) => void) => () => void;
+        attachAgent: (opts?: { requestId?: string; sessionId?: string; tailBytes?: number }) => Promise<{ ok: boolean; sessionId?: string; error?: string }>;
+        detachAgent: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
+
     };
 
       tsRefactor?: {
@@ -143,6 +146,10 @@ declare global {
           generatedContext?: boolean;
           error?: string;
         }>;
+      };
+      planning?: {
+        saveApproved: (plan: any) => Promise<{ ok: boolean; error?: string }>;
+        loadApproved: () => Promise<{ ok: boolean; plan?: any; error?: string }>;
       };
 
     }
