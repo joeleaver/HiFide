@@ -1222,7 +1222,12 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
         const idx = st.agentTerminalTabs.indexOf(tabId)
         active = tabs[idx - 1] || tabs[0] || null
       }
-      set({ agentTerminalTabs: tabs, agentActiveTerminal: active })
+      if (tabs.length === 0) {
+        const newId = `a${crypto.randomUUID().slice(0, 7)}`
+        set({ agentTerminalTabs: [newId], agentActiveTerminal: newId })
+      } else {
+        set({ agentTerminalTabs: tabs, agentActiveTerminal: active })
+      }
     } else {
       const tabs = st.explorerTerminalTabs.filter((t) => t !== tabId)
       let active = st.explorerActiveTerminal
@@ -1236,6 +1241,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     st.unmountTerminal(tabId)
     void st.disposePty(tabId)
   },
+
 
   setActiveTerminal: (context, tabId) => {
     if (context === 'agent') {
@@ -1254,6 +1260,13 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     }))
     // Clear agent terminal state
     set({ agentTerminalTabs: [], agentActiveTerminal: null })
+
+    // Enforce at least one agent terminal after clearing
+    {
+      const newId = `a${crypto.randomUUID().slice(0, 7)}`
+      set({ agentTerminalTabs: [newId], agentActiveTerminal: newId })
+    }
+
   },
 
   clearExplorerTerminals: async () => {
@@ -1544,7 +1557,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
       }
 
       // Non-agent (explorer) terminals create their own PTY
-      const create = await ptySvc.create({ cwd: opts?.cwd, shell: opts?.shell, cols, rows })
+      const create = await ptySvc.create({ cwd: (opts?.cwd ?? get().workspaceRoot ?? undefined), shell: opts?.shell, cols, rows })
       if (!create?.sessionId) {
         console.error('[PTY] create returned no sessionId:', create)
         throw new Error('PTY create failed: no sessionId returned')

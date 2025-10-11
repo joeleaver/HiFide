@@ -96,7 +96,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
           )}
         </Group>
         <Group gap="xs">
-          {open && (
+          {open && context === 'explorer' && (
             <UnstyledButton
               onClick={addTab}
               style={{
@@ -199,7 +199,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
           <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
             {tabs.length === 0 ? (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888' }}>
-                <Text size="sm">No terminals open. Click + to create one.</Text>
+                <Text size="sm">{context === 'explorer' ? 'No terminals open. Click + to create one.' : 'No terminals open.'}</Text>
               </div>
             ) : (
               tabs.map((id) => (
