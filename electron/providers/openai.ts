@@ -9,21 +9,45 @@ function toResponsesInput(messages: ChatMessage[]) {
   return messages.map((m) => ({ role: m.role as any, content: m.content }))
 }
 
+// Tiny non-crypto hash for preamble/tool schemas
+function hashStr(s: string): string {
+  let h = 2166136261 >>> 0
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0 }
+  return h.toString(16)
+}
+
+// In-memory conversation state keyed by sessionId for Responses API chaining and invalidation
+const openAIConversations = new Map<string, { lastResponseId?: string; systemHash?: string; toolsHash?: string }>()
+
 
 export const OpenAIProvider: ProviderAdapter = {
   id: 'openai',
 
   // Plain chat (Responses API). We use non-stream + chunked emit for reliability; can be upgraded to true streaming.
-  async chatStream({ apiKey, model, messages, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async chatStream({ apiKey, model, messages, onChunk, onDone, onError, onTokenUsage, onConversationMeta, sessionId }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey })
 
     const holder: { stream?: any; cancelled?: boolean } = {}
 
+      // Invalidate previous_response_id when preamble (system) changes
+      try {
+        const stateKey = sessionId || 'global'
+        const systemText = (messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')) || ''
+        const sysHash = hashStr(systemText)
+        const st = openAIConversations.get(stateKey)
+        if (!st || st.systemHash !== sysHash) {
+          openAIConversations.set(stateKey, { lastResponseId: undefined, systemHash: sysHash, toolsHash: st?.toolsHash })
+        }
+      } catch {}
+
     ;(async () => {
       try {
+        const stateKey = sessionId || 'global'
+        const prev = openAIConversations.get(stateKey)?.lastResponseId
         const stream: any = await withRetries(() => Promise.resolve(client.responses.stream({
           model,
           input: toResponsesInput(messages),
+          ...(prev ? { previous_response_id: prev } : {}),
         })))
         holder.stream = stream
         try {
@@ -44,6 +68,19 @@ export const OpenAIProvider: ProviderAdapter = {
           // Extract token usage from final response
           try {
             const finalResponse = await stream.finalResponse()
+            // Persist response id for session chaining
+            try {
+              const stateKey = sessionId || 'global'
+              if (finalResponse?.id) {
+                const prevState = openAIConversations.get(stateKey) || {}
+                openAIConversations.set(stateKey, { ...prevState, lastResponseId: String(finalResponse.id) })
+              }
+            } catch {}
+            // Emit conversation meta so renderer can persist
+            try {
+              const sysText = (messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')) || ''
+              onConversationMeta?.({ provider: 'openai', sessionId, lastResponseId: String(finalResponse?.id || ''), preambleHash: hashStr(sysText) })
+            } catch {}
             if (finalResponse?.usage && onTokenUsage) {
               onTokenUsage({
                 inputTokens: finalResponse.usage.input_tokens || 0,
@@ -76,7 +113,7 @@ export const OpenAIProvider: ProviderAdapter = {
   },
 
   // Agent loop with tool-calling via Responses API
-  async agentStream({ apiKey, model, messages, tools, responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, messages, tools, responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError, onConversationMeta, sessionId }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey })
 
     // Validate tools array
@@ -169,9 +206,27 @@ export const OpenAIProvider: ProviderAdapter = {
             return opts
           }
 
+          // Invalidate previous_response_id when system/tools change (agent mode)
+          try {
+            const stateKey = sessionId || 'global'
+            const systemText = (messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')) || ''
+            const sysHash = hashStr(systemText)
+            const toolsHash = hashStr(JSON.stringify(oaTools))
+            const st = openAIConversations.get(stateKey)
+            if (!st || st.systemHash !== sysHash || st.toolsHash !== toolsHash) {
+              openAIConversations.set(stateKey, { lastResponseId: undefined, systemHash: sysHash, toolsHash })
+            }
+          } catch {}
+
           let stream: any
           try {
             const opts = mkOpts(useResponseFormat)
+            // Chain with previous response when available for this session
+            try {
+              const stateKey = sessionId || 'global'
+              const prev = openAIConversations.get(stateKey)?.lastResponseId
+              if (prev) (opts as any).previous_response_id = prev
+            } catch {}
             console.log('[OpenAI Provider] Sending request with options:', JSON.stringify({
               model: opts.model,
               hasTools: !!opts.tools,
@@ -190,21 +245,39 @@ export const OpenAIProvider: ProviderAdapter = {
             }
           }
 
-          // Stream text chunks to the user
+          // Buffer text chunks for this streamed turn. We'll decide after finalResponse
+          // whether to emit to chat (only when there are NO tool calls in this turn).
+          let turnBuffer = ''
           for await (const evt of stream) {
             try {
-              const t = evt?.type || ''
+              const t = String(evt?.type || '')
+              // Skip streaming tool/function argument deltas to chat; they will be handled via onToolStart/onToolEnd
+              const isToolArgDelta = t.includes('function_call') || t.includes('tool') || t.includes('arguments')
 
-              // Stream any textual deltas
-              if (typeof (evt as any)?.delta === 'string') onChunk((evt as any).delta)
-              if (typeof (evt as any)?.text === 'string') onChunk((evt as any).text)
-              if (t.includes('output_text') && typeof (evt as any)?.text === 'string') onChunk((evt as any).text)
+              if (!isToolArgDelta) {
+                if (typeof (evt as any)?.delta === 'string') turnBuffer += (evt as any).delta
+                else if (typeof (evt as any)?.text === 'string') turnBuffer += (evt as any).text
+                else if (t.includes('output_text') && typeof (evt as any)?.text === 'string') turnBuffer += (evt as any).text
+              }
             } catch (e: any) { onError(e?.message || String(e)) }
           }
 
           // After stream completes, get the final response with complete output array
           const finalResponse = await stream.finalResponse()
           console.log('[OpenAI Provider] Final response output:', JSON.stringify(finalResponse?.output, null, 2))
+          // Persist response id for session chaining
+          try {
+            const stateKey = sessionId || 'global'
+            if (finalResponse?.id) {
+              const prevState = openAIConversations.get(stateKey) || {}
+              openAIConversations.set(stateKey, { ...prevState, lastResponseId: String(finalResponse.id) })
+            }
+          } catch {}
+          // Emit conversation meta so renderer can persist
+          try {
+            const sysText = (messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')) || ''
+            onConversationMeta?.({ provider: 'openai', sessionId, lastResponseId: String(finalResponse?.id || ''), preambleHash: hashStr(sysText) })
+          } catch {}
 
           // Extract function calls from the output array and add them to conversation
           const toolCalls: Array<{ id: string; name: string; arguments: any }> = []
@@ -296,7 +369,10 @@ export const OpenAIProvider: ProviderAdapter = {
             continue
           }
 
-          // No tool calls in this streamed turn -> we have already streamed the final answer
+          // No tool calls in this streamed turn -> emit buffered assistant text now
+          if (turnBuffer) {
+            try { onChunk(turnBuffer) } catch (e: any) { onError(e?.message || String(e)) }
+          }
           // Extract token usage from final response
           try {
             if (finalResponse?.usage && onTokenUsage) {

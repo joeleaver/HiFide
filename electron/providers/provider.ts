@@ -33,6 +33,12 @@ export interface ProviderAdapter {
     onDone: () => void
     onError: (error: string) => void
     onTokenUsage?: (usage: TokenUsage) => void
+    // Provider can emit conversation metadata (e.g., lastResponseId, preamble hashes)
+    onConversationMeta?: (meta: { provider: string; sessionId?: string; lastResponseId?: string; preambleHash?: string; lastToolsHash?: string }) => void
+    // Optional session identifier to enable provider-native conversation state
+    sessionId?: string
+    // Optional signal from caller to reset native conversation state for this session
+    resetConversation?: boolean
   }): Promise<StreamHandle>
 
   // Optional provider-native agent streaming with tool-calling and optional structured outputs
@@ -53,5 +59,11 @@ export interface ProviderAdapter {
     onToolError?: (ev: { callId?: string; name: string; error: string }) => void
     // Optional metadata passed to tools (e.g., requestId for session tracking)
     toolMeta?: { requestId?: string; [key: string]: any }
+    // Provider can emit conversation metadata (e.g., lastResponseId, preamble hashes)
+    onConversationMeta?: (meta: { provider: string; sessionId?: string; lastResponseId?: string; preambleHash?: string; lastToolsHash?: string }) => void
+    // Optional session identifier to enable provider-native conversation state
+    sessionId?: string
+    // Optional signal from caller to reset native conversation state for this session
+    resetConversation?: boolean
   }) => Promise<StreamHandle>
 }

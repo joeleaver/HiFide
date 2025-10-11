@@ -60,8 +60,8 @@ contextBridge.exposeInMainWorld('secrets', {
 
 
 contextBridge.exposeInMainWorld('llm', {
-  start: (requestId: string, messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>, model?: string, provider?: string) =>
-    ipcRenderer.invoke('llm:start', { requestId, messages, model, provider }),
+  start: (requestId: string, messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>, model?: string, provider?: string, sessionId?: string) =>
+    ipcRenderer.invoke('llm:start', { requestId, messages, model, provider, sessionId }),
   agentStart: (
     requestId: string,
     messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>,
@@ -69,7 +69,8 @@ contextBridge.exposeInMainWorld('llm', {
     provider?: string,
     tools?: string[],
     responseSchema?: any,
-  ) => ipcRenderer.invoke('llm:agentStart', { requestId, messages, model, provider, tools, responseSchema }),
+    sessionId?: string,
+  ) => ipcRenderer.invoke('llm:agentStart', { requestId, messages, model, provider, tools, responseSchema, sessionId }),
   auto: (
     requestId: string,
     messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>,
@@ -77,7 +78,8 @@ contextBridge.exposeInMainWorld('llm', {
     provider?: string,
     tools?: string[],
     responseSchema?: any,
-  ) => ipcRenderer.invoke('llm:auto', { requestId, messages, model, provider, tools, responseSchema }),
+    sessionId?: string,
+  ) => ipcRenderer.invoke('llm:auto', { requestId, messages, model, provider, tools, responseSchema, sessionId }),
   cancel: (requestId: string) => ipcRenderer.invoke('llm:cancel', { requestId }),
 })
 

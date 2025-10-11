@@ -19,7 +19,8 @@ declare global {
         requestId: string,
         messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
         model?: string,
-        provider?: string
+        provider?: string,
+        sessionId?: string,
       ) => Promise<{ ok: boolean }>;
       agentStart: (
         requestId: string,
@@ -28,6 +29,7 @@ declare global {
         provider?: string,
         tools?: string[],
         responseSchema?: any,
+        sessionId?: string,
       ) => Promise<{ ok: boolean }>;
       auto: (
         requestId: string,
@@ -36,6 +38,7 @@ declare global {
         provider?: string,
         tools?: string[],
         responseSchema?: any,
+        sessionId?: string,
       ) => Promise<{ ok: boolean; mode?: 'chat'|'tools'|'plan' }>;
       cancel: (requestId: string) => Promise<{ ok: boolean }>;
     };

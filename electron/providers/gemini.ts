@@ -39,12 +39,31 @@ function stripAdditionalProperties(schema: any): any {
   return cleaned
 }
 
+// Tiny non-crypto hash for preamble/tool schemas
+function hashStr(s: string): string {
+  let h = 2166136261 >>> 0
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0 }
+  return h.toString(16)
+}
+
+
+
+// In-memory Gemini chat sessions keyed by sessionId
+const geminiChats = new Map<string, any>()
+
+// In-memory Gemini agent contents per session
+const geminiAgentContents = new Map<string, any[]>()
+
 export const GeminiProvider: ProviderAdapter = {
   id: 'gemini',
-  async chatStream({ apiKey, model, messages, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async chatStream({ apiKey, model, messages, onChunk, onDone, onError, onTokenUsage, sessionId, onConversationMeta }): Promise<StreamHandle> {
     const genAI = new GoogleGenerativeAI(apiKey)
     const systemInstruction = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
     const m = genAI.getGenerativeModel({ model, systemInstruction }) as any
+
+
+    // Emit preamble hash for persistence (system only)
+    try { onConversationMeta?.({ provider: 'gemini', sessionId, preambleHash: hashStr(systemInstruction || '') }) } catch {}
 
     // Convert messages to Google content format (exclude system)
     const contents = messages
@@ -58,31 +77,66 @@ export const GeminiProvider: ProviderAdapter = {
 
     ;(async () => {
       try {
-        const res: any = await withRetries(() => m.generateContentStream({ contents }) as any)
-        holder.abort = () => { try { res?.abortController?.abort?.() } catch {} }
-        for await (const chunk of res.stream) {
-          try {
-            const t = chunk?.text?.() ?? chunk?.candidates?.[0]?.content?.parts?.[0]?.text
-            if (t) onChunk(String(t))
-          } catch (e: any) { onError(e?.message || String(e)) }
-        }
-
-        // Extract token usage from response
-        try {
-          const response = await res.response
-          const usage = response?.usageMetadata
-          if (usage && onTokenUsage) {
-            onTokenUsage({
-              inputTokens: usage.promptTokenCount || 0,
-              outputTokens: usage.candidatesTokenCount || 0,
-              totalTokens: usage.totalTokenCount || 0,
-            })
+        if (sessionId) {
+          let chat = geminiChats.get(sessionId)
+          if (!chat) {
+            const nonSystem = messages.filter(m => m.role !== 'system')
+            // Use all but the last user message as history
+            const lastUserIdxFromEnd = [...nonSystem].reverse().findIndex(m => m.role === 'user')
+            const lastUserMsg = lastUserIdxFromEnd >= 0 ? nonSystem[nonSystem.length - 1 - lastUserIdxFromEnd] : nonSystem[nonSystem.length - 1]
+            const history = nonSystem
+              .filter(m => m !== lastUserMsg)
+              .map((msg: ChatMessage) => ({ role: msg.role === 'assistant' ? 'model' : msg.role, parts: [{ text: msg.content }] }))
+            chat = (m as any).startChat({ history })
+            geminiChats.set(sessionId, chat)
           }
-        } catch (e) {
-          // Token usage extraction failed, continue anyway
-        }
+          const lastUserText = [...messages].reverse().find(mm => mm.role === 'user')?.content || ''
+          const res: any = await withRetries(() => chat.sendMessageStream(lastUserText) as any)
+          holder.abort = () => { try { res?.abortController?.abort?.() } catch {} }
+          for await (const chunk of res.stream) {
+            try {
+              const t = chunk?.text?.() ?? chunk?.candidates?.[0]?.content?.parts?.[0]?.text
+              if (t) onChunk(String(t))
+            } catch (e: any) { onError(e?.message || String(e)) }
+          }
+          try {
+            const response = await res.response
+            const usage = response?.usageMetadata
+            if (usage && onTokenUsage) {
+              onTokenUsage({
+                inputTokens: usage.promptTokenCount || 0,
+                outputTokens: usage.candidatesTokenCount || 0,
+                totalTokens: usage.totalTokenCount || 0,
+              })
+            }
+          } catch {}
+          onDone()
+        } else {
+          const res: any = await withRetries(() => m.generateContentStream({ contents }) as any)
+          holder.abort = () => { try { res?.abortController?.abort?.() } catch {} }
+          for await (const chunk of res.stream) {
+            try {
+              const t = chunk?.text?.() ?? chunk?.candidates?.[0]?.content?.parts?.[0]?.text
+              if (t) onChunk(String(t))
+            } catch (e: any) { onError(e?.message || String(e)) }
+          }
 
-        onDone()
+          // Extract token usage from response
+          try {
+            const response = await res.response
+            const usage = response?.usageMetadata
+            if (usage && onTokenUsage) {
+              onTokenUsage({
+                inputTokens: usage.promptTokenCount || 0,
+                outputTokens: usage.candidatesTokenCount || 0,
+                totalTokens: usage.totalTokenCount || 0,
+              })
+            }
+          } catch (e) {
+            // Token usage extraction failed, continue anyway
+          }
+          onDone()
+        }
       } catch (e: any) {
         // Fallback: if streaming is not supported for this model/API version, try non-stream generateContent
         if (e?.name === 'AbortError') return
@@ -118,7 +172,7 @@ export const GeminiProvider: ProviderAdapter = {
   },
 
   // Agent streaming with Gemini function calling
-  async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, toolMeta, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, toolMeta, onChunk, onDone, onError, onTokenUsage, sessionId }): Promise<StreamHandle> {
     const genAI = new GoogleGenerativeAI(apiKey)
     const systemInstruction = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
     const m: any = genAI.getGenerativeModel({ model, systemInstruction })
@@ -134,9 +188,22 @@ export const GeminiProvider: ProviderAdapter = {
       }
     })
 
-    const contents: any[] = messages
-      .filter(m => m.role !== 'system')
-      .map((msg: ChatMessage) => ({ role: msg.role === 'assistant' ? 'model' : msg.role, parts: [{ text: msg.content }] }))
+    let contents: any[]
+    if (sessionId) {
+      const cached = geminiAgentContents.get(sessionId)
+      if (cached && cached.length) {
+        contents = [...cached]
+      } else {
+        contents = messages
+          .filter(m => m.role !== 'system')
+          .map((msg: ChatMessage) => ({ role: msg.role === 'assistant' ? 'model' : msg.role, parts: [{ text: msg.content }] }))
+        geminiAgentContents.set(sessionId, [...contents])
+      }
+    } else {
+      contents = messages
+        .filter(m => m.role !== 'system')
+        .map((msg: ChatMessage) => ({ role: msg.role === 'assistant' ? 'model' : msg.role, parts: [{ text: msg.content }] }))
+    }
 
     // We'll iteratively stream until no functionCalls appear in a streamed turn
     let shouldPrune = false
@@ -259,6 +326,10 @@ export const GeminiProvider: ProviderAdapter = {
     }
 
     run()
+    // Persist session contents for continuity
+    if (sessionId) {
+      try { geminiAgentContents.set(sessionId, [...contents]) } catch {}
+    }
     return { cancel: () => { cancelled = true } }
   },
 

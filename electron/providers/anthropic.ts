@@ -4,21 +4,34 @@ import { validateJson } from './jsonschema'
 import { withRetries } from './retry'
 import { formatSummary } from '../agent/types'
 
+// Tiny non-crypto hash for preamble/tool schemas
+function hashStr(s: string): string {
+  let h = 2166136261 >>> 0
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0 }
+  return h.toString(16)
+}
+
+
 export const AnthropicProvider: ProviderAdapter = {
   id: 'anthropic',
 
-  async chatStream({ apiKey, model, messages, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
-    const client = new Anthropic({ apiKey })
+  async chatStream({ apiKey, model, messages, onChunk, onDone, onError, onTokenUsage, onConversationMeta, sessionId }): Promise<StreamHandle> {
+    const client = new Anthropic({ apiKey, defaultHeaders: { 'anthropic-beta': 'prompt-caching-2024-07-31' } as any })
 
-    const system = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
+    const systemText = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
+    // Use prompt caching for system prompt when available
+    const system: any = systemText ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }] : undefined
     const conv = messages.filter(m => m.role !== 'system').map((m: ChatMessage) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
 
     const holder: { abort?: () => void } = {}
 
     ;(async () => {
       try {
-        const stream: any = await withRetries(() => client.messages.create({ model, system: system || undefined, messages: conv as any, stream: true, max_tokens: 2048 }) as any)
+        const stream: any = await withRetries(() => client.messages.create({ model, system: (system as any) || undefined, messages: conv as any, stream: true, max_tokens: 2048 }) as any)
         holder.abort = () => { try { stream?.controller?.abort?.() } catch {} }
+
+        // Emit preamble hash (system only here) so UI can persist
+        try { onConversationMeta?.({ provider: 'anthropic', sessionId, preambleHash: hashStr(systemText) }) } catch {}
 
         let usage: any = null
 
@@ -63,8 +76,8 @@ export const AnthropicProvider: ProviderAdapter = {
   },
 
   // Agent streaming with tool-calling using Anthropic Messages API
-  async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta }): Promise<StreamHandle> {
-    const client = new Anthropic({ apiKey })
+  async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta, onConversationMeta, sessionId }): Promise<StreamHandle> {
+    const client = new Anthropic({ apiKey, defaultHeaders: { 'anthropic-beta': 'prompt-caching-2024-07-31' } as any })
 
     // Map tools to Anthropic format
     const toolMap = new Map<string, AgentTool>()
@@ -73,11 +86,20 @@ export const AnthropicProvider: ProviderAdapter = {
       return { name: t.name, description: t.description || undefined, input_schema: t.parameters as any }
     }) as any
 
-    const system = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
+    // Optional cached tool preamble block for stable tool schemas
+    const toolsDesc = (anthTools && anthTools.length)
+      ? 'Available tools:\n' + anthTools.map((t: any) => `- ${t.name}${t.description ? ': ' + t.description : ''}`).join('\n')
+      : ''
+    const toolBlocks: any = toolsDesc ? [{ type: 'text', text: toolsDesc, cache_control: { type: 'ephemeral' } }] : undefined
+
+    const systemText = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
+    const systemBlocks: any = systemText ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }] : undefined
+    const systemAllBlocks: any[] = [ ...(systemBlocks || []), ...((toolBlocks as any) || []) ]
+
     let conv: any[] = messages.filter(m => m.role !== 'system').map((m: any) => ({ role: m.role, content: m.content }))
     let cancelled = false
     let iteration = 0
-    
+
     // Helper to prune conversation when agent requests it
     const pruneConversation = (summary: any) => {
             const recent = conv.slice(-5) // Keep last 5 messages
@@ -100,12 +122,26 @@ export const AnthropicProvider: ProviderAdapter = {
           // Stream an assistant turn and capture any tool_use blocks while streaming
           const stream: any = await withRetries(() => client.messages.create({
             model: model as any,
-            system: system || undefined,
+            system: (systemAllBlocks && systemAllBlocks.length) ? (systemAllBlocks as any) : undefined,
             messages: conv as any,
             tools: anthTools.length ? anthTools : undefined,
             stream: true,
             max_tokens: 2048,
           }) as any)
+
+	          // Emit preamble + tools hash for persistence/visibility (once per turn)
+	          try {
+	            const toolsHash = hashStr(JSON.stringify(anthTools))
+
+	          // Emit preamble + tools hash for persistence/visibility (once per turn)
+	          try {
+	            const toolsHash = hashStr(JSON.stringify(anthTools))
+	            onConversationMeta?.({ provider: 'anthropic', sessionId, preambleHash: hashStr(systemText || ''), lastToolsHash: toolsHash })
+	          } catch {}
+
+	            onConversationMeta?.({ provider: 'anthropic', sessionId, preambleHash: hashStr(systemText || ''), lastToolsHash: toolsHash })
+	          } catch {}
+
 
           // Accumulate tool_use inputs incrementally and track usage
           const active: Record<string, { id: string; name: string; inputText: string }> = {}

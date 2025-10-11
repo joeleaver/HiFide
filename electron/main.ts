@@ -208,16 +208,26 @@ ipcMain.handle('secrets:getFor', async (_e, provider: string) => {
 
 
 
+
+// Safe logging helpers to avoid crashing when stdout/stderr pipes are closed (e.g., packaged app EPIPE)
+function safeLog(...args: any[]) {
+  try {
+    const out: any = (process as any).stdout
+    if (!out || out.destroyed) return
+    console.log(...args)
+  } catch {}
+}
+
 // Helper: get provider API key with env fallback for dev
 async function getProviderKey(providerId: string): Promise<string | null> {
   const mem = providerKeysMem[providerKeyName(providerId)]
-  console.log(`[main] getProviderKey(${providerId}): mem=${mem ? `${mem.slice(0, 10)}...` : 'none'}`)
+  safeLog(`[main] getProviderKey(${providerId}): mem=${mem ? `${mem.slice(0, 10)}...` : 'none'}`)
   if (mem && mem.trim()) return mem
   const env = process.env
   if (providerId === 'openai' && env?.OPENAI_API_KEY) return env.OPENAI_API_KEY
   if (providerId === 'anthropic' && env?.ANTHROPIC_API_KEY) return env.ANTHROPIC_API_KEY
   if (providerId === 'gemini' && (env?.GEMINI_API_KEY || env?.GOOGLE_API_KEY)) return env.GEMINI_API_KEY || env.GOOGLE_API_KEY || null
-  console.log(`[main] getProviderKey(${providerId}): returning null (no key found)`)
+  safeLog(`[main] getProviderKey(${providerId}): returning null (no key found)`)
   return null
 }
 
@@ -1195,7 +1205,7 @@ const agentTools: AgentTool[] = [
         const { stdout, stderr } = await exec(args.command, {
           cwd,
           env: { ...process.env, ...(args.env || {}) },
-          shell: args.shell,
+          shell: args.shell || (process.platform === 'win32' ? 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe' : (process.env.SHELL || '/bin/bash')),
           timeout: Math.max(1000, Math.min(600000, args.timeoutMs || 120000)),
           maxBuffer: 5 * 1024 * 1024,
         } as any)
@@ -1240,6 +1250,13 @@ const agentTools: AgentTool[] = [
       const sid = await (globalThis as any).__getOrCreateAgentPtyFor(req, { shell: args.shell, cwd: desiredCwd, cols: args.cols, rows: args.rows })
       const rec = (globalThis as any).__agentPtySessions.get(sid)
       if (!rec) return { ok: false, error: 'no-session' }
+
+      // Attach current window so that output goes to the visible terminal immediately
+      try {
+        const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents
+        if (wc) rec.attachedWcIds.add(wc.id)
+      } catch {}
+
       const state = rec.state
       const lastCmds = state.commands.slice(-5).map((c: any) => ({ id: c.id, command: c.command.slice(0, 200), startedAt: c.startedAt, endedAt: c.endedAt, bytes: c.bytes, tail: c.data.slice(-200) }))
       return {
@@ -1277,6 +1294,13 @@ const agentTools: AgentTool[] = [
       const sid = await (globalThis as any).__getOrCreateAgentPtyFor(req)
       const rec = (globalThis as any).__agentPtySessions.get(sid)
       if (!rec) return { ok: false, error: 'no-session' }
+
+      // Ensure the calling window is attached so output streams to the visible terminal
+      try {
+        const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents
+        if (wc) rec.attachedWcIds.add(wc.id)
+      } catch {}
+
       const { risky, reason } = isRiskyCommand(args.command)
       await logEvent(sid, 'agent_pty_command_attempt', { command: args.command, risky, reason })
       if (risky) {
@@ -1697,7 +1721,7 @@ ipcMain.handle('pty:create', async (event, opts: { shell?: string; cwd?: string;
   const isWin = process.platform === 'win32'
 
 
-  const shell = opts.shell || (isWin ? (process.env.COMSPEC || 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe') : (process.env.SHELL || '/bin/bash'))
+  const shell = opts.shell || (isWin ? 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe' : (process.env.SHELL || '/bin/bash'))
   const cols = opts.cols || 80
   const rows = opts.rows || 24
   const env = { ...process.env, ...(opts.env || {}) }
@@ -1925,12 +1949,31 @@ async function beginCommand(st: AgentTerminalState, cmd: string) {
 
 async function createAgentPtySession(opts: { shell?: string; cwd?: string; cols?: number; rows?: number }) {
   const isWin = process.platform === 'win32'
-  const shell = opts.shell || (isWin ? (process.env.COMSPEC || 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe') : (process.env.SHELL || '/bin/bash'))
+  // Normalize requested shell: on Windows, force PowerShell if a POSIX shell was requested
+  const normalizeShell = (s?: string) => {
+    if (!s || !s.trim()) return s
+    const lower = s.toLowerCase()
+    if (isWin && (lower.includes('bash') || lower.includes('sh') || lower.includes('/bin/'))) {
+      return 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe'
+    }
+    return s
+  }
+  let shell = normalizeShell(opts.shell) || (isWin ? 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe' : (process.env.SHELL || '/bin/bash'))
   const cols = opts.cols || 80
   const rows = opts.rows || 24
   const cwd = opts.cwd || process.cwd()
+
+  // Try spawn with requested/normalized shell, then fallback to platform default on failure
   const ptyModule = require('@homebridge/node-pty-prebuilt-multiarch')
-  const p: IPty = (ptyModule as any).spawn(shell, [], { name: 'xterm-color', cols, rows, cwd, env: process.env })
+  let p: IPty
+  try {
+    p = (ptyModule as any).spawn(shell, [], { name: 'xterm-color', cols, rows, cwd, env: process.env })
+  } catch (e) {
+    // Fallback once to a safe default shell
+    shell = (isWin ? 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe' : (process.env.SHELL || '/bin/bash'))
+    p = (ptyModule as any).spawn(shell, [], { name: 'xterm-color', cols, rows, cwd, env: process.env })
+  }
+
   const sessionId = randomUUID()
   const state: AgentTerminalState = { ring: '', ringLimit: 1_000_000, commands: [], maxCommands: 50, activeIndex: null }
   agentPtySessions.set(sessionId, { p, shell, cwd, cols, rows, state, attachedWcIds: new Set<number>() })
@@ -2101,6 +2144,15 @@ const providers: Record<string, ProviderAdapter> = { openai: OpenAIProvider, ant
 const inflight = new Map<string, { cancel: () => void }>()
 
 
+function resetInflight(requestId: string) {
+  const h = inflight.get(requestId)
+  if (h) {
+    try { h.cancel() } catch {}
+    inflight.delete(requestId)
+  }
+}
+
+
 // Propose edits via provider with strict JSON schema output
 function buildEditsSchemaPrompt() {
   return `You are a code editor agent. Propose edits strictly as JSON.\n\nReturn ONLY a JSON object with this shape (no prose, no markdown fences):\n{\n  "edits": [\n    { "type": "replaceOnce", "path": "relative/path/from/workspace.ext", "oldText": "...", "newText": "..." },\n    { "type": "insertAfterLine", "path": "relative/path/from/workspace.ext", "line": 42, "text": "..." },\n    { "type": "replaceRange", "path": "relative/path/from/workspace.ext", "start": 120, "end": 140, "text": "..." }\n  ]\n}\nRules:\n- Paths are relative to the workspace root.\n- Use smallest, precise edits.\n- Do not include explanations.`
@@ -2146,6 +2198,38 @@ function isPlanIntentText(t: string): boolean {
 }
 
 
+
+// Detect terminal-intent requests like "run", "dir", "ls", "git status", etc.
+function isTerminalIntentText(t: string): boolean {
+  const s = (t || '').toLowerCase()
+  const patterns: RegExp[] = [
+    /\b(run|execute|open|start)\b.*\b(cmd|powershell|terminal|shell)\b/,
+    /\b(dir|ls|pwd|cd|git|pnpm|npm|yarn|node|python|pip|go|cargo|make|gradle|mvn)\b/,
+    /^\s*(dir|ls|pwd|git|pnpm|npm|yarn|node|python|pip|go|cargo|make|gradle|mvn)\b/,
+  ]
+  return patterns.some(re => re.test(s))
+}
+
+// Produce a slim copy of tools with minimal descriptions and without per-field descriptions.
+function slimTools(tools: AgentTool[]): AgentTool[] {
+  const strip = (obj: any): any => {
+    if (!obj || typeof obj !== 'object') return obj
+    if (Array.isArray(obj)) return obj.map(strip)
+    const out: any = {}
+    for (const k of Object.keys(obj)) {
+      if (k === 'description' || k === 'examples' || k === 'example') continue
+      out[k] = strip((obj as any)[k])
+    }
+    return out
+  }
+  return tools.map((t) => ({
+    ...t,
+    // keep a tiny description to satisfy some providers, but avoid long prose
+    description: t.description && t.description.length > 80 ? t.description.slice(0, 80) : (t.description || ''),
+    parameters: strip(t.parameters),
+  }))
+}
+
 // Helper to send debug logs to renderer
 function sendDebugLog(level: 'info' | 'warning' | 'error', category: string, message: string, data?: any) {
   const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents
@@ -2153,7 +2237,7 @@ function sendDebugLog(level: 'info' | 'warning' | 'error', category: string, mes
 }
 
 // Auto router (chat vs tools) registered once at startup
-ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>, model?: string, provider?: string, tools?: string[], responseSchema?: any }) => {
+ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>, model?: string, provider?: string, tools?: string[], responseSchema?: any, sessionId?: string }) => {
   const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents
   const providerId = (args.provider || 'openai')
   sendDebugLog('info', 'Router', `Auto-routing request to ${providerId}`, { requestId: args.requestId, provider: providerId })
@@ -2171,10 +2255,24 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
   const wantsPlan = isPlanIntentText(lastUser?.content || '')
   const wantsEdits = !wantsPlan && isEditIntentText(lastUser?.content || '')
   const intent = wantsPlan ? 'PLAN' : wantsEdits ? 'TOOLS (edit intent)' : 'CHAT'
+  const wantsTerminal = !wantsPlan && isTerminalIntentText(lastUser?.content || '')
+
   sendDebugLog('info', 'Router', `Intent detection: ${intent}`, {
     hasAgentStream: !!provider.agentStream,
     lastUserMessage: lastUser?.content?.slice(0, 100)
   })
+
+  // Helper: apply rolling window while preserving system messages
+  const applyWindow = (arr: Array<{ role: 'system'|'user'|'assistant'; content: string }>) => {
+    const systems = arr.filter(m => m.role === 'system')
+    const rest = arr.filter(m => m.role !== 'system')
+    const recent = rest.slice(-8)
+    const pruned = [...systems, ...recent]
+    const savedChars = Math.max(0, arr.reduce((n, m) => n + (m.content?.length || 0), 0) - pruned.reduce((n, m) => n + (m.content?.length || 0), 0))
+    const approxTokens = Math.round(savedChars / 4)
+    if (approxTokens > 0) wc?.send('llm:savings', { requestId: args.requestId, provider: providerId, model: args.model || 'gpt-5', approxTokensAvoided: approxTokens })
+    return pruned
+  }
 
   // Planning intent branch: run a planning conversation (no tools, no edits)
   if (isPlanIntentText(lastUser?.content || '')) {
@@ -2186,7 +2284,7 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
 
     const model = args.model || 'gpt-5'
     const systemMsg = { role: 'system' as const, content: buildPlanningPrompt() }
-    const routed = [systemMsg, ...args.messages]
+    const routed = applyWindow([systemMsg, ...args.messages])
 
     try {
       const handle = await provider.chatStream({
@@ -2195,8 +2293,10 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
         messages: routed,
         onChunk: (text) => wc?.send('llm:chunk', { requestId: args.requestId, content: text }),
         onDone: () => wc?.send('llm:done', { requestId: args.requestId }),
+        onConversationMeta: (meta) => wc?.send('llm:provider-meta', { requestId: args.requestId, ...meta }),
         onError: (error) => wc?.send('llm:error', { requestId: args.requestId, error }),
         onTokenUsage: (usage) => wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage }),
+        sessionId: args.sessionId,
       })
       inflight.set(args.requestId, handle)
       return { ok: true, mode: 'plan' }
@@ -2211,7 +2311,15 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
     sendDebugLog('info', 'Agent', 'Using agent mode with tools', { toolCount: agentTools.length })
     // Use the same tool selection as agentStart
     const names = Array.isArray(args.tools) && args.tools.length ? new Set(args.tools) : null
-    const selectedTools = agentTools.filter(t => !names || names.has(t.name))
+    const allowTerminalRun = names ? names.has('terminal.run') : false
+    const allowSessionPresent = names ? names.has('terminal.session_present') : false
+    const selectedTools = agentTools
+      .filter(t => !names || names.has(t.name))
+      .filter(t => t.name !== 'terminal.run' || allowTerminalRun)
+      .filter(t => t.name !== 'terminal.session_present' || allowSessionPresent)
+    const narrowed = wantsTerminal ? selectedTools.filter(t => t.name.startsWith('terminal.')) : selectedTools
+    const toolsToSend = slimTools(narrowed)
+
 
     // Prepend tool-usage instruction and retrieval context (reuse logic from agentStart)
     const systemMsg = { role: 'system' as const, content: buildSystemPrompt(true) }
@@ -2227,28 +2335,47 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
 
     const model = args.model || 'gpt-5'
     try {
-      sendDebugLog('info', 'Agent', `Starting agent stream with ${selectedTools.length} tools`)
+    // Deduplicate by requestId: ignore if a stream is already running
+    if (inflight.has(args.requestId)) {
+      sendDebugLog('warning', 'Agent', `Duplicate start ignored for requestId=${args.requestId}`)
+      return { ok: true, mode: 'tools' }
+    }
+
+      resetInflight(args.requestId)
+      sendDebugLog('info', 'Agent', `Starting agent stream with ${toolsToSend.length} tools`)
+      // Mark inflight early to prevent race where two starts pass the check before set
+      if (!inflight.has(args.requestId)) { inflight.set(args.requestId, { cancel: () => {} } as any) }
+
       let buffer = ''
       const handle = await provider.agentStream({
         apiKey: key,
         model,
-        messages: routed,
-        tools: selectedTools,
+        messages: applyWindow(routed),
+        tools: toolsToSend,
         responseSchema: args.responseSchema,
+        onConversationMeta: (meta) => wc?.send('llm:provider-meta', { requestId: args.requestId, ...meta }),
         toolMeta: { requestId: args.requestId },
-        onChunk: (text) => { buffer += text; wc?.send('llm:chunk', { requestId: args.requestId, content: text }) },
+        onChunk: (text) => {
+          buffer += text
+          // If we're in strict JSON schema mode (structured edits), don't stream raw JSON into chat.
+          if (!args.responseSchema) {
+            wc?.send('llm:chunk', { requestId: args.requestId, content: text })
+          }
+        },
         onToolStart: (ev) => {
           try {
             const opId = ev.callId || `${ev.name}-${Date.now()}`
             let summary: string | undefined
             try { const s = JSON.stringify(ev.arguments); summary = s && s.length > 200 ? s.slice(0, 200) + '\u2026' : s } catch {}
             wc?.send('activity:event', { requestId: args.requestId, kind: 'ToolStarted', opId, tool: ev.name, summary })
+            try { sendDebugLog('info', 'Tool', `▶ ${ev.name}`, { callId: opId, args: ev.arguments }) } catch {}
           } catch {}
         },
         onToolEnd: (ev) => {
           try {
             const opId = ev.callId || `${ev.name}-${Date.now()}`
             wc?.send('activity:event', { requestId: args.requestId, kind: 'ToolCompleted', opId, tool: ev.name })
+            try { sendDebugLog('info', 'Tool', `✔ ${ev.name}`, { callId: opId, result: ev.result }) } catch {}
             if (ev?.name === 'edits.apply' && ev?.result && Array.isArray(ev.result.results)) {
               const changed = ev.result.results.filter((r: any) => r?.changed)
               const files = changed.map((r: any) => r?.path).filter(Boolean)
@@ -2303,6 +2430,7 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
             percentageUsed: Math.round((session.cumulativeTokens / tokenBudget) * 1000) / 10
           })
         },
+        sessionId: args.sessionId,
       })
       inflight.set(args.requestId, handle)
       return { ok: true, mode: 'tools' }
@@ -2325,17 +2453,29 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
 
   // Use agentStream with tools if provider supports it (enables file reading in chat mode)
   if (provider.agentStream) {
+
     const names = Array.isArray(args.tools) && args.tools.length ? new Set(args.tools) : null
-    const selectedTools = agentTools.filter(t => !names || names.has(t.name))
+    const allowTerminalRun = names ? names.has('terminal.run') : false
+    const allowSessionPresent = names ? names.has('terminal.session_present') : false
+    const selectedTools = agentTools
+      .filter(t => !names || names.has(t.name))
+      .filter(t => t.name !== 'terminal.run' || allowTerminalRun)
+      .filter(t => t.name !== 'terminal.session_present' || allowSessionPresent)
+
+    const wantsTerminalChat = isTerminalIntentText((([...args.messages].reverse().find(m => m.role === 'user')?.content) || ''))
+    const narrowed = wantsTerminalChat ? selectedTools.filter(t => t.name.startsWith('terminal.')) : selectedTools
+    const toolsToSend = slimTools(narrowed)
 
     try {
+      resetInflight(args.requestId)
       const handle = await provider.agentStream({
         apiKey: key,
         model,
-        messages: args.messages,
-        tools: selectedTools,
+        messages: applyWindow(args.messages),
+        tools: toolsToSend,
         responseSchema: args.responseSchema,
         toolMeta: { requestId: args.requestId },
+        onConversationMeta: (meta) => wc?.send('llm:provider-meta', { requestId: args.requestId, ...meta }),
         onChunk: (text) => wc?.send('llm:chunk', { requestId: args.requestId, content: text }),
         onToolStart: (ev) => {
           try {
@@ -2343,12 +2483,14 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
             let summary: string | undefined
             try { const s = JSON.stringify(ev.arguments); summary = s && s.length > 200 ? s.slice(0, 200) + '\u2026' : s } catch {}
             wc?.send('activity:event', { requestId: args.requestId, kind: 'ToolStarted', opId, tool: ev.name, summary })
+            try { sendDebugLog('info', 'Tool', `\u25b6 ${ev.name}`, { callId: opId, args: ev.arguments }) } catch {}
           } catch {}
         },
         onToolEnd: (ev) => {
           try {
             const opId = ev.callId || `${ev.name}-${Date.now()}`
             wc?.send('activity:event', { requestId: args.requestId, kind: 'ToolCompleted', opId, tool: ev.name })
+            try { sendDebugLog('info', 'Tool', `\u2714 ${ev.name}`, { callId: opId, result: ev.result }) } catch {}
             if (ev?.name === 'edits.apply' && ev?.result && Array.isArray(ev.result.results)) {
               const changed = ev.result.results.filter((r: any) => r?.changed)
               const files = changed.map((r: any) => r?.path).filter(Boolean)
@@ -2380,6 +2522,7 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
             percentageUsed: Math.round((session.cumulativeTokens / tokenBudget) * 1000) / 10
           })
         },
+        sessionId: args.sessionId,
       })
       inflight.set(args.requestId, handle)
       return { ok: true, mode: 'chat' }
@@ -2394,11 +2537,13 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
     const handle = await provider.chatStream({
       apiKey: key,
       model,
-      messages: args.messages,
+      messages: applyWindow(args.messages),
       onChunk: (text) => wc?.send('llm:chunk', { requestId: args.requestId, content: text }),
       onDone: () => wc?.send('llm:done', { requestId: args.requestId }),
+      onConversationMeta: (meta) => wc?.send('llm:provider-meta', { requestId: args.requestId, ...meta }),
       onError: (error) => wc?.send('llm:error', { requestId: args.requestId, error }),
       onTokenUsage: (usage) => wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage }),
+      sessionId: args.sessionId,
     })
     inflight.set(args.requestId, handle)
     return { ok: true, mode: 'chat' }
@@ -2409,7 +2554,7 @@ ipcMain.handle('llm:auto', async (_event, args: { requestId: string, messages: A
 })
 
 // Agent-mode LLM streaming with provider-native tools
-ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>, model?: string, provider?: string, tools?: string[], responseSchema?: any }) => {
+ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>, model?: string, provider?: string, tools?: string[], responseSchema?: any, sessionId?: string }) => {
   const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents
   const providerId = (args.provider || 'openai')
   sendDebugLog('info', 'Agent', `Starting agent mode with ${providerId}`, { requestId: args.requestId, provider: providerId })
@@ -2419,6 +2564,18 @@ ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messa
     sendDebugLog('error', 'Agent', missingMsg, { provider: providerId })
     wc?.send('llm:error', { requestId: args.requestId, error: missingMsg })
     return { ok: false }
+  }
+
+  // Helper: apply rolling window while preserving system messages
+  const applyWindow = (arr: Array<{ role: 'system'|'user'|'assistant'; content: string }>) => {
+    const systems = arr.filter(m => m.role === 'system')
+    const rest = arr.filter(m => m.role !== 'system')
+    const recent = rest.slice(-8)
+    const pruned = [...systems, ...recent]
+    const savedChars = Math.max(0, arr.reduce((n, m) => n + (m.content?.length || 0), 0) - pruned.reduce((n, m) => n + (m.content?.length || 0), 0))
+    const approxTokens = Math.round(savedChars / 4)
+    if (approxTokens > 0) wc?.send('llm:savings', { requestId: args.requestId, provider: providerId, model: args.model || 'gpt-5', approxTokensAvoided: approxTokens })
+    return pruned
   }
 
   const provider = providers[providerId]
@@ -2431,11 +2588,13 @@ ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messa
       const handle = await provider.chatStream({
         apiKey: key,
         model,
-        messages: args.messages,
+        messages: applyWindow(args.messages),
         onChunk: (t) => { buffer += t; wc?.send('llm:chunk', { requestId: args.requestId, content: t }) },
         onDone: () => wc?.send('llm:done', { requestId: args.requestId }),
+      onConversationMeta: (meta) => wc?.send('llm:provider-meta', { requestId: args.requestId, ...meta }),
         onError: (error) => wc?.send('llm:error', { requestId: args.requestId, error }),
         onTokenUsage: (usage) => wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage }),
+        sessionId: args.sessionId,
       })
       inflight.set(args.requestId, handle)
       return { ok: true }
@@ -2447,7 +2606,16 @@ ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messa
 
   // Select tools to expose; default to full set for file work
   const names = Array.isArray(args.tools) && args.tools.length ? new Set(args.tools) : null
-  const selectedTools = agentTools.filter(t => !names || names.has(t.name))
+  const allowTerminalRun = names ? names.has('terminal.run') : false
+  const allowSessionPresent = names ? names.has('terminal.session_present') : false
+  const selectedTools = agentTools
+    .filter(t => !names || names.has(t.name))
+    .filter(t => t.name !== 'terminal.run' || allowTerminalRun)
+    .filter(t => t.name !== 'terminal.session_present' || allowSessionPresent)
+  const wantsTerminalAgent = isTerminalIntentText((([...args.messages].reverse().find(m => m.role === 'user')?.content) || ''))
+  const narrowed = wantsTerminalAgent ? selectedTools.filter(t => t.name.startsWith('terminal.')) : selectedTools
+  const toolsToSend = slimTools(narrowed)
+
 
   // Augment messages with project context and index search results
   try {
@@ -2462,29 +2630,46 @@ ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messa
   const systemMsg = { role: 'system' as const, content: buildSystemPrompt(true) }
   args.messages = [systemMsg, ...args.messages]
 
+  // Deduplicate by requestId: if one is already running, ignore this start
+  if (inflight.has(args.requestId)) {
+    sendDebugLog('warning', 'Agent', `Duplicate agentStart ignored for requestId=${args.requestId}`)
+    return { ok: true, mode: 'agent' }
+  }
+
+    // Mark inflight early to avoid race on duplicate starts
+    if (!inflight.has(args.requestId)) { inflight.set(args.requestId, { cancel: () => {} } as any) }
+
   try {
-    sendDebugLog('info', 'Agent', `Starting agent stream with ${selectedTools.length} tools available`)
+    resetInflight(args.requestId)
+    sendDebugLog('info', 'Agent', `Starting agent stream with ${toolsToSend.length} tools available`)
     let buffer = ''
     const handle = await provider.agentStream!({
       apiKey: key,
       model,
-      messages: args.messages,
-      tools: selectedTools,
+      messages: applyWindow(args.messages),
+      tools: toolsToSend,
       responseSchema: args.responseSchema,
       toolMeta: { requestId: args.requestId },
-      onChunk: (text) => { buffer += text; wc?.send('llm:chunk', { requestId: args.requestId, content: text }) },
+      onChunk: (text) => {
+        buffer += text
+        if (!args.responseSchema) {
+          wc?.send('llm:chunk', { requestId: args.requestId, content: text })
+        }
+      },
       onToolStart: (ev) => {
         try {
           const opId = ev.callId || `${ev.name}-${Date.now()}`
           let summary: string | undefined
           try { const s = JSON.stringify(ev.arguments); summary = s && s.length > 200 ? s.slice(0, 200) + '…' : s } catch {}
           wc?.send('activity:event', { requestId: args.requestId, kind: 'ToolStarted', opId, tool: ev.name, summary })
+          try { sendDebugLog('info', 'Tool', `\u25b6 ${ev.name}`, { callId: opId, args: ev.arguments }) } catch {}
         } catch {}
       },
       onToolEnd: (ev) => {
         try {
           const opId = ev.callId || `${ev.name}-${Date.now()}`
           wc?.send('activity:event', { requestId: args.requestId, kind: 'ToolCompleted', opId, tool: ev.name })
+          try { sendDebugLog('info', 'Tool', `\u2714 ${ev.name}`, { callId: opId, result: ev.result }) } catch {}
           // If edits.apply returned results, emit a FileEditApplied event
           if (ev?.name === 'edits.apply' && ev?.result && Array.isArray(ev.result.results)) {
             const changed = ev.result.results.filter((r: any) => r?.changed)
@@ -2541,6 +2726,7 @@ ipcMain.handle('llm:agentStart', async (_event, args: { requestId: string, messa
           percentageUsed: Math.round((session.cumulativeTokens / tokenBudget) * 1000) / 10
         })
       },
+      sessionId: args.sessionId,
     })
     inflight.set(args.requestId, handle)
     return { ok: true }
@@ -2579,6 +2765,7 @@ ipcMain.handle('edits:propose', async (_e, args: { instruction: string; model?: 
     messages,
     onChunk: (t) => { buffer += t },
     onDone: () => { /* no-op */ },
+
     onError: (_e) => { /* no-op */ },
   })
   // Wait briefly for stream to complete (best-effort)
@@ -2600,7 +2787,7 @@ ipcMain.handle('edits:propose', async (_e, args: { instruction: string; model?: 
   }
 })
 
-ipcMain.handle('llm:start', async (_event, args: { requestId: string, messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>, model?: string, provider?: string }) => {
+ipcMain.handle('llm:start', async (_event, args: { requestId: string, messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>, model?: string, provider?: string, sessionId?: string }) => {
   const wc = BrowserWindow.getFocusedWindow()?.webContents || win?.webContents
   const providerId = (args.provider || 'openai')
   sendDebugLog('info', 'LLM', `Starting chat with ${providerId}`, { requestId: args.requestId, provider: providerId })
@@ -2628,13 +2815,27 @@ ipcMain.handle('llm:start', async (_event, args: { requestId: string, messages: 
   }
 
   const model = args.model || 'gpt-5'
+
+  // Apply a rolling window and emit an approximate savings metric
+  const applyWindow = (arr: Array<{ role: 'system'|'user'|'assistant'; content: string }>) => {
+    const systems = arr.filter(m => m.role === 'system')
+    const rest = arr.filter(m => m.role !== 'system')
+    const recent = rest.slice(-8)
+    const pruned = [...systems, ...recent]
+    const savedChars = Math.max(0, arr.reduce((n, m) => n + (m.content?.length || 0), 0) - pruned.reduce((n, m) => n + (m.content?.length || 0), 0))
+    const approxTokens = Math.round(savedChars / 4)
+    if (approxTokens > 0) wc?.send('llm:savings', { requestId: args.requestId, provider: providerId, model, approxTokensAvoided: approxTokens })
+    return pruned
+  }
+
   try {
     let buffer = ''
     const handle = await provider.chatStream({
       apiKey: key,
       model,
-      messages: args.messages,
+      messages: applyWindow(args.messages),
       onChunk: (text) => { buffer += text; wc?.send('llm:chunk', { requestId: args.requestId, content: text }) },
+      onConversationMeta: (meta) => wc?.send('llm:provider-meta', { requestId: args.requestId, ...meta }),
       onDone: async () => {
         // Attempt to detect and auto-apply edits returned as JSON
         try {
@@ -2652,6 +2853,7 @@ ipcMain.handle('llm:start', async (_event, args: { requestId: string, messages: 
       },
       onError: (error) => wc?.send('llm:error', { requestId: args.requestId, error }),
       onTokenUsage: (usage) => wc?.send('llm:token-usage', { requestId: args.requestId, provider: providerId, model, usage }),
+      sessionId: args.sessionId,
     })
     inflight.set(args.requestId, handle)
     return { ok: true }
@@ -3124,6 +3326,8 @@ Be concise and specific to this repository.`
             { role: 'system', content: prompt },
             { role: 'user', content: user },
           ],
+
+
           onChunk: (t) => { out += t },
           onDone: () => {},
           onError: (_e) => {},

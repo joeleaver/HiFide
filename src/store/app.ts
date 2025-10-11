@@ -97,6 +97,14 @@ export type Session = {
     totalCost: number
     currency: string
   }
+  // Provider-specific conversation metadata (optional)
+  conversationState?: Record<string, {
+    conversationId?: string
+    lastResponseId?: string
+    preambleHash?: string
+    lastSystemPrompt?: string
+    lastToolsHash?: string
+  }>
 }
 
 // Sessions are now loaded from files, not localStorage
@@ -110,6 +118,7 @@ async function loadSessions(): Promise<{ sessions: Session[]; currentId: string 
         messages: [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        conversationState: {},
         tokenUsage: { byProvider: {}, total: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
         costs: { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }
       }
@@ -138,6 +147,7 @@ async function loadSessions(): Promise<{ sessions: Session[]; currentId: string 
     messages: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    conversationState: {},
     tokenUsage: { byProvider: {}, total: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
     costs: { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }
   }
@@ -337,6 +347,8 @@ const chatInitial = {
   // Token usage tracking
   lastRequestTokenUsage: { provider: string; model: string; usage: TokenUsage } | null
   recordTokenUsage: (provider: string, model: string, usage: TokenUsage) => void
+  // Token savings (approximate, from windowing or provider-native conversations)
+  lastRequestSavings: { provider: string; model: string; approxTokensAvoided: number } | null
 
   // Agent metrics (from main process)
   agentMetrics: null | { requestId: string; tokensUsed: number; tokenBudget: number; iterationsUsed: number; maxIterations: number; percentageUsed: number }
@@ -349,6 +361,7 @@ const chatInitial = {
 	  chunkStats: { count: number; totalChars: number }
 	  retryCount: number
 	  llmIpcSubscribed: boolean
+	  doneByRequestId: Record<string, boolean>
 	  ensureLlmIpcSubscription: () => void
 
       // Activity/badge state
@@ -1092,7 +1105,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
       { role: 'user' as const, content: user },
     ]
     try {
-      const res = await window.llm?.agentStart?.(rid, msgs, selectedModel, selectedProvider)
+      const res = await window.llm?.agentStart?.(rid, msgs, selectedModel, selectedProvider, undefined, undefined, get().currentId || undefined)
       try { get().pushRouteRecord?.({ requestId: rid, mode: 'tools', provider: selectedProvider, model: selectedModel, timestamp: Date.now() }) } catch {}
       if (!res?.ok) get().addDebugLog('error', 'LLM', 'agentStart failed for ApprovedPlan execution', res)
     } catch (e) {
@@ -1131,7 +1144,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     ]
 
     try {
-      const res = await window.llm?.agentStart?.(rid, msgs, selectedModel, selectedProvider)
+      const res = await window.llm?.agentStart?.(rid, msgs, selectedModel, selectedProvider, undefined, undefined, get().currentId || undefined)
       try { get().pushRouteRecord?.({ requestId: rid, mode: 'tools', provider: selectedProvider, model: selectedModel, timestamp: Date.now() }) } catch {}
       if (!res?.ok) get().addDebugLog('error', 'LLM', 'agentStart failed for autonomous ApprovedPlan execution', res)
     } catch (e) {
@@ -1471,18 +1484,29 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     // Global PTY event routing
     try {
       ptySvc.onData(({ sessionId, data }) => {
-        const tabId = get().ptyBySessionId[sessionId]
-        const sub = get().ptySubscribers[tabId]
+        let tabId = get().ptyBySessionId[sessionId]
+        // Failsafe: if no mapping yet, bind to active agent terminal on first data chunk
+        if (!tabId) {
+          const activeAgent = get().agentActiveTerminal
+          if (activeAgent) {
+            set({ ptyBySessionId: { ...get().ptyBySessionId, [sessionId]: activeAgent } })
+            tabId = activeAgent
+          }
+        }
+        const sub = tabId ? get().ptySubscribers[tabId] : undefined
         if (sub) sub(data)
       })
       ptySvc.onExit(({ sessionId, exitCode }) => {
         const tabId = get().ptyBySessionId[sessionId]
-        const sub = get().ptySubscribers[tabId]
+        const sub = tabId ? get().ptySubscribers[tabId] : undefined
         if (sub) sub(`\r\n[process exited with code ${exitCode}]\r\n`)
         // Cleanup mappings but keep subscriber until component unmounts
-        const { [tabId]: _, ...rest } = get().ptySessions
+        if (tabId) {
+          const { [tabId]: _, ...rest } = get().ptySessions
+          set({ ptySessions: rest })
+        }
         const { [sessionId]: __, ...restIdx } = get().ptyBySessionId
-        set({ ptySessions: rest, ptyBySessionId: restIdx })
+        set({ ptyBySessionId: restIdx })
       })
     } catch {}
     set({ ptyInitialized: true })
@@ -1490,29 +1514,42 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   ensurePtySession: async (tabId, opts) => {
     const st = get()
     st.ensurePtyInfra()
-    const existing = st.ptySessions[tabId]
-    if (existing) return { sessionId: existing.sessionId }
     const cols = opts?.cols ?? 80
     const rows = opts?.rows ?? 24
     const context = opts?.context ?? 'explorer' // Default to explorer for backward compatibility
+
     try {
-      let sessionId: string | null = null
+      // Agent terminals need to bind to the ACTIVE request's PTY session.
       if (context === 'agent') {
         const requestId = get().currentRequestId || 'agent'
-        const res = await ptySvc.attachAgent({ requestId, tailBytes: 400 })
-        if (!res?.sessionId) {
-          console.error('[PTY] attachAgent returned no sessionId:', res)
+        const attach = await ptySvc.attachAgent({ requestId, tailBytes: 400 })
+        if (!attach?.sessionId) {
+          console.error('[PTY] attachAgent returned no sessionId:', attach)
           throw new Error('PTY attach failed: no sessionId returned')
         }
-        sessionId = res.sessionId
-      } else {
-        const res = await ptySvc.create({ cwd: opts?.cwd, shell: opts?.shell, cols, rows })
-        if (!res?.sessionId) {
-          console.error('[PTY] create returned no sessionId:', res)
-          throw new Error('PTY create failed: no sessionId returned')
+        const desiredSessionId = attach.sessionId
+        const existing = st.ptySessions[tabId]
+        if (existing && existing.sessionId === desiredSessionId) {
+          return { sessionId: existing.sessionId }
         }
-        sessionId = res.sessionId
+        // If an old agent session is wired, detach and rewire to the active one
+        if (existing) {
+          try { await ptySvc.detachAgent(existing.sessionId) } catch {}
+          const { [existing.sessionId]: __, ...restIdx } = get().ptyBySessionId
+          set({ ptyBySessionId: restIdx })
+        }
+        const rec: PtySession = { tabId, sessionId: desiredSessionId, cols, rows, cwd: opts?.cwd, shell: opts?.shell, context }
+        set({ ptySessions: { ...get().ptySessions, [tabId]: rec }, ptyBySessionId: { ...get().ptyBySessionId, [desiredSessionId]: tabId } })
+        return { sessionId: desiredSessionId }
       }
+
+      // Non-agent (explorer) terminals create their own PTY
+      const create = await ptySvc.create({ cwd: opts?.cwd, shell: opts?.shell, cols, rows })
+      if (!create?.sessionId) {
+        console.error('[PTY] create returned no sessionId:', create)
+        throw new Error('PTY create failed: no sessionId returned')
+      }
+      const sessionId = create.sessionId
       const rec: PtySession = { tabId, sessionId, cols, rows, cwd: opts?.cwd, shell: opts?.shell, context }
       set({ ptySessions: { ...get().ptySessions, [tabId]: rec }, ptyBySessionId: { ...get().ptyBySessionId, [sessionId]: tabId } })
       return { sessionId }
@@ -1673,9 +1710,15 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   addAssistantMessage: (content) => {
     set((s) => {
       if (!s.currentId) return {}
-      const sessions = s.sessions.map((sess) =>
-        sess.id === s.currentId ? { ...sess, messages: [...sess.messages, { role: 'assistant' as const, content }], updatedAt: Date.now() } : sess
-      )
+      const sessions = s.sessions.map((sess) => {
+        if (sess.id !== s.currentId) return sess
+        const last = sess.messages[sess.messages.length - 1]
+        if (last && last.role === 'assistant' && last.content === content) {
+          // Deduplicate identical consecutive assistant messages
+          return sess
+        }
+        return { ...sess, messages: [...sess.messages, { role: 'assistant' as const, content }], updatedAt: Date.now() }
+      })
       return { sessions }
     })
     // Save after assistant message
@@ -1690,6 +1733,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 
   // Token usage tracking
   lastRequestTokenUsage: null,
+  lastRequestSavings: null,
   recordTokenUsage: (provider, model, usage) => {
     set((s) => {
       if (!s.currentId) return { lastRequestTokenUsage: { provider, model, usage } }
@@ -1857,6 +1901,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 	  chunkStats: { count: 0, totalChars: 0 },
 	  retryCount: 0,
 	  llmIpcSubscribed: false,
+		  doneByRequestId: {},
 
 		  // Activity/badge state
 		  activityByRequestId: {},
@@ -1875,6 +1920,9 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 	    }
 	    const onDone = () => {
 	      const rid = get().currentRequestId; if (!rid) return
+	      // Idempotency guard to avoid duplicate completion handling
+	      if (get().doneByRequestId?.[rid]) return
+	      set({ doneByRequestId: { ...get().doneByRequestId, [rid]: true } })
 	      const text = get().streamingText
 	      try { get().addAssistantMessage(text) } catch {}
 	      // log chunk stats
@@ -1910,24 +1958,82 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 	      try { get().recordTokenUsage(payload.provider, payload.model, payload.usage) } catch {}
 	      get().addDebugLog('info', 'Tokens', `Usage: ${payload.usage?.totalTokens} tokens (${payload.provider}/${payload.model})`, payload.usage)
 
-		    // Activity events
-		    const onActivity = (_: any, payload: any) => {
-		      const rid = payload?.requestId; if (!rid) return
-		      const ev: ActivityEvent = { ...payload, timestamp: Date.now() }
-		      set((st) => {
-		        const map = { ...(st.activityByRequestId || {}) } as Record<string, ActivityEvent[]>
-		        const arr = Array.isArray(map[rid]) ? [...map[rid], ev] : [ev]
-		        map[rid] = arr
-		        return { activityByRequestId: map }
-		      })
-		    }
-		    ipc.on('activity:event', onActivity)
 
 	    }
 	    ipc.on('llm:chunk', onChunk)
 	    ipc.on('llm:done', onDone)
 	    ipc.on('llm:error', onErr)
 	    ipc.on('llm:token-usage', onToken)
+    ipc.on('llm:savings', (_: any, payload: any) => {
+      const rid = get().currentRequestId
+      if (!rid || payload?.requestId !== rid) return
+      set({ lastRequestSavings: { provider: payload.provider, model: payload.model, approxTokensAvoided: Math.max(0, Number(payload?.approxTokensAvoided || 0)) } })
+    })
+
+
+			// Provider metadata (conversation ids, preamble hashes)
+			ipc.on('llm:provider-meta', (_: any, payload: any) => {
+			  const rid = get().currentRequestId
+			  if (!rid || payload?.requestId !== rid) return
+			  const prov = String(payload?.provider || '')
+			  if (!prov) return
+			  set((st) => {
+			    const sid = st.currentId
+			    if (!sid) return {}
+			    const sessions = st.sessions.map((s) => {
+			      if (s.id !== sid) return s
+			      const cs = { ...(s.conversationState || {}) }
+			      const prev = cs[prov] || {}
+			      cs[prov] = {
+			        ...prev,
+			        lastResponseId: payload?.lastResponseId ?? prev.lastResponseId,
+			        preambleHash: payload?.preambleHash ?? prev.preambleHash,
+			        lastToolsHash: payload?.lastToolsHash ?? prev.lastToolsHash,
+			      }
+			      return { ...s, conversationState: cs }
+			    })
+			    return { sessions }
+			  })
+			})
+
+			// Subscribe to activity/events and debug logs once when LLM IPC is set up
+			const onActivity = (_: any, payload: any) => {
+			  const rid = payload?.requestId; if (!rid) return
+			  const ev: ActivityEvent = { ...payload, timestamp: Date.now() }
+			  set((st) => {
+			    const map = { ...(st.activityByRequestId || {}) } as Record<string, ActivityEvent[]>
+			    const arr = Array.isArray(map[rid]) ? [...map[rid], ev] : [ev]
+			    map[rid] = arr
+			    return { activityByRequestId: map }
+			  })
+			}
+			ipc.on('activity:event', onActivity)
+
+			const onActivityOpen = async (_: any, payload: any) => {
+			  try {
+			    const tool = String(payload?.tool || '')
+			    if (tool.startsWith('terminal.')) {
+			      const st = get()
+			      if (!st.agentTerminalPanelOpen) set({ agentTerminalPanelOpen: true })
+			      if ((st.agentTerminalTabs || []).length === 0) {
+			        try { get().addTerminalTab('agent') } catch {}
+				      }
+				      // Ensure the active Agent terminal is bound to the current request's PTY
+				      const active = get().agentActiveTerminal
+				      if (active) {
+				        try { await get().ensurePtySession(active, { context: 'agent' }) } catch {}
+				        try { get().fitAllTerminals('agent') } catch {}
+			      }
+			    }
+			  } catch {}
+			}
+			ipc.on('activity:event', onActivityOpen)
+
+			const onDebugLog = (_: any, p: any) => {
+			  try { get().addDebugLog(p?.level || 'info', p?.category || 'Main', p?.message || '', p?.data) } catch {}
+			}
+			ipc.on('debug:log', onDebugLog)
+
 	    set({ llmIpcSubscribed: true })
 	  },
 	  buildResponseSchemaForInput: (userText) => {
@@ -1950,6 +2056,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 	                type: { type: 'string', enum: ['replaceOnce', 'insertAfterLine', 'replaceRange'] },
 	                path: { type: 'string' },
 	                oldText: { type: 'string' },
+
 	                newText: { type: 'string' },
 	                line: { type: 'integer' },
 	                start: { type: 'integer' },
@@ -1961,6 +2068,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 	          },
 	        },
 	        required: ['edits'],
+
 	      },
 	      strict: false,
 	    }
@@ -1975,11 +2083,15 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 	    const { selectedModel, selectedProvider } = get()
 	    get().addDebugLog('info', 'LLM', `Sending request to ${selectedProvider}/${selectedModel}`, { requestId: rid, provider: selectedProvider, model: selectedModel, messageCount: toSend.length })
 	    const schema = get().buildResponseSchemaForInput(userText)
-	    const res = await window.llm?.auto?.(rid, toSend, selectedModel, selectedProvider, undefined, schema)
+	    const res = await window.llm?.auto?.(rid, toSend, selectedModel, selectedProvider, undefined, schema, get().currentId || undefined)
 	    try { get().pushRouteRecord?.({ requestId: rid, mode: (res as any)?.mode || 'chat', provider: selectedProvider, model: selectedModel, timestamp: Date.now() }) } catch {}
 	  },
 	  stopCurrentRequest: async () => {
 	    const rid = get().currentRequestId; if (!rid) return
+
+
+
+
 	    await window.llm?.cancel?.(rid)
 	    const cs = get().chunkStats
 	    set({ currentRequestId: null, streamingText: '', chunkStats: { count: 0, totalChars: 0 } })

@@ -26,6 +26,7 @@ export default function AgentView() {
 
   // Token usage selectors used in meta panel
   const lastRequest = useAppStore((s) => s.lastRequestTokenUsage)
+  const lastSavings = useAppStore((s) => s.lastRequestSavings)
   const calculateCost = useAppStore((s) => s.calculateCost)
 
   // Debug panel resize state
@@ -302,6 +303,9 @@ export default function AgentView() {
                                   <span style={{ color: '#666' }}> out</span>
                                   <span style={{ color: '#666' }}> = </span>
                                   <span style={{ color: '#ccc' }}>{lr.usage.totalTokens.toLocaleString()}</span>
+                                  {lastSavings && lastSavings.provider === lr.provider && lastSavings.model === lr.model && (
+                                    <span style={{ color: '#66bb6a', marginLeft: 8 }}>−{lastSavings.approxTokensAvoided.toLocaleString()} saved</span>
+                                  )}
                                 </Text>
                               </Group>
                               <Group gap="xs" ml="md">
