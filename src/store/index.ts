@@ -79,29 +79,38 @@ export type AppStore = ViewSlice &
  * - The combined store provides full type safety
  * - Dependencies are documented in each slice file
  */
+
+// Generate a unique ID for this store instance (for HMR debugging)
+const storeInstanceId = `store-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+console.log('[store] Creating store instance:', storeInstanceId)
+
 export const useAppStore = create<AppStore>()(
   persist(
-    (set, get, store) => ({
-      // Simple Slices
-      ...createViewSlice(set, get, store),
-      ...createUiSlice(set, get, store),
-      ...createDebugSlice(set, get, store),
-      ...createPlanningSlice(set, get, store),
+    (set, get, store) => {
+      // Add instance ID for debugging HMR issues
+      ;(store as any).__storeId = storeInstanceId
 
-      // Medium Slices
-      ...createAppSlice(set, get, store),
-      ...createWorkspaceSlice(set, get, store),
-      ...createExplorerSlice(set, get, store),
-      ...createIndexingSlice(set, get, store),
+      return {
+        // Simple Slices
+        ...createViewSlice(set, get, store),
+        ...createUiSlice(set, get, store),
+        ...createDebugSlice(set, get, store),
+        ...createPlanningSlice(set, get, store),
 
-      // Complex Slices
-      ...createProviderSlice(set, get, store),
-      ...createSettingsSlice(set, get, store),
-      ...createTerminalSlice(set, get, store),
-      ...createSessionSlice(set, get, store),
-      ...createFlowEditorSlice(set, get, store),
+        // Medium Slices
+        ...createAppSlice(set, get, store),
+        ...createWorkspaceSlice(set, get, store),
+        ...createExplorerSlice(set, get, store),
+        ...createIndexingSlice(set, get, store),
 
-    }),
+        // Complex Slices
+        ...createProviderSlice(set, get, store),
+        ...createSettingsSlice(set, get, store),
+        ...createTerminalSlice(set, get, store),
+        ...createSessionSlice(set, get, store),
+        ...createFlowEditorSlice(set, get, store),
+      }
+    },
     {
       name: 'hifide-app-storage',
       // Specify which parts of the state to persist
@@ -257,6 +266,23 @@ export const initializeStore = async () => {
   } finally {
     isInitializing = false
   }
+}
+
+/**
+ * Re-register event handlers after HMR
+ * This is called automatically when the store module is hot-reloaded
+ */
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    console.log('[store] HMR detected - re-registering event handlers...')
+    const store = useAppStore.getState()
+
+    // Force re-registration by clearing the flag
+    ;(window as any).__fe_event_handler_registered = false
+
+    // Re-register the event handler with the new store instance
+    store.registerGlobalFlowEventHandler()
+  })
 }
 
 // ============================================================================

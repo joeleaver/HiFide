@@ -129,6 +129,9 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
       },
     }))
     console.debug('[provider] Providers validation:', map)
+
+    // Ensure consistency after provider validation changes
+    get().ensureProviderModelConsistency()
   },
   
   setModelsForProvider: (provider: string, models: ModelOption[]) => {
@@ -139,6 +142,9 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
       },
     }))
     console.debug('[provider] Models for', provider, ':', models.length)
+
+    // Ensure consistency after models are loaded
+    get().ensureProviderModelConsistency()
   },
   
   refreshModels: async (provider: 'openai' | 'anthropic' | 'gemini') => {
@@ -234,14 +240,14 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
     const state = get()
     const validMap = state.providerValid || {}
     const anyValidated = Object.values(validMap).some(Boolean)
-    
+
     // Get list of valid providers, or all providers if none are validated yet
     const providerOptions = anyValidated
       ? (['openai', 'anthropic', 'gemini'] as const).filter((p) => validMap[p])
       : (['openai', 'anthropic', 'gemini'] as const)
-    
+
     let provider = state.selectedProvider
-    
+
     // If current provider is not in the valid list, switch to first valid provider
     if (!providerOptions.includes(provider as any) && providerOptions.length > 0) {
       provider = providerOptions[0]
@@ -249,31 +255,30 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
       setInLocalStorage(LS_KEYS.SELECTED_PROVIDER, provider)
       console.log('[provider] Switched to valid provider:', provider)
     }
-    
+
     // Get models for current provider
     const models = state.modelsByProvider[provider] || []
-    
-    // Check if we have a preferred default model for this provider
-    const preferred = state.defaultModels?.[provider]
-    const hasPreferred = preferred && models.some((m) => m.value === preferred)
-    
-    if (hasPreferred) {
-      // Use preferred model if it's available
-      if (state.selectedModel !== preferred) {
+
+    // Check if current model is valid for this provider
+    const currentModelValid = models.some((m) => m.value === state.selectedModel)
+
+    // Only auto-select a model if the current one is invalid
+    if (!currentModelValid && models.length > 0) {
+      // Check if we have a preferred default model for this provider
+      const preferred = state.defaultModels?.[provider]
+      const hasPreferred = preferred && models.some((m) => m.value === preferred)
+
+      if (hasPreferred) {
+        // Use preferred model if it's available
         set({ selectedModel: preferred })
         setInLocalStorage(LS_KEYS.SELECTED_MODEL, preferred)
-        console.log('[provider] Using preferred model:', preferred)
-      }
-      return
-    }
-    
-    // If current model is not in the list, select first available model
-    if (!models.find((m) => m.value === state.selectedModel)) {
-      const first = models[0]
-      if (first?.value) {
+        console.log('[provider] Current model invalid, using preferred model:', preferred)
+      } else {
+        // Otherwise use first available model
+        const first = models[0]
         set({ selectedModel: first.value })
         setInLocalStorage(LS_KEYS.SELECTED_MODEL, first.value)
-        console.log('[provider] Selected first available model:', first.value)
+        console.log('[provider] Current model invalid, selected first available model:', first.value)
       }
     }
   },

@@ -56,7 +56,7 @@ export interface SessionSlice {
   // Session Actions
   loadSessions: () => Promise<void>
   initializeSession: () => Promise<void>
-  ensureSessionPresent: () => void
+  ensureSessionPresent: () => boolean  // Returns true if a new session was created
   saveCurrentSession: () => Promise<void>
   updateCurrentSessionFlow: (flowId: string) => Promise<void>
   select: (id: string) => void
@@ -175,7 +175,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 
     if (!state.sessions || state.sessions.length === 0) {
       get().newSession()
-      return
+      return true // Created a new session
     }
 
     if (!state.currentId) {
@@ -184,7 +184,10 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       try {
         localStorage.setItem(LS_KEYS.CURRENT_SESSION_ID, id)
       } catch {}
+      return false // Selected existing session, needs initialization
     }
+
+    return false // Session already present and selected
   },
 
   saveCurrentSession: async () => {

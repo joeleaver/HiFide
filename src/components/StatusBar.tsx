@@ -1,7 +1,7 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { Group, Text, UnstyledButton, Select } from '@mantine/core'
 import { IconFolder, IconChevronDown } from '@tabler/icons-react'
-import { useAppStore, selectWorkspaceRoot, selectSelectedModel, selectSelectedProvider, selectProviderValid, selectModelsByProvider, selectDefaultModels, selectAgentMetrics, selectCurrentView } from '../store'
+import { useAppStore, selectWorkspaceRoot, selectSelectedModel, selectSelectedProvider, selectProviderValid, selectModelsByProvider, selectAgentMetrics, selectCurrentView } from '../store'
 
 const STATUS_BAR_HEIGHT = 24
 
@@ -12,7 +12,6 @@ export default function StatusBar() {
   const selectedProvider = useAppStore(selectSelectedProvider)
   const providerValid = useAppStore(selectProviderValid)
   const modelsByProvider = useAppStore(selectModelsByProvider)
-  const defaultModels = useAppStore(selectDefaultModels)
   const agentMetrics = useAppStore(selectAgentMetrics)
   const currentView = useAppStore(selectCurrentView)
 
@@ -25,9 +24,6 @@ export default function StatusBar() {
   const openFolder = useAppStore((s) => s.openFolder)
   const setSelectedModel = useAppStore((s) => s.setSelectedModel)
   const setSelectedProvider = useAppStore((s) => s.setSelectedProvider)
-  const ensureIndexProgressSubscription = useAppStore((s) => s.ensureIndexProgressSubscription)
-  const ensureAgentMetricsSubscription = useAppStore((s) => s.ensureAgentMetricsSubscription)
-  const ensureProviderModelConsistency = useAppStore((s) => s.ensureProviderModelConsistency)
 
   const providerOptions = useMemo(() => {
     const all = [
@@ -39,18 +35,7 @@ export default function StatusBar() {
     return anyValidated ? all.filter((p) => providerValid[p.value]) : all
   }, [providerValid])
 
-  // Agent metrics subscription + state
-  useEffect(() => { try { ensureAgentMetricsSubscription() } catch {} }, [])
-
   const modelOptions = useMemo(() => modelsByProvider[selectedProvider] || [], [modelsByProvider, selectedProvider])
-
-  // Keep provider/model consistent using centralized store logic
-  useEffect(() => { try { ensureProviderModelConsistency() } catch {} }, [providerValid, modelsByProvider, selectedProvider, selectedModel, defaultModels])
-
-  // Ensure index progress subscription is active (StatusBar is always mounted)
-  useEffect(() => {
-    try { ensureIndexProgressSubscription() } catch {}
-  }, [])
 
   const handleFolderClick = async () => {
     const result = await window.workspace?.openFolderDialog?.()

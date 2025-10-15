@@ -213,14 +213,27 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
         console.error('[workspace] Failed to load sessions:', e)
       }
       console.log(`[workspace] Load sessions: ${(performance.now() - t7).toFixed(2)}ms`)
-      
+
       // 8. Ensure a session is present
+      let createdNewSession = false
       try {
         if (state.ensureSessionPresent) {
-          state.ensureSessionPresent()
+          createdNewSession = state.ensureSessionPresent()
         }
       } catch (e) {
         console.error('[workspace] Failed to ensure session:', e)
+      }
+
+      // 8b. Initialize the current session (loads flow, resumes if paused)
+      // Only if we didn't create a new session (newSession already initializes)
+      if (!createdNewSession) {
+        try {
+          if (state.initializeSession) {
+            await state.initializeSession()
+          }
+        } catch (e) {
+          console.error('[workspace] Failed to initialize session:', e)
+        }
       }
       
       // 9. Start a new explorer terminal

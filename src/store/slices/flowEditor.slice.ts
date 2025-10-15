@@ -210,7 +210,11 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       // Unregister old handler if it exists (from previous HMR)
       if ((window as any).__fe_off) {
         console.log('[flowEditor] Unregistering old event handler from HMR')
-        ;(window as any).__fe_off()
+        try {
+          ;(window as any).__fe_off()
+        } catch (e) {
+          console.warn('[flowEditor] Error unregistering old handler:', e)
+        }
       }
 
       if (!(window as any).flowExec?.onEvent) {
@@ -226,7 +230,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           receivedRequestId: ev.requestId,
           currentRequestId: reqId,
           hasText: !!(ev as any).text,
-          textPreview: (ev as any).text?.substring?.(0, 20)
+          textPreview: (ev as any).text?.substring?.(0, 20),
+          storeInstanceId: (store as any).__storeId // Debug: verify we're using current store
         })
 
         // If this event is from a different flow, update our requestId to match

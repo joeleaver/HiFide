@@ -12,7 +12,15 @@ export async function loadSessions(): Promise<{ sessions: Session[]; currentId: 
       toolCalls: session.toolCalls || []
     }))
 
-    const currentId = (typeof localStorage !== 'undefined') ? (localStorage.getItem(LS_KEYS.CURRENT_SESSION_ID) as string | null) : null
+    // Get currentId from localStorage
+    let currentId = (typeof localStorage !== 'undefined') ? (localStorage.getItem(LS_KEYS.CURRENT_SESSION_ID) as string | null) : null
+
+    // Validate that currentId exists in loaded sessions
+    if (currentId && !sessions.some(s => s.id === currentId)) {
+      console.warn('[sessions] Saved currentId not found in loaded sessions, clearing it')
+      currentId = null
+    }
+
     return { sessions, currentId }
   } catch {
     return { sessions: [], currentId: null }

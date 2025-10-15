@@ -193,26 +193,42 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
         }
 
         // Ensure at least one session exists
+        let createdNewSession = false
         try {
           if (state.ensureSessionPresent) {
-            state.ensureSessionPresent()
+            createdNewSession = state.ensureSessionPresent()
           }
         } catch (e) {
           console.error('[app] Failed to ensure session present:', e)
         }
 
         // Initialize the current session (loads flow, resumes if paused)
-        try {
-          if (state.initializeSession) {
-            await state.initializeSession()
+        // Only if we didn't create a new session (newSession already initializes)
+        if (!createdNewSession) {
+          try {
+            if (state.initializeSession) {
+              await state.initializeSession()
+            }
+          } catch (e) {
+            console.error('[app] Failed to initialize session:', e)
           }
-        } catch (e) {
-          console.error('[app] Failed to initialize session:', e)
         }
       } catch (e) {
         console.error('[app] Failed to load sessions during init:', e)
       }
-      
+
+      // 8. Initialize subscriptions
+      try {
+        if (state.ensureIndexProgressSubscription) {
+          state.ensureIndexProgressSubscription()
+        }
+        if (state.ensureAgentMetricsSubscription) {
+          state.ensureAgentMetricsSubscription()
+        }
+      } catch (e) {
+        console.error('[app] Failed to initialize subscriptions:', e)
+      }
+
       console.debug('[app] Initialization complete')
     } catch (e) {
       console.error('[app] Initialization failed:', e)

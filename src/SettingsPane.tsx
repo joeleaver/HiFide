@@ -48,14 +48,14 @@ export default function SettingsPane() {
   // Indexing state (centralized)
   const {
     idxStatus, idxLoading, idxQuery, idxResults, idxProg,
-    ensureIndexProgressSubscription, refreshIndexStatus, rebuildIndex,
+    refreshIndexStatus, rebuildIndex,
     clearIndex, setIdxQuery, searchIndex
   } = useAppStore()
 
+  // Refresh index status on mount (subscription is initialized in store)
   useEffect(() => {
-    ensureIndexProgressSubscription()
     void refreshIndexStatus()
-  }, [])
+  }, [refreshIndexStatus])
 
 
   const doRebuildIndex = async () => {
