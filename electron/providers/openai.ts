@@ -81,11 +81,19 @@ export const OpenAIProvider: ProviderAdapter = {
               const sysText = (messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')) || ''
               onConversationMeta?.({ provider: 'openai', sessionId, lastResponseId: String(finalResponse?.id || ''), preambleHash: hashStr(sysText) })
             } catch {}
+            console.log('[OpenAI chatStream] Final response usage:', finalResponse?.usage)
             if (finalResponse?.usage && onTokenUsage) {
-              onTokenUsage({
+              const usage = {
                 inputTokens: finalResponse.usage.input_tokens || 0,
                 outputTokens: finalResponse.usage.output_tokens || 0,
                 totalTokens: finalResponse.usage.total_tokens || 0,
+              }
+              console.log('[OpenAI chatStream] Calling onTokenUsage with:', usage)
+              onTokenUsage(usage)
+            } else {
+              console.log('[OpenAI chatStream] No usage data or no callback:', {
+                hasUsage: !!finalResponse?.usage,
+                hasCallback: !!onTokenUsage
               })
             }
           } catch (e) {
@@ -101,7 +109,14 @@ export const OpenAIProvider: ProviderAdapter = {
         if (e?.name === 'AbortError') return
         onError(e?.message || String(e))
       }
-    })()
+    })().catch((e: any) => {
+      // Handle any errors that occur after chatStream returns
+      // This prevents unhandled promise rejections
+      console.error('[OpenAIProvider] Unhandled error in chatStream:', e)
+      try {
+        onError(e?.message || String(e))
+      } catch {}
+    })
 
     return {
       cancel: () => {
@@ -199,9 +214,16 @@ export const OpenAIProvider: ProviderAdapter = {
               opts.tools = oaTools
               opts.tool_choice = 'auto'
             }
-            // Add response format if requested
+            // Add response format if requested (Responses API uses text.format, not response_format)
             if (strict && responseSchema) {
-              opts.response_format = { type: 'json_schema', json_schema: responseSchema }
+              opts.text = {
+                format: {
+                  type: 'json_schema',
+                  name: responseSchema.name,
+                  strict: responseSchema.strict,
+                  schema: responseSchema.schema
+                }
+              }
             }
             return opts
           }
@@ -237,7 +259,8 @@ export const OpenAIProvider: ProviderAdapter = {
             stream = await withRetries(() => Promise.resolve(client.responses.stream(opts)))
           } catch (err: any) {
             const msg = err?.message || ''
-            if (useResponseFormat && (err?.status === 400 || /response_format|json_schema|unsupported/i.test(msg))) {
+            if (useResponseFormat && (err?.status === 400 || /response_format|text\.format|json_schema|unsupported/i.test(msg))) {
+              console.warn('[OpenAI Provider] Structured output failed, retrying without schema:', msg)
               useResponseFormat = false
               stream = await withRetries(() => Promise.resolve(client.responses.stream(mkOpts(false))))
             } else {
@@ -255,9 +278,27 @@ export const OpenAIProvider: ProviderAdapter = {
               const isToolArgDelta = t.includes('function_call') || t.includes('tool') || t.includes('arguments')
 
               if (!isToolArgDelta) {
-                if (typeof (evt as any)?.delta === 'string') turnBuffer += (evt as any).delta
-                else if (typeof (evt as any)?.text === 'string') turnBuffer += (evt as any).text
-                else if (t.includes('output_text') && typeof (evt as any)?.text === 'string') turnBuffer += (evt as any).text
+                let textToAdd = ''
+
+                // Check different fields in priority order, but only use ONE per event
+                // Use if-else to ensure we only take one field
+                if (typeof (evt as any)?.delta === 'string' && (evt as any).delta) {
+                  textToAdd = (evt as any).delta
+                } else if (t.includes('output_text') && typeof (evt as any)?.text === 'string' && (evt as any).text) {
+                  textToAdd = (evt as any).text
+                } else if (typeof (evt as any)?.text === 'string' && (evt as any).text) {
+                  textToAdd = (evt as any).text
+                }
+
+                // Add text if we got any
+                if (textToAdd) {
+                  // Skip if this would create a duplicate (text equals entire buffer so far)
+                  if (textToAdd === turnBuffer) {
+                    console.log('[OpenAI Provider] Skipping duplicate text chunk:', textToAdd.substring(0, 50))
+                  } else {
+                    turnBuffer += textToAdd
+                  }
+                }
               }
             } catch (e: any) { onError(e?.message || String(e)) }
           }
@@ -265,6 +306,8 @@ export const OpenAIProvider: ProviderAdapter = {
           // After stream completes, get the final response with complete output array
           const finalResponse = await stream.finalResponse()
           console.log('[OpenAI Provider] Final response output:', JSON.stringify(finalResponse?.output, null, 2))
+          console.log('[OpenAI Provider] Final response usage:', JSON.stringify(finalResponse?.usage, null, 2))
+          console.log('[OpenAI Provider] Final response keys:', Object.keys(finalResponse || {}))
           // Persist response id for session chaining
           try {
             const stateKey = sessionId || 'global'
@@ -375,17 +418,24 @@ export const OpenAIProvider: ProviderAdapter = {
           }
           // Extract token usage from final response
           try {
+            console.log('[OpenAI agentStream] Final response usage:', finalResponse?.usage)
             if (finalResponse?.usage && onTokenUsage) {
               const usage = {
                 inputTokens: finalResponse.usage.input_tokens || 0,
                 outputTokens: finalResponse.usage.output_tokens || 0,
                 totalTokens: finalResponse.usage.total_tokens || 0,
               }
+              console.log('[OpenAI agentStream] Calling onTokenUsage with:', usage)
               cumulativeTokens += usage.totalTokens
               onTokenUsage(usage)
+            } else {
+              console.log('[OpenAI agentStream] No usage data or no callback:', {
+                hasUsage: !!finalResponse?.usage,
+                hasCallback: !!onTokenUsage
+              })
             }
           } catch (e) {
-            // Token usage extraction failed, continue anyway
+            console.error('[OpenAI agentStream] Error extracting token usage:', e)
           }
 
           onDone()
@@ -397,7 +447,14 @@ export const OpenAIProvider: ProviderAdapter = {
       }
     }
 
-    run()
+    run().catch((e: any) => {
+      // Handle any errors that occur after agentStream returns
+      // This prevents unhandled promise rejections
+      console.error('[OpenAIProvider] Unhandled error in agentStream run():', e)
+      try {
+        onError(e?.message || String(e))
+      } catch {}
+    })
 
     return { cancel: () => { cancelled = true } }
   }

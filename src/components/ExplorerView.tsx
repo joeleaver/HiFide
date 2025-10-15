@@ -2,7 +2,7 @@ import { Group, Stack, Text, ScrollArea, UnstyledButton } from '@mantine/core'
 import { IconFile, IconFolder, IconChevronRight, IconChevronDown } from '@tabler/icons-react'
 import Editor from '@monaco-editor/react'
 import { Profiler } from 'react'
-import { useAppStore } from '../store/app'
+import { useAppStore, selectOpenedFile, selectWorkspaceRoot, selectExplorerOpenFolders, selectExplorerChildrenByDir, selectExplorerTerminalPanelOpen, selectExplorerTerminalPanelHeight } from '../store'
 import TerminalPanel from './TerminalPanel'
 
 interface FileTreeItemProps {
@@ -68,14 +68,16 @@ function FileTreeItem({ name, type, level, path, isOpen, onToggle, onFileClick }
 
 
 export default function ExplorerView() {
-  const openedFile = useAppStore((s) => s.openedFile)
-  const workspaceRoot = useAppStore((s) => s.workspaceRoot)
-  const openFolders = useAppStore((s) => s.explorerOpenFolders)
-  const childrenByDir = useAppStore((s) => s.explorerChildrenByDir)
+  // Use selectors for better performance
+  const openedFile = useAppStore(selectOpenedFile)
+  const workspaceRoot = useAppStore(selectWorkspaceRoot)
+  const openFolders = useAppStore(selectExplorerOpenFolders)
+  const childrenByDir = useAppStore(selectExplorerChildrenByDir)
+  const explorerTerminalPanelOpen = useAppStore(selectExplorerTerminalPanelOpen)
+  const explorerTerminalPanelHeight = useAppStore(selectExplorerTerminalPanelHeight)
+
+  // Actions only - these don't cause re-renders
   const toggleExplorerFolder = useAppStore((s) => s.toggleExplorerFolder)
-  // Subscribe to terminal panel state to ensure layout updates when it changes
-  const explorerTerminalPanelOpen = useAppStore((s) => s.explorerTerminalPanelOpen)
-  const explorerTerminalPanelHeight = useAppStore((s) => s.explorerTerminalPanelHeight)
   const openFile = useAppStore((s) => s.openFile)
 
   // Render a directory's entries recursively

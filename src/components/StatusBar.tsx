@@ -1,21 +1,33 @@
 import { useEffect, useMemo } from 'react'
 import { Group, Text, UnstyledButton, Select } from '@mantine/core'
 import { IconFolder, IconChevronDown } from '@tabler/icons-react'
-import { useAppStore } from '../store/app'
+import { useAppStore, selectWorkspaceRoot, selectSelectedModel, selectSelectedProvider, selectProviderValid, selectModelsByProvider, selectDefaultModels, selectAgentMetrics, selectCurrentView } from '../store'
 
 const STATUS_BAR_HEIGHT = 24
 
 export default function StatusBar() {
-  const workspaceRoot = useAppStore((s) => s.workspaceRoot)
-  const openFolder = useAppStore((s) => s.openFolder)
-  const selectedModel = useAppStore((s) => s.selectedModel)
-  const setSelectedModel = useAppStore((s) => s.setSelectedModel)
-  const selectedProvider = useAppStore((s) => s.selectedProvider)
-  const setSelectedProvider = useAppStore((s) => s.setSelectedProvider)
-  const providerValid = useAppStore((s) => s.providerValid)
+  // Use selectors for better performance
+  const workspaceRoot = useAppStore(selectWorkspaceRoot)
+  const selectedModel = useAppStore(selectSelectedModel)
+  const selectedProvider = useAppStore(selectSelectedProvider)
+  const providerValid = useAppStore(selectProviderValid)
+  const modelsByProvider = useAppStore(selectModelsByProvider)
+  const defaultModels = useAppStore(selectDefaultModels)
+  const agentMetrics = useAppStore(selectAgentMetrics)
+  const currentView = useAppStore(selectCurrentView)
 
-  // Centralized indexing actions
+  // Flow Editor specific state
+  const feNodes = useAppStore((s) => s.feNodes)
+  const feEdges = useAppStore((s) => s.feEdges)
+  const feStatus = useAppStore((s) => s.feStatus)
+
+  // Actions only - these don't cause re-renders
+  const openFolder = useAppStore((s) => s.openFolder)
+  const setSelectedModel = useAppStore((s) => s.setSelectedModel)
+  const setSelectedProvider = useAppStore((s) => s.setSelectedProvider)
   const ensureIndexProgressSubscription = useAppStore((s) => s.ensureIndexProgressSubscription)
+  const ensureAgentMetricsSubscription = useAppStore((s) => s.ensureAgentMetricsSubscription)
+  const ensureProviderModelConsistency = useAppStore((s) => s.ensureProviderModelConsistency)
 
   const providerOptions = useMemo(() => {
     const all = [
@@ -28,15 +40,8 @@ export default function StatusBar() {
   }, [providerValid])
 
   // Agent metrics subscription + state
-  const ensureAgentMetricsSubscription = useAppStore((s) => s.ensureAgentMetricsSubscription)
-  const agentMetrics = useAppStore((s) => s.agentMetrics)
-  useEffect(() => { try { ensureAgentMetricsSubscription() } catch {} }, [ensureAgentMetricsSubscription])
-  const ensureProviderModelConsistency = useAppStore((s) => s.ensureProviderModelConsistency)
+  useEffect(() => { try { ensureAgentMetricsSubscription() } catch {} }, [])
 
-  const defaultModels = useAppStore((s) => s.defaultModels)
-
-  // Models come from centralized store (no direct window.models calls here)
-  const modelsByProvider = useAppStore((s) => s.modelsByProvider)
   const modelOptions = useMemo(() => modelsByProvider[selectedProvider] || [], [modelsByProvider, selectedProvider])
 
   // Keep provider/model consistent using centralized store logic
@@ -45,7 +50,7 @@ export default function StatusBar() {
   // Ensure index progress subscription is active (StatusBar is always mounted)
   useEffect(() => {
     try { ensureIndexProgressSubscription() } catch {}
-  }, [ensureIndexProgressSubscription])
+  }, [])
 
   const handleFolderClick = async () => {
     const result = await window.workspace?.openFolderDialog?.()
@@ -97,45 +102,112 @@ export default function StatusBar() {
         </UnstyledButton>
       </Group>
 
-      {/* Right side - Metrics + Provider + Model selectors */}
+      {/* Right side - Combined status for agent view */}
       <Group gap={8}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 8px', height: STATUS_BAR_HEIGHT }}>
-          {/* Agent metrics compact display */}
-          {agentMetrics && (
-            <Text size="xs" style={{ color: '#fff', opacity: 0.9 }}>
-              {`Tokens ${agentMetrics.tokensUsed}/${agentMetrics.tokenBudget} (${agentMetrics.percentageUsed}%)} · Iters ${agentMetrics.iterationsUsed}/${agentMetrics.maxIterations}`}
-            </Text>
+          {currentView === 'agent' ? (
+            // Agent view: Show flow stats + provider/model selectors
+            <>
+              {/* Flow stats */}
+              <Text size="xs" style={{ color: '#fff', opacity: 0.9 }}>
+                {feNodes.length} nodes · {feEdges.length} edges
+              </Text>
+              {feStatus !== 'idle' && (
+                <>
+                  <Text size="xs" c="dimmed" style={{ margin: '0 4px' }}>|</Text>
+                  <Text size="xs" style={{
+                    color: feStatus === 'paused' || feStatus === 'waitingForInput' ? '#f59f00' : '#4caf50',
+                    fontWeight: 600
+                  }}>
+                    {feStatus === 'paused' ? '⏸ PAUSED' : feStatus === 'waitingForInput' ? '⏸ WAITING' : '▶ RUNNING'}
+                  </Text>
+                </>
+              )}
+
+              {/* Agent metrics */}
+              {agentMetrics && (
+                <>
+                  <Text size="xs" c="dimmed" style={{ margin: '0 4px' }}>|</Text>
+                  <Text size="xs" style={{ color: '#fff', opacity: 0.9 }}>
+                    {`Tokens ${agentMetrics.tokensUsed}/${agentMetrics.tokenBudget} (${agentMetrics.percentageUsed}%) · Iters ${agentMetrics.iterationsUsed}/${agentMetrics.maxIterations}`}
+                  </Text>
+                </>
+              )}
+
+              {/* Provider/Model selectors */}
+              <Text size="xs" c="dimmed" style={{ margin: '0 4px' }}>|</Text>
+              <Select
+                value={providerOptions.find((p) => p.value === selectedProvider) ? selectedProvider : undefined}
+                onChange={(v) => v && setSelectedProvider(v)}
+                data={providerOptions as any}
+                size="xs"
+                variant="unstyled"
+                placeholder={providerOptions.length ? 'Select provider' : 'No validated providers'}
+                disabled={providerOptions.length === 0}
+                rightSection={<IconChevronDown size={12} />}
+                styles={{
+                  input: { color: '#fff', fontSize: 12, fontWeight: 500, padding: 0, minHeight: 'auto', height: STATUS_BAR_HEIGHT, border: 'none', cursor: providerOptions.length ? 'pointer' : 'not-allowed' },
+                  section: { color: '#fff' },
+                }}
+                comboboxProps={{ position: 'top', offset: 4 }}
+              />
+              <Text size="xs" c="dimmed" style={{ margin: '0 4px' }}>|</Text>
+              <Select
+                value={selectedModel}
+                onChange={(v) => v && setSelectedModel(v)}
+                data={modelOptions}
+                size="xs"
+                variant="unstyled"
+                disabled={providerOptions.length === 0}
+                rightSection={<IconChevronDown size={12} />}
+                styles={{
+                  input: { color: '#fff', fontSize: 12, fontWeight: 500, padding: 0, minHeight: 'auto', height: STATUS_BAR_HEIGHT, border: 'none', cursor: providerOptions.length ? 'pointer' : 'not-allowed' },
+                  section: { color: '#fff' },
+                }}
+                comboboxProps={{ position: 'top', offset: 4 }}
+              />
+            </>
+          ) : (
+            // Other views: Show provider/model selectors only
+            <>
+              {/* Agent metrics compact display */}
+              {agentMetrics && (
+                <Text size="xs" style={{ color: '#fff', opacity: 0.9 }}>
+                  {`Tokens ${agentMetrics.tokensUsed}/${agentMetrics.tokenBudget} (${agentMetrics.percentageUsed}%) · Iters ${agentMetrics.iterationsUsed}/${agentMetrics.maxIterations}`}
+                </Text>
+              )}
+              <Select
+                value={providerOptions.find((p) => p.value === selectedProvider) ? selectedProvider : undefined}
+                onChange={(v) => v && setSelectedProvider(v)}
+                data={providerOptions as any}
+                size="xs"
+                variant="unstyled"
+                placeholder={providerOptions.length ? 'Select provider' : 'No validated providers'}
+                disabled={providerOptions.length === 0}
+                rightSection={<IconChevronDown size={12} />}
+                styles={{
+                  input: { color: '#fff', fontSize: 12, fontWeight: 500, padding: 0, minHeight: 'auto', height: STATUS_BAR_HEIGHT, border: 'none', cursor: providerOptions.length ? 'pointer' : 'not-allowed' },
+                  section: { color: '#fff' },
+                }}
+                comboboxProps={{ position: 'top', offset: 4 }}
+              />
+              <Text size="xs" c="dimmed" style={{ margin: '0 4px' }}>|</Text>
+              <Select
+                value={selectedModel}
+                onChange={(v) => v && setSelectedModel(v)}
+                data={modelOptions}
+                size="xs"
+                variant="unstyled"
+                disabled={providerOptions.length === 0}
+                rightSection={<IconChevronDown size={12} />}
+                styles={{
+                  input: { color: '#fff', fontSize: 12, fontWeight: 500, padding: 0, minHeight: 'auto', height: STATUS_BAR_HEIGHT, border: 'none', cursor: providerOptions.length ? 'pointer' : 'not-allowed' },
+                  section: { color: '#fff' },
+                }}
+                comboboxProps={{ position: 'top', offset: 4 }}
+              />
+            </>
           )}
-          <Select
-            value={providerOptions.find((p) => p.value === selectedProvider) ? selectedProvider : undefined}
-            onChange={(v) => v && setSelectedProvider(v)}
-            data={providerOptions as any}
-            size="xs"
-            variant="unstyled"
-            placeholder={providerOptions.length ? 'Select provider' : 'No validated providers'}
-            disabled={providerOptions.length === 0}
-            rightSection={<IconChevronDown size={12} />}
-            styles={{
-              input: { color: '#fff', fontSize: 12, fontWeight: 500, padding: 0, minHeight: 'auto', height: STATUS_BAR_HEIGHT, border: 'none', cursor: providerOptions.length ? 'pointer' : 'not-allowed' },
-              section: { color: '#fff' },
-            }}
-            comboboxProps={{ position: 'top', offset: 4 }}
-          />
-          <Text size="xs" c="dimmed" style={{ margin: '0 4px' }}>|</Text>
-          <Select
-            value={selectedModel}
-            onChange={(v) => v && setSelectedModel(v)}
-            data={modelOptions}
-            size="xs"
-            variant="unstyled"
-            disabled={providerOptions.length === 0}
-            rightSection={<IconChevronDown size={12} />}
-            styles={{
-              input: { color: '#fff', fontSize: 12, fontWeight: 500, padding: 0, minHeight: 'auto', height: STATUS_BAR_HEIGHT, border: 'none', cursor: providerOptions.length ? 'pointer' : 'not-allowed' },
-              section: { color: '#fff' },
-            }}
-            comboboxProps={{ position: 'top', offset: 4 }}
-          />
         </div>
       </Group>
     </Group>

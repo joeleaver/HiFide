@@ -1,6 +1,6 @@
 import { useEffect, Profiler } from 'react'
 import { Button, Group, Title } from '@mantine/core'
-import { useAppStore } from './store/app'
+import { useAppStore, selectCurrentView, initializeStore } from './store'
 import ActivityBar from './components/ActivityBar'
 import StatusBar from './components/StatusBar'
 import AgentView from './components/AgentView'
@@ -40,10 +40,15 @@ const menuHandlers = {
 let handlersRegistered = false
 
 function App() {
-  const currentView = useAppStore((s) => s.currentView)
+  // Use selector for better performance
+  const currentView = useAppStore(selectCurrentView)
   const appBootstrapping = useAppStore((s) => s.appBootstrapping)
   const startupMessage = useAppStore((s) => s.startupMessage)
-  const initializeApp = useAppStore((s) => s.initializeApp)
+
+  // Expose store to window for debugging
+  useEffect(() => {
+    (window as any).debugStore = useAppStore
+  }, [])
 
   // Register menu handlers once
   if (!handlersRegistered && window.ipcRenderer) {
@@ -56,10 +61,10 @@ function App() {
     window.ipcRenderer.on('menu:clear-recent-folders', menuHandlers.clearRecentFolders)
   }
 
-  // Bootstrap on first mount: fetch keys and load models
+  // Initialize store on first mount
   useEffect(() => {
-    void initializeApp()
-  }, [initializeApp])
+    void initializeStore()
+  }, [])
 
 
   // Keep main-process menu state in sync with current view (for enabling/disabling items)

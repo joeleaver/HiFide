@@ -1,23 +1,27 @@
 import { Group, Text, UnstyledButton, Badge } from '@mantine/core'
 import { IconPlus, IconX, IconChevronUp, IconChevronDown } from '@tabler/icons-react'
-import { useAppStore } from '../store/app'
+import { useAppStore, selectAgentTerminalTabs, selectAgentActiveTerminal, selectExplorerTerminalTabs, selectExplorerActiveTerminal } from '../store'
 import { usePanelResize } from '../hooks/usePanelResize'
 import TerminalView from './TerminalView'
 
 export default function TerminalPanel({ context }: { context: 'agent' | 'explorer' }) {
+  // Use selectors for better performance
+  const tabs = useAppStore(context === 'agent' ? selectAgentTerminalTabs : selectExplorerTerminalTabs)
+  const activeTab = useAppStore(context === 'agent' ? selectAgentActiveTerminal : selectExplorerActiveTerminal)
+
+  // Get state and actions
   const open = useAppStore((s) => context === 'agent' ? s.agentTerminalPanelOpen : s.explorerTerminalPanelOpen)
   const height = useAppStore((s) => context === 'agent' ? s.agentTerminalPanelHeight : s.explorerTerminalPanelHeight)
   const setHeight = useAppStore((s) => context === 'agent' ? s.setAgentTerminalPanelHeight : s.setExplorerTerminalPanelHeight)
-  const toggleExplorer = useAppStore((s) => s.toggleExplorerTerminalPanel)
-  const setAgentOpen = useAppStore((s) => s.setAgentTerminalPanelOpen)
 
-  // Terminal tabs from store
-  const tabs = useAppStore((s) => context === 'agent' ? s.agentTerminalTabs : s.explorerTerminalTabs)
-  const activeTab = useAppStore((s) => context === 'agent' ? s.agentActiveTerminal : s.explorerActiveTerminal)
-  const addTerminalTab = useAppStore((s) => s.addTerminalTab)
-  const removeTerminalTab = useAppStore((s) => s.removeTerminalTab)
-  const setActiveTerminal = useAppStore((s) => s.setActiveTerminal)
-  const fitAllTerminals = useAppStore((s) => s.fitAllTerminals)
+  const {
+    toggleExplorerTerminalPanel: toggleExplorer,
+    setAgentTerminalPanelOpen: setAgentOpen,
+    addTerminalTab,
+    removeTerminalTab,
+    setActiveTerminal,
+    fitAllTerminals,
+  } = useAppStore()
 
   const addTab = () => {
     addTerminalTab(context)

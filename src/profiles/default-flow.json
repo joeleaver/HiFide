@@ -1,0 +1,214 @@
+{
+		"name": "default with tools",
+		"description": "",
+		"version": "7.0.0",
+		"nodes": [
+			{
+				"id": "defaultContextStart",
+				"kind": "defaultContextStart",
+				"config": {
+					"systemInstructions": "You are a master of agentic coding. There's nothing you can't do. Soar. Build incredible code, amazing products."
+				},
+				"position": {
+					"x": -274.21440426575947,
+					"y": -189.9277857852667
+				},
+				"expanded": true
+			},
+			{
+				"id": "user-input",
+				"kind": "userInput",
+				"config": {},
+				"position": {
+					"x": 202.82249398921056,
+					"y": -191.6773244841484
+				},
+				"expanded": false
+			},
+			{
+				"id": "assistant-response",
+				"kind": "chat",
+				"config": {},
+				"position": {
+					"x": 1183.989394842136,
+					"y": 230.85563941180737
+				},
+				"expanded": false
+			},
+			{
+				"id": "tools-1760478079316",
+				"kind": "tools",
+				"config": {
+					"tools": [
+						"fs.read_file",
+						"fs.read_dir",
+						"index.search"
+					]
+				},
+				"position": {
+					"x": 872.1478399531284,
+					"y": 379.8103753657815
+				},
+				"expanded": false
+			},
+			{
+				"id": "intentRouter-1760503463693",
+				"kind": "intentRouter",
+				"config": {
+					"provider": "openai",
+					"model": "gpt-4.1-nano",
+					"routes": {
+						"plan": "user wants to plan something",
+						"execute": "user wants to execute the plan",
+						"info": "user just wants info about the project"
+					}
+				},
+				"position": {
+					"x": 634.452282613398,
+					"y": -190.52765863031237
+				},
+				"expanded": true
+			},
+			{
+				"id": "chat-1760504433090",
+				"kind": "chat",
+				"config": {},
+				"position": {
+					"x": 1152.969673703129,
+					"y": -413.25643821816607
+				},
+				"expanded": false
+			},
+			{
+				"id": "tools-1760504451346",
+				"kind": "tools",
+				"config": {
+					"tools": [
+						"fs.read_file",
+						"fs.read_dir",
+						"fs.write_file",
+						"fs.create_dir",
+						"fs.delete_dir",
+						"fs.delete_file",
+						"fs.exists",
+						"fs.stat",
+						"fs.append_file",
+						"fs.move",
+						"fs.copy",
+						"fs.remove",
+						"fs.truncate_file",
+						"fs.truncate_dir",
+						"edits.apply",
+						"index.search",
+						"terminal.run",
+						"terminal.session_present",
+						"terminal.session_exec",
+						"terminal.session_search_output",
+						"terminal.session_tail",
+						"terminal.session_restart",
+						"terminal.session_close",
+						"code.search_ast",
+						"code.apply_edits_targeted"
+					]
+				},
+				"position": {
+					"x": 799.2213795401335,
+					"y": -478.02008957035605
+				},
+				"expanded": false
+			}
+		],
+		"edges": [
+			{
+				"id": "tools-1760478079316-assistant-response-tools-tools",
+				"source": "tools-1760478079316",
+				"target": "assistant-response",
+				"sourceHandle": "tools",
+				"targetHandle": "tools"
+			},
+			{
+				"id": "user-input-intentRouter-1760503463693-context-context",
+				"source": "user-input",
+				"target": "intentRouter-1760503463693",
+				"sourceHandle": "context",
+				"targetHandle": "context"
+			},
+			{
+				"id": "user-input-intentRouter-1760503463693-data-data",
+				"source": "user-input",
+				"target": "intentRouter-1760503463693",
+				"sourceHandle": "data",
+				"targetHandle": "data"
+			},
+			{
+				"id": "defaultContextStart-user-input-context-context",
+				"source": "defaultContextStart",
+				"target": "user-input",
+				"sourceHandle": "context",
+				"targetHandle": "context"
+			},
+			{
+				"id": "intentRouter-1760503463693-assistant-response-info-context-context",
+				"source": "intentRouter-1760503463693",
+				"target": "assistant-response",
+				"sourceHandle": "info-context",
+				"targetHandle": "context"
+			},
+			{
+				"id": "intentRouter-1760503463693-assistant-response-info-data-data",
+				"source": "intentRouter-1760503463693",
+				"target": "assistant-response",
+				"sourceHandle": "info-data",
+				"targetHandle": "data"
+			},
+			{
+				"id": "intentRouter-1760503463693-assistant-response-plan-context-context",
+				"source": "intentRouter-1760503463693",
+				"target": "assistant-response",
+				"sourceHandle": "plan-context",
+				"targetHandle": "context"
+			},
+			{
+				"id": "intentRouter-1760503463693-assistant-response-plan-data-data",
+				"source": "intentRouter-1760503463693",
+				"target": "assistant-response",
+				"sourceHandle": "plan-data",
+				"targetHandle": "data"
+			},
+			{
+				"id": "assistant-response-user-input-context-context",
+				"source": "assistant-response",
+				"target": "user-input",
+				"sourceHandle": "context",
+				"targetHandle": "context"
+			},
+			{
+				"id": "intentRouter-1760503463693-chat-1760504433090-execute-context-context",
+				"source": "intentRouter-1760503463693",
+				"target": "chat-1760504433090",
+				"sourceHandle": "execute-context",
+				"targetHandle": "context"
+			},
+			{
+				"id": "intentRouter-1760503463693-chat-1760504433090-execute-data-data",
+				"source": "intentRouter-1760503463693",
+				"target": "chat-1760504433090",
+				"sourceHandle": "execute-data",
+				"targetHandle": "data"
+			},
+			{
+				"id": "tools-1760504451346-chat-1760504433090-tools-tools",
+				"source": "tools-1760504451346",
+				"target": "chat-1760504433090",
+				"sourceHandle": "tools",
+				"targetHandle": "tools"
+			},
+			{
+				"id": "chat-1760504433090-user-input-context-context",
+				"source": "chat-1760504433090",
+				"target": "user-input",
+				"sourceHandle": "context",
+				"targetHandle": "context"
+			}
+		]
+	}

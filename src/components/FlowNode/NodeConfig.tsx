@@ -1,0 +1,709 @@
+import { Text, Checkbox, Accordion } from '@mantine/core'
+import { useAppStore } from '../../store'
+import { useMemo, useState, useEffect } from 'react'
+
+interface NodeConfigProps {
+  nodeId: string
+  kind: string
+  config: any
+  onConfigChange: (patch: any) => void
+}
+
+export default function NodeConfig({ nodeId, kind, config, onConfigChange }: NodeConfigProps) {
+  // Get provider/model data for newContext node
+  const providerValid = useAppStore((s) => s.providerValid)
+  const modelsByProvider = useAppStore((s) => s.modelsByProvider)
+  const edges = useAppStore((s) => s.feEdges)
+
+  const providerOptions = useMemo(() => {
+    return Object.entries(providerValid || {})
+      .filter(([, ok]) => !!ok)
+      .map(([id]) => ({ value: id, label: id.charAt(0).toUpperCase() + id.slice(1) }))
+  }, [providerValid])
+
+  const modelOptions = useMemo(() => {
+    const provider = config.provider || 'openai'
+    return (modelsByProvider[provider as keyof typeof modelsByProvider] || [])
+  }, [config.provider, modelsByProvider])
+
+  // Check if this node has an input connection (context or input handle)
+  const hasInputConnection = useMemo(() => {
+    return edges.some(edge => {
+      const handle = (edge as any).targetHandle
+      return edge.target === nodeId && (handle === 'context' || handle === 'input')
+    })
+  }, [edges, nodeId])
+
+  return (
+    <div className="nodrag" style={{ padding: 10, background: '#1e1e1e', borderTop: '1px solid #333', fontSize: 11, overflow: 'hidden', wordWrap: 'break-word' }}>
+      {/* defaultContextStart node configuration */}
+      {kind === 'defaultContextStart' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
+          <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
+            🎬 Flow entry point. Uses the global provider/model settings. Configure system instructions below.
+          </Text>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>System Instructions:</span>
+            <textarea
+              value={config.systemInstructions || ''}
+              onChange={(e) => onConfigChange({ systemInstructions: e.target.value })}
+              placeholder="Optional system instructions for the AI (e.g., 'You are a helpful assistant...')"
+              rows={4}
+              style={{
+                padding: '4px 6px',
+                background: '#252526',
+                color: '#cccccc',
+                border: '1px solid #3e3e42',
+                borderRadius: 3,
+                fontSize: 10,
+                fontFamily: 'inherit',
+                resize: 'vertical',
+              }}
+            />
+          </label>
+        </div>
+      )}
+
+      {/* userInput node configuration */}
+      {kind === 'userInput' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
+          <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
+            👤 Pauses flow execution and waits for user input. Use this to create interactive loops or get feedback mid-flow.
+          </Text>
+          <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3, fontStyle: 'italic' }}>
+            No configuration needed - just connect it in your flow where you want to wait for user input.
+          </Text>
+        </div>
+      )}
+
+      {/* manualInput node configuration */}
+      {kind === 'manualInput' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
+          <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
+            ✍️ Sends a pre-configured user message to the LLM in the current context. Useful for multi-turn conversations.
+          </Text>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Message:</span>
+            <textarea
+              value={config.message || ''}
+              onChange={(e) => onConfigChange({ message: e.target.value })}
+              placeholder="Enter the user message to send (e.g., 'Now explain that in simpler terms...')"
+              rows={3}
+              style={{
+                padding: '4px 6px',
+                background: '#252526',
+                color: '#cccccc',
+                border: '1px solid #3e3e42',
+                borderRadius: 3,
+                fontSize: 10,
+                fontFamily: 'inherit',
+                resize: 'vertical',
+              }}
+            />
+          </label>
+        </div>
+      )}
+
+      {/* tools node configuration */}
+      {kind === 'tools' && <ToolsConfig config={config} onConfigChange={onConfigChange} />}
+
+      {/* newContext node configuration */}
+      {kind === 'newContext' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
+          <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
+            🔀 Creates a new execution context. Downstream nodes (connected via top handle) will use this provider/model.
+          </Text>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Provider:</span>
+            <select
+              value={config.provider || 'openai'}
+              onChange={(e) => onConfigChange({ provider: e.target.value })}
+              style={{
+                padding: '4px 6px',
+                background: '#252526',
+                color: '#cccccc',
+                border: '1px solid #3e3e42',
+                borderRadius: 3,
+                fontSize: 10,
+              }}
+            >
+              {providerOptions.map((p) => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </select>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Model:</span>
+            <select
+              value={config.model || (modelOptions[0]?.value || '')}
+              onChange={(e) => onConfigChange({ model: e.target.value })}
+              style={{
+                padding: '4px 6px',
+                background: '#252526',
+                color: '#cccccc',
+                border: '1px solid #3e3e42',
+                borderRadius: 3,
+                fontSize: 10,
+              }}
+            >
+              {modelOptions.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
+
+
+      {/* Node-specific config */}
+      {kind === 'approvalGate' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc', fontSize: 10 }}>
+            <input
+              type="checkbox"
+              checked={!!config.requireApproval}
+              onChange={(e) => onConfigChange({ requireApproval: e.target.checked })}
+            />
+            <span>Require approval</span>
+          </label>
+          <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
+            {config.requireApproval
+              ? '⏸ Flow will pause here and wait for manual approval (click Resume to continue)'
+              : '✓ Flow will continue automatically without pausing'}
+          </Text>
+        </div>
+      )}
+
+      {kind === 'budgetGuard' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+            <span style={{ fontSize: 10, color: '#888', width: 60 }}>Budget:</span>
+            <input
+              type="number"
+              step="0.01"
+              value={config.budgetUSD || ''}
+              onChange={(e) => onConfigChange({ budgetUSD: e.target.value })}
+              placeholder="USD"
+              style={{
+                flex: 1,
+                padding: '2px 4px',
+                background: '#252526',
+                color: '#cccccc',
+                border: '1px solid #3e3e42',
+                borderRadius: 3,
+                fontSize: 10,
+              }}
+            />
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc', fontSize: 10 }}>
+            <input
+              type="checkbox"
+              checked={!!config.blockOnExceed}
+              onChange={(e) => onConfigChange({ blockOnExceed: e.target.checked })}
+            />
+            <span>Block on exceed</span>
+          </label>
+        </div>
+      )}
+
+      {kind === 'chat' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+            <span style={{ fontSize: 10, color: '#888', width: 80 }}>Retry attempts:</span>
+            <input
+              type="number"
+              min="1"
+              value={config.retryAttempts || 1}
+              onChange={(e) => onConfigChange({ retryAttempts: parseInt(e.target.value) || 1 })}
+              style={{
+                flex: 1,
+                padding: '2px 4px',
+                background: '#252526',
+                color: '#cccccc',
+                border: '1px solid #3e3e42',
+                borderRadius: 3,
+                fontSize: 10,
+              }}
+            />
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+            <span style={{ fontSize: 10, color: '#888', width: 80 }}>Retry backoff:</span>
+            <input
+              type="number"
+              min="0"
+              value={config.retryBackoffMs || 0}
+              onChange={(e) => onConfigChange({ retryBackoffMs: parseInt(e.target.value) || 0 })}
+              placeholder="ms"
+              style={{
+                flex: 1,
+                padding: '2px 4px',
+                background: '#252526',
+                color: '#cccccc',
+                border: '1px solid #3e3e42',
+                borderRadius: 3,
+                fontSize: 10,
+              }}
+            />
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc', fontSize: 10 }}>
+            <input
+              type="checkbox"
+              checked={!!config.cacheEnabled}
+              onChange={(e) => onConfigChange({ cacheEnabled: e.target.checked })}
+            />
+            <span>Cache enabled</span>
+          </label>
+          {config.cacheEnabled && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+              <span style={{ fontSize: 10, color: '#888', width: 80 }}>Cache TTL:</span>
+              <input
+                type="number"
+                min="60000"
+                value={config.cacheTtlMs || 7200000}
+                onChange={(e) => onConfigChange({ cacheTtlMs: parseInt(e.target.value) || 7200000 })}
+                placeholder="ms"
+                style={{
+                  flex: 1,
+                  padding: '2px 4px',
+                  background: '#252526',
+                  color: '#cccccc',
+                  border: '1px solid #3e3e42',
+                  borderRadius: 3,
+                  fontSize: 10,
+                }}
+              />
+            </label>
+          )}
+        </div>
+      )}
+
+      {kind === 'redactor' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc', fontSize: 10 }}>
+            <input
+              type="checkbox"
+              checked={config.enabled ?? true}
+              onChange={(e) => onConfigChange({ enabled: e.target.checked })}
+            />
+            <span>Enabled</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc', fontSize: 10 }}>
+            <input
+              type="checkbox"
+              checked={!!config.ruleEmails}
+              onChange={(e) => onConfigChange({ ruleEmails: e.target.checked })}
+            />
+            <span>Redact emails</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc', fontSize: 10 }}>
+            <input
+              type="checkbox"
+              checked={!!config.ruleApiKeys}
+              onChange={(e) => onConfigChange({ ruleApiKeys: e.target.checked })}
+            />
+            <span>Redact API keys</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc', fontSize: 10 }}>
+            <input
+              type="checkbox"
+              checked={!!config.ruleAwsKeys}
+              onChange={(e) => onConfigChange({ ruleAwsKeys: e.target.checked })}
+            />
+            <span>Redact AWS keys</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc', fontSize: 10 }}>
+            <input
+              type="checkbox"
+              checked={!!config.ruleNumbers16}
+              onChange={(e) => onConfigChange({ ruleNumbers16: e.target.checked })}
+            />
+            <span>Redact 16+ digit numbers</span>
+          </label>
+        </div>
+      )}
+
+      {kind === 'errorDetection' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc', fontSize: 10 }}>
+            <input
+              type="checkbox"
+              checked={config.enabled ?? true}
+              onChange={(e) => onConfigChange({ enabled: e.target.checked })}
+            />
+            <span>Enabled</span>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, color: '#cccccc' }}>
+            <span style={{ fontSize: 10, color: '#888' }}>Error patterns (one per line):</span>
+            <textarea
+              value={(config.patterns || []).join('\n')}
+              onChange={(e) => onConfigChange({ patterns: e.target.value.split('\n').filter(Boolean) })}
+              placeholder="error\nexception\nfailed"
+              rows={3}
+              style={{
+                padding: '4px 6px',
+                background: '#252526',
+                color: '#cccccc',
+                border: '1px solid #3e3e42',
+                borderRadius: 3,
+                fontSize: 10,
+                fontFamily: 'monospace',
+                resize: 'vertical',
+              }}
+            />
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc', fontSize: 10 }}>
+            <input
+              type="checkbox"
+              checked={!!config.blockOnFlag}
+              onChange={(e) => onConfigChange({ blockOnFlag: e.target.checked })}
+            />
+            <span>Block when flagged</span>
+          </label>
+        </div>
+      )}
+
+      {kind === 'intentRouter' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
+            🔀 Routes flow based on LLM-classified user intent. Passes context through unchanged.
+          </Text>
+
+          {/* Provider and Model Selection - always show */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 8, borderBottom: '1px solid #3e3e42' }}>
+            <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
+              Configure the LLM used for intent classification:
+            </Text>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Provider:</span>
+                <select
+                  value={config.provider || 'openai'}
+                  onChange={(e) => onConfigChange({ provider: e.target.value, model: '' })}
+                  className="nodrag"
+                  style={{
+                    padding: '4px 6px',
+                    background: '#252526',
+                    color: '#cccccc',
+                    border: '1px solid #3e3e42',
+                    borderRadius: 3,
+                    fontSize: 10,
+                  }}
+                >
+                  {providerOptions.map((p) => (
+                    <option key={p.value} value={p.value}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Model:</span>
+                <select
+                  value={config.model || ''}
+                  onChange={(e) => onConfigChange({ model: e.target.value })}
+                  className="nodrag"
+                  style={{
+                    padding: '4px 6px',
+                    background: '#252526',
+                    color: '#cccccc',
+                    border: '1px solid #3e3e42',
+                    borderRadius: 3,
+                    fontSize: 10,
+                  }}
+                >
+                  <option value="">Select model...</option>
+                  {modelOptions.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+
+          {/* Intent Table */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr 24px', gap: 4, fontSize: 9, color: '#888', fontWeight: 600, paddingBottom: 4, borderBottom: '1px solid #3e3e42' }}>
+              <span>Intent</span>
+              <span>Description</span>
+              <span></span>
+            </div>
+
+            {/* Render existing intents */}
+            {Object.entries(config.routes || {}).map(([intent, description], idx) => (
+              <div key={`intent-${idx}`} style={{ display: 'grid', gridTemplateColumns: '100px 1fr 24px', gap: 4, alignItems: 'center' }}>
+                <input
+                  type="text"
+                  value={intent}
+                  onChange={(e) => {
+                    const entries = Object.entries(config.routes || {})
+                    const newRoutes: Record<string, string> = {}
+                    entries.forEach(([k, v], i) => {
+                      if (i === idx) {
+                        newRoutes[e.target.value] = v as string
+                      } else {
+                        newRoutes[k] = v as string
+                      }
+                    })
+                    onConfigChange({ routes: newRoutes })
+                  }}
+                  placeholder="intent"
+                  className="nodrag"
+                  style={{
+                    padding: '3px 5px',
+                    background: '#252526',
+                    color: '#cccccc',
+                    border: '1px solid #3e3e42',
+                    borderRadius: 3,
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                  }}
+                />
+                <input
+                  type="text"
+                  value={description as string}
+                  onChange={(e) => {
+                    const newRoutes = { ...config.routes }
+                    newRoutes[intent] = e.target.value
+                    onConfigChange({ routes: newRoutes })
+                  }}
+                  placeholder="Description of when to use this intent"
+                  className="nodrag"
+                  style={{
+                    padding: '3px 5px',
+                    background: '#252526',
+                    color: '#cccccc',
+                    border: '1px solid #3e3e42',
+                    borderRadius: 3,
+                    fontSize: 10,
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    const newRoutes = { ...config.routes }
+                    delete newRoutes[intent]
+                    onConfigChange({ routes: newRoutes })
+                  }}
+                  className="nodrag"
+                  style={{
+                    padding: '2px 6px',
+                    background: '#3e3e42',
+                    color: '#cccccc',
+                    border: 'none',
+                    borderRadius: 3,
+                    fontSize: 10,
+                    cursor: 'pointer',
+                  }}
+                  title="Remove intent"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+
+            {/* Add new intent button */}
+            <button
+              onClick={() => {
+                const newRoutes = { ...config.routes }
+                let counter = 1
+                while (newRoutes[`intent${counter}`]) counter++
+                newRoutes[`intent${counter}`] = ''
+                onConfigChange({ routes: newRoutes })
+              }}
+              style={{
+                padding: '4px 8px',
+                background: '#3e3e42',
+                color: '#cccccc',
+                border: '1px solid #555',
+                borderRadius: 3,
+                fontSize: 10,
+                cursor: 'pointer',
+                marginTop: 4,
+              }}
+            >
+              + Add Intent
+            </button>
+          </div>
+
+          <Text size="xs" c="blue.4" style={{ fontSize: 9, lineHeight: 1.3 }}>
+            💡 The LLM classifies the input text (without conversation context) and routes to the matching intent. Context is passed through unchanged. Only the matched intent's outputs will trigger downstream nodes.
+          </Text>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Tools configuration component with grouped checkboxes
+function ToolsConfig({ config, onConfigChange }: { config: any; onConfigChange: (patch: any) => void }) {
+  const [availableTools, setAvailableTools] = useState<Array<{ name: string; description: string }>>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const loadTools = async () => {
+      try {
+        const tools = await window.flows?.getTools()
+        setAvailableTools(tools || [])
+      } catch (e) {
+        console.error('Failed to load tools:', e)
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadTools()
+  }, [])
+
+  // Group tools by prefix (agent., fs., terminal., etc.)
+  const groupedTools = useMemo(() => {
+    const groups: Record<string, Array<{ name: string; description: string }>> = {}
+    availableTools.forEach(tool => {
+      const prefix = tool.name.includes('.') ? tool.name.split('.')[0] : 'other'
+      if (!groups[prefix]) groups[prefix] = []
+      groups[prefix].push(tool)
+    })
+    return groups
+  }, [availableTools])
+
+  const isAuto = config.tools === 'auto'
+  const selectedTools = Array.isArray(config.tools) ? config.tools : []
+
+  const handleAutoToggle = () => {
+    if (isAuto) {
+      onConfigChange({ tools: [] })
+    } else {
+      onConfigChange({ tools: 'auto' })
+    }
+  }
+
+  const handleToolToggle = (toolName: string) => {
+    if (isAuto) return // Can't toggle individual tools in auto mode
+
+    const newSelected = selectedTools.includes(toolName)
+      ? selectedTools.filter((t: string) => t !== toolName)
+      : [...selectedTools, toolName]
+
+    onConfigChange({ tools: newSelected })
+  }
+
+  const handleGroupToggle = (groupName: string) => {
+    if (isAuto) return
+
+    const groupTools = groupedTools[groupName].map(t => t.name)
+    const allSelected = groupTools.every(t => selectedTools.includes(t))
+
+    if (allSelected) {
+      // Deselect all in group
+      onConfigChange({ tools: selectedTools.filter((t: string) => !groupTools.includes(t)) })
+    } else {
+      // Select all in group
+      const newSelected = [...new Set([...selectedTools, ...groupTools])]
+      onConfigChange({ tools: newSelected })
+    }
+  }
+
+  if (loading) {
+    return (
+      <div style={{ padding: 10, background: '#1e1e1e', borderTop: '1px solid #333' }}>
+        <Text size="xs" c="dimmed">Loading tools...</Text>
+      </div>
+    )
+  }
+
+  const groupLabels: Record<string, string> = {
+    agent: '🤖 Agent (Self-regulation)',
+    fs: '📁 Filesystem',
+    edits: '✏️ Code Editing',
+    index: '🔍 Search',
+    terminal: '💻 Terminal',
+    code: '🔧 Code Analysis',
+    other: '📦 Other',
+  }
+
+  return (
+    <div className="nodrag" style={{ padding: 10, background: '#1e1e1e', borderTop: '1px solid #333', fontSize: 11 }}>
+      <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3, marginBottom: 8 }}>
+        🔧 Provides tools to the LLM. Select "Auto" for all tools, or choose specific tools below.
+      </Text>
+
+      <Checkbox
+        label="Auto (All Tools)"
+        checked={isAuto}
+        onChange={handleAutoToggle}
+        size="xs"
+        styles={{
+          root: { marginBottom: 12 },
+          label: { fontSize: 11, fontWeight: 600, color: '#e0e0e0' },
+        }}
+      />
+
+      {!isAuto && (
+        <Accordion
+          variant="separated"
+          styles={{
+            root: { background: 'transparent' },
+            item: { background: '#252526', border: '1px solid #3e3e42', marginBottom: 4 },
+            control: { padding: '6px 8px', fontSize: 10 },
+            label: { fontSize: 10, fontWeight: 600 },
+            content: { padding: '4px 8px' },
+          }}
+        >
+          {Object.entries(groupedTools).map(([groupName, tools]) => {
+            const allSelected = tools.every(t => selectedTools.includes(t.name))
+            const someSelected = tools.some(t => selectedTools.includes(t.name))
+
+            return (
+              <Accordion.Item key={groupName} value={groupName}>
+                <Accordion.Control>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Checkbox
+                      checked={allSelected}
+                      indeterminate={someSelected && !allSelected}
+                      onChange={() => handleGroupToggle(groupName)}
+                      size="xs"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <span>{groupLabels[groupName] || groupName}</span>
+                    <span style={{ marginLeft: 'auto', fontSize: 9, color: '#888' }}>
+                      {tools.filter(t => selectedTools.includes(t.name)).length}/{tools.length}
+                    </span>
+                  </div>
+                </Accordion.Control>
+                <Accordion.Panel>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {tools.map(tool => (
+                      <Checkbox
+                        key={tool.name}
+                        label={
+                          <div style={{ fontSize: 9 }}>
+                            <div style={{ fontWeight: 500, color: '#e0e0e0' }}>{tool.name}</div>
+                            <div style={{ color: '#888', marginTop: 2 }}>{tool.description}</div>
+                          </div>
+                        }
+                        checked={selectedTools.includes(tool.name)}
+                        onChange={() => handleToolToggle(tool.name)}
+                        size="xs"
+                        styles={{
+                          root: { marginBottom: 4 },
+                          body: { alignItems: 'flex-start' },
+                        }}
+                      />
+                    ))}
+                  </div>
+                </Accordion.Panel>
+              </Accordion.Item>
+            )
+          })}
+        </Accordion>
+      )}
+
+      {!isAuto && (
+        <Text size="xs" c="dimmed" style={{ fontSize: 9, marginTop: 8 }}>
+          Selected: {selectedTools.length} tool{selectedTools.length !== 1 ? 's' : ''}
+        </Text>
+      )}
+    </div>
+  )
+}
+

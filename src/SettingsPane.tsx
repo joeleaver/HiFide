@@ -1,22 +1,34 @@
 import { useEffect } from 'react'
 import { Button, Group, Stack, Text, TextInput, Title, Select, Switch, Slider, Progress, Divider, Card, Alert } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useAppStore } from './store/app'
+import { useAppStore, selectModelsByProvider, selectProviderValid, selectDefaultModels, selectAutoRetry, selectAutoApproveEnabled, selectAutoApproveThreshold, selectAutoEnforceEditsSchema, selectSettingsApiKeys, selectSettingsSaving, selectSettingsSaved, selectStartupMessage } from './store'
 import PricingSettings from './components/PricingSettings'
 
+import RateLimitSettings from './components/RateLimitSettings'
+
 export default function SettingsPane() {
-  const {
-    autoRetry, setAutoRetry,
-    defaultModels, setDefaultModel,
-    autoApproveEnabled, setAutoApproveEnabled,
-    autoApproveThreshold, setAutoApproveThreshold,
-    autoEnforceEditsSchema, setAutoEnforceEditsSchema,
-    settingsApiKeys, settingsSaving, settingsSaved,
-    setSettingsApiKey, loadSettingsApiKeys, saveSettingsApiKeys,
-    modelsByProvider,
-    providerValid,
-    startupMessage,
-  } = useAppStore()
+  // Use selectors for better performance
+  const modelsByProvider = useAppStore(selectModelsByProvider)
+  const providerValid = useAppStore(selectProviderValid)
+  const defaultModels = useAppStore(selectDefaultModels)
+  const autoRetry = useAppStore(selectAutoRetry)
+  const autoApproveEnabled = useAppStore(selectAutoApproveEnabled)
+  const autoApproveThreshold = useAppStore(selectAutoApproveThreshold)
+  const autoEnforceEditsSchema = useAppStore(selectAutoEnforceEditsSchema)
+  const settingsApiKeys = useAppStore(selectSettingsApiKeys)
+  const settingsSaving = useAppStore(selectSettingsSaving)
+  const settingsSaved = useAppStore(selectSettingsSaved)
+  const startupMessage = useAppStore(selectStartupMessage)
+
+  // Actions only - these don't cause re-renders
+  const setAutoRetry = useAppStore((s) => s.setAutoRetry)
+  const setDefaultModel = useAppStore((s) => s.setDefaultModel)
+  const setAutoApproveEnabled = useAppStore((s) => s.setAutoApproveEnabled)
+  const setAutoApproveThreshold = useAppStore((s) => s.setAutoApproveThreshold)
+  const setAutoEnforceEditsSchema = useAppStore((s) => s.setAutoEnforceEditsSchema)
+  const setSettingsApiKey = useAppStore((s) => s.setSettingsApiKey)
+  const loadSettingsApiKeys = useAppStore((s) => s.loadSettingsApiKeys)
+  const saveSettingsApiKeys = useAppStore((s) => s.saveSettingsApiKeys)
 
   // Load keys on mount
   useEffect(() => {
@@ -34,7 +46,11 @@ export default function SettingsPane() {
 
 
   // Indexing state (centralized)
-  const { idxStatus, idxLoading, idxQuery, idxResults, idxProg, ensureIndexProgressSubscription, refreshIndexStatus, rebuildIndex, clearIndex, setIdxQuery, searchIndex } = useAppStore()
+  const {
+    idxStatus, idxLoading, idxQuery, idxResults, idxProg,
+    ensureIndexProgressSubscription, refreshIndexStatus, rebuildIndex,
+    clearIndex, setIdxQuery, searchIndex
+  } = useAppStore()
 
   useEffect(() => {
     ensureIndexProgressSubscription()
@@ -224,6 +240,17 @@ export default function SettingsPane() {
           <Text size="sm" c="dimmed">Configure pricing per model for accurate cost tracking</Text>
         </div>
         <PricingSettings />
+      </Stack>
+
+      <Divider />
+
+      {/* Rate Limits Section */}
+      <Stack gap="md">
+        <div>
+          <Title order={3}>Rate Limits</Title>
+          <Text size="sm" c="dimmed">Optionally throttle requests/tokens per model to avoid exceeding provider quotas</Text>
+        </div>
+        <RateLimitSettings />
       </Stack>
 
       <Divider />

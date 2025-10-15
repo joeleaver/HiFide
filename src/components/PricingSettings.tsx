@@ -1,14 +1,17 @@
 import { useState } from 'react'
 import { Card, Stack, Group, Text, Button, Accordion, Table, NumberInput, Badge } from '@mantine/core'
-import { useAppStore } from '../store/app'
+import { useAppStore, selectModelsByProvider, selectPricingConfig } from '../store'
 import { DEFAULT_PRICING, type ModelPricing } from '../data/defaultPricing'
 
 export default function PricingSettings() {
-  const pricingConfig = useAppStore((s) => s.pricingConfig)
+  // Use selectors for better performance
+  const modelsByProvider = useAppStore(selectModelsByProvider)
+  const pricingConfig = useAppStore(selectPricingConfig)
+
+  // Actions only - these don't cause re-renders
   const setPricingForModel = useAppStore((s) => s.setPricingForModel)
   const resetPricingToDefaults = useAppStore((s) => s.resetPricingToDefaults)
   const resetProviderPricing = useAppStore((s) => s.resetProviderPricing)
-  const modelsByProvider = useAppStore((s) => s.modelsByProvider)
   
   const [expanded, setExpanded] = useState<string | null>(null)
   

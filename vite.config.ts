@@ -23,11 +23,12 @@ export default defineConfig({
               fileName: () => 'main.mjs',
             },
             rollupOptions: {
-              external: ['keytar', 'openai', '@homebridge/node-pty-prebuilt-multiarch', '@ast-grep/napi', '@ast-grep/napi-win32-x64-msvc', 'ts-morph', 'typescript'],
+              external: ['keytar', 'openai', '@homebridge/node-pty-prebuilt-multiarch', '@ast-grep/napi', '@ast-grep/napi-win32-x64-msvc'],
               output: {
                 format: 'es',
                 entryFileNames: 'main.mjs',
                 chunkFileNames: 'main-[hash].mjs',
+                banner: 'import { fileURLToPath as __fut } from "node:url"; import * as __path from "node:path"; var __filename = __fut(import.meta.url); var __dirname = __path.dirname(__filename);',
               },
             },
           },

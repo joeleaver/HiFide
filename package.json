@@ -22,7 +22,9 @@
     "@mantine/notifications": "^8.3.3",
     "@monaco-editor/react": "^4.7.0",
     "@tanstack/react-query": "^5.90.2",
+    "@types/dagre": "^0.7.53",
     "ajv": "^8.17.1",
+    "dagre": "^0.8.5",
     "dompurify": "^3.2.7",
     "electron-store": "^11.0.2",
     "highlight.js": "^11.11.1",
@@ -31,6 +33,7 @@
     "openai": "^6.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "reactflow": "^11.11.4",
     "ts-morph": "^27.0.0",
     "xterm": "^5.3.0",
     "xterm-addon-fit": "^0.8.0",
@@ -38,7 +41,6 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
-    "@ast-grep/napi": "^0.39.6",
     "@electron/rebuild": "^4.0.1",
     "@tabler/icons-react": "^3.35.0",
     "@types/markdown-it": "^14.1.2",

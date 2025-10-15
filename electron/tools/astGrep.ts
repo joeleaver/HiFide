@@ -1,7 +1,19 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import fg from 'fast-glob'
-import * as napi from '@ast-grep/napi'
+
+let cachedNapi: any | null = null
+async function loadNapi(): Promise<any> {
+  if (cachedNapi) return cachedNapi
+  try {
+    const mod = await import('@ast-grep/napi')
+    cachedNapi = mod as any
+    return cachedNapi
+  } catch (e: any) {
+    const msg = 'The ast-grep engine (@ast-grep/napi) is required at runtime but was not found. Please install it as a production dependency.'
+    throw new Error(msg)
+  }
+}
 
 export type AstGrepSearchOptions = {
   pattern: string
@@ -31,10 +43,7 @@ export type AstGrepSearchResult = {
   stats: { scannedFiles: number; matchedCount: number; durationMs: number }
 }
 
-// Detect available languages from @ast-grep/napi dynamically
-const Available: Record<string, any> = Object.fromEntries(
-  Object.entries(napi as any).filter(([, v]) => v && typeof (v as any).parse === 'function')
-) as any
+
 
 // Conservative extension mapping. We only enable entries that exist in Available at runtime.
 const BaseExtMap: Record<string, string> = {
@@ -62,7 +71,7 @@ const BaseExtMap: Record<string, string> = {
   sh: 'bash', bash: 'bash', zsh: 'bash'
 }
 
-function extToLang(ext: string): string | undefined {
+function extToLang(ext: string, Available: Record<string, any>): string | undefined {
   const cand = BaseExtMap[ext.toLowerCase()]
   if (cand && Available[cand]) return cand
   return undefined
@@ -100,6 +109,10 @@ export async function astGrepSearch(opts: AstGrepSearchOptions): Promise<AstGrep
   // Discover candidate files
   const files = await fg(include, { cwd, ignore: exclude, absolute: true, onlyFiles: true, dot: false })
 
+  const napi = await loadNapi()
+  const Available: Record<string, any> = Object.fromEntries(
+    Object.entries(napi as any).filter(([, v]) => v && typeof (v as any).parse === 'function')
+  ) as any
   const requestedLangs = opts.languages && opts.languages !== 'auto' ? opts.languages : null
 
   const matches: AstGrepMatch[] = []
@@ -112,7 +125,7 @@ export async function astGrepSearch(opts: AstGrepSearchOptions): Promise<AstGrep
       const file = queue.shift()
       if (!file) break
       const ext = path.extname(file).slice(1).toLowerCase()
-      const lang = requestedLangs ? (requestedLangs.find(l => l === extToLang(ext) || l === ext || l === (BaseExtMap[ext] || '')) as string | undefined) : extToLang(ext)
+      const lang = requestedLangs ? (requestedLangs.find(l => l === extToLang(ext, Available) || l === ext || l === (BaseExtMap[ext] || '')) as string | undefined) : extToLang(ext, Available)
       if (!lang || !Available[lang]) { continue }
       if (await statIsLarge(file, maxFileBytes)) { continue }
       let content = ''
@@ -205,6 +218,10 @@ export async function astGrepRewrite(opts: AstGrepRewriteOptions): Promise<AstGr
   if (!pattern) throw new Error('pattern is required')
 
   const files = await fg(include, { cwd, ignore: exclude, absolute: true, onlyFiles: true, dot: false })
+  const napi = await loadNapi()
+  const Available: Record<string, any> = Object.fromEntries(
+    Object.entries(napi as any).filter(([, v]) => v && typeof (v as any).parse === 'function')
+  ) as any
   const requestedLangs = opts.languages && opts.languages !== 'auto' ? opts.languages : null
 
   const changes: AstGrepRewriteChange[] = []
@@ -218,7 +235,7 @@ export async function astGrepRewrite(opts: AstGrepRewriteOptions): Promise<AstGr
       const file = queue.shift()
       if (!file) break
       const ext = path.extname(file).slice(1).toLowerCase()
-      const lang = requestedLangs ? (requestedLangs.find(l => l === extToLang(ext) || l === ext || l === (BaseExtMap[ext] || '')) as string | undefined) : extToLang(ext)
+      const lang = requestedLangs ? (requestedLangs.find(l => l === extToLang(ext, Available) || l === ext || l === (BaseExtMap[ext] || '')) as string | undefined) : extToLang(ext, Available)
       if (!lang || !Available[lang]) { continue }
       if (await statIsLarge(file, maxFileBytes)) { continue }
 

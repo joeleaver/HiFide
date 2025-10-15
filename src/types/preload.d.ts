@@ -113,21 +113,40 @@ declare global {
           | { type: 'replaceRange'; path: string; start: number; end: number; text: string }
         >; error?: string; raw?: string }>;
         apply: (
-          edits: Array<
-            | { type: 'replaceOnce'; path: string; oldText: string; newText: string }
-            | { type: 'insertAfterLine'; path: string; line: number; text: string }
-            | { type: 'replaceRange'; path: string; start: number; end: number; text: string }
-          >,
+          edits: Array<any>,
           opts?: { dryRun?: boolean; verify?: boolean; tsconfigPath?: string }
         ) => Promise<{
           ok: boolean;
-          applied: number;
-          results: Array<{ path: string; changed: boolean; message?: string }>;
-          dryRun: boolean;
+          applied?: number;
+          results?: Array<{ path: string; changed: boolean; message?: string }>;
+          dryRun?: boolean;
           verification?: { ok: boolean; exitCode: number; stdout: string; stderr: string };
           error?: string;
         }>;
       };
+      flows?: {
+        list: () => Promise<{ ok: boolean; flows?: Array<{ id: string; label: string; location: 'builtin'|'workspace'; path: string }>; error?: string }>;
+        load: (idOrPath: string) => Promise<{ ok: boolean; def?: any; error?: string }>;
+        save: (id: string, def: any) => Promise<{ ok: boolean; path?: string; error?: string }>;
+        getTools: () => Promise<Array<{ name: string; description: string }>>;
+      };
+      flowExec?: {
+        run: (args: { requestId: string; flowId?: string; flowDef?: any; input?: string; model?: string; provider?: string; sessionId?: string; policy?: { autoApproveEnabled?: boolean; autoApproveThreshold?: number; redactor?: { enabled?: boolean; rules?: string[] }; budgetGuard?: { maxUSD?: number; blockOnExceed?: boolean }; errorDetection?: { enabled?: boolean; blockOnFlag?: boolean; patterns?: string[] }; pricing?: { inputCostPer1M?: number; outputCostPer1M?: number } } }) => Promise<{ ok: boolean }>;
+        stop: (requestId: string) => Promise<{ ok: boolean }>;
+      pause: (requestId: string) => Promise<{ ok: boolean }>;
+      resume: (requestId: string) => Promise<{ ok: boolean }>;
+      step: (requestId: string) => Promise<{ ok: boolean }>;
+
+      flowTrace?: {
+        export: (events: any[], label?: string) => Promise<{ ok: boolean; file?: string; error?: string }>;
+      };
+
+      setBreakpoints: (args: { requestId: string; nodeIds: string[] }) => Promise<{ ok: boolean }>;
+        onEvent: (listener: (ev: { requestId: string; type: string; nodeId?: string; data?: any; error?: string }) => void) => () => void;
+      };
+    models?: {
+      cheapestClassifier: (provider: string) => Promise<{ ok: boolean; model?: string; error?: string }>;
+    };
 
       indexing?: {
         rebuild: () => Promise<{ ok: boolean; status?: { ready: boolean; chunks: number; modelId?: string; dim?: number; indexPath: string; exists?: boolean; inProgress?: boolean; phase?: string; processedFiles?: number; totalFiles?: number; processedChunks?: number; totalChunks?: number; elapsedMs?: number }; error?: string }>;
@@ -149,10 +168,21 @@ declare global {
           generatedContext?: boolean;
           error?: string;
         }>;
+        getSettings: () => Promise<{ ok: boolean; settings?: Record<string, any>; error?: string }>;
+        setSetting: (key: string, value: any) => Promise<{ ok: boolean; error?: string }>;
       };
       planning?: {
         saveApproved: (plan: any) => Promise<{ ok: boolean; error?: string }>;
         loadApproved: () => Promise<{ ok: boolean; plan?: any; error?: string }>;
+      };
+
+      flowState?: {
+        load: () => Promise<{ ok: boolean; state?: any; error?: string }>;
+        save: (state: any) => Promise<{ ok: boolean; error?: string }>;
+      };
+
+      capabilities?: {
+        get: () => Promise<{ ok: boolean; capabilities?: Record<string, Record<string, boolean>>; error?: string }>;
       };
 
     }

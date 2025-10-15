@@ -93,11 +93,16 @@ export const GeminiProvider: ProviderAdapter = {
           const lastUserText = [...messages].reverse().find(mm => mm.role === 'user')?.content || ''
           const res: any = await withRetries(() => chat.sendMessageStream(lastUserText) as any)
           holder.abort = () => { try { res?.abortController?.abort?.() } catch {} }
-          for await (const chunk of res.stream) {
-            try {
-              const t = chunk?.text?.() ?? chunk?.candidates?.[0]?.content?.parts?.[0]?.text
-              if (t) onChunk(String(t))
-            } catch (e: any) { onError(e?.message || String(e)) }
+          try {
+            for await (const chunk of res.stream) {
+              try {
+                const t = chunk?.text?.() ?? chunk?.candidates?.[0]?.content?.parts?.[0]?.text
+                if (t) onChunk(String(t))
+              } catch (e: any) { onError(e?.message || String(e)) }
+            }
+          } catch (e: any) {
+            // Stream iteration failed (e.g., parse error)
+            onError(e?.message || String(e))
           }
           try {
             const response = await res.response
@@ -114,11 +119,16 @@ export const GeminiProvider: ProviderAdapter = {
         } else {
           const res: any = await withRetries(() => m.generateContentStream({ contents }) as any)
           holder.abort = () => { try { res?.abortController?.abort?.() } catch {} }
-          for await (const chunk of res.stream) {
-            try {
-              const t = chunk?.text?.() ?? chunk?.candidates?.[0]?.content?.parts?.[0]?.text
-              if (t) onChunk(String(t))
-            } catch (e: any) { onError(e?.message || String(e)) }
+          try {
+            for await (const chunk of res.stream) {
+              try {
+                const t = chunk?.text?.() ?? chunk?.candidates?.[0]?.content?.parts?.[0]?.text
+                if (t) onChunk(String(t))
+              } catch (e: any) { onError(e?.message || String(e)) }
+            }
+          } catch (e: any) {
+            // Stream iteration failed (e.g., parse error)
+            onError(e?.message || String(e))
           }
 
           // Extract token usage from response
@@ -164,7 +174,14 @@ export const GeminiProvider: ProviderAdapter = {
           onError(e2?.message || String(e2))
         }
       }
-    })()
+    })().catch((e: any) => {
+      // Handle any errors that occur after chatStream returns
+      // This prevents unhandled promise rejections
+      console.error('[GeminiProvider] Unhandled error in chatStream:', e)
+      try {
+        onError(e?.message || String(e))
+      } catch {}
+    })
 
     return {
       cancel: () => { try { holder.abort?.() } catch {} },
@@ -172,7 +189,7 @@ export const GeminiProvider: ProviderAdapter = {
   },
 
   // Agent streaming with Gemini function calling
-  async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, toolMeta, onChunk, onDone, onError, onTokenUsage, sessionId }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, toolMeta, onChunk, onDone, onError, onTokenUsage, onToolStart, onToolEnd, onToolError, sessionId }): Promise<StreamHandle> {
     const genAI = new GoogleGenerativeAI(apiKey)
     const systemInstruction = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
     const m: any = genAI.getGenerativeModel({ model, systemInstruction })
@@ -231,23 +248,28 @@ export const GeminiProvider: ProviderAdapter = {
           // Accumulate function calls incrementally
           const callAcc: Record<string, { name: string; args: any }> = {}
 
-          for await (const chunk of streamRes.stream) {
-            try {
-              // Stream text parts
-              const t = chunk?.text?.() ?? chunk?.candidates?.[0]?.content?.parts?.[0]?.text
-              if (t) onChunk(String(t))
+          try {
+            for await (const chunk of streamRes.stream) {
+              try {
+                // Stream text parts
+                const t = chunk?.text?.() ?? chunk?.candidates?.[0]?.content?.parts?.[0]?.text
+                if (t) onChunk(String(t))
 
-              // Capture functionCall parts if present
-              const parts = chunk?.candidates?.[0]?.content?.parts || []
-              for (const p of parts) {
-                if (p?.functionCall) {
-                  const name = p.functionCall.name
-                  const args = p.functionCall.args
-                  const key = name // one per name per turn typical
-                  callAcc[key] = { name, args }
+                // Capture functionCall parts if present
+                const parts = chunk?.candidates?.[0]?.content?.parts || []
+                for (const p of parts) {
+                  if (p?.functionCall) {
+                    const name = p.functionCall.name
+                    const args = p.functionCall.args
+                    const key = name // one per name per turn typical
+                    callAcc[key] = { name, args }
+                  }
                 }
-              }
-            } catch (e: any) { onError(e?.message || String(e)) }
+              } catch (e: any) { onError(e?.message || String(e)) }
+            }
+          } catch (e: any) {
+            // Stream iteration failed (e.g., parse error)
+            onError(e?.message || String(e))
           }
 
           // Extract and accumulate token usage
@@ -277,6 +299,9 @@ export const GeminiProvider: ProviderAdapter = {
             for (const fc of functionCalls) {
               const name = fc.name
               const args = fc.args || {}
+              // Generate a unique call ID for this tool invocation
+              const callId = `${name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+
               try {
                 const tool = toolMap.get(name)
                 const schema = tools.find(t => t.name === name)?.parameters
@@ -285,13 +310,23 @@ export const GeminiProvider: ProviderAdapter = {
                   toolResponses.push({ functionResponse: { name, response: { content: `Validation error: ${v.errors || 'invalid input'}` } } })
                   continue
                 }
+
+                // Notify tool start
+                try { onToolStart?.({ callId, name, arguments: args }) } catch {}
+
                 const result = await Promise.resolve(tool?.run(args, toolMeta))
+
+                // Notify tool end
+                try { onToolEnd?.({ callId, name, result }) } catch {}
+
                 if (result && result._meta && result._meta.trigger_pruning) {
                   shouldPrune = true
                   pruneData = result._meta.summary
                 }
                 toolResponses.push({ functionResponse: { name, response: { content: typeof result === 'string' ? result : JSON.stringify(result) } } })
               } catch (e: any) {
+                // Notify tool error
+                try { onToolError?.({ callId, name, error: e?.message || String(e) }) } catch {}
                 toolResponses.push({ functionResponse: { name, response: { content: `Error: ${e?.message || String(e)}` } } })
               }
             }
@@ -325,7 +360,14 @@ export const GeminiProvider: ProviderAdapter = {
       }
     }
 
-    run()
+    run().catch((e: any) => {
+      // Handle any errors that occur after agentStream returns
+      // This prevents unhandled promise rejections
+      console.error('[GeminiProvider] Unhandled error in agentStream run():', e)
+      try {
+        onError(e?.message || String(e))
+      } catch {}
+    })
     // Persist session contents for continuity
     if (sessionId) {
       try { geminiAgentContents.set(sessionId, [...contents]) } catch {}

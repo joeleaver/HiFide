@@ -60,26 +60,6 @@ contextBridge.exposeInMainWorld('secrets', {
 
 
 contextBridge.exposeInMainWorld('llm', {
-  start: (requestId: string, messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>, model?: string, provider?: string, sessionId?: string) =>
-    ipcRenderer.invoke('llm:start', { requestId, messages, model, provider, sessionId }),
-  agentStart: (
-    requestId: string,
-    messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>,
-    model?: string,
-    provider?: string,
-    tools?: string[],
-    responseSchema?: any,
-    sessionId?: string,
-  ) => ipcRenderer.invoke('llm:agentStart', { requestId, messages, model, provider, tools, responseSchema, sessionId }),
-  auto: (
-    requestId: string,
-    messages: Array<{ role: 'system'|'user'|'assistant'; content: string }>,
-    model?: string,
-    provider?: string,
-    tools?: string[],
-    responseSchema?: any,
-    sessionId?: string,
-  ) => ipcRenderer.invoke('llm:auto', { requestId, messages, model, provider, tools, responseSchema, sessionId }),
   cancel: (requestId: string) => ipcRenderer.invoke('llm:cancel', { requestId }),
 })
 
@@ -98,6 +78,10 @@ contextBridge.exposeInMainWorld('fs', {
   unwatch: (id: number) => ipcRenderer.invoke('fs:watchStop', id),
   onWatch: (listener: (payload: { id: number; type: 'rename'|'change'; path: string; dir: string }) => void) => {
     const fn = (_: any, payload: any) => listener(payload)
+contextBridge.exposeInMainWorld('capabilities', {
+  get: () => ipcRenderer.invoke('capabilities:get'),
+})
+
     ipcRenderer.on('fs:watch:event', fn)
     return () => ipcRenderer.off('fs:watch:event', fn)
   },
@@ -211,4 +195,93 @@ contextBridge.exposeInMainWorld('workspace', {
     ipcRenderer.send('workspace:recent-folders-changed', recentFolders),
   bootstrap: (baseDir: string, preferAgent?: boolean, overwrite?: boolean) =>
     ipcRenderer.invoke('workspace:bootstrap', { baseDir, preferAgent, overwrite }),
+  ensureDirectory: (dirPath: string) => ipcRenderer.invoke('workspace:ensure-directory', dirPath),
+  getSettings: () => ipcRenderer.invoke('workspace:get-settings'),
+  setSetting: (key: string, value: any) => ipcRenderer.invoke('workspace:set-setting', key, value),
+  fileExists: (filePath: string) => ipcRenderer.invoke('workspace:file-exists', filePath),
+  readFile: (filePath: string) => ipcRenderer.invoke('workspace:read-file', filePath),
+  writeFile: (filePath: string, content: string) => ipcRenderer.invoke('workspace:write-file', filePath, content),
+  listFiles: (dirPath: string) => ipcRenderer.invoke('workspace:list-files', dirPath),
 })
+
+// Flow Profiles API
+contextBridge.exposeInMainWorld('flowProfiles', {
+  get: (profileName: string) => ipcRenderer.invoke('flow-profiles:get', profileName),
+  set: (profileName: string, profile: any) => ipcRenderer.invoke('flow-profiles:set', profileName, profile),
+  list: () => ipcRenderer.invoke('flow-profiles:list'),
+  delete: (profileName: string) => ipcRenderer.invoke('flow-profiles:delete', profileName),
+  has: (profileName: string) => ipcRenderer.invoke('flow-profiles:has', profileName),
+})
+
+// Rate limits API
+contextBridge.exposeInMainWorld('ratelimits', {
+  get: () => ipcRenderer.invoke('ratelimits:get'),
+  set: (config: any) => ipcRenderer.invoke('ratelimits:set', config),
+})
+
+
+// Flows API (Flow definitions & execution)
+contextBridge.exposeInMainWorld('flows', {
+  list: () => ipcRenderer.invoke('flows:list'),
+  load: (flowIdOrPath: string) => ipcRenderer.invoke('flows:load', { idOrPath: flowIdOrPath }),
+  save: (flowId: string, def: any) => ipcRenderer.invoke('flows:save', { id: flowId, def }),
+  getTools: () => ipcRenderer.invoke('flows:getTools'),
+})
+
+contextBridge.exposeInMainWorld('flowExec', {
+  // V2 handlers - clean function-based execution
+  run: (args: { requestId: string; flowId?: string; flowDef?: any; input?: string; model?: string; provider?: string; sessionId?: string }) =>
+    ipcRenderer.invoke('flow:run:v2', args),
+  resume: (requestId: string, userInput?: string) => ipcRenderer.invoke('flow:resume:v2', { requestId, userInput }),
+  stop: (requestId: string) => ipcRenderer.invoke('flow:cancel:v2', { requestId }),
+
+  // Legacy handlers (not implemented in V2 yet)
+  init: (_args: { requestId: string; flowId?: string; flowDef?: any; model?: string; provider?: string; sessionId?: string }) => {
+    console.warn('[flowExec.init] Not implemented in V2, use run instead')
+    return Promise.resolve({ ok: false, error: 'Not implemented in V2' })
+  },
+  pause: (_requestId: string) => {
+    console.warn('[flowExec.pause] Not implemented in V2')
+    return Promise.resolve({ ok: false, error: 'Not implemented in V2' })
+  },
+  step: (_requestId: string) => {
+    console.warn('[flowExec.step] Not implemented in V2')
+    return Promise.resolve({ ok: false, error: 'Not implemented in V2' })
+  },
+  setBreakpoints: (_args: { requestId: string; nodeIds: string[] }) => {
+    console.warn('[flowExec.setBreakpoints] Not implemented in V2')
+    return Promise.resolve({ ok: false, error: 'Not implemented in V2' })
+  },
+
+  onEvent: (listener: (ev: { requestId: string; type: string; nodeId?: string; data?: any; error?: string; prompt?: string }) => void) => {
+    const fn = (_: any, payload: any) => listener(payload)
+    ipcRenderer.on('flow:event', fn)
+    return () => ipcRenderer.off('flow:event', fn)
+  },
+  })
+
+
+// Flow cache API
+contextBridge.exposeInMainWorld('flowCache', {
+  stats: () => ipcRenderer.invoke('flowCache:stats'),
+  clear: () => ipcRenderer.invoke('flowCache:clear'),
+})
+
+// Models helper APIs
+contextBridge.exposeInMainWorld('models', {
+  cheapestClassifier: (provider: string) => ipcRenderer.invoke('models:cheapestClassifier', { provider }),
+})
+
+// Flow state persistence (Watch Mode)
+contextBridge.exposeInMainWorld('flowState', {
+  load: () => ipcRenderer.invoke('flowState:load'),
+  save: (state: any) => ipcRenderer.invoke('flowState:save', { state }),
+})
+
+
+// Trace export bridge
+contextBridge.exposeInMainWorld('flowTrace', {
+  export: (events: any[], label?: string) => ipcRenderer.invoke('flow:trace:export', { events, label }),
+})
+
+

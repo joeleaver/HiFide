@@ -9,7 +9,7 @@ export default function LoadingScreen({ message }: LoadingScreenProps) {
     <Center style={{ width: '100vw', height: '100vh', backgroundColor: '#1e1e1e' }}>
       <Stack align="center" gap={8}>
         <Loader color="blue" />
-        <Text c="dimmed" size="sm">{message || 'Loading providers and models…'}</Text>
+        <Text c="dimmed" size="sm">{message || 'Loading…'}</Text>
       </Stack>
     </Center>
   )

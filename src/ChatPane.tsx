@@ -1,66 +1,78 @@
-import { useEffect, useRef, useState } from 'react'
-import { Group, Stack, Textarea, Card, ScrollArea, Text, Loader, ActionIcon } from '@mantine/core'
-import { IconPlayerStop } from '@tabler/icons-react'
-import { useAppStore, type ActivityEvent } from './store/app'
+import { Group, Stack, Textarea, Card, ScrollArea, Text, Loader, ActionIcon, Badge } from '@mantine/core'
+import { IconPlayerStop, IconSparkles, IconClock } from '@tabler/icons-react'
+import { useAppStore, selectSessions, selectCurrentId } from './store'
 import Markdown from './components/Markdown'
 import StreamingMarkdown from './components/StreamingMarkdown'
-
-// Use a shared empty array to keep selector output stable when no activity is present
-const EMPTY_ACTIVITY: ReadonlyArray<ActivityEvent> = Object.freeze([])
+import { useRef, useEffect } from 'react'
 
 export default function ChatPane() {
-  const [input, setInput] = useState('')
-  const sessions = useAppStore((s) => s.sessions)
-  const currentId = useAppStore((s) => s.currentId)
-  const currentRequestId = useAppStore((s) => s.currentRequestId)
-  const streamingText = useAppStore((s) => s.streamingText)
-  // Select activity directly from map with a stable empty fallback to avoid infinite loop warnings
-  const activity: ReadonlyArray<ActivityEvent> = useAppStore((s) => {
-    const rid = s.currentRequestId || ''
-    const arr = s.activityByRequestId[rid]
-    return arr ? arr : EMPTY_ACTIVITY
-  })
-  const startChatRequest = useAppStore((s) => s.startChatRequest)
-  const stopCurrentRequest = useAppStore((s) => s.stopCurrentRequest)
-  const ensureLlmIpcSubscription = useAppStore((s) => s.ensureLlmIpcSubscription)
+  const sessions = useAppStore(selectSessions)
+  const currentId = useAppStore(selectCurrentId)
+
+  // Flow execution state - actions don't cause re-renders
+  const feResume = useAppStore((s) => s.feResume)
+  const feStop = useAppStore((s) => s.feStop)
+
+  // Flow execution state - these DO cause re-renders when they change
+  const feStatus = useAppStore((s) => s.feStatus)
+  const feStreamingText = useAppStore((s) => s.feStreamingText)
+  const feActiveTools = useAppStore((s) => s.feActiveTools)
+  const currentTurnToolCalls = useAppStore((s) => s.currentTurnToolCalls)
+
+  // Chat input from store - this changes on every keystroke
+  const input = useAppStore((s) => s.chatInput)
+  const setInput = useAppStore((s) => s.setChatInput)
 
   const messages = (sessions.find((sess) => sess.id === currentId)?.messages) || []
 
-  // Ref for the scroll area viewport
-  const scrollViewportRef = useRef<HTMLDivElement>(null)
+  // Smart auto-scroll: only scroll to bottom if user is already near bottom
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const shouldAutoScrollRef = useRef(true)
 
-  // Scroll to bottom when messages change or streaming text updates
+  // Check if user is near bottom (within 100px)
+  const checkIfNearBottom = () => {
+    const viewport = viewportRef.current
+    if (!viewport) return true
+
+    const { scrollTop, scrollHeight, clientHeight } = viewport
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+    return distanceFromBottom < 100
+  }
+
+  // Update shouldAutoScroll when user manually scrolls
   useEffect(() => {
-    if (scrollViewportRef.current) {
-      scrollViewportRef.current.scrollTop = scrollViewportRef.current.scrollHeight
+    const viewport = viewportRef.current
+    if (!viewport) return
+
+    const handleScroll = () => {
+      shouldAutoScrollRef.current = checkIfNearBottom()
     }
-  }, [messages, streamingText, currentId])
 
+    viewport.addEventListener('scroll', handleScroll)
+    return () => viewport.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  // Auto-scroll when messages/streaming changes, but only if user is near bottom
   useEffect(() => {
-    try { ensureLlmIpcSubscription() } catch {}
-  }, [ensureLlmIpcSubscription])
+    const viewport = viewportRef.current
+    if (!viewport || !shouldAutoScrollRef.current) return
 
-
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && currentRequestId) {
-        e.preventDefault(); stop()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [currentRequestId])
+    // Scroll to bottom
+    viewport.scrollTop = viewport.scrollHeight
+  }, [messages.length, feStreamingText, currentTurnToolCalls.length])
 
   const send = async () => {
     const text = input.trim()
     if (!text) return
-    await startChatRequest(text)
+
+    // Resume flow with user input
     setInput('')
+    await feResume(text)
   }
 
   const stop = async () => {
-    await stopCurrentRequest()
+    // Stop flow execution
+    await feStop()
   }
 
   return (
@@ -78,63 +90,137 @@ export default function ChatPane() {
         style={{ flex: 1 }}
         scrollbars="y"
         type="auto"
-        viewportRef={scrollViewportRef}
+        viewportRef={viewportRef}
       >
         <Stack gap="sm" pr="md">
           {messages.map((m, i) => (
-            <Card
-              key={i}
-              withBorder
-              style={{
-                backgroundColor: m.role === 'user' ? '#1e3a5f' : '#252526',
-                marginLeft: m.role === 'user' ? '40px' : '0',
-                borderColor: m.role === 'user' ? '#2b5a8e' : '#3e3e42',
-              }}
-            >
-              {m.role === 'assistant' ? <Markdown content={m.content} /> : <Text>{m.content}</Text>}
-            </Card>
-          ))}
-          {currentRequestId && (
-            <Card withBorder style={{ backgroundColor: '#252526', position: 'relative' }}>
-              <StreamingMarkdown content={streamingText} />
-              {/* Inline activity badges (MVP) */}
-              {activity.length > 0 && (
-                <Stack gap={4} mt="sm">
-                  {activity.map((ev: ActivityEvent, idx) => (
-                    <Text key={idx} size="xs" c={ev.kind === 'ToolFailed' ? 'red.4' : 'dimmed'}>
-                      {ev.kind === 'ToolStarted' && `🛠️ ${ev.tool} started`}
-                      {ev.kind === 'ToolCompleted' && `✅ ${ev.tool} completed`}
-                      {ev.kind === 'ToolFailed' && `❌ ${ev.tool} failed: ${ev.error}`}
-                      {ev.kind === 'FileEditApplied' && `✏️ files: ${(ev.files || []).join(', ')}`}
-                      {ev.summary ? ` — ${ev.summary}` : ''}
-                    </Text>
-                  ))}
-                </Stack>
+            <div key={i}>
+              {/* Intent and tool calls that happened before this message */}
+              {(m.intent || (m.toolCalls && m.toolCalls.length > 0)) && (
+                <Card withBorder style={{ backgroundColor: '#1e1e1e', padding: '8px 12px', marginBottom: '8px' }}>
+                  <Group gap="xs" wrap="wrap">
+                    {/* Intent badge */}
+                    {m.intent && (
+                      <Badge
+                        variant="light"
+                        color="orange"
+                        size="sm"
+                      >
+                        🎯 {m.intent}
+                      </Badge>
+                    )}
+
+                    {/* Tool call badges */}
+                    {m.toolCalls?.map((toolCall, tcIdx) => (
+                      <Badge
+                        key={tcIdx}
+                        variant={toolCall.status === 'running' ? 'filled' : 'light'}
+                        color={
+                          toolCall.status === 'running' ? 'orange' :
+                          toolCall.status === 'error' ? 'red' : 'green'
+                        }
+                        size="sm"
+                        leftSection={toolCall.status === 'running' ? <Loader size={12} /> : undefined}
+                        title={toolCall.error || new Date(toolCall.timestamp).toLocaleTimeString()}
+                      >
+                        🔧 {toolCall.toolName}
+                      </Badge>
+                    ))}
+                  </Group>
+                </Card>
               )}
-              <Group
-                gap="xs"
+
+              {/* Message */}
+              <Card
+                withBorder
                 style={{
-                  position: 'absolute',
-                  bottom: '12px',
-                  right: '12px',
-                  backgroundColor: '#252526',
-                  padding: '4px 8px',
-                  borderRadius: '4px',
+                  backgroundColor: m.role === 'user' ? '#1e3a5f' : '#252526',
+                  marginLeft: m.role === 'user' ? '40px' : '0',
+                  borderColor: m.role === 'user' ? '#2b5a8e' : '#3e3e42',
                 }}
               >
-                <Loader size="xs" />
-                <Text c="dimmed" size="sm">
-                  Streaming…
-                </Text>
-                <ActionIcon
-                  size="sm"
-                  variant="light"
-                  color="red"
-                  onClick={stop}
-                  title="Stop"
-                >
-                  <IconPlayerStop size={16} />
-                </ActionIcon>
+                {m.role === 'assistant' ? <Markdown content={m.content} /> : <Text>{m.content}</Text>}
+              </Card>
+            </div>
+          ))}
+
+          {/* Current turn tool calls (before assistant message is added) */}
+          {currentTurnToolCalls.length > 0 && (
+            <Card withBorder style={{ backgroundColor: '#1e1e1e', padding: '8px 12px' }}>
+              <Group gap="xs" wrap="wrap">
+                {currentTurnToolCalls.map((toolCall, idx) => (
+                  <Badge
+                    key={idx}
+                    variant={toolCall.status === 'running' ? 'filled' : 'light'}
+                    color={
+                      toolCall.status === 'running' ? 'orange' :
+                      toolCall.status === 'error' ? 'red' : 'green'
+                    }
+                    size="sm"
+                    leftSection={toolCall.status === 'running' ? <Loader size={12} /> : undefined}
+                    title={toolCall.error || new Date(toolCall.timestamp).toLocaleTimeString()}
+                  >
+                    🔧 {toolCall.toolName}
+                  </Badge>
+                ))}
+              </Group>
+            </Card>
+          )}
+
+          {/* Streaming response */}
+          {feStreamingText && (
+            <Card withBorder style={{ backgroundColor: '#252526', position: 'relative' }}>
+              <StreamingMarkdown content={feStreamingText} />
+              <Group gap="xs" style={{ position: 'absolute', bottom: '12px', right: '12px' }}>
+                {/* Streaming indicator - show whenever LLM is active */}
+                {feStatus === 'running' && (
+                  <Badge
+                    variant="light"
+                    color="blue"
+                    size="sm"
+                    leftSection={<Loader size={12} />}
+                  >
+                    Streaming
+                  </Badge>
+                )}
+              </Group>
+            </Card>
+          )}
+
+          {/* LLM active but not streaming yet - show spinner */}
+          {!feStreamingText && feStatus === 'running' && (
+            <Card
+              withBorder
+              style={{
+                backgroundColor: '#1a2a3a',
+                borderColor: '#4dabf7',
+                padding: '12px 16px',
+              }}
+            >
+              <Group gap="sm" align="center">
+                <Loader size={18} color="#4dabf7" />
+                <Badge variant="light" color="blue" size="sm" leftSection={<Loader size={12} />}>
+                  Streaming
+                </Badge>
+              </Group>
+            </Card>
+          )}
+
+          {/* Waiting for user input */}
+          {feStatus === 'waitingForInput' && (
+            <Card
+              withBorder
+              style={{
+                backgroundColor: '#1a2a1a',
+                borderColor: '#4ade80',
+                padding: '12px 16px',
+              }}
+            >
+              <Group gap="sm" align="center">
+                <IconClock size={18} color="#4ade80" />
+                <Badge variant="light" color="green" size="lg">
+                  Waiting for user input
+                </Badge>
               </Group>
             </Card>
           )}

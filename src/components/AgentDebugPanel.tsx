@@ -1,19 +1,20 @@
 import { Stack, Text, ScrollArea, Badge, Group, UnstyledButton } from '@mantine/core'
 import { IconTrash, IconChevronDown, IconChevronUp } from '@tabler/icons-react'
-import { useAppStore } from '../store/app'
+import { useAppStore, selectDebugPanelCollapsed } from '../store'
 
 export default function AgentDebugPanel() {
-  const debugLogs = useAppStore((s) => s.debugLogs)
-  const clearDebugLogs = useAppStore((s) => s.clearDebugLogs)
-  const debugPanelCollapsed = useAppStore((s) => s.debugPanelCollapsed)
-  const setDebugPanelCollapsed = useAppStore((s) => s.setDebugPanelCollapsed)
+  // Use selectors for better performance
+  const debugPanelCollapsed = useAppStore(selectDebugPanelCollapsed)
 
-  const getLevelColor = (level: 'info' | 'warning' | 'error') => {
-    switch (level) {
-      case 'info': return 'blue'
-      case 'warning': return 'yellow'
-      case 'error': return 'red'
-    }
+  // Flow events
+  const flowEvents = useAppStore((s) => s.feEvents)
+
+  // Get actions
+  const { setDebugPanelCollapsed, feClearLogs } = useAppStore()
+
+  // Clear flow events
+  const handleClearAll = () => {
+    feClearLogs()
   }
 
   const formatTime = (timestamp: number) => {
@@ -43,18 +44,19 @@ export default function AgentDebugPanel() {
       >
         <Group gap="xs">
           <Text size="xs" fw={600} c="dimmed">
-            AGENT DEBUG
+            FLOW DEBUG
           </Text>
-          {debugLogs.length > 0 && (
+          {flowEvents.length > 0 && (
             <Badge size="xs" variant="light" color="gray">
-              {debugLogs.length}
+              {flowEvents.length}
             </Badge>
           )}
         </Group>
         <Group gap="xs">
-          {debugLogs.length > 0 && !debugPanelCollapsed && (
+          {flowEvents.length > 0 && !debugPanelCollapsed && (
             <UnstyledButton
-              onClick={clearDebugLogs}
+              onClick={handleClearAll}
+              title="Clear all logs"
               style={{
                 color: '#888',
                 display: 'flex',
@@ -94,24 +96,25 @@ export default function AgentDebugPanel() {
       {/* Content area - hidden when collapsed */}
       {!debugPanelCollapsed && (
         <div style={{ flex: 1, overflow: 'hidden' }}>
-          {debugLogs.length === 0 ? (
+          {flowEvents.length === 0 ? (
             <div style={{ padding: '12px' }}>
               <Text size="xs" c="dimmed" style={{ fontStyle: 'italic' }}>
-                No debug logs yet. Logs will appear here when the agent performs actions.
+                No flow events yet. Events will appear here when the flow executes.
               </Text>
             </div>
           ) : (
             <ScrollArea style={{ height: '100%' }} type="auto">
               <div style={{ padding: '12px' }}>
                 <Stack gap={4}>
-                  {debugLogs.map((log, idx) => (
+                  {/* Flow Events */}
+                  {flowEvents.map((event, idx) => (
                     <div
-                      key={idx}
+                      key={`flow-${idx}`}
                       style={{
                         padding: '6px 8px',
                         backgroundColor: '#252526',
                         borderRadius: '4px',
-                        borderLeft: `3px solid var(--mantine-color-${getLevelColor(log.level)}-6)`,
+                        borderLeft: `3px solid #a855f7`,
                       }}
                     >
                       <Group gap="xs" wrap="nowrap">
@@ -120,15 +123,15 @@ export default function AgentDebugPanel() {
                           c="dimmed"
                           style={{ fontFamily: 'monospace', minWidth: '90px' }}
                         >
-                          {formatTime(log.timestamp)}
+                          {formatTime(event.timestamp)}
                         </Text>
                         <Badge
                           size="xs"
                           variant="light"
-                          color={getLevelColor(log.level)}
+                          color="violet"
                           style={{ minWidth: '50px', textAlign: 'center' }}
                         >
-                          {log.level.toUpperCase()}
+                          FLOW
                         </Badge>
                         <Badge
                           size="xs"
@@ -136,7 +139,7 @@ export default function AgentDebugPanel() {
                           color="gray"
                           style={{ minWidth: '60px', textAlign: 'center' }}
                         >
-                          {log.category}
+                          {event.type}
                         </Badge>
                       </Group>
                       <Text
@@ -148,9 +151,24 @@ export default function AgentDebugPanel() {
                           color: '#ccc',
                         }}
                       >
-                        {log.message}
+                        {event.nodeId ? `Node: ${event.nodeId}` : (event as any).message || ''}
                       </Text>
-                      {log.data && (
+                      {event.error && (
+                        <Text
+                          size="xs"
+                          mt={2}
+                          c="red.4"
+                          style={{
+                            fontFamily: 'monospace',
+                            fontSize: '10px',
+                            wordBreak: 'break-word',
+                            whiteSpace: 'pre-wrap',
+                          }}
+                        >
+                          {event.error}
+                        </Text>
+                      )}
+                      {event.data && (
                         <Text
                           size="xs"
                           mt={2}
@@ -158,10 +176,11 @@ export default function AgentDebugPanel() {
                           style={{
                             fontFamily: 'monospace',
                             fontSize: '10px',
-                            wordBreak: 'break-all',
+                            wordBreak: 'break-word',
+                            whiteSpace: 'pre-wrap',
                           }}
                         >
-                          {JSON.stringify(log.data, null, 2)}
+                          {typeof event.data === 'string' ? event.data : JSON.stringify(event.data, null, 2)}
                         </Text>
                       )}
                     </div>

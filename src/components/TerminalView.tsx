@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import 'xterm/css/xterm.css'
-import { useAppStore } from '../store/app'
+import { useAppStore } from '../store'
 
 export default function TerminalView({ tabId, context = 'explorer' }: { tabId: string; context?: 'agent' | 'explorer' }) {
   const containerRef = useRef<HTMLDivElement | null>(null)

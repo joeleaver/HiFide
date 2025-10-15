@@ -1,36 +1,44 @@
-import { useState } from 'react'
 import { Group, Stack, Text, UnstyledButton, ScrollArea, Card, Select, Button, Badge } from '@mantine/core'
 import { IconChevronLeft, IconChevronRight, IconPlus } from '@tabler/icons-react'
-import { useAppStore } from '../store/app'
+import { useAppStore, selectSessions, selectCurrentId, selectWorkspaceRoot, selectMetaPanelOpen, selectDebugPanelCollapsed, selectCtxRefreshing, selectCtxResult, selectLastRequestTokenUsage, selectLastRequestSavings } from '../store'
 import { usePanelResize } from '../hooks/usePanelResize'
 import ChatPane from '../ChatPane'
 import TerminalPanel from './TerminalPanel'
 import AgentDebugPanel from './AgentDebugPanel'
+import FlowCanvasPanel from './FlowCanvasPanel'
 
 
 
 export default function AgentView() {
-  const metaPanelOpen = useAppStore((s) => s.metaPanelOpen)
+  // Use selectors for better performance
+  const metaPanelOpen = useAppStore(selectMetaPanelOpen)
+  const debugPanelCollapsed = useAppStore(selectDebugPanelCollapsed)
+  const debugPanelHeight = useAppStore((s) => s.debugPanelHeight)
+  const setDebugPanelHeight = useAppStore((s) => s.setDebugPanelHeight)
+  const sessions = useAppStore(selectSessions)
+  const currentId = useAppStore(selectCurrentId)
+  const workspaceRoot = useAppStore(selectWorkspaceRoot)
+
+  // Flow canvas state
+  const flowCanvasCollapsed = useAppStore((s) => s.flowCanvasCollapsed)
+  const setFlowCanvasCollapsed = useAppStore((s) => s.setFlowCanvasCollapsed)
+  const flowCanvasWidth = useAppStore((s) => s.flowCanvasWidth)
+  const setFlowCanvasWidth = useAppStore((s) => s.setFlowCanvasWidth)
+
+  // Context state - use selectors
+  const ctxRefreshing = useAppStore(selectCtxRefreshing)
+  const ctxResult = useAppStore(selectCtxResult)
+  const lastRequest = useAppStore(selectLastRequestTokenUsage)
+  const lastSavings = useAppStore(selectLastRequestSavings)
+
+  // Actions only - these don't cause re-renders
   const setMetaPanelOpen = useAppStore((s) => s.setMetaPanelOpen)
-  const debugPanelCollapsed = useAppStore((s) => s.debugPanelCollapsed)
-
-  const sessions = useAppStore((s) => s.sessions)
-  const currentId = useAppStore((s) => s.currentId)
   const select = useAppStore((s) => s.select)
-  const workspaceRoot = useAppStore((s) => s.workspaceRoot)
-  const ctxRefreshing = useAppStore((s) => s.ctxRefreshing)
-  const ctxResult = useAppStore((s) => s.ctxResult)
   const refreshContext = useAppStore((s) => s.refreshContext)
-
   const newSession = useAppStore((s) => s.newSession)
-
-  // Token usage selectors used in meta panel
-  const lastRequest = useAppStore((s) => s.lastRequestTokenUsage)
-  const lastSavings = useAppStore((s) => s.lastRequestSavings)
   const calculateCost = useAppStore((s) => s.calculateCost)
 
-  // Debug panel resize state
-  const [debugPanelHeight, setDebugPanelHeight] = useState(300)
+  // Debug panel resize handler
   const { onMouseDown, isResizingRef } = usePanelResize({
     getHeight: () => debugPanelHeight,
     setHeight: setDebugPanelHeight,
@@ -109,6 +117,14 @@ export default function AgentView() {
           </div>
         </div>
       </div>
+
+      {/* Flow Canvas Panel */}
+      <FlowCanvasPanel
+        collapsed={flowCanvasCollapsed}
+        onToggleCollapse={() => setFlowCanvasCollapsed(!flowCanvasCollapsed)}
+        width={flowCanvasWidth}
+        onResize={setFlowCanvasWidth}
+      />
 
       {/* Meta Panel */}
       {metaPanelOpen && (

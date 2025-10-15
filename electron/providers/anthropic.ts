@@ -68,7 +68,14 @@ export const AnthropicProvider: ProviderAdapter = {
         if (e?.name === 'AbortError') return
         onError(e?.message || String(e))
       }
-    })()
+    })().catch((e: any) => {
+      // Handle any errors that occur after chatStream returns
+      // This prevents unhandled promise rejections
+      console.error('[AnthropicProvider] Unhandled error in chatStream:', e)
+      try {
+        onError(e?.message || String(e))
+      } catch {}
+    })
 
     return {
       cancel: () => { try { holder.abort?.() } catch {} },
@@ -76,7 +83,7 @@ export const AnthropicProvider: ProviderAdapter = {
   },
 
   // Agent streaming with tool-calling using Anthropic Messages API
-  async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta, onConversationMeta, sessionId }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError, onConversationMeta, sessionId }): Promise<StreamHandle> {
     const client = new Anthropic({ apiKey, defaultHeaders: { 'anthropic-beta': 'prompt-caching-2024-07-31' } as any })
 
     // Map tools to Anthropic format
@@ -215,8 +222,14 @@ export const AnthropicProvider: ProviderAdapter = {
                   continue
                 }
 
+                // Notify tool start
+                try { onToolStart?.({ callId: tu.id, name: tu.name, arguments: tu.input }) } catch {}
+
                 // Pass toolMeta to tool.run()
                 const result = await Promise.resolve(tool.run(tu.input, toolMeta))
+
+                // Notify tool end
+                try { onToolEnd?.({ callId: tu.id, name: tu.name, result }) } catch {}
 
                 // Check if tool requested pruning
                 if (result?._meta?.trigger_pruning) {
@@ -226,6 +239,8 @@ export const AnthropicProvider: ProviderAdapter = {
 
                 results.push({ type: 'tool_result', tool_use_id: tu.id, content: typeof result === 'string' ? result : JSON.stringify(result) })
               } catch (e: any) {
+                // Notify tool error
+                try { onToolError?.({ callId: tu.id, name: tu.name, error: e?.message || String(e) }) } catch {}
                 results.push({ type: 'tool_result', tool_use_id: tu.id, content: `Error: ${e?.message || String(e)}`, is_error: true })
               }
             }
@@ -258,7 +273,14 @@ export const AnthropicProvider: ProviderAdapter = {
       }
     }
 
-    run()
+    run().catch((e: any) => {
+      // Handle any errors that occur after agentStream returns
+      // This prevents unhandled promise rejections
+      console.error('[AnthropicProvider] Unhandled error in agentStream run():', e)
+      try {
+        onError(e?.message || String(e))
+      } catch {}
+    })
 
     return { cancel: () => { cancelled = true } }
   },
