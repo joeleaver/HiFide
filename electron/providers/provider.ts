@@ -9,6 +9,7 @@ export type TokenUsage = {
   inputTokens: number
   outputTokens: number
   totalTokens: number
+  cachedTokens?: number  // Tokens served from cache (Gemini context caching)
 }
 
 // Generic tool spec used by provider-native agent runtimes

@@ -22,6 +22,7 @@ export type ChatMessage = {
   content: string
   toolCalls?: ToolCall[]  // Tool calls that happened before this message
   intent?: string  // Detected intent for this message (from intent router)
+  tokenUsage?: TokenUsage  // Token usage for this specific message (assistant messages only)
 }
 
 export type ToolCall = {
@@ -35,6 +36,7 @@ export type TokenUsage = {
   inputTokens: number
   outputTokens: number
   totalTokens: number
+  cachedTokens?: number  // Tokens served from cache (Gemini context caching)
 }
 
 export type TokenCost = {
@@ -42,6 +44,9 @@ export type TokenCost = {
   outputCost: number
   totalCost: number
   currency: string  // 'USD'
+  cachedInputCost?: number  // Cost of cached tokens (if applicable)
+  savings?: number          // Amount saved from caching
+  savingsPercent?: number   // Percentage saved from caching
 }
 
 export type Session = {
@@ -170,6 +175,7 @@ export type RouteRecord = {
 export type ModelPricing = {
   inputCostPer1M: number
   outputCostPer1M: number
+  cachedInputCostPer1M?: number  // Cost per 1M cached input tokens (for Gemini context caching)
 }
 
 export type ProviderPricing = Record<string, ModelPricing>

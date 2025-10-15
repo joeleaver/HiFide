@@ -239,35 +239,6 @@ export default function NodeConfig({ kind, config, onConfigChange }: NodeConfigP
               }}
             />
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc', fontSize: 10 }}>
-            <input
-              type="checkbox"
-              checked={!!config.cacheEnabled}
-              onChange={(e) => onConfigChange({ cacheEnabled: e.target.checked })}
-            />
-            <span>Cache enabled</span>
-          </label>
-          {config.cacheEnabled && (
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
-              <span style={{ fontSize: 10, color: '#888', width: 80 }}>Cache TTL:</span>
-              <input
-                type="number"
-                min="60000"
-                value={config.cacheTtlMs || 7200000}
-                onChange={(e) => onConfigChange({ cacheTtlMs: parseInt(e.target.value) || 7200000 })}
-                placeholder="ms"
-                style={{
-                  flex: 1,
-                  padding: '2px 4px',
-                  background: '#252526',
-                  color: '#cccccc',
-                  border: '1px solid #3e3e42',
-                  borderRadius: 3,
-                  fontSize: 10,
-                }}
-              />
-            </label>
-          )}
         </div>
       )}
 

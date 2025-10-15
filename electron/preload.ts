@@ -260,13 +260,6 @@ contextBridge.exposeInMainWorld('flowExec', {
   },
   })
 
-
-// Flow cache API
-contextBridge.exposeInMainWorld('flowCache', {
-  stats: () => ipcRenderer.invoke('flowCache:stats'),
-  clear: () => ipcRenderer.invoke('flowCache:clear'),
-})
-
 // Models helper APIs
 contextBridge.exposeInMainWorld('models', {
   cheapestClassifier: (provider: string) => ipcRenderer.invoke('models:cheapestClassifier', { provider }),

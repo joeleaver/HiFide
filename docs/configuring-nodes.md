@@ -56,8 +56,6 @@ Click the "BP" button in the header to set a breakpoint:
 #### **LLM Message** (💬)
 - **Retry Attempts** - Number of times to retry on failure
 - **Retry Backoff (ms)** - Delay between retries
-- **Cache Enabled** - Cache responses to save costs
-- **Cache TTL (ms)** - How long to cache responses
 
 #### **Redactor** (🧹)
 - **☑️ Enabled** - Turn redaction on/off

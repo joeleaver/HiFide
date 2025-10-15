@@ -363,7 +363,8 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
             role: 'assistant' as const,
             content,
             toolCalls: s.currentTurnToolCalls.length > 0 ? [...s.currentTurnToolCalls] : undefined,
-            intent: s.currentTurnIntent || undefined
+            intent: s.currentTurnIntent || undefined,
+            tokenUsage: s.lastRequestTokenUsage?.usage || undefined,
           }],
           updatedAt: Date.now(),
         }
@@ -472,12 +473,14 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
           inputTokens: 0,
           outputTokens: 0,
           totalTokens: 0,
+          cachedTokens: 0,
         }
 
         const newProviderUsage = {
           inputTokens: providerUsage.inputTokens + usage.inputTokens,
           outputTokens: providerUsage.outputTokens + usage.outputTokens,
           totalTokens: providerUsage.totalTokens + usage.totalTokens,
+          cachedTokens: (providerUsage.cachedTokens || 0) + (usage.cachedTokens || 0),
         }
 
         // Update total usage
@@ -485,6 +488,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
           inputTokens: sess.tokenUsage.total.inputTokens + usage.inputTokens,
           outputTokens: sess.tokenUsage.total.outputTokens + usage.outputTokens,
           totalTokens: sess.tokenUsage.total.totalTokens + usage.totalTokens,
+          cachedTokens: (sess.tokenUsage.total.cachedTokens || 0) + (usage.cachedTokens || 0),
         }
 
         // Update costs

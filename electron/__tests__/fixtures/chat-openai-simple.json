@@ -1,0 +1,21 @@
+{
+  "context": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [
+      {
+        "role": "user",
+        "content": "Say \"Hello from OpenAI!\" and nothing else."
+      },
+      {
+        "role": "assistant",
+        "content": "Hello from OpenAI!"
+      }
+    ],
+    "currentOutput": "Hello from OpenAI!",
+    "sessionId": "test-session-1760550047263"
+  },
+  "data": "Hello from OpenAI!",
+  "status": "success"
+}

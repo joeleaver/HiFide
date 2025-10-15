@@ -16,8 +16,19 @@
  * - tools: Array of tool objects for chat nodes (PULL-ONLY)
  */
 
-import type { NodeFunction } from '../types'
+import type { NodeFunction, NodeExecutionPolicy } from '../types'
 
+/**
+ * Node metadata
+ */
+export const metadata = {
+  executionPolicy: 'any' as NodeExecutionPolicy, // No inputs needed
+  description: 'Provides a list of tools to chat nodes. Can be configured to provide all tools or a specific subset.'
+}
+
+/**
+ * Node implementation
+ */
 export const toolsNode: NodeFunction = async (contextIn, dataIn, _inputs, config) => {
   const toolsConfig = config.tools || 'auto'
 

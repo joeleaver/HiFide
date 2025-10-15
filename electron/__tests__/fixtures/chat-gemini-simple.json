@@ -1,0 +1,21 @@
+{
+  "context": {
+    "provider": "gemini",
+    "model": "gemini-2.0-flash-exp",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [
+      {
+        "role": "user",
+        "content": "Say \"Hello from Gemini!\" and nothing else."
+      },
+      {
+        "role": "assistant",
+        "content": "Hello from Gemini!\n"
+      }
+    ],
+    "currentOutput": "Hello from Gemini!\n",
+    "sessionId": "test-session-1760550048614"
+  },
+  "data": "Hello from Gemini!\n",
+  "status": "success"
+}

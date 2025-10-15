@@ -64,17 +64,17 @@ export default function PricingSettings() {
             <Accordion.Control>
               <Group justify="space-between" style={{ width: '100%', paddingRight: '16px' }}>
                 <Text size="sm" c="#cccccc">OpenAI Models</Text>
-                <Button
+                <Text
                   size="xs"
-                  variant="subtle"
-                  color="gray"
+                  c="dimmed"
+                  style={{ cursor: 'pointer', textDecoration: 'underline' }}
                   onClick={(e) => {
                     e.stopPropagation()
                     resetProviderPricing('openai')
                   }}
                 >
                   Reset
-                </Button>
+                </Text>
               </Group>
             </Accordion.Control>
             <Accordion.Panel>
@@ -92,17 +92,17 @@ export default function PricingSettings() {
             <Accordion.Control>
               <Group justify="space-between" style={{ width: '100%', paddingRight: '16px' }}>
                 <Text size="sm" c="#cccccc">Anthropic Models</Text>
-                <Button
+                <Text
                   size="xs"
-                  variant="subtle"
-                  color="gray"
+                  c="dimmed"
+                  style={{ cursor: 'pointer', textDecoration: 'underline' }}
                   onClick={(e) => {
                     e.stopPropagation()
                     resetProviderPricing('anthropic')
                   }}
                 >
                   Reset
-                </Button>
+                </Text>
               </Group>
             </Accordion.Control>
             <Accordion.Panel>
@@ -120,17 +120,17 @@ export default function PricingSettings() {
             <Accordion.Control>
               <Group justify="space-between" style={{ width: '100%', paddingRight: '16px' }}>
                 <Text size="sm" c="#cccccc">Google Gemini Models</Text>
-                <Button
+                <Text
                   size="xs"
-                  variant="subtle"
-                  color="gray"
+                  c="dimmed"
+                  style={{ cursor: 'pointer', textDecoration: 'underline' }}
                   onClick={(e) => {
                     e.stopPropagation()
                     resetProviderPricing('gemini')
                   }}
                 >
                   Reset
-                </Button>
+                </Text>
               </Group>
             </Accordion.Control>
             <Accordion.Panel>
@@ -144,10 +144,16 @@ export default function PricingSettings() {
           </Accordion.Item>
         </Accordion>
         
-        <Text size="xs" c="dimmed">
-          💡 Pricing is per 1 million tokens. Costs are estimates based on published rates.
-          Contact your provider for enterprise pricing.
-        </Text>
+        <Stack gap="xs">
+          <Text size="xs" c="dimmed">
+            💡 Pricing is per 1 million tokens. Costs are estimates based on published rates.
+            Contact your provider for enterprise pricing.
+          </Text>
+          <Text size="xs" c="dimmed">
+            💾 <strong>Cached Input</strong> pricing applies to Gemini models with context caching enabled.
+            Cached tokens are typically charged at 75% discount (e.g., $0.075/1M vs $0.30/1M for Flash).
+          </Text>
+        </Stack>
       </Stack>
     </Card>
   )
@@ -196,6 +202,7 @@ function PricingTable({ provider, models, pricing, onUpdate }: PricingTableProps
         <Table.Tr>
           <Table.Th>Model</Table.Th>
           <Table.Th>Input ($/1M)</Table.Th>
+          <Table.Th>Cached Input ($/1M)</Table.Th>
           <Table.Th>Output ($/1M)</Table.Th>
           <Table.Th></Table.Th>
         </Table.Tr>
@@ -206,7 +213,11 @@ function PricingTable({ provider, models, pricing, onUpdate }: PricingTableProps
           const defaultPricing = (DEFAULT_PRICING as any)[provider]?.[model.value]
           const isDefault = defaultPricing &&
             modelPricing.inputCostPer1M === defaultPricing.inputCostPer1M &&
-            modelPricing.outputCostPer1M === defaultPricing.outputCostPer1M
+            modelPricing.outputCostPer1M === defaultPricing.outputCostPer1M &&
+            modelPricing.cachedInputCostPer1M === defaultPricing.cachedInputCostPer1M
+
+          // Check if this model supports caching (has cachedInputCostPer1M in defaults)
+          const supportsCaching = defaultPricing?.cachedInputCostPer1M !== undefined
 
           return (
             <Table.Tr key={model.value}>
@@ -233,6 +244,31 @@ function PricingTable({ provider, models, pricing, onUpdate }: PricingTableProps
                     },
                   }}
                 />
+              </Table.Td>
+              <Table.Td>
+                {supportsCaching ? (
+                  <NumberInput
+                    size="xs"
+                    value={modelPricing.cachedInputCostPer1M ?? 0}
+                    onChange={(val) => onUpdate(model.value, {
+                      ...modelPricing,
+                      cachedInputCostPer1M: typeof val === 'number' ? val : 0
+                    })}
+                    decimalScale={4}
+                    step={0.01}
+                    min={0}
+                    prefix="$"
+                    styles={{
+                      input: {
+                        backgroundColor: '#252526',
+                        border: '1px solid #3e3e42',
+                        color: '#cccccc',
+                      },
+                    }}
+                  />
+                ) : (
+                  <Text size="xs" c="dimmed" ta="center">—</Text>
+                )}
               </Table.Td>
               <Table.Td>
                 <NumberInput

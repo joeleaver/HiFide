@@ -281,20 +281,46 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
   calculateCost: (provider: string, model: string, usage: TokenUsage): TokenCost | null => {
     const state = get()
     const config = state.pricingConfig[provider as keyof PricingConfig]
-    
+
     if (typeof config === 'boolean') return null
-    
+
     const pricing = (config as any)?.[model] as ModelPricing | undefined
     if (!pricing) return null
-    
-    const inputCost = (usage.inputTokens / 1_000_000) * pricing.inputCostPer1M
+
+    // Calculate costs with cache awareness
+    const cachedTokens = usage.cachedTokens || 0
+    const normalInputTokens = usage.inputTokens - cachedTokens
+
+    // Normal input tokens at full price
+    const normalInputCost = (normalInputTokens / 1_000_000) * pricing.inputCostPer1M
+
+    // Cached tokens at reduced price (if pricing available)
+    const cachedInputCost = pricing.cachedInputCostPer1M
+      ? (cachedTokens / 1_000_000) * pricing.cachedInputCostPer1M
+      : (cachedTokens / 1_000_000) * pricing.inputCostPer1M  // Fallback to normal price
+
+    const inputCost = normalInputCost + cachedInputCost
     const outputCost = (usage.outputTokens / 1_000_000) * pricing.outputCostPer1M
-    
+
+    // Calculate savings if caching was used
+    let savings = 0
+    let savingsPercent = 0
+    if (cachedTokens > 0 && pricing.cachedInputCostPer1M) {
+      // Savings = what we would have paid at full price - what we actually paid
+      const fullPriceCost = (cachedTokens / 1_000_000) * pricing.inputCostPer1M
+      savings = fullPriceCost - cachedInputCost
+      const totalWithoutSavings = inputCost + outputCost + savings
+      savingsPercent = totalWithoutSavings > 0 ? (savings / totalWithoutSavings) * 100 : 0
+    }
+
     return {
       inputCost,
       outputCost,
       totalCost: inputCost + outputCost,
       currency: 'USD',
+      cachedInputCost: cachedTokens > 0 ? cachedInputCost : undefined,
+      savings: savings > 0 ? savings : undefined,
+      savingsPercent: savingsPercent > 0 ? savingsPercent : undefined,
     }
   },
   

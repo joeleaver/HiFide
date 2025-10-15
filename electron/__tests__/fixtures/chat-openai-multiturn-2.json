@@ -1,0 +1,29 @@
+{
+  "context": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [
+      {
+        "role": "user",
+        "content": "My name is Alice."
+      },
+      {
+        "role": "assistant",
+        "content": "Nice to meet you, Alice! How can I assist you today?"
+      },
+      {
+        "role": "user",
+        "content": "What is my name?"
+      },
+      {
+        "role": "assistant",
+        "content": "Your name is Alice."
+      }
+    ],
+    "currentOutput": "Your name is Alice.",
+    "sessionId": "test-multiturn-session"
+  },
+  "data": "Your name is Alice.",
+  "status": "success"
+}

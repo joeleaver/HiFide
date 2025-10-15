@@ -33,3 +33,11 @@ api_key.txt
 
 *.exe
 *.exe*
+
+# Test environment files (don't commit API keys)
+.env.test
+.env.test.local
+
+# Test coverage
+coverage/
+.nyc_output/

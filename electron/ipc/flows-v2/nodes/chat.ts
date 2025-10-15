@@ -14,11 +14,22 @@
  * - data: Assistant's response
  */
 
-import type { NodeFunction } from '../types'
+import type { NodeFunction, NodeExecutionPolicy } from '../types'
 import { providers } from '../../../core/state'
 import { getProviderKey } from '../../../core/state'
 import { sendFlowEvent } from '../events'
 
+/**
+ * Node metadata
+ */
+export const metadata = {
+  executionPolicy: 'any' as NodeExecutionPolicy, // Can execute with just message, tools are optional
+  description: 'Sends a message to the LLM and returns the response. Supports tools via agentStream if provided.'
+}
+
+/**
+ * Node implementation
+ */
 export const chatNode: NodeFunction = async (contextIn, dataIn, inputs, config) => {
   // Get node ID from config (added by scheduler)
   const nodeId = (config as any)?._nodeId || 'chat'
@@ -75,22 +86,16 @@ export const chatNode: NodeFunction = async (contextIn, dataIn, inputs, config) 
   
   // Build messages to send
   const messagesToSend: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = []
-  const useNativeSession = (context.provider === 'openai' || context.provider === 'gemini')
-  
-  if (useNativeSession) {
-    // Native session management - only send system on first message
-    if (context.systemInstructions && context.messageHistory.length === 1) {
-      messagesToSend.push({ role: 'system', content: context.systemInstructions })
-    }
-    // Only send current user input - provider handles history via sessionId
-    messagesToSend.push({ role: 'user', content: message })
-  } else {
-    // Anthropic - send full history every time
-    if (context.systemInstructions && context.messageHistory.length === 1) {
-      messagesToSend.push({ role: 'system', content: context.systemInstructions })
-    }
-    messagesToSend.push(...context.messageHistory)
+
+  // Add system instructions if present (only on first message)
+  if (context.systemInstructions && context.messageHistory.length === 1) {
+    messagesToSend.push({ role: 'system', content: context.systemInstructions })
   }
+
+  // Send full message history for all providers
+  // Note: OpenAI/Gemini use sessionId + previous_response_id for optimization,
+  // but still need the full message history to maintain context
+  messagesToSend.push(...context.messageHistory)
   
   // Call LLM
   let response = ''

@@ -12,8 +12,19 @@
  * - data: User's message
  */
 
-import type { NodeFunction } from '../types'
+import type { NodeFunction, NodeExecutionPolicy } from '../types'
 
+/**
+ * Node metadata
+ */
+export const metadata = {
+  executionPolicy: 'any' as NodeExecutionPolicy, // Execute on ANY input (supports loops)
+  description: 'Waits for user input by awaiting a promise that resolves when the user submits.'
+}
+
+/**
+ * Node implementation
+ */
 export const userInputNode: NodeFunction = async (contextIn, _dataIn, _inputs, _config) => {
   // We need access to the scheduler to wait for user input
   // The scheduler reference is passed via context._scheduler (a bit hacky but works)

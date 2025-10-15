@@ -12,8 +12,19 @@
  * - data: The configured message
  */
 
-import type { NodeFunction } from '../types'
+import type { NodeFunction, NodeExecutionPolicy } from '../types'
 
+/**
+ * Node metadata
+ */
+export const metadata = {
+  executionPolicy: 'any' as NodeExecutionPolicy, // No inputs needed
+  description: 'Sends a pre-configured user message to the LLM in the current context.'
+}
+
+/**
+ * Node implementation
+ */
 export const manualInputNode: NodeFunction = async (contextIn, _dataIn, _inputs, config) => {
   const message = config.message || ''
 

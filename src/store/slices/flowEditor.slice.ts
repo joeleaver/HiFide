@@ -21,8 +21,6 @@ export type FlowEvent = {
   usage?: { inputTokens: number; outputTokens: number; totalTokens: number }  // For tokenUsage events
 }
 
-export type CacheStats = { entries: number; bytes: number } | null
-
 // Flow execution status
 export type FlowStatus = 'idle' | 'running' | 'paused' | 'waitingForInput'
 
@@ -64,9 +62,6 @@ export interface FlowEditorSlice {
   feBudgetBlock: boolean
   feErrorDetectEnabled: boolean
   feErrorDetectBlock: boolean
-
-  // Derived/auxiliary
-  feCacheStats: CacheStats
 
   // Template management state
   feCurrentProfile: string
@@ -117,8 +112,6 @@ export interface FlowEditorSlice {
   feSetBudgetBlock: (v: boolean) => void
   feSetErrorDetectEnabled: (v: boolean) => void
   feSetErrorDetectBlock: (v: boolean) => void
-
-  feRefreshCacheStats: () => Promise<void>
 
   feComputeResolvedModel: () => void
 
@@ -175,8 +168,6 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   feBudgetBlock: true,
   feErrorDetectEnabled: true,
   feErrorDetectBlock: false,
-
-  feCacheStats: null,
 
   // Template management initial state
   feCurrentProfile: '',
@@ -688,9 +679,6 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     })
     ;(store as any).__fe_unsub = unsub
 
-    // Initial cache stats
-    await get().feRefreshCacheStats()
-
     // Compute initial model selection
     get().feComputeResolvedModel()
 
@@ -804,13 +792,6 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   feSetBudgetBlock: (v) => set({ feBudgetBlock: !!v }),
   feSetErrorDetectEnabled: (v) => set({ feErrorDetectEnabled: !!v }),
   feSetErrorDetectBlock: (v) => set({ feErrorDetectBlock: !!v }),
-
-  feRefreshCacheStats: async () => {
-    try {
-      const s = await (window as any).flowCache?.stats?.()
-      if (s) set({ feCacheStats: s })
-    } catch {}
-  },
 
   feComputeResolvedModel: () => {
     try {

@@ -18,11 +18,22 @@
  *   Example: { "greeting": "User is greeting or saying hello", "question": "User is asking a question" }
  */
 
-import type { NodeFunction } from '../types'
+import type { NodeFunction, NodeExecutionPolicy } from '../types'
 import { providers } from '../../../core/state'
 import { getProviderKey } from '../../../core/state'
 import { sendFlowEvent } from '../events'
 
+/**
+ * Node metadata
+ */
+export const metadata = {
+  executionPolicy: 'any' as NodeExecutionPolicy, // Needs context and data
+  description: 'Uses an LLM to classify user input into one of several configured intents, then routes the flow to the corresponding output.'
+}
+
+/**
+ * Node implementation
+ */
 export const intentRouterNode: NodeFunction = async (contextIn, dataIn, _inputs, config) => {
   const message = dataIn as string
   const nodeId = (config as any)?._nodeId || 'intentRouter'

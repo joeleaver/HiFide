@@ -1,0 +1,21 @@
+{
+  "context": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [
+      {
+        "role": "user",
+        "content": "What is the weather like? Use the get_weather tool with input \"San Francisco\"."
+      },
+      {
+        "role": "assistant",
+        "content": "It seems that the weather retrieval for San Francisco didn't provide specific results. If you would like to know about the current weather or any particular aspect (like temperature, precipitation, etc.), please let me know!"
+      }
+    ],
+    "currentOutput": "It seems that the weather retrieval for San Francisco didn't provide specific results. If you would like to know about the current weather or any particular aspect (like temperature, precipitation, etc.), please let me know!",
+    "sessionId": "test-session-1760550052906"
+  },
+  "data": "It seems that the weather retrieval for San Francisco didn't provide specific results. If you would like to know about the current weather or any particular aspect (like temperature, precipitation, etc.), please let me know!",
+  "status": "success"
+}

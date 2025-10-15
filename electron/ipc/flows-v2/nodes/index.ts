@@ -1,14 +1,17 @@
 /**
  * Node function registry with execution policies
+ *
+ * Each node is now self-contained in its own file with metadata.
+ * This registry imports and aggregates them for easy lookup.
  */
 
 import type { FlowNode, NodeFunction, NodeExecutionPolicy } from '../types'
-import { defaultContextStartNode } from './defaultContextStart'
-import { userInputNode } from './userInput'
-import { chatNode } from './chat'
-import { toolsNode } from './tools'
-import { manualInputNode } from './manualInput'
-import { intentRouterNode } from './intentRouter'
+import { defaultContextStartNode, metadata as defaultContextStartMetadata } from './defaultContextStart'
+import { userInputNode, metadata as userInputMetadata } from './userInput'
+import { chatNode, metadata as chatMetadata } from './chat'
+import { toolsNode, metadata as toolsMetadata } from './tools'
+import { manualInputNode, metadata as manualInputMetadata } from './manualInput'
+import { intentRouterNode, metadata as intentRouterMetadata } from './intentRouter'
 
 /**
  * Node metadata
@@ -16,32 +19,36 @@ import { intentRouterNode } from './intentRouter'
 interface NodeMetadata {
   fn: NodeFunction
   executionPolicy: NodeExecutionPolicy
+  description?: string
 }
 
+/**
+ * Node registry - aggregates all node implementations and their metadata
+ */
 const NODE_REGISTRY: Record<string, NodeMetadata> = {
   defaultContextStart: {
     fn: defaultContextStartNode,
-    executionPolicy: 'any' // Entry node, no inputs needed
+    ...defaultContextStartMetadata
   },
   userInput: {
     fn: userInputNode,
-    executionPolicy: 'any' // Execute on ANY input (supports loops)
+    ...userInputMetadata
   },
   chat: {
     fn: chatNode,
-    executionPolicy: 'any' // Can execute with just message, tools are optional
+    ...chatMetadata
   },
   tools: {
     fn: toolsNode,
-    executionPolicy: 'any' // No inputs needed
+    ...toolsMetadata
   },
   manualInput: {
     fn: manualInputNode,
-    executionPolicy: 'any' // No inputs needed
+    ...manualInputMetadata
   },
   intentRouter: {
     fn: intentRouterNode,
-    executionPolicy: 'any' // Needs context and data
+    ...intentRouterMetadata
   },
 }
 

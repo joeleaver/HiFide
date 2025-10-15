@@ -4,8 +4,9 @@
 // Users can customize these rates in Settings
 
 export type ModelPricing = {
-  inputCostPer1M: number   // Cost per 1M input tokens
-  outputCostPer1M: number  // Cost per 1M output tokens
+  inputCostPer1M: number        // Cost per 1M input tokens
+  outputCostPer1M: number       // Cost per 1M output tokens
+  cachedInputCostPer1M?: number // Cost per 1M cached input tokens (for Gemini context caching)
 }
 
 export type ProviderPricing = {
@@ -125,16 +126,16 @@ export const DEFAULT_PRICING: PricingConfig = {
   },
   
   gemini: {
-    // Gemini 2.5 Pro
-    'gemini-2.5-pro': { inputCostPer1M: 1.25, outputCostPer1M: 10.00 },
-    
-    // Gemini 2.5 Flash
-    'gemini-2.5-flash': { inputCostPer1M: 0.30, outputCostPer1M: 2.50 },
-    'gemini-2.5-flash-preview-09-2025': { inputCostPer1M: 0.30, outputCostPer1M: 2.50 },
-    
-    // Gemini 2.5 Flash-Lite
-    'gemini-2.5-flash-lite': { inputCostPer1M: 0.10, outputCostPer1M: 0.40 },
-    'gemini-2.5-flash-lite-preview-09-2025': { inputCostPer1M: 0.10, outputCostPer1M: 0.40 },
+    // Gemini 2.5 Pro (with context caching - 75% discount on cached tokens)
+    'gemini-2.5-pro': { inputCostPer1M: 1.25, outputCostPer1M: 10.00, cachedInputCostPer1M: 0.3125 },
+
+    // Gemini 2.5 Flash (with context caching - 75% discount on cached tokens)
+    'gemini-2.5-flash': { inputCostPer1M: 0.30, outputCostPer1M: 2.50, cachedInputCostPer1M: 0.075 },
+    'gemini-2.5-flash-preview-09-2025': { inputCostPer1M: 0.30, outputCostPer1M: 2.50, cachedInputCostPer1M: 0.075 },
+
+    // Gemini 2.5 Flash-Lite (with context caching - 75% discount on cached tokens)
+    'gemini-2.5-flash-lite': { inputCostPer1M: 0.10, outputCostPer1M: 0.40, cachedInputCostPer1M: 0.025 },
+    'gemini-2.5-flash-lite-preview-09-2025': { inputCostPer1M: 0.10, outputCostPer1M: 0.40, cachedInputCostPer1M: 0.025 },
     
     // Gemini 2.5 Flash Native Audio
     'gemini-2.5-flash-preview-native-audio-dialog': { inputCostPer1M: 0.50, outputCostPer1M: 2.00 },

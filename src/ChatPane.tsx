@@ -89,7 +89,7 @@ export default function ChatPane() {
           {messages.map((m, i) => (
             <div key={i}>
               {/* Intent and tool calls that happened before this message */}
-              {(m.intent || (m.toolCalls && m.toolCalls.length > 0)) && (
+              {(m.intent || (m.toolCalls && m.toolCalls.length > 0) || (m.role === 'assistant' && m.tokenUsage?.cachedTokens && m.tokenUsage.cachedTokens > 0)) && (
                 <Card withBorder style={{ backgroundColor: '#1e1e1e', padding: '8px 12px', marginBottom: '8px' }}>
                   <Group gap="xs" wrap="wrap">
                     {/* Intent badge */}
@@ -119,6 +119,18 @@ export default function ChatPane() {
                         🔧 {toolCall.toolName}
                       </Badge>
                     ))}
+
+                    {/* Cache hit badge for assistant messages */}
+                    {m.role === 'assistant' && m.tokenUsage?.cachedTokens && m.tokenUsage.cachedTokens > 0 && (
+                      <Badge
+                        variant="light"
+                        color="yellow"
+                        size="sm"
+                        title={`${m.tokenUsage.cachedTokens.toLocaleString()} tokens served from cache`}
+                      >
+                        💾 {m.tokenUsage.cachedTokens.toLocaleString()} cached
+                      </Badge>
+                    )}
                   </Group>
                 </Card>
               )}

@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GoogleGenAI } from '@google/genai'
 import { formatSummary } from '../agent/types'
 
 import type { ProviderAdapter, StreamHandle, ChatMessage } from './provider'
@@ -48,7 +48,7 @@ function hashStr(s: string): string {
 
 
 
-// In-memory Gemini chat sessions keyed by sessionId
+// In-memory Gemini chat sessions keyed by sessionId (using new SDK's Chat class)
 const geminiChats = new Map<string, any>()
 
 // In-memory Gemini agent contents per session
@@ -57,10 +57,8 @@ const geminiAgentContents = new Map<string, any[]>()
 export const GeminiProvider: ProviderAdapter = {
   id: 'gemini',
   async chatStream({ apiKey, model, messages, onChunk, onDone, onError, onTokenUsage, sessionId, onConversationMeta }): Promise<StreamHandle> {
-    const genAI = new GoogleGenerativeAI(apiKey)
+    const ai = new GoogleGenAI({ apiKey })
     const systemInstruction = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
-    const m = genAI.getGenerativeModel({ model, systemInstruction }) as any
-
 
     // Emit preamble hash for persistence (system only)
     try { onConversationMeta?.({ provider: 'gemini', sessionId, preambleHash: hashStr(systemInstruction || '') }) } catch {}
@@ -78,6 +76,7 @@ export const GeminiProvider: ProviderAdapter = {
     ;(async () => {
       try {
         if (sessionId) {
+          // Use the new SDK's Chat class for session management
           let chat = geminiChats.get(sessionId)
           if (!chat) {
             const nonSystem = messages.filter(m => m.role !== 'system')
@@ -87,16 +86,29 @@ export const GeminiProvider: ProviderAdapter = {
             const history = nonSystem
               .filter(m => m !== lastUserMsg)
               .map((msg: ChatMessage) => ({ role: msg.role === 'assistant' ? 'model' : msg.role, parts: [{ text: msg.content }] }))
-            chat = (m as any).startChat({ history })
+
+            // Create chat using new SDK's ai.chats.create() - it's synchronous, not async
+            chat = ai.chats.create({
+              model,
+              config: {
+                systemInstruction: systemInstruction || undefined,
+              },
+              history,
+            })
             geminiChats.set(sessionId, chat)
           }
           const lastUserText = [...messages].reverse().find(mm => mm.role === 'user')?.content || ''
-          const res: any = await withRetries(() => chat.sendMessageStream(lastUserText) as any)
-          holder.abort = () => { try { res?.abortController?.abort?.() } catch {} }
+
+          // Use the new SDK's sendMessageStream method - it takes a message parameter
+          const streamGenerator: any = await withRetries(() => chat.sendMessageStream({ message: lastUserText }) as any)
+          // Note: The Chat class doesn't expose an abort controller directly, cancellation would need to be handled differently
+
+          let lastChunk: any = null
           try {
-            for await (const chunk of res.stream) {
+            for await (const chunk of streamGenerator) {
               try {
-                const t = chunk?.text?.() ?? chunk?.candidates?.[0]?.content?.parts?.[0]?.text
+                lastChunk = chunk
+                const t = chunk?.text
                 if (t) onChunk(String(t))
               } catch (e: any) { onError(e?.message || String(e)) }
             }
@@ -104,25 +116,42 @@ export const GeminiProvider: ProviderAdapter = {
             // Stream iteration failed (e.g., parse error)
             onError(e?.message || String(e))
           }
+
+          // Extract token usage from the last chunk
           try {
-            const response = await res.response
-            const usage = response?.usageMetadata
+            const usage = lastChunk?.usageMetadata
             if (usage && onTokenUsage) {
+              const cachedTokens = usage.cachedContentTokenCount || 0
+
               onTokenUsage({
                 inputTokens: usage.promptTokenCount || 0,
                 outputTokens: usage.candidatesTokenCount || 0,
                 totalTokens: usage.totalTokenCount || 0,
+                cachedTokens,
               })
+
+              // Log cache hits
+              if (cachedTokens > 0) {
+                console.log(`[Gemini] Cache hit: ${cachedTokens} tokens served from cache`)
+              }
             }
           } catch {}
           onDone()
         } else {
-          const res: any = await withRetries(() => m.generateContentStream({ contents }) as any)
-          holder.abort = () => { try { res?.abortController?.abort?.() } catch {} }
+          // Use the new SDK's ai.models.generateContentStream for non-session chats
+          const res: any = await withRetries(() => ai.models.generateContentStream({
+            model,
+            contents,
+            config: {
+              systemInstruction: systemInstruction || undefined,
+            },
+          }) as any)
+          holder.abort = () => { try { res?.controller?.abort?.() } catch {} }
+
           try {
-            for await (const chunk of res.stream) {
+            for await (const chunk of res) {
               try {
-                const t = chunk?.text?.() ?? chunk?.candidates?.[0]?.content?.parts?.[0]?.text
+                const t = chunk?.text
                 if (t) onChunk(String(t))
               } catch (e: any) { onError(e?.message || String(e)) }
             }
@@ -133,14 +162,21 @@ export const GeminiProvider: ProviderAdapter = {
 
           // Extract token usage from response
           try {
-            const response = await res.response
-            const usage = response?.usageMetadata
+            const usage = res?.usageMetadata
             if (usage && onTokenUsage) {
+              const cachedTokens = usage.cachedContentTokenCount || 0
+
               onTokenUsage({
                 inputTokens: usage.promptTokenCount || 0,
                 outputTokens: usage.candidatesTokenCount || 0,
                 totalTokens: usage.totalTokenCount || 0,
+                cachedTokens,
               })
+
+              // Log cache hits
+              if (cachedTokens > 0) {
+                console.log(`[Gemini] Cache hit: ${cachedTokens} tokens served from cache`)
+              }
             }
           } catch (e) {
             // Token usage extraction failed, continue anyway
@@ -151,19 +187,33 @@ export const GeminiProvider: ProviderAdapter = {
         // Fallback: if streaming is not supported for this model/API version, try non-stream generateContent
         if (e?.name === 'AbortError') return
         try {
-          const res: any = await withRetries(() => (m as any).generateContent({ contents }) as any)
-          const text = res?.response?.text?.() ?? res?.text?.() ?? res?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text).filter(Boolean).join('')
+          const res: any = await withRetries(() => ai.models.generateContent({
+            model,
+            contents,
+            config: {
+              systemInstruction: systemInstruction || undefined,
+            },
+          }) as any)
+          const text = res?.text
           if (text) onChunk(String(text))
 
           // Extract token usage from non-streaming response
           try {
-            const usage = res?.response?.usageMetadata
+            const usage = res?.usageMetadata
             if (usage && onTokenUsage) {
+              const cachedTokens = usage.cachedContentTokenCount || 0
+
               onTokenUsage({
                 inputTokens: usage.promptTokenCount || 0,
                 outputTokens: usage.candidatesTokenCount || 0,
                 totalTokens: usage.totalTokenCount || 0,
+                cachedTokens,
               })
+
+              // Log cache hits
+              if (cachedTokens > 0) {
+                console.log(`[Gemini] Cache hit: ${cachedTokens} tokens served from cache`)
+              }
             }
           } catch (e) {
             // Token usage extraction failed, continue anyway
@@ -190,18 +240,18 @@ export const GeminiProvider: ProviderAdapter = {
 
   // Agent streaming with Gemini function calling
   async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, toolMeta, onChunk, onDone, onError, onTokenUsage, onToolStart, onToolEnd, onToolError, sessionId }): Promise<StreamHandle> {
-    const genAI = new GoogleGenerativeAI(apiKey)
+    const ai = new GoogleGenAI({ apiKey })
     const systemInstruction = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
-    const m: any = genAI.getGenerativeModel({ model, systemInstruction })
 
-    // Map tools to Gemini function declarations
+    // Map tools to Gemini function declarations using new SDK format
     const toolMap = new Map<string, { run: (input: any, meta?: any) => any }>()
     const functionDeclarations = tools.map((t) => {
       toolMap.set(t.name, { run: t.run })
       return {
         name: t.name,
         description: t.description,
-        parameters: stripAdditionalProperties(t.parameters) as any,
+        // New SDK uses parametersJsonSchema instead of parameters
+        parametersJsonSchema: stripAdditionalProperties(t.parameters) as any,
       }
     })
 
@@ -232,27 +282,32 @@ export const GeminiProvider: ProviderAdapter = {
     const run = async () => {
       try {
         while (!cancelled) {
-          const genOpts: any = {}
+          const config: any = {
+            systemInstruction: systemInstruction || undefined,
+          }
           if (_responseSchema) {
-            genOpts.responseMimeType = 'application/json'
-            genOpts.responseSchema = (_responseSchema as any).schema || _responseSchema
+            config.responseMimeType = 'application/json'
+            config.responseSchema = (_responseSchema as any).schema || _responseSchema
+          }
+          if (functionDeclarations.length) {
+            config.tools = [{ functionDeclarations }]
           }
 
-          // Stream a model turn and capture any functionCalls while streaming
-          const streamRes: any = await withRetries(() => m.generateContentStream({
+          // Stream a model turn and capture any functionCalls while streaming using new SDK
+          const streamRes: any = await withRetries(() => ai.models.generateContentStream({
+            model,
             contents,
-            tools: functionDeclarations.length ? [{ functionDeclarations }] : undefined,
-            ...(genOpts as any),
+            config,
           }) as any)
 
           // Accumulate function calls incrementally
           const callAcc: Record<string, { name: string; args: any }> = {}
 
           try {
-            for await (const chunk of streamRes.stream) {
+            for await (const chunk of streamRes) {
               try {
-                // Stream text parts
-                const t = chunk?.text?.() ?? chunk?.candidates?.[0]?.content?.parts?.[0]?.text
+                // Stream text parts using new SDK format
+                const t = chunk?.text
                 if (t) onChunk(String(t))
 
                 // Capture functionCall parts if present
@@ -274,8 +329,7 @@ export const GeminiProvider: ProviderAdapter = {
 
           // Extract and accumulate token usage
           try {
-            const response = await streamRes.response
-            const usage = response?.usageMetadata
+            const usage = streamRes?.usageMetadata
             if (usage) {
               if (!totalUsage) {
                 totalUsage = usage
@@ -283,6 +337,8 @@ export const GeminiProvider: ProviderAdapter = {
                 totalUsage.promptTokenCount = (totalUsage.promptTokenCount || 0) + (usage.promptTokenCount || 0)
                 totalUsage.candidatesTokenCount = (totalUsage.candidatesTokenCount || 0) + (usage.candidatesTokenCount || 0)
                 totalUsage.totalTokenCount = (totalUsage.totalTokenCount || 0) + (usage.totalTokenCount || 0)
+                // Accumulate cached tokens as well
+                totalUsage.cachedContentTokenCount = (totalUsage.cachedContentTokenCount || 0) + (usage.cachedContentTokenCount || 0)
               }
             }
           } catch (e) {
@@ -300,7 +356,7 @@ export const GeminiProvider: ProviderAdapter = {
               const name = fc.name
               const args = fc.args || {}
               // Generate a unique call ID for this tool invocation
-              const callId = `${name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+              const callId = `${name}-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
 
               try {
                 const tool = toolMap.get(name)
@@ -345,11 +401,19 @@ export const GeminiProvider: ProviderAdapter = {
           // No function calls in this streamed turn -> we've streamed the final answer
           // Report accumulated token usage
           if (totalUsage && onTokenUsage) {
+            const cachedTokens = totalUsage.cachedContentTokenCount || 0
+
             onTokenUsage({
               inputTokens: totalUsage.promptTokenCount || 0,
               outputTokens: totalUsage.candidatesTokenCount || 0,
               totalTokens: totalUsage.totalTokenCount || 0,
+              cachedTokens,
             })
+
+            // Log cache hits
+            if (cachedTokens > 0) {
+              console.log(`[Gemini agentStream] Cache hit: ${cachedTokens} tokens served from cache`)
+            }
           }
 
           onDone()

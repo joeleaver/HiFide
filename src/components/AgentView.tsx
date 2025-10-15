@@ -1,6 +1,6 @@
 import { Group, Stack, Text, UnstyledButton, ScrollArea, Card, Select, Button, Badge } from '@mantine/core'
 import { IconChevronLeft, IconChevronRight, IconPlus } from '@tabler/icons-react'
-import { useAppStore, selectSessions, selectCurrentId, selectWorkspaceRoot, selectMetaPanelOpen, selectDebugPanelCollapsed, selectCtxRefreshing, selectCtxResult, selectLastRequestTokenUsage, selectLastRequestSavings } from '../store'
+import { useAppStore, selectSessions, selectCurrentId, selectWorkspaceRoot, selectMetaPanelOpen, selectDebugPanelCollapsed, selectCtxRefreshing, selectCtxResult, selectLastRequestTokenUsage } from '../store'
 import { usePanelResize } from '../hooks/usePanelResize'
 import ChatPane from '../ChatPane'
 import TerminalPanel from './TerminalPanel'
@@ -29,7 +29,6 @@ export default function AgentView() {
   const ctxRefreshing = useAppStore(selectCtxRefreshing)
   const ctxResult = useAppStore(selectCtxResult)
   const lastRequest = useAppStore(selectLastRequestTokenUsage)
-  const lastSavings = useAppStore(selectLastRequestSavings)
 
   // Actions only - these don't cause re-renders
   const setMetaPanelOpen = useAppStore((s) => s.setMetaPanelOpen)
@@ -235,6 +234,13 @@ export default function AgentView() {
                             <Text size="xs">
                               <span style={{ color: '#4fc3f7' }}>{total.inputTokens.toLocaleString()}</span>
                               <span style={{ color: '#666' }}> in</span>
+                              {total.cachedTokens && total.cachedTokens > 0 && (
+                                <>
+                                  <span style={{ color: '#666' }}> (</span>
+                                  <span style={{ color: '#ffa726' }}>💾 {total.cachedTokens.toLocaleString()} cached</span>
+                                  <span style={{ color: '#666' }}>)</span>
+                                </>
+                              )}
                               <span style={{ color: '#666' }}> + </span>
                               <span style={{ color: '#81c784' }}>{total.outputTokens.toLocaleString()}</span>
                               <span style={{ color: '#666' }}> out</span>
@@ -245,8 +251,27 @@ export default function AgentView() {
                           {totalCost > 0 && (
                             <Group gap="xs">
                               <Text size="xs" c="dimmed" style={{ minWidth: '60px' }}>Cost:</Text>
-                              <Text size="xs" c="#4ade80" fw={600}>
-                                ${totalCost.toFixed(4)} USD
+                              <Text size="xs">
+                                <span style={{ color: '#4ade80', fontWeight: 600 }}>${totalCost.toFixed(4)}</span>
+                                {(() => {
+                                  // Calculate total savings across all providers/models
+                                  let totalSavings = 0
+                                  Object.entries(byProviderAndModel).forEach(([, models]) => {
+                                    Object.entries(models).forEach(([, cost]) => {
+                                      if (cost.savings) totalSavings += cost.savings
+                                    })
+                                  })
+                                  if (totalSavings > 0) {
+                                    const totalWithoutSavings = totalCost + totalSavings
+                                    const savingsPercent = (totalSavings / totalWithoutSavings) * 100
+                                    return (
+                                      <span style={{ color: '#66bb6a', marginLeft: 8 }}>
+                                        (saved ${totalSavings.toFixed(4)} · {savingsPercent.toFixed(0)}%)
+                                      </span>
+                                    )
+                                  }
+                                  return null
+                                })()}
                               </Text>
                             </Group>
                           )}
@@ -314,21 +339,30 @@ export default function AgentView() {
                                 <Text size="xs">
                                   <span style={{ color: '#4fc3f7' }}>{lr.usage.inputTokens.toLocaleString()}</span>
                                   <span style={{ color: '#666' }}> in</span>
+                                  {lr.usage.cachedTokens && lr.usage.cachedTokens > 0 && (
+                                    <>
+                                      <span style={{ color: '#666' }}> (</span>
+                                      <span style={{ color: '#ffa726' }}>💾 {lr.usage.cachedTokens.toLocaleString()} cached</span>
+                                      <span style={{ color: '#666' }}>)</span>
+                                    </>
+                                  )}
                                   <span style={{ color: '#666' }}> + </span>
                                   <span style={{ color: '#81c784' }}>{lr.usage.outputTokens.toLocaleString()}</span>
                                   <span style={{ color: '#666' }}> out</span>
                                   <span style={{ color: '#666' }}> = </span>
                                   <span style={{ color: '#ccc' }}>{lr.usage.totalTokens.toLocaleString()}</span>
-                                  {lastSavings && lastSavings.provider === lr.provider && lastSavings.model === lr.model && (
-                                    <span style={{ color: '#66bb6a', marginLeft: 8 }}>−{lastSavings.approxTokensAvoided.toLocaleString()} saved</span>
-                                  )}
                                 </Text>
                               </Group>
                               <Group gap="xs" ml="md">
                                 <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Cost:</Text>
                                 {cost ? (
-                                  <Text size="xs" c="#4ade80">
-                                    ${cost.totalCost.toFixed(4)} USD
+                                  <Text size="xs">
+                                    <span style={{ color: '#4ade80' }}>${cost.totalCost.toFixed(4)}</span>
+                                    {cost.savings && cost.savings > 0 && (
+                                      <span style={{ color: '#66bb6a', marginLeft: 8 }}>
+                                        (saved ${cost.savings.toFixed(4)} · {cost.savingsPercent?.toFixed(0)}%)
+                                      </span>
+                                    )}
                                   </Text>
                                 ) : (
                                   <Text size="xs" c="dimmed" fs="italic">
