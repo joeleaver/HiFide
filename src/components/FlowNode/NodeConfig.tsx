@@ -9,11 +9,10 @@ interface NodeConfigProps {
   onConfigChange: (patch: any) => void
 }
 
-export default function NodeConfig({ nodeId, kind, config, onConfigChange }: NodeConfigProps) {
+export default function NodeConfig({ kind, config, onConfigChange }: NodeConfigProps) {
   // Get provider/model data for newContext node
   const providerValid = useAppStore((s) => s.providerValid)
   const modelsByProvider = useAppStore((s) => s.modelsByProvider)
-  const edges = useAppStore((s) => s.feEdges)
 
   const providerOptions = useMemo(() => {
     return Object.entries(providerValid || {})
@@ -26,13 +25,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
     return (modelsByProvider[provider as keyof typeof modelsByProvider] || [])
   }, [config.provider, modelsByProvider])
 
-  // Check if this node has an input connection (context or input handle)
-  const hasInputConnection = useMemo(() => {
-    return edges.some(edge => {
-      const handle = (edge as any).targetHandle
-      return edge.target === nodeId && (handle === 'context' || handle === 'input')
-    })
-  }, [edges, nodeId])
+
 
   return (
     <div className="nodrag" style={{ padding: 10, background: '#1e1e1e', borderTop: '1px solid #333', fontSize: 11, overflow: 'hidden', wordWrap: 'break-word' }}>

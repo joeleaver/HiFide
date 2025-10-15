@@ -1,5 +1,5 @@
-import { Group, Stack, Textarea, Card, ScrollArea, Text, Loader, ActionIcon, Badge } from '@mantine/core'
-import { IconPlayerStop, IconSparkles, IconClock } from '@tabler/icons-react'
+import { Group, Stack, Textarea, Card, ScrollArea, Text, Loader, Badge } from '@mantine/core'
+import { IconClock } from '@tabler/icons-react'
 import { useAppStore, selectSessions, selectCurrentId } from './store'
 import Markdown from './components/Markdown'
 import StreamingMarkdown from './components/StreamingMarkdown'
@@ -11,12 +11,10 @@ export default function ChatPane() {
 
   // Flow execution state - actions don't cause re-renders
   const feResume = useAppStore((s) => s.feResume)
-  const feStop = useAppStore((s) => s.feStop)
 
   // Flow execution state - these DO cause re-renders when they change
   const feStatus = useAppStore((s) => s.feStatus)
   const feStreamingText = useAppStore((s) => s.feStreamingText)
-  const feActiveTools = useAppStore((s) => s.feActiveTools)
   const currentTurnToolCalls = useAppStore((s) => s.currentTurnToolCalls)
 
   // Chat input from store - this changes on every keystroke
@@ -68,11 +66,6 @@ export default function ChatPane() {
     // Resume flow with user input
     setInput('')
     await feResume(text)
-  }
-
-  const stop = async () => {
-    // Stop flow execution
-    await feStop()
   }
 
   return (

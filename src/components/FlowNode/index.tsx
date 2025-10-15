@@ -29,7 +29,8 @@ function getKindFromIdOrData(id: string, data: any): string {
 }
 
 export default function FlowNode(props: NodeProps<any>) {
-  const { id, data, selected, style } = props
+  const { id, data, selected } = props
+  const style = (props as any).style
   const kind = getKindFromIdOrData(id, data)
   const color = KIND_COLORS[kind] || '#4a4a4a'
   const label = data?.labelBase || data?.label || id

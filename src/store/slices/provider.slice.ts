@@ -82,6 +82,27 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
     set({ selectedProvider: provider })
     setInLocalStorage(LS_KEYS.SELECTED_PROVIDER, provider)
     console.debug('[provider] Selected provider:', provider)
+
+    // Immediately update model to match new provider
+    const state = get()
+    const models = state.modelsByProvider[provider] || []
+
+    // Check if we have a preferred default model for this provider
+    const preferred = state.defaultModels?.[provider]
+    const hasPreferred = preferred && models.some((m) => m.value === preferred)
+
+    if (hasPreferred) {
+      // Use preferred model if it's available
+      set({ selectedModel: preferred })
+      setInLocalStorage(LS_KEYS.SELECTED_MODEL, preferred)
+      console.log('[provider] Using preferred model for new provider:', preferred)
+    } else if (models.length > 0) {
+      // Otherwise use first available model
+      const first = models[0]
+      set({ selectedModel: first.value })
+      setInLocalStorage(LS_KEYS.SELECTED_MODEL, first.value)
+      console.log('[provider] Selected first available model for new provider:', first.value)
+    }
   },
   
   setAutoRetry: (value: boolean) => {
