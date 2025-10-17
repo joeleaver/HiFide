@@ -3,7 +3,6 @@ import type { RateLimitKind } from '../store'
 
 import { Card, Stack, Group, Text, Accordion, Table, NumberInput, Switch, Badge } from '@mantine/core'
 import { useAppStore, useDispatch, selectModelsByProvider, selectRateLimitConfig } from '../store'
-import { DEFAULT_PRICING } from '../data/defaultPricing'
 
 export default function RateLimitSettings() {
   // Use selectors for better performance
@@ -59,10 +58,10 @@ function ProviderLimits({ provider, title, models }: { provider: 'openai'|'anthr
   const rateLimitConfig = useAppStore((s) => s.rateLimitConfig)
   const dispatch = useDispatch()
 
-  // Show fields only for the filtered list of models we already surface in Pricing (those with default pricing entries)
+  // Show all available models (same as in Pricing)
   const rows = useMemo(() => {
-    return models.filter((m) => (DEFAULT_PRICING as any)[provider]?.[m.value] !== undefined)
-  }, [models, provider])
+    return models
+  }, [models])
 
   if (!rows.length) {
     return (

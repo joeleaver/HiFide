@@ -11,7 +11,10 @@ interface NodeHandlesProps {
 
 export default function NodeHandles({ kind, config }: NodeHandlesProps) {
   // Entry nodes don't need input - they define the root context
-  const isEntryNode = kind === 'defaultContextStart'
+  const isEntryNode = kind === 'defaultContextStart' || kind === 'newContext'
+
+  // Determine context color based on node type
+  const contextColor = kind === 'newContext' ? CONNECTION_COLORS.contextIsolated : CONNECTION_COLORS.context
 
   // intentRouter has dynamic outputs based on configured routes
   const isIntentRouter = kind === 'intentRouter'
@@ -28,7 +31,7 @@ export default function NodeHandles({ kind, config }: NodeHandlesProps) {
   // Input handles - V2 architecture with explicit Context In / Data In
   if (kind === 'portalInput') {
     // Portal Input has Context In and Data In (both optional)
-    inputs.push({ id: 'context', label: 'Context In', color: CONNECTION_COLORS.context })
+    inputs.push({ id: 'context', label: 'Context In', color: contextColor })
     inputs.push({ id: 'data', label: 'Data In', color: CONNECTION_COLORS.data })
   } else if (kind === 'portalOutput') {
     // Portal Output has no inputs - it pulls from the portal registry
@@ -41,27 +44,27 @@ export default function NodeHandles({ kind, config }: NodeHandlesProps) {
   } else if (kind === 'llmRequest') {
     // LLM Request node has Context In, Data In, and Tools inputs
     if (!isEntryNode) {
-      inputs.push({ id: 'context', label: 'Context In', color: CONNECTION_COLORS.context })
+      inputs.push({ id: 'context', label: 'Context In', color: contextColor })
       inputs.push({ id: 'data', label: 'Data In', color: CONNECTION_COLORS.data })
       inputs.push({ id: 'tools', label: 'Tools', color: CONNECTION_COLORS.tools })
     }
   } else if (kind === 'userInput') {
     // UserInput node has Context In only (Data In comes from UI pause/resume)
     if (!isEntryNode) {
-      inputs.push({ id: 'context', label: 'Context In', color: CONNECTION_COLORS.context })
+      inputs.push({ id: 'context', label: 'Context In', color: contextColor })
     }
   } else if (kind === 'tools') {
     // Tools node has optional Context In and Data In
-    inputs.push({ id: 'context', label: 'Context In', color: CONNECTION_COLORS.context })
+    inputs.push({ id: 'context', label: 'Context In', color: contextColor })
     inputs.push({ id: 'data', label: 'Data In', color: CONNECTION_COLORS.data })
   } else if (kind === 'injectMessages') {
     // InjectMessages node has Context In and optional dynamic message inputs
-    inputs.push({ id: 'context', label: 'Context In', color: CONNECTION_COLORS.context })
+    inputs.push({ id: 'context', label: 'Context In', color: contextColor })
     inputs.push({ id: 'userMessage', label: 'User Message', color: CONNECTION_COLORS.data })
     inputs.push({ id: 'assistantMessage', label: 'Assistant Message', color: CONNECTION_COLORS.data })
   } else if (!isEntryNode) {
     // All other nodes have Context In and Data In
-    inputs.push({ id: 'context', label: 'Context In', color: CONNECTION_COLORS.context })
+    inputs.push({ id: 'context', label: 'Context In', color: contextColor })
     inputs.push({ id: 'data', label: 'Data In', color: CONNECTION_COLORS.data })
   }
 
@@ -89,7 +92,7 @@ export default function NodeHandles({ kind, config }: NodeHandlesProps) {
 
         // Only show outputs for connected inputs
         if (connectedHandles.has('context')) {
-          outputs.push({ id: 'context', label: 'Context Out', color: CONNECTION_COLORS.context })
+          outputs.push({ id: 'context', label: 'Context Out', color: contextColor })
         }
         if (connectedHandles.has('data')) {
           outputs.push({ id: 'data', label: 'Data Out', color: CONNECTION_COLORS.data })
@@ -99,7 +102,7 @@ export default function NodeHandles({ kind, config }: NodeHandlesProps) {
   } else if (isIntentRouter && intentRoutes.length > 0) {
     // Each intent gets both Context Out and Data Out
     intentRoutes.forEach(intent => {
-      outputs.push({ id: `${intent}-context`, label: `${intent} Context`, color: CONNECTION_COLORS.context })
+      outputs.push({ id: `${intent}-context`, label: `${intent} Context`, color: contextColor })
       outputs.push({ id: `${intent}-data`, label: `${intent} Data`, color: CONNECTION_COLORS.data })
     })
   } else if (kind === 'conditional' || kind === 'parallelSplit') {
@@ -109,18 +112,18 @@ export default function NodeHandles({ kind, config }: NodeHandlesProps) {
     // LLM Request and userInput nodes have Context Out and Data Out
     // - Context Out: passes conversation context (for continuing conversation)
     // - Data Out: passes only the message text (for using output elsewhere)
-    outputs.push({ id: 'context', label: 'Context Out', color: CONNECTION_COLORS.context })
+    outputs.push({ id: 'context', label: 'Context Out', color: contextColor })
     outputs.push({ id: 'data', label: 'Data Out', color: CONNECTION_COLORS.data })
   } else if (kind === 'tools') {
     // Tools node has Context Out and Tools output
-    outputs.push({ id: 'context', label: 'Context Out', color: CONNECTION_COLORS.context })
+    outputs.push({ id: 'context', label: 'Context Out', color: contextColor })
     outputs.push({ id: 'tools', label: 'Tools', color: CONNECTION_COLORS.tools })
-  } else if (kind === 'defaultContextStart') {
-    // Entry node only has Context Out (no data)
-    outputs.push({ id: 'context', label: 'Context Out', color: CONNECTION_COLORS.context })
+  } else if (kind === 'defaultContextStart' || kind === 'newContext') {
+    // Entry nodes only have Context Out (no data)
+    outputs.push({ id: 'context', label: 'Context Out', color: contextColor })
   } else {
     // All other nodes have Context Out and Data Out
-    outputs.push({ id: 'context', label: 'Context Out', color: CONNECTION_COLORS.context })
+    outputs.push({ id: 'context', label: 'Context Out', color: contextColor })
     outputs.push({ id: 'data', label: 'Data Out', color: CONNECTION_COLORS.data })
   }
 

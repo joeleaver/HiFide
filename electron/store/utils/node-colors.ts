@@ -20,6 +20,7 @@ export const NODE_COLORS: Record<string, string> = {
   parallelJoin: '#10b981',
   portalInput: '#ec4899',
   portalOutput: '#ec4899',
+  cache: '#1e88e5',           // Blue - caching/performance optimization
 }
 
 /**
@@ -42,6 +43,7 @@ export const NODE_KIND_LABELS: Record<string, string> = {
   approvalGate: 'Approval Gate',
   portalInput: 'Portal In',
   portalOutput: 'Portal Out',
+  cache: 'Cache',
 }
 
 /**
@@ -69,6 +71,7 @@ export const NODE_CATEGORIES: Record<string, NodeCategory> = {
   parallelJoin: 'flow-control',
   portalInput: 'flow-control',
   portalOutput: 'flow-control',
+  cache: 'flow-control',
   redactor: 'safety',
   budgetGuard: 'safety',
   errorDetection: 'safety',

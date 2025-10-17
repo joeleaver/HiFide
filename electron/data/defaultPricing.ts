@@ -100,29 +100,34 @@ export const DEFAULT_PRICING: PricingConfig = {
   
   anthropic: {
     // Claude Opus 4.1
-    'claude-opus-4.1': { inputCostPer1M: 15.00, outputCostPer1M: 75.00 },
-    'claude-opus-4-20250514': { inputCostPer1M: 15.00, outputCostPer1M: 75.00 },
-    
+    'claude-opus-4.1': { inputCostPer1M: 15.00, outputCostPer1M: 75.00, cachedInputCostPer1M: 1.50 },
+    'claude-opus-4-20250514': { inputCostPer1M: 15.00, outputCostPer1M: 75.00, cachedInputCostPer1M: 1.50 },
+
     // Claude Sonnet 4.5
-    'claude-sonnet-4.5': { inputCostPer1M: 3.00, outputCostPer1M: 15.00 },
-    'claude-sonnet-4-20250514': { inputCostPer1M: 3.00, outputCostPer1M: 15.00 },
-    
+    'claude-sonnet-4.5': { inputCostPer1M: 3.00, outputCostPer1M: 15.00, cachedInputCostPer1M: 0.30 },
+    'claude-sonnet-4-20250514': { inputCostPer1M: 3.00, outputCostPer1M: 15.00, cachedInputCostPer1M: 0.30 },
+
+    // Claude Haiku 4.5
+    'claude-haiku-4.5': { inputCostPer1M: 1.00, outputCostPer1M: 5.00, cachedInputCostPer1M: 0.10 },
+    'claude-haiku-4-5-20251001': { inputCostPer1M: 1.00, outputCostPer1M: 5.00, cachedInputCostPer1M: 0.10 },
+    'claude-haiku-4-20250514': { inputCostPer1M: 1.00, outputCostPer1M: 5.00, cachedInputCostPer1M: 0.10 },
+
     // Claude Haiku 3.5
     'claude-haiku-3.5': { inputCostPer1M: 0.80, outputCostPer1M: 4.00 },
     'claude-3-5-haiku-20241022': { inputCostPer1M: 0.80, outputCostPer1M: 4.00 },
-    
+
     // Claude 3.5 Sonnet (legacy)
-    'claude-3-5-sonnet-20241022': { inputCostPer1M: 3.00, outputCostPer1M: 15.00 },
-    'claude-3-5-sonnet-20240620': { inputCostPer1M: 3.00, outputCostPer1M: 15.00 },
-    
+    'claude-3-5-sonnet-20241022': { inputCostPer1M: 3.00, outputCostPer1M: 15.00, cachedInputCostPer1M: 0.30 },
+    'claude-3-5-sonnet-20240620': { inputCostPer1M: 3.00, outputCostPer1M: 15.00, cachedInputCostPer1M: 0.30 },
+
     // Claude 3 Opus (legacy)
-    'claude-3-opus-20240229': { inputCostPer1M: 15.00, outputCostPer1M: 75.00 },
-    
+    'claude-3-opus-20240229': { inputCostPer1M: 15.00, outputCostPer1M: 75.00, cachedInputCostPer1M: 1.50 },
+
     // Claude 3 Sonnet (legacy)
-    'claude-3-sonnet-20240229': { inputCostPer1M: 3.00, outputCostPer1M: 15.00 },
-    
+    'claude-3-sonnet-20240229': { inputCostPer1M: 3.00, outputCostPer1M: 15.00, cachedInputCostPer1M: 0.30 },
+
     // Claude 3 Haiku (legacy)
-    'claude-3-haiku-20240307': { inputCostPer1M: 0.25, outputCostPer1M: 1.25 },
+    'claude-3-haiku-20240307': { inputCostPer1M: 0.25, outputCostPer1M: 1.25, cachedInputCostPer1M: 0.03 },
   },
   
   gemini: {

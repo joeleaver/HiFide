@@ -58,6 +58,10 @@ export class FlowScheduler {
   // Enables portal output nodes to retrieve data from matching input portals
   private portalRegistry = new Map<string, { context?: any; data?: any }>()
 
+  // Multi-context tracking: main context + isolated contexts
+  private mainContext: MainFlowContext
+  private isolatedContexts = new Map<string, MainFlowContext>()
+
   // Current provider/model (can be updated mid-flow)
   private currentProvider: string
   private currentModel: string
@@ -74,6 +78,10 @@ export class FlowScheduler {
     // Initialize with provided values, but these will be refreshed from Zustand on each node execution
     this.currentProvider = args.provider || 'openai'
     this.currentModel = args.model || 'gpt-4'
+
+    // Initialize main context
+    this.mainContext = this.createDefaultContext()
+    this.mainContext.contextType = 'main'
 
     this.buildGraphStructure()
   }
@@ -156,28 +164,42 @@ export class FlowScheduler {
     // Pull = called to satisfy a dependency (no caller or empty inputs)
     const isPush = callerId !== null && Object.keys(pushedInputs).length > 0
 
-    // If this is a PULL and we're already executing, await the existing promise
-    if (!isPush && this.pullPromises.has(nodeId)) {
+    // If we're already executing this node, handle carefully to avoid deadlock
+    if (this.pullPromises.has(nodeId)) {
+      // If this is a PUSH and the node is already executing, it means the node
+      // is pulling from us. Don't await - just return immediately to avoid deadlock.
+      // The pull will get our result when we return from this call.
+      if (isPush) {
+        console.log(`[Scheduler] ${nodeId} - Already executing (being pulled), ignoring push to avoid deadlock`)
+        // Return a dummy result - the actual result will come from the pull
+        return { status: 'success' } as NodeOutput
+      }
+
+      // If this is a PULL, await the existing promise
+      console.log(`[Scheduler] ${nodeId} - Already executing, awaiting existing promise`)
       return await this.pullPromises.get(nodeId)!
     }
 
-    // If this is a PULL and we have cached result, return it
+    // If we have a cached result from a previous pull, return it
+    // (Only for pulls - pushes should always execute)
     if (!isPush && this.pullCache.has(nodeId)) {
+      console.log(`[Scheduler] ${nodeId} - Returning cached result`)
       return this.pullCache.get(nodeId)!
     }
 
     const executionPromise = this.doExecuteNode(nodeId, pushedInputs, callerId, isPush)
 
-    // Cache the promise if this is a pull
-    if (!isPush) {
-      this.pullPromises.set(nodeId, executionPromise)
-    }
+    // Cache the promise (for both push and pull now)
+    this.pullPromises.set(nodeId, executionPromise)
 
     const result = await executionPromise
 
     // Clean up promise cache
+    this.pullPromises.delete(nodeId)
+
+    // Cache result only for pulls
     if (!isPush) {
-      this.pullPromises.delete(nodeId)
+      this.pullCache.set(nodeId, result)
     }
 
     return result
@@ -208,35 +230,68 @@ export class FlowScheduler {
       // PULL PHASE: Get any missing inputs
       const incomingEdges = this.incomingEdges.get(nodeId) || []
 
+      console.log(`[Scheduler] ${nodeId} - PULL phase:`, {
+        incomingEdges: incomingEdges.length,
+        pushedInputs: Object.keys(pushedInputs),
+        callerId
+      })
+
       for (const edge of incomingEdges) {
         const inputName = edge.targetInput
 
-        // Skip if we already have this input from push
-        if (inputName in pushedInputs) {
+        // Skip if we already have this input (from push or previous pull)
+        if (inputName in allInputs) {
+          console.log(`[Scheduler] ${nodeId} - Skipping ${inputName} (already have it)`)
           continue
         }
 
         // Skip if this edge is from our caller (prevent immediate cycle)
         if (edge.source === callerId) {
+          console.log(`[Scheduler] ${nodeId} - Skipping ${edge.source} (caller)`)
           continue
         }
 
         // PULL from source node
+        console.log(`[Scheduler] ${nodeId} - Pulling ${inputName} from ${edge.source}.${edge.sourceOutput}`)
         const sourceResult = await this.executeNode(edge.source, {}, nodeId)
 
         // Extract the specific output from source
         const sourceOutput = edge.sourceOutput
         if (sourceOutput in sourceResult) {
           allInputs[inputName] = (sourceResult as any)[sourceOutput]
+          console.log(`[Scheduler] ${nodeId} - Got ${inputName}:`, typeof allInputs[inputName])
+        } else {
+          console.log(`[Scheduler] ${nodeId} - Source ${edge.source} did not return ${sourceOutput}`)
         }
       }
       
       // Get node configuration from renderer (fresh on every execution)
       const nodeConfig = this.flowDef.nodes.find(n => n.id === nodeId)
       const config = await this.getNodeConfig(nodeId)
-      
+
       // Separate inputs into context, data, and others
-      const contextIn = allInputs.context || this.createDefaultContext()
+      // Context handling: if node has a context input, use it; otherwise use main context
+      let contextIn: MainFlowContext
+      if (allInputs.context) {
+        // Node received a context from an edge - use it
+        contextIn = allInputs.context
+        console.log(`[Scheduler] ${nodeId} - Using context from edge:`, {
+          contextId: contextIn.contextId,
+          contextType: contextIn.contextType,
+          provider: contextIn.provider,
+          model: contextIn.model
+        })
+      } else {
+        // No context input - use main context
+        contextIn = this.mainContext
+        console.log(`[Scheduler] ${nodeId} - Using main context:`, {
+          contextId: contextIn.contextId,
+          contextType: contextIn.contextType,
+          provider: contextIn.provider,
+          model: contextIn.model
+        })
+      }
+
       const dataIn = allInputs.data
       const otherInputs: Record<string, any> = {}
       for (const [key, value] of Object.entries(allInputs)) {
@@ -258,9 +313,33 @@ export class FlowScheduler {
       const nodeFunction = getNodeFunction(nodeConfig!)
       const result = await nodeFunction(contextIn, dataIn, otherInputs, configWithNodeId)
 
-      // Update main flow context in store if context was modified
+      // Update context tracking based on result
       if (result.context) {
-        store.feUpdateMainFlowContext(result.context)
+        const resultContext = result.context
+
+        if (resultContext.contextType === 'main' || !resultContext.contextType) {
+          // Update main context
+          this.mainContext = resultContext
+          console.log(`[Scheduler] ${nodeId} - Updated main context:`, {
+            contextId: this.mainContext.contextId,
+            messageHistoryLength: this.mainContext.messageHistory.length
+          })
+
+          // Sync to store for UI display
+          store.feUpdateMainFlowContext(this.mainContext)
+        } else if (resultContext.contextType === 'isolated') {
+          // Update isolated context
+          this.isolatedContexts.set(resultContext.contextId, resultContext)
+          console.log(`[Scheduler] ${nodeId} - Updated isolated context:`, {
+            contextId: resultContext.contextId,
+            messageHistoryLength: resultContext.messageHistory.length,
+            totalIsolatedContexts: this.isolatedContexts.size
+          })
+
+          // Also sync to store (for now, just use the main context update)
+          // TODO: Update store to handle multiple contexts
+          store.feUpdateMainFlowContext(resultContext)
+        }
       }
 
       // Cache result if this was a pull
@@ -271,9 +350,23 @@ export class FlowScheduler {
       const durationMs = Date.now() - startTime
       store.feHandleNodeEnd(nodeId, durationMs)
 
+      // Check for error status - stop execution if node failed
+      if (result.status === 'error') {
+        const errorMsg = result.error || 'Node execution failed'
+        console.error(`[Scheduler] ${nodeId} - ERROR:`, errorMsg)
+        store.feHandleError(`${nodeId}: ${errorMsg}`)
+        throw new Error(errorMsg)
+      }
+
       // PUSH PHASE: Call successors with our outputs
       // Note: Some nodes (like tools) are pull-only and don't push to successors
       const outgoingEdges = this.outgoingEdges.get(nodeId) || []
+
+      console.log(`[Scheduler] ${nodeId} - PUSH phase:`, {
+        outgoingEdges: outgoingEdges.length,
+        resultKeys: Object.keys(result),
+        status: result.status
+      })
 
       // Filter out pull-only edges (tools edges should only be pulled, not pushed)
       const pushEdges = outgoingEdges.filter(edge => {
@@ -305,7 +398,10 @@ export class FlowScheduler {
         // Only push to successor if we have data to push
         // This prevents calling successors with empty inputs (which would be treated as a pull)
         if (Object.keys(pushedData).length > 0) {
+          console.log(`[Scheduler] ${nodeId} - Pushing to ${successorId}:`, Object.keys(pushedData))
           await this.executeNode(successorId, pushedData, nodeId)
+        } else {
+          console.log(`[Scheduler] ${nodeId} - NOT pushing to ${successorId} (no data)`)
         }
       }
       
@@ -325,6 +421,7 @@ export class FlowScheduler {
   private createDefaultContext(): MainFlowContext {
     return {
       contextId: 'main',
+      contextType: 'main', // Mark as main context for purple color
       provider: this.currentProvider,
       model: this.currentModel,
       messageHistory: [],

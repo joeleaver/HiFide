@@ -230,6 +230,14 @@ class LLMService {
     const eventHandlers = await this.createEventHandlers(context, nodeId, provider, model, skipHistory)
 
     // 6. Call provider with formatted messages
+    console.log(`[LLMService] Starting stream:`, {
+      provider,
+      model,
+      hasTools: !!tools && tools.length > 0,
+      toolCount: tools?.length || 0,
+      messageHistoryLength: formattedMessages.messages?.length || 0
+    })
+
     let response = ''
 
     try {
@@ -247,8 +255,18 @@ class LLMService {
               response += text
               eventHandlers.onChunk(text)
             },
-            onDone: () => resolve(),
-            onError: (error: string) => reject(new Error(error)),
+            onDone: () => {
+              console.log(`[LLMService] Stream completed:`, {
+                provider,
+                model,
+                responseLength: response.length
+              })
+              resolve()
+            },
+            onError: (error: string) => {
+              console.error(`[LLMService] Stream error:`, error)
+              reject(new Error(error))
+            },
             onTokenUsage: eventHandlers.onTokenUsage
           }
 
@@ -343,38 +361,54 @@ class LLMService {
    * @param skipHistory - If true, suppresses chunk events (for internal/stateless calls like intentRouter)
    */
   private async createEventHandlers(_context: MainFlowContext, nodeId: string, provider: string, model: string, skipHistory?: boolean) {
-    const { useMainStore } = await import('../../store/index.js')
-    const store = useMainStore.getState()
+    // Try to get store, but gracefully handle if not available (e.g., in tests)
+    let store: any = null
+    try {
+      const { useMainStore } = await import('../../store/index.js')
+      store = useMainStore.getState()
+    } catch (e) {
+      // Store not available - event handlers will be no-ops
+    }
 
     return {
       onChunk: (text: string) => {
         // Don't emit chunk events for internal/stateless calls (like intentRouter)
         // These are not part of the user conversation and shouldn't be displayed
-        if (!skipHistory) {
+        if (!skipHistory && store) {
           store.feHandleChunk(text)
         }
       },
 
       onTokenUsage: (usage: TokenUsage) => {
-        store.feHandleTokenUsage(provider, model, usage)
+        if (store) {
+          store.feHandleTokenUsage(provider, model, usage)
+        }
       },
 
       onToolStart: (ev: { callId?: string; name: string; arguments?: any }) => {
         // Pass callId, nodeId and arguments so tool badges can be tracked and updated
-        store.feHandleToolStart(ev.name, nodeId, ev.arguments, ev.callId)
+        if (store) {
+          store.feHandleToolStart(ev.name, nodeId, ev.arguments, ev.callId)
+        }
       },
 
       onToolEnd: (ev: { callId?: string; name: string }) => {
         // Pass callId so we can find and update the specific badge
-        store.feHandleToolEnd(ev.name, ev.callId)
+        if (store) {
+          store.feHandleToolEnd(ev.name, ev.callId)
+        }
       },
 
       onToolError: (ev: { callId?: string; name: string; error: string }) => {
-        store.feHandleToolError(ev.name, ev.error, ev.callId)
+        if (store) {
+          store.feHandleToolError(ev.name, ev.error, ev.callId)
+        }
       },
 
       onError: (error: string) => {
-        store.feHandleError(error)
+        if (store) {
+          store.feHandleError(error)
+        }
       }
     }
   }

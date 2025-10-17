@@ -21,6 +21,13 @@ export interface MainFlowContext {
   contextId: string
 
   /**
+   * Context type - determines visual styling and behavior
+   * - 'main': The primary conversation context (purple handles)
+   * - 'isolated': A separate context created by newContext node (teal handles)
+   */
+  contextType?: 'main' | 'isolated'
+
+  /**
    * AI provider for this context (e.g., 'openai', 'anthropic', 'gemini')
    * Determines which LLM API to use.
    */

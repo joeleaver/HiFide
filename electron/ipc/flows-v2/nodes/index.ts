@@ -7,6 +7,7 @@
 
 import type { FlowNode, NodeFunction, NodeExecutionPolicy } from '../types'
 import { defaultContextStartNode, metadata as defaultContextStartMetadata } from './defaultContextStart'
+import { newContextNode, metadata as newContextMetadata } from './newContext'
 import { userInputNode, metadata as userInputMetadata } from './userInput'
 import { llmRequestNode, metadata as llmRequestMetadata } from './llmRequest'
 import { toolsNode, metadata as toolsMetadata } from './tools'
@@ -15,6 +16,7 @@ import { intentRouterNode, metadata as intentRouterMetadata } from './intentRout
 import { portalInputNode, metadata as portalInputMetadata } from './portalInput'
 import { portalOutputNode, metadata as portalOutputMetadata } from './portalOutput'
 import { injectMessagesNode, metadata as injectMessagesMetadata } from './injectMessages'
+import { cacheNode, metadata as cacheMetadata } from './cache'
 
 /**
  * Node metadata
@@ -32,6 +34,10 @@ const NODE_REGISTRY: Record<string, NodeMetadata> = {
   defaultContextStart: {
     fn: defaultContextStartNode,
     ...defaultContextStartMetadata
+  },
+  newContext: {
+    fn: newContextNode,
+    ...newContextMetadata
   },
   userInput: {
     fn: userInputNode,
@@ -64,6 +70,10 @@ const NODE_REGISTRY: Record<string, NodeMetadata> = {
   injectMessages: {
     fn: injectMessagesNode,
     ...injectMessagesMetadata
+  },
+  cache: {
+    fn: cacheNode,
+    ...cacheMetadata
   },
 }
 

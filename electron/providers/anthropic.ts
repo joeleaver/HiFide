@@ -83,12 +83,27 @@ export const AnthropicProvider: ProviderAdapter = {
   async agentStream({ apiKey, model, system, messages, tools, responseSchema: _responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const client = new Anthropic({ apiKey, defaultHeaders: { 'anthropic-beta': 'prompt-caching-2024-07-31' } as any })
 
-    // Map tools to Anthropic format
+    // Map tools to Anthropic format (sanitize names to match pattern ^[a-zA-Z0-9_-]{1,128}$)
     const toolMap = new Map<string, AgentTool>()
-    const anthTools = tools.map((t) => {
-      toolMap.set(t.name, t)
-      return { name: t.name, description: t.description || undefined, input_schema: t.parameters as any }
-    }) as any
+    const usedNames = new Set<string>()
+    const toSafeName = (name: string) => {
+      // Replace invalid characters (dots, spaces, etc.) with underscores
+      let safe = (name || 'tool').replace(/[^a-zA-Z0-9_-]/g, '_')
+      if (!safe) safe = 'tool'
+      // Handle duplicates
+      let base = safe, i = 1
+      while (usedNames.has(safe)) { i += 1; safe = `${base}_${i}` }
+      usedNames.add(safe)
+      return safe
+    }
+
+    const anthTools = tools
+      .filter(t => t && t.name) // Filter out invalid tools
+      .map((t) => {
+        const safeName = toSafeName(t.name)
+        toolMap.set(safeName, t) // Map safe name to original tool
+        return { name: safeName, description: t.description || undefined, input_schema: t.parameters as any }
+      }) as any
 
     // Optional cached tool preamble block for stable tool schemas
     const toolsDesc = (anthTools && anthTools.length)
@@ -123,6 +138,15 @@ export const AnthropicProvider: ProviderAdapter = {
 
         while (!cancelled && iteration < 50) { // Hard limit of 50 iterations as safety
           iteration++
+
+          console.log(`[Anthropic] Starting iteration ${iteration}:`, {
+            model,
+            hasSystem: !!(systemAllBlocks && systemAllBlocks.length),
+            messageCount: conv.length,
+            toolCount: anthTools.length,
+            toolNames: anthTools.map((t: any) => t.name)
+          })
+
           // Stream an assistant turn and capture any tool_use blocks while streaming
           const stream: any = await withRetries(() => client.messages.create({
             model: model as any,
@@ -137,29 +161,64 @@ export const AnthropicProvider: ProviderAdapter = {
           const active: Record<string, { id: string; name: string; inputText: string }> = {}
           const completed: Array<{ id: string; name: string; input: any }> = []
           let usage: any = null
+          // Map index to id for tracking tool inputs (since delta events only have index, not id)
+          const indexToId: Record<number, string> = {}
 
           for await (const evt of stream) {
             try {
               if (evt?.type === 'content_block_delta') {
-                const t = evt?.delta?.text
-                if (t) onChunk(String(t))
+                // Handle text deltas
+                if (evt?.delta?.type === 'text_delta') {
+                  const t = evt?.delta?.text
+                  if (t) onChunk(String(t))
+                }
+                // Handle tool input JSON deltas
+                else if (evt?.delta?.type === 'input_json_delta') {
+                  const index = evt?.index
+                  const id = index !== undefined ? indexToId[index] : undefined
+                  const chunk = evt?.delta?.partial_json || ''
+                  if (id && active[id]) {
+                    active[id].inputText += chunk
+                    console.log(`[Anthropic] Accumulating tool input:`, {
+                      id,
+                      chunkLength: chunk.length,
+                      totalLength: active[id].inputText.length
+                    })
+                  }
+                }
               } else if (evt?.type === 'content_block_start' && evt?.content_block?.type === 'tool_use') {
                 const id = evt?.content_block?.id
                 const name = evt?.content_block?.name
-                if (id && name) active[id] = { id, name, inputText: '' }
-              } else if (evt?.type === 'input_json_delta' && evt?.delta) {
-                // Append partial JSON chunks for the active tool_use (Anthropic streams JSON deltas)
-                const id = evt?.content_block_id || evt?.block_id
-                const chunk = typeof evt.delta === 'string' ? evt.delta : JSON.stringify(evt.delta)
-                if (id && active[id]) active[id].inputText += chunk
+                const index = evt?.index
+                console.log(`[Anthropic] Tool use started:`, { id, name, index })
+                if (id && name) {
+                  active[id] = { id, name, inputText: '' }
+                  if (index !== undefined) {
+                    indexToId[index] = id
+                  }
+                }
               } else if (evt?.type === 'content_block_stop') {
-                const id = evt?.content_block_id || evt?.block_id
+                const index = evt?.index
+                const id = index !== undefined ? indexToId[index] : undefined
                 const item = id ? active[id] : undefined
                 if (item) {
                   let parsed: any = {}
-                  try { parsed = item.inputText ? JSON.parse(item.inputText) : {} } catch {}
+                  try {
+                    parsed = item.inputText ? JSON.parse(item.inputText) : {}
+                    console.log(`[Anthropic] Parsed tool input:`, {
+                      toolName: item.name,
+                      inputText: item.inputText,
+                      parsed
+                    })
+                  } catch (e) {
+                    console.error(`[Anthropic] Failed to parse tool input:`, {
+                      toolName: item.name,
+                      inputText: item.inputText,
+                      error: e
+                    })
+                  }
                   completed.push({ id: item.id, name: item.name, input: parsed })
-                  delete active[id!]
+                  delete active[id]
                 }
               } else if (evt?.type === 'message_start') {
                 // Capture usage from message_start event
@@ -182,6 +241,11 @@ export const AnthropicProvider: ProviderAdapter = {
           }
 
           if (completed.length > 0) {
+            console.log(`[Anthropic] Tool calls detected:`, {
+              toolCount: completed.length,
+              tools: completed.map(t => ({ name: t.name, id: t.id }))
+            })
+
             // Reconstruct assistant content with tool_use blocks for the transcript context
             const assistantBlocks = completed.map(tu => ({ type: 'tool_use', id: tu.id, name: tu.name, input: tu.input }))
             conv.push({ role: 'assistant', content: assistantBlocks as any })
@@ -193,11 +257,29 @@ export const AnthropicProvider: ProviderAdapter = {
 
             for (const tu of completed) {
               try {
+                console.log(`[Anthropic] Executing tool:`, {
+                  sanitizedName: tu.name,
+                  toolId: tu.id,
+                  inputPreview: JSON.stringify(tu.input).substring(0, 100)
+                })
+
                 const tool = toolMap.get(tu.name)
                 if (!tool) {
+                  console.error(`[Anthropic] Tool not found in toolMap:`, {
+                    sanitizedName: tu.name,
+                    availableTools: Array.from(toolMap.keys())
+                  })
                   results.push({ type: 'tool_result', tool_use_id: tu.id, content: `Error: Tool ${tu.name} not found`, is_error: true })
                   continue
                 }
+
+                // Use original tool name for events (not sanitized name)
+                const originalToolName = tool.name
+                console.log(`[Anthropic] Found tool:`, {
+                  sanitizedName: tu.name,
+                  originalName: originalToolName
+                })
+
                 const schema = (tool as any)?.parameters
                 const v = validateJson(schema, tu.input)
                 if (!v.ok) {
@@ -205,14 +287,21 @@ export const AnthropicProvider: ProviderAdapter = {
                   continue
                 }
 
-                // Notify tool start
-                try { onToolStart?.({ callId: tu.id, name: tu.name, arguments: tu.input }) } catch {}
+                // Notify tool start (use original name for UI display)
+                try { onToolStart?.({ callId: tu.id, name: originalToolName, arguments: tu.input }) } catch {}
+
+                console.log(`[Anthropic] Running tool:`, { originalName: originalToolName })
 
                 // Pass toolMeta to tool.run()
                 const result = await Promise.resolve(tool.run(tu.input, toolMeta))
 
-                // Notify tool end
-                try { onToolEnd?.({ callId: tu.id, name: tu.name, result }) } catch {}
+                console.log(`[Anthropic] Tool completed:`, {
+                  originalName: originalToolName,
+                  resultPreview: typeof result === 'string' ? result.substring(0, 100) : JSON.stringify(result).substring(0, 100)
+                })
+
+                // Notify tool end (use original name for UI display)
+                try { onToolEnd?.({ callId: tu.id, name: originalToolName, result }) } catch {}
 
                 // Check if tool requested pruning
                 if (result?._meta?.trigger_pruning) {
@@ -222,12 +311,21 @@ export const AnthropicProvider: ProviderAdapter = {
 
                 results.push({ type: 'tool_result', tool_use_id: tu.id, content: typeof result === 'string' ? result : JSON.stringify(result) })
               } catch (e: any) {
-                // Notify tool error
-                try { onToolError?.({ callId: tu.id, name: tu.name, error: e?.message || String(e) }) } catch {}
+                // Get original tool name for error reporting
+                const tool = toolMap.get(tu.name)
+                const originalToolName = tool?.name || tu.name
+
+                // Notify tool error (use original name for UI display)
+                try { onToolError?.({ callId: tu.id, name: originalToolName, error: e?.message || String(e) }) } catch {}
                 results.push({ type: 'tool_result', tool_use_id: tu.id, content: `Error: ${e?.message || String(e)}`, is_error: true })
               }
             }
             conv.push({ role: 'user', content: results })
+
+            console.log(`[Anthropic] Tool results added to conversation, continuing agentic loop...`, {
+              iteration,
+              resultCount: results.length
+            })
 
             // Prune conversation if requested
             if (shouldPrune && pruneSummary) {
@@ -238,6 +336,11 @@ export const AnthropicProvider: ProviderAdapter = {
           }
 
           // No tool_use in this streamed turn; we already streamed the final text
+          console.log(`[Anthropic] No tool calls in this turn, ending agentic loop`, {
+            iteration,
+            totalIterations: iteration
+          })
+
           // Report accumulated token usage
           if (totalUsage && onTokenUsage) {
             onTokenUsage({

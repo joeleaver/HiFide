@@ -122,7 +122,8 @@ export const useMainStore = create<AppStore>()(
         settingsApiKeys: state.settingsApiKeys,
         autoApproveEnabled: state.autoApproveEnabled,
         autoApproveThreshold: state.autoApproveThreshold,
-        pricingConfig: state.pricingConfig,
+        // NOTE: pricingConfig is NOT persisted - always initialized from DEFAULT_PRICING
+        // This ensures new models are available immediately without requiring app restart
 
         // Workspace
         workspaceRoot: state.workspaceRoot,

@@ -13,6 +13,7 @@ const NODE_PALETTE: Array<{ kind: string; label: string; icon: string; descripti
   { kind: 'portalOutput', label: 'Portal Out', icon: '📤', description: 'Retrieve data from portal input (reduces edge crossings)' },
   { kind: 'parallelSplit', label: 'Split', icon: '⑂', description: 'Split flow into two parallel branches' },
   { kind: 'parallelJoin', label: 'Merge', icon: '🔗', description: 'Merge multiple inputs into one output' },
+  { kind: 'cache', label: 'Cache', icon: '💾', description: 'Cache data to avoid re-executing expensive operations' },
   { kind: 'redactor', label: 'Redactor', icon: '🧹', description: 'Redact sensitive data' },
   { kind: 'budgetGuard', label: 'Budget Guard', icon: '💰', description: 'Monitor token budget' },
   { kind: 'errorDetection', label: 'Error Detection', icon: '⚠️', description: 'Detect error patterns' },

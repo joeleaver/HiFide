@@ -11,10 +11,11 @@ interface NodeConfigProps {
 }
 
 export default function NodeConfig({ nodeId, kind, config, onConfigChange }: NodeConfigProps) {
-  // Get provider/model data for newContext node
+  // Get provider/model data for newContext node and llmRequest node
   const providerValid = useAppStore((s) => s.providerValid)
   const modelsByProvider = useAppStore((s) => s.modelsByProvider)
   const feNodes = useAppStore((s) => s.feNodes)
+  const feEdges = useAppStore((s) => s.feEdges)
 
   const providerOptions = useMemo(() => {
     return Object.entries(providerValid || {})
@@ -134,7 +135,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
       {kind === 'newContext' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
           <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
-            🔀 Creates a new execution context. Downstream nodes (connected via top handle) will use this provider/model.
+            🔀 Creates an isolated execution context for parallel flows. Use this for bootstrap flows or background processing that shouldn't pollute the main conversation.
           </Text>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Provider:</span>
@@ -173,6 +174,25 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
                 <option key={m.value} value={m.value}>{m.label}</option>
               ))}
             </select>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>System Instructions:</span>
+            <textarea
+              value={config.systemInstructions || ''}
+              onChange={(e) => onConfigChange({ systemInstructions: e.target.value })}
+              placeholder="Optional system instructions for this isolated context (e.g., 'You are a code analyzer...')"
+              rows={4}
+              style={{
+                padding: '4px 6px',
+                background: '#252526',
+                color: '#cccccc',
+                border: '1px solid #3e3e42',
+                borderRadius: 3,
+                fontSize: 10,
+                fontFamily: 'inherit',
+                resize: 'vertical',
+              }}
+            />
           </label>
         </div>
       )}
@@ -295,39 +315,95 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
         </div>
       )}
 
-      {kind === 'llmRequest' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
-            <span style={{ fontSize: 10, color: '#888', width: 80 }}>Retry attempts:</span>
-            <input
-              type="number"
-              min="1"
-              value={config.retryAttempts || 1}
-              onChange={(e) => onConfigChange({ retryAttempts: parseInt(e.target.value) || 1 })}
-              style={{
-                flex: 1,
-                padding: '2px 4px',
-                background: '#252526',
-                color: '#cccccc',
-                border: '1px solid #3e3e42',
-                borderRadius: 3,
-                fontSize: 10,
-              }}
-            />
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
-            <span style={{ fontSize: 10, color: '#888', width: 80 }}>Retry backoff:</span>
-            <input
-              type="number"
-              min="0"
-              value={config.retryBackoffMs || 0}
-              onChange={(e) => onConfigChange({ retryBackoffMs: parseInt(e.target.value) || 0 })}
-              placeholder="ms"
-              style={{
-                flex: 1,
-                padding: '2px 4px',
-                background: '#252526',
-                color: '#cccccc',
+      {kind === 'llmRequest' && (() => {
+        // Check if context input is connected
+        const isContextConnected = feEdges.some((e: any) => e.target === nodeId && e.targetHandle === 'context')
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Show provider/model selectors only when context is NOT connected */}
+            {!isContextConnected && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
+                <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
+                  💬 No context connected. Configure provider/model for this LLM request:
+                </Text>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Provider:</span>
+                    <select
+                      value={config.provider || 'openai'}
+                      onChange={(e) => onConfigChange({ provider: e.target.value, model: '' })}
+                      className="nodrag"
+                      style={{
+                        padding: '4px 6px',
+                        background: '#252526',
+                        color: '#cccccc',
+                        border: '1px solid #3e3e42',
+                        borderRadius: 3,
+                        fontSize: 10,
+                      }}
+                    >
+                      {providerOptions.map((p) => (
+                        <option key={p.value} value={p.value}>{p.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Model:</span>
+                    <select
+                      value={config.model || (modelOptions[0]?.value || '')}
+                      onChange={(e) => onConfigChange({ model: e.target.value })}
+                      className="nodrag"
+                      style={{
+                        padding: '4px 6px',
+                        background: '#252526',
+                        color: '#cccccc',
+                        border: '1px solid #3e3e42',
+                        borderRadius: 3,
+                        fontSize: 10,
+                      }}
+                    >
+                      {modelOptions.map((m: any) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* Retry settings - always show */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+              <span style={{ fontSize: 10, color: '#888', width: 80 }}>Retry attempts:</span>
+              <input
+                type="number"
+                min="1"
+                value={config.retryAttempts || 1}
+                onChange={(e) => onConfigChange({ retryAttempts: parseInt(e.target.value) || 1 })}
+                style={{
+                  flex: 1,
+                  padding: '2px 4px',
+                  background: '#252526',
+                  color: '#cccccc',
+                  border: '1px solid #3e3e42',
+                  borderRadius: 3,
+                  fontSize: 10,
+                }}
+              />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+              <span style={{ fontSize: 10, color: '#888', width: 80 }}>Retry backoff:</span>
+              <input
+                type="number"
+                min="0"
+                value={config.retryBackoffMs || 0}
+                onChange={(e) => onConfigChange({ retryBackoffMs: parseInt(e.target.value) || 0 })}
+                placeholder="ms"
+                style={{
+                  flex: 1,
+                  padding: '2px 4px',
+                  background: '#252526',
+                  color: '#cccccc',
                 border: '1px solid #3e3e42',
                 borderRadius: 3,
                 fontSize: 10,
@@ -335,7 +411,8 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
             />
           </label>
         </div>
-      )}
+        )
+      })()}
 
       {kind === 'redactor' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -589,6 +666,53 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
           <Text size="xs" c="blue.4" style={{ fontSize: 9, lineHeight: 1.3 }}>
             💡 The LLM classifies the input text (without conversation context) and routes to the matching intent. Context is passed through unchanged. Only the matched intent's outputs will trigger downstream nodes.
           </Text>
+        </div>
+      )}
+
+      {/* cache node configuration */}
+      {kind === 'cache' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
+          <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
+            💾 Caches data from upstream nodes. Set TTL to 0 to disable caching.
+          </Text>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>TTL (seconds):</span>
+            <input
+              type="number"
+              min="0"
+              value={config.ttl ?? 300}
+              onChange={(e) => onConfigChange({ ttl: parseInt(e.target.value) || 0 })}
+              placeholder="300"
+              style={{
+                padding: '4px 6px',
+                background: '#252526',
+                color: '#cccccc',
+                border: '1px solid #3e3e42',
+                borderRadius: 3,
+                fontSize: 10,
+              }}
+            />
+            <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
+              Default: 300 seconds (5 minutes). Set to 0 to disable caching.
+            </Text>
+          </label>
+
+          <button
+            onClick={() => onConfigChange({ invalidate: Date.now() })}
+            style={{
+              padding: '6px 10px',
+              background: '#3e3e42',
+              color: '#cccccc',
+              border: '1px solid #555',
+              borderRadius: 3,
+              fontSize: 10,
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
+            🗑️ Invalidate Cache
+          </button>
         </div>
       )}
     </div>

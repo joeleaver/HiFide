@@ -50,6 +50,10 @@ export interface FlowEditorSlice {
   // Main flow context (ephemeral, only exists during flow execution)
   feMainFlowContext: MainFlowContext | null
 
+  // Isolated contexts (ephemeral, only exist during flow execution)
+  // Map of contextId -> MainFlowContext for all isolated contexts created by newContext nodes
+  feIsolatedContexts: Record<string, MainFlowContext>
+
   // Selection/UI state
   feSelectedNodeId: string | null
 
@@ -190,6 +194,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   feNodePositions: {},
   feNodeExecutionState: {},
   feMainFlowContext: null,
+  feIsolatedContexts: {},
 
   feSelectedNodeId: null,
 
@@ -704,6 +709,10 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
     // Add user message to session
     if (userInput) {
+      console.log('[feResume] Adding user message to session:', {
+        userInputLength: userInput.length,
+        hasAddSessionItem: !!store.getState().addSessionItem,
+      })
       const state = store.getState() as any
       if (state.addSessionItem) {
         state.addSessionItem({
@@ -711,6 +720,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           role: 'user',
           content: userInput,
         })
+      } else {
+        console.warn('[feResume] addSessionItem not found in store!')
       }
     }
 
@@ -1199,6 +1210,24 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       },
     })
 
+    // For LLM nodes, create an empty assistant message in the session so chunks can append to it
+    const node = get().feNodes.find(n => n.id === nodeId)
+    const isLlmNode = node?.data?.kind === 'llmRequest' || node?.data?.kind === 'intentRouter'
+
+    if (isLlmNode) {
+      const state = store.getState() as any
+      if (state.addSessionItem) {
+        state.addSessionItem({
+          type: 'message',
+          role: 'assistant',
+          content: '',  // Empty initially, will be appended to as chunks arrive
+          nodeId,
+          nodeLabel: node?.data?.label || 'LLM Request',
+          nodeKind: node?.data?.kind || 'llmRequest',
+        })
+      }
+    }
+
     // Add to session flow debug logs
     const state = store.getState() as any
     if (state.addFlowDebugLog) {
@@ -1248,22 +1277,28 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         } catch {}
       }
 
-      // Add assistant message to session when chat node completes
-      const streamingText = get().feStreamingText
-      if (streamingText) {
-        if (state.addSessionItem) {
-          state.addSessionItem({
-            type: 'message',
-            role: 'assistant',
-            content: streamingText,
-            nodeId,  // Include nodeId so message can be grouped with badges
-            nodeLabel: node?.data?.label || 'LLM Request',
-            nodeKind: node?.data?.kind || 'llmRequest',
-            cost: tokenCost || undefined,
-          })
-          set({ feStreamingText: '' })
+      // Message was already added to session in feHandleNodeStart and chunks were appended in feHandleChunk
+      // Just clear the streaming text and update the message with cost if available
+      if (tokenCost) {
+        // Find the last message with this nodeId and update its cost
+        const state = store.getState() as any
+        const currentSession = state.sessions?.find((s: any) => s.id === state.currentId)
+        if (currentSession) {
+          const lastMessageId = currentSession.items
+            .reverse()
+            .find((item: any) => item.type === 'message' && item.nodeId === nodeId)?.id
+
+          if (lastMessageId && state.updateSessionItem) {
+            state.updateSessionItem({
+              id: lastMessageId,
+              updates: { cost: tokenCost }
+            })
+          }
         }
       }
+
+      // Clear streaming text
+      set({ feStreamingText: '' })
     }
 
     const currentState = get().feNodeExecutionState[nodeId] || {}
@@ -1336,7 +1371,20 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
   feHandleChunk: (text: string) => {
     if (text) {
-      set({ feStreamingText: get().feStreamingText + text })
+      // Find the currently executing LLM node
+      const executingNode = get().feNodes.find((n: any) => {
+        const state = get().feNodeExecutionState[n.id]
+        const isLlmNode = n.data?.kind === 'llmRequest' || n.data?.kind === 'intentRouter'
+        return isLlmNode && state?.status === 'executing'
+      })
+
+      if (executingNode) {
+        // Append chunk to the session message for this node
+        const state = store.getState() as any
+        if (state.appendToLastMessageWithNodeId) {
+          state.appendToLastMessageWithNodeId(text, executingNode.id)
+        }
+      }
     }
   },
 
@@ -1371,8 +1419,9 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           nodeLabel: node?.data?.label || 'LLM Request',
           nodeKind: node?.data?.kind || 'llmRequest',
         })
-        set({ feStreamingText: '' })
       }
+      // Always clear streaming text after flushing, regardless of whether addSessionItem succeeded
+      set({ feStreamingText: '' })
     }
 
     // Get node label from flow definition if nodeId is provided
@@ -1392,14 +1441,17 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     let badgeLabel = toolName.toUpperCase()
     if (toolArgs) {
       // Extract file/folder name for fs tools
-      if (toolName === 'fs_read_file' || toolName === 'fs_write_file') {
+      // Handle both formats: 'fs.read_file' and 'fs_read_file'
+      const normalizedToolName = toolName.replace(/\./g, '_')
+
+      if (normalizedToolName === 'fs_read_file' || normalizedToolName === 'fs_write_file') {
         const path = toolArgs.path || toolArgs.file_path
         if (path) {
           // Get just the filename from the path
           const filename = path.split(/[/\\]/).pop()
           badgeLabel = `${toolName.toUpperCase()}: ${filename}`
         }
-      } else if (toolName === 'fs_read_dir' || toolName === 'fs_create_dir') {
+      } else if (normalizedToolName === 'fs_read_dir' || normalizedToolName === 'fs_create_dir') {
         const path = toolArgs.path || toolArgs.dir_path
         if (path) {
           // Get just the folder name from the path
@@ -1670,7 +1722,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   },
 
   feHandleDone: () => {
-    set({ feStatus: 'stopped', feMainFlowContext: null })
+    set({ feStatus: 'stopped', feMainFlowContext: null, feIsolatedContexts: {} })
 
     // Add to session flow debug logs
     const state = store.getState() as any
@@ -1696,7 +1748,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
   feHandleError: (error: string) => {
     console.error('[flowEditor] Flow error:', error)
-    set({ feStatus: 'stopped', feMainFlowContext: null })
+    set({ feStatus: 'stopped', feMainFlowContext: null, feIsolatedContexts: {} })
 
     // Add to session flow debug logs
     const state = store.getState() as any
@@ -1722,35 +1774,49 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   },
 
   // Debounced sync to session.currentContext
+  // Now handles both main and isolated contexts
   feUpdateMainFlowContext: (() => {
     let syncTimeout: NodeJS.Timeout | null = null
 
     return (context: MainFlowContext) => {
       console.log('[feUpdateMainFlowContext] Updating context:', {
+        contextId: context.contextId,
+        contextType: context.contextType,
         provider: context.provider,
         model: context.model,
         systemInstructions: context.systemInstructions?.substring(0, 50) + '...',
         messageHistoryLength: context.messageHistory.length
       })
 
-      // Update the live main flow context immediately
-      set({ feMainFlowContext: context })
+      // Update the appropriate context based on type
+      if (context.contextType === 'isolated') {
+        // Update isolated context
+        set((state) => ({
+          feIsolatedContexts: {
+            ...state.feIsolatedContexts,
+            [context.contextId]: context
+          }
+        }))
+      } else {
+        // Update main context
+        set({ feMainFlowContext: context })
 
-      // Debounce sync to session.currentContext (1 second)
-      if (syncTimeout) clearTimeout(syncTimeout)
-      syncTimeout = setTimeout(() => {
-        const state = store.getState() as any
-        if (state.updateCurrentContext) {
-          console.log('[feUpdateMainFlowContext] Syncing to session.currentContext')
-          // Sync shallow copy to session (only fields that exist in both)
-          state.updateCurrentContext({
-            provider: context.provider,
-            model: context.model,
-            systemInstructions: context.systemInstructions,
-            // temperature is not in MainFlowContext, only in Session.currentContext
-          })
-        }
-      }, 1000)
+        // Debounce sync to session.currentContext (1 second) - only for main context
+        if (syncTimeout) clearTimeout(syncTimeout)
+        syncTimeout = setTimeout(() => {
+          const state = store.getState() as any
+          if (state.updateCurrentContext) {
+            console.log('[feUpdateMainFlowContext] Syncing to session.currentContext')
+            // Sync shallow copy to session (only fields that exist in both)
+            state.updateCurrentContext({
+              provider: context.provider,
+              model: context.model,
+              systemInstructions: context.systemInstructions,
+              // temperature is not in MainFlowContext, only in Session.currentContext
+            })
+          }
+        }, 1000)
+      }
     }
   })(),
 

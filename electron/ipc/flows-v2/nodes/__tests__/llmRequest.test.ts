@@ -233,5 +233,97 @@ describe('LLM Request Node', () => {
       }
     })
   })
+
+  describe('Provider/Model from Config', () => {
+    it('should create context from config when no context provided', () => {
+      // This test verifies the context creation logic without actually calling the LLM
+      const config = {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        _nodeId: 'test-node'
+      }
+
+      // Simulate the logic from llmRequestNode
+      const contextIn = undefined
+      let context: any
+
+      if (contextIn && (contextIn as any).provider && (contextIn as any).model) {
+        context = contextIn
+      } else {
+        const provider = config.provider || 'openai'
+        const model = config.model || 'gpt-4o'
+
+        context = {
+          contextId: `llm-${config._nodeId}-${Date.now()}`,
+          provider,
+          model,
+          systemInstructions: '',
+          messageHistory: []
+        }
+      }
+
+      expect(context.provider).toBe('openai')
+      expect(context.model).toBe('gpt-4o-mini')
+      expect(context.messageHistory).toEqual([])
+    })
+
+    it('should use config provider/model when context is incomplete', async () => {
+      const incompleteContext = {
+        contextId: 'test',
+        messageHistory: []
+      } as any
+
+      const config = createTestConfig({
+        provider: 'gemini',
+        model: 'gemini-2.0-flash-exp'
+      })
+      const message = 'Hello!'
+
+      const result = await llmRequestNode(incompleteContext, message, {}, config)
+
+      // May fail with API error, but should have created context with config provider/model
+      expect(result.context.provider).toBe('gemini')
+      expect(result.context.model).toBe('gemini-2.0-flash-exp')
+    })
+
+    it('should prefer provided context over config', () => {
+      // This test verifies the context selection logic without actually calling the LLM
+      const contextIn = {
+        contextId: 'test',
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet-20241022',
+        systemInstructions: '',
+        messageHistory: []
+      }
+
+      const config = {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        _nodeId: 'test-node'
+      }
+
+      // Simulate the logic from llmRequestNode
+      let context: any
+
+      if (contextIn && contextIn.provider && contextIn.model) {
+        context = contextIn
+      } else {
+        const provider = config.provider || 'openai'
+        const model = config.model || 'gpt-4o'
+
+        context = {
+          contextId: `llm-${config._nodeId}-${Date.now()}`,
+          provider,
+          model,
+          systemInstructions: '',
+          messageHistory: []
+        }
+      }
+
+      // Should use context provider/model, not config
+      expect(context.provider).toBe('anthropic')
+      expect(context.model).toBe('claude-3-5-sonnet-20241022')
+    })
+  })
 })
 

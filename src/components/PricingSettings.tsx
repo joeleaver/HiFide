@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { Card, Stack, Group, Text, Button, Accordion, Table, NumberInput, Badge } from '@mantine/core'
-import { useAppStore, useDispatch, selectModelsByProvider, selectPricingConfig } from '../store'
-import { DEFAULT_PRICING, type ModelPricing } from '../data/defaultPricing'
+import { useAppStore, useDispatch, selectModelsByProvider, selectPricingConfig, selectDefaultPricingConfig } from '../store'
+import type { ModelPricing } from '../store'
 
 export default function PricingSettings() {
   // Use selectors for better performance
   const modelsByProvider = useAppStore(selectModelsByProvider)
   const pricingConfig = useAppStore(selectPricingConfig)
+  const defaultPricingConfig = useAppStore(selectDefaultPricingConfig)
 
   // Use dispatch for actions
   const dispatch = useDispatch()
@@ -80,6 +81,7 @@ export default function PricingSettings() {
                 provider="openai"
                 models={modelsByProvider.openai || []}
                 pricing={pricingConfig.openai}
+                defaultPricing={defaultPricingConfig.openai}
                 onUpdate={(model, pricing) => dispatch('setPricingForModel', { provider: 'openai', model, pricing })}
               />
             </Accordion.Panel>
@@ -108,11 +110,12 @@ export default function PricingSettings() {
                 provider="anthropic"
                 models={modelsByProvider.anthropic || []}
                 pricing={pricingConfig.anthropic}
+                defaultPricing={defaultPricingConfig.anthropic}
                 onUpdate={(model, pricing) => dispatch('setPricingForModel', { provider: 'anthropic', model, pricing })}
               />
             </Accordion.Panel>
           </Accordion.Item>
-          
+
           {/* Gemini */}
           <Accordion.Item value="gemini">
             <Accordion.Control>
@@ -136,6 +139,7 @@ export default function PricingSettings() {
                 provider="gemini"
                 models={modelsByProvider.gemini || []}
                 pricing={pricingConfig.gemini}
+                defaultPricing={defaultPricingConfig.gemini}
                 onUpdate={(model, pricing) => dispatch('setPricingForModel', { provider: 'gemini', model, pricing })}
               />
             </Accordion.Panel>
@@ -161,15 +165,13 @@ type PricingTableProps = {
   provider: string
   models: Array<{ value: string; label: string }>
   pricing: Record<string, ModelPricing>
+  defaultPricing: Record<string, ModelPricing>
   onUpdate: (model: string, pricing: ModelPricing) => void
 }
 
-function PricingTable({ provider, models, pricing, onUpdate }: PricingTableProps) {
-  // Only show models that have pricing configured in DEFAULT_PRICING
-  const availableModels = models.filter(model => {
-    const defaultPricing = (DEFAULT_PRICING as any)[provider]?.[model.value]
-    return defaultPricing !== undefined
-  })
+function PricingTable({ provider, models, pricing, defaultPricing, onUpdate }: PricingTableProps) {
+  // Show all available models, even if they don't have default pricing
+  const availableModels = models
 
   if (availableModels.length === 0) {
     return (
@@ -208,14 +210,17 @@ function PricingTable({ provider, models, pricing, onUpdate }: PricingTableProps
       <Table.Tbody>
         {availableModels.map((model) => {
           const modelPricing = pricing[model.value] || { inputCostPer1M: 0, outputCostPer1M: 0 }
-          const defaultPricing = (DEFAULT_PRICING as any)[provider]?.[model.value]
-          const isDefault = defaultPricing &&
-            modelPricing.inputCostPer1M === defaultPricing.inputCostPer1M &&
-            modelPricing.outputCostPer1M === defaultPricing.outputCostPer1M &&
-            modelPricing.cachedInputCostPer1M === defaultPricing.cachedInputCostPer1M
+          const modelDefaultPricing = defaultPricing[model.value]
+
+          // A model is at default if it has default pricing and matches it, or if it has no default pricing and is at 0/0
+          const isDefault = modelDefaultPricing
+            ? (modelPricing.inputCostPer1M === modelDefaultPricing.inputCostPer1M &&
+               modelPricing.outputCostPer1M === modelDefaultPricing.outputCostPer1M &&
+               modelPricing.cachedInputCostPer1M === modelDefaultPricing.cachedInputCostPer1M)
+            : (modelPricing.inputCostPer1M === 0 && modelPricing.outputCostPer1M === 0)
 
           // Check if this model supports caching (has cachedInputCostPer1M in defaults)
-          const supportsCaching = defaultPricing?.cachedInputCostPer1M !== undefined
+          const supportsCaching = modelDefaultPricing?.cachedInputCostPer1M !== undefined
 
           return (
             <Table.Tr key={model.value}>

@@ -15,7 +15,7 @@ import { createUseStore, useDispatch as useZubridgeDispatch } from '@zubridge/el
 import type { AppStore } from '../../electron/store'
 
 // Re-export types that are used by components
-export type { ViewType } from '../../electron/store/types'
+export type { ViewType, ModelPricing, PricingConfig } from '../../electron/store/types'
 export type { RateLimitKind } from '../../electron/store/types'
 
 /**
@@ -98,6 +98,7 @@ export const selectApprovedPlan = (state: AppStore) => state.approvedPlan
 export const selectAutoApproveEnabled = (state: AppStore) => state.autoApproveEnabled
 export const selectAutoApproveThreshold = (state: AppStore) => state.autoApproveThreshold
 export const selectPricingConfig = (state: AppStore) => state.pricingConfig
+export const selectDefaultPricingConfig = (state: AppStore) => state.defaultPricingConfig
 
 // LLM Request selectors
 export const selectCurrentRequestId = (state: AppStore) => state.currentRequestId

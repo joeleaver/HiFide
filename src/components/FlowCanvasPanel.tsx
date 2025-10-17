@@ -34,6 +34,7 @@ const NODE_PALETTE: Array<{ kind: string; label: string; icon: string; descripti
   { kind: 'portalOutput', label: 'Portal Out', icon: '📤', description: 'Retrieve data from portal input (reduces edge crossings)' },
   { kind: 'parallelSplit', label: 'Split', icon: '⑂', description: 'Split flow into two parallel branches' },
   { kind: 'parallelJoin', label: 'Merge', icon: '🔗', description: 'Merge multiple inputs into one output' },
+  { kind: 'cache', label: 'Cache', icon: '💾', description: 'Cache data to avoid re-executing expensive operations' },
   { kind: 'redactor', label: 'Redactor', icon: '🧹', description: 'Redact sensitive data' },
   { kind: 'budgetGuard', label: 'Budget Guard', icon: '💰', description: 'Monitor token budget' },
   { kind: 'errorDetection', label: 'Error Detection', icon: '⚠️', description: 'Detect error patterns' },
@@ -301,8 +302,16 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
     const sourceHandle = connection.sourceHandle
     const targetHandle = connection.targetHandle
 
-    // Determine edge color based on handles using centralized logic
-    const color = getConnectionColorFromHandles(sourceHandle || undefined, targetHandle || undefined)
+    // Find source node to determine context type
+    const sourceNode = localNodes.find(n => n.id === connection.source)
+    const sourceNodeKind = (sourceNode as any)?.data?.kind
+
+    // Determine edge color based on handles and source node kind
+    const color = getConnectionColorFromHandles(
+      sourceHandle || undefined,
+      targetHandle || undefined,
+      sourceNodeKind
+    )
 
     const newEdge = {
       id: `${connection.source}-${connection.target}-${sourceHandle || 'data'}-${targetHandle || 'data'}`,
@@ -315,7 +324,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
       markerEnd: { type: 'arrowclosed' as any, color },
     }
     dispatch('feSetEdges', [...edges, newEdge])
-  }, [edges, dispatch])
+  }, [edges, localNodes, dispatch])
 
   // Enhance edges with selection styling and handle-based colors
   const styledEdges = useMemo(() => {
@@ -327,8 +336,12 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
       const sourceHandle = (edge as any).sourceHandle
       const targetHandle = (edge as any).targetHandle
 
-      // Determine edge color based on handles using centralized logic
-      const color = getConnectionColorFromHandles(sourceHandle, targetHandle)
+      // Find source node to determine context type
+      const sourceNode = localNodes.find(n => n.id === (edge as any).source)
+      const sourceNodeKind = (sourceNode as any)?.data?.kind
+
+      // Determine edge color based on handles and source node kind
+      const color = getConnectionColorFromHandles(sourceHandle, targetHandle, sourceNodeKind)
 
       return {
         ...edge,
@@ -343,7 +356,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
         },
       }
     })
-  }, [edges])
+  }, [edges, localNodes])
 
   return (
     <div style={{

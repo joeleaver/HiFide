@@ -19,6 +19,14 @@ const electronStore = new Store({
   // On Linux: ~/.config/hifide/zustand-state.json
 })
 
+// Migration: Remove persisted pricingConfig so it always uses DEFAULT_PRICING
+// This ensures new models are available immediately without app restart
+const storedState = electronStore.get('hifide-store')
+if (storedState && typeof storedState === 'object' && 'pricingConfig' in storedState) {
+  const { pricingConfig, ...rest } = storedState as any
+  electronStore.set('hifide-store', rest)
+}
+
 /**
  * Storage adapter that implements Zustand's StateStorage interface
  * using electron-store as the backend

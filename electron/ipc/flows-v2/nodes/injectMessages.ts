@@ -37,17 +37,33 @@ export const metadata = {
  */
 export const injectMessagesNode: NodeFunction = async (contextIn, _dataIn, inputs, config) => {
   const nodeId = (config as any)?._nodeId || 'inject-messages'
-  
+
   // Get message content (dynamic inputs override static config)
   const userMessage = inputs.userMessage || config.staticUserMessage
   const assistantMessage = inputs.assistantMessage || config.staticAssistantMessage
-  
+
+  // Debug logging
+  console.log('[injectMessages] Inputs:', {
+    userMessage: typeof userMessage === 'string' ? userMessage.substring(0, 50) : userMessage,
+    assistantMessage: typeof assistantMessage === 'string' ? assistantMessage.substring(0, 50) : assistantMessage,
+    hasUserInput: !!inputs.userMessage,
+    hasAssistantInput: !!inputs.assistantMessage,
+    hasStaticUser: !!config.staticUserMessage,
+    hasStaticAssistant: !!config.staticAssistantMessage
+  })
+
   // Validation: both required and non-empty
   if (!userMessage?.trim() || !assistantMessage?.trim()) {
+    const errorMsg = !userMessage?.trim()
+      ? 'User message is required and must be non-empty'
+      : 'Assistant message is required and must be non-empty'
+
+    console.error('[injectMessages] Validation failed:', errorMsg)
+
     return {
       context: contextIn,
       status: 'error',
-      error: 'Both user and assistant messages are required and must be non-empty'
+      error: errorMsg
     }
   }
   

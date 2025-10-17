@@ -18,6 +18,8 @@ export default function SessionPane() {
   // Flow execution state - these DO cause re-renders when they change
   const feStatus = useAppStore((s) => s.feStatus)
   const feStreamingText = useAppStore((s) => s.feStreamingText)
+  const feNodes = useAppStore((s) => s.feNodes)
+  const feNodeExecutionState = useAppStore((s) => s.feNodeExecutionState)
 
   // Use local state for input to avoid lag on every keystroke
   const [localInput, setLocalInput] = useState('')
@@ -59,7 +61,7 @@ export default function SessionPane() {
 
     // Scroll to bottom
     viewport.scrollTop = viewport.scrollHeight
-  }, [sessionItems.length, feStreamingText])
+  }, [sessionItems.length])
 
   const send = async () => {
     const text = localInput.trim()
@@ -236,27 +238,8 @@ export default function SessionPane() {
             })
           })()}
 
-          {/* Streaming response */}
-          {feStreamingText && (
-            <NodeOutputBox nodeLabel="ASSISTANT" nodeKind="llmRequest">
-              <div style={{ position: 'relative' }}>
-                <StreamingMarkdown content={feStreamingText} />
-                {feStatus === 'running' && (
-                  <Badge
-                    variant="light"
-                    color="blue"
-                    size="sm"
-                    style={{ position: 'absolute', bottom: 0, right: 0 }}
-                  >
-                    Streaming
-                  </Badge>
-                )}
-              </div>
-            </NodeOutputBox>
-          )}
-
           {/* Flow status indicator - shows running/waiting/stopped states */}
-          {!feStreamingText && <FlowStatusIndicator status={feStatus} />}
+          <FlowStatusIndicator status={feStatus} />
         </Stack>
       </ScrollArea>
 

@@ -65,6 +65,7 @@ export interface SessionSlice {
   addSessionItem: (item: Omit<SessionItem, 'id' | 'timestamp'>) => void
   updateSessionItem: (params: { id: string; updates: Partial<SessionItem> }) => void
   appendToLastMessage: (content: string) => void  // For streaming chunks
+  appendToLastMessageWithNodeId: (content: string, nodeId: string) => void  // For streaming chunks with nodeId
 
   // Context Management
   updateCurrentContext: (params: {
@@ -217,7 +218,16 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     const state = get()
     const current = state.sessions.find((sess) => sess.id === state.currentId)
 
-    if (!current) return
+    if (!current) {
+      console.warn('[saveCurrentSession] No current session found')
+      return
+    }
+
+    console.log('[saveCurrentSession] Saving session:', {
+      sessionId: current.id,
+      itemCount: current.items.length,
+      immediate,
+    })
 
     // Save to disk using debounced saver
     sessionSaver.save(current, immediate)
@@ -354,6 +364,15 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     const now = Date.now()
     const id = crypto.randomUUID()
 
+    // Debug logging
+    console.log('[addSessionItem] Adding item:', {
+      type: item.type,
+      role: (item as any).role,
+      contentLength: (item as any).content?.length || 0,
+      currentId: get().currentId,
+      sessionCount: get().sessions.length,
+    })
+
     // For messages, automatically populate provider/model from current context
     let fullItem: SessionItem
     if (item.type === 'message') {
@@ -377,7 +396,10 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     }
 
     set((s) => {
-      if (!s.currentId) return {}
+      if (!s.currentId) {
+        console.warn('[addSessionItem] No currentId, skipping')
+        return {}
+      }
 
       const sessions = s.sessions.map((sess) => {
         if (sess.id !== s.currentId) return sess
@@ -400,6 +422,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
         }
       })
 
+      console.log('[addSessionItem] Updated sessions, new item count:', sessions.find(s => s.id === s.currentId)?.items.length)
       return { sessions }
     })
 
@@ -441,6 +464,40 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
         const items = [...sess.items]
         for (let i = items.length - 1; i >= 0; i--) {
           if (items[i].type === 'message') {
+            const msg = items[i] as SessionMessage
+            items[i] = {
+              ...msg,
+              content: msg.content + content,
+            }
+            break
+          }
+        }
+
+        return {
+          ...sess,
+          items,
+          updatedAt: Date.now(),
+        }
+      })
+
+      return { sessions }
+    })
+
+    // Debounced save after append
+    get().saveCurrentSession()
+  },
+
+  appendToLastMessageWithNodeId: (content: string, nodeId: string) => {
+    set((s) => {
+      if (!s.currentId) return {}
+
+      const sessions = s.sessions.map((sess) => {
+        if (sess.id !== s.currentId) return sess
+
+        // Find the last message item with matching nodeId
+        const items = [...sess.items]
+        for (let i = items.length - 1; i >= 0; i--) {
+          if (items[i].type === 'message' && items[i].nodeId === nodeId) {
             const msg = items[i] as SessionMessage
             items[i] = {
               ...msg,

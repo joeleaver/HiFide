@@ -37,6 +37,7 @@ export interface SettingsSlice {
 
   // Pricing State
   pricingConfig: PricingConfig
+  defaultPricingConfig: PricingConfig  // Immutable reference to DEFAULT_PRICING for UI comparison
 
   // Rate Limit State
   rateLimitConfig: RateLimitConfig
@@ -88,6 +89,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
   autoApproveThreshold: 0.8,
 
   pricingConfig: DEFAULT_PRICING,
+  defaultPricingConfig: DEFAULT_PRICING,  // Immutable reference for UI comparison
 
   rateLimitConfig: { enabled: false },
   
