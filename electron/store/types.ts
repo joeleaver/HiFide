@@ -30,10 +30,13 @@ export type Badge = {
   nodeId?: string               // Which flow node created this badge
 
   // Badge-specific data
-  label: string                 // Display text
+  label: string                 // Display text (may include context like filename)
   icon?: string                 // Emoji or icon
   color?: string                // Badge color (mantine color name)
   variant?: 'light' | 'filled'  // Badge style
+
+  // Tool-specific data (for matching when updating status)
+  toolName?: string             // Original tool name (e.g., 'fs_read_file') for tool badges
 
   // Interactive badge data (future)
   interactive?: {
@@ -58,6 +61,7 @@ export type SessionMessage = {
   role: 'user' | 'assistant'
   content: string
   timestamp: number
+  nodeId?: string               // Which node created this message (for grouping with badges)
   nodeLabel?: string            // Display name of the node that generated this
   nodeKind?: string             // Kind of node (for color matching)
 

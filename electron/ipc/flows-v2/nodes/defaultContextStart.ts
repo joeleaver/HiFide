@@ -23,12 +23,34 @@ export const metadata = {
 /**
  * Node implementation
  */
-export const defaultContextStartNode: NodeFunction = async (contextIn, _dataIn, _inputs, _config) => {
+export const defaultContextStartNode: NodeFunction = async (contextIn, _dataIn, _inputs, config) => {
   // This is an entry node that establishes the initial context
-  // System instructions are already set in contextIn during initialization
+  // Read system instructions from node config and set them on the context
+
+  const systemInstructions = (config as any)?.systemInstructions
+
+  console.log('[defaultContextStart] Input context:', {
+    provider: contextIn.provider,
+    model: contextIn.model,
+    systemInstructions: contextIn.systemInstructions?.substring(0, 50),
+    messageHistoryLength: contextIn.messageHistory.length
+  })
+  console.log('[defaultContextStart] Config systemInstructions:', systemInstructions?.substring(0, 50))
+
+  const outputContext = {
+    ...contextIn,
+    systemInstructions: systemInstructions || contextIn.systemInstructions
+  }
+
+  console.log('[defaultContextStart] Output context:', {
+    provider: outputContext.provider,
+    model: outputContext.model,
+    systemInstructions: outputContext.systemInstructions?.substring(0, 50),
+    messageHistoryLength: outputContext.messageHistory.length
+  })
 
   return {
-    context: contextIn, // Pass through the initialized context
+    context: outputContext,
     status: 'success'
   }
 }

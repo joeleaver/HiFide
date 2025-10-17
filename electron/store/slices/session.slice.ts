@@ -32,10 +32,6 @@ export interface SessionSlice {
   currentId: string | null
   sessionsLoaded: boolean
 
-  // Session Input State
-  sessionInput: string
-  setSessionInput: (input: string) => void
-
   // LLM Request State
   currentRequestId: string | null
   streamingText: string
@@ -117,9 +113,6 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
   sessions: [],
   currentId: null,
   sessionsLoaded: false,
-
-  sessionInput: '',
-  setSessionInput: (input: string) => set({ sessionInput: input }),
 
   currentRequestId: null,
   streamingText: '',
@@ -505,7 +498,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
   },
 
   // Badge Helper Actions
-  addBadge: ({ badge, nodeId, nodeLabel, nodeKind, provider, model, cost }: {
+  addBadge: ({ badge, nodeId, nodeLabel, nodeKind, provider, model, cost, badgeId }: {
     badge: Omit<Badge, 'id' | 'timestamp'>
     nodeId?: string
     nodeLabel?: string
@@ -513,13 +506,14 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     provider?: string
     model?: string
     cost?: TokenCost
+    badgeId?: string  // Optional: use specific ID (e.g., tool callId) instead of generating UUID
   }) => {
     const now = Date.now()
-    const badgeId = crypto.randomUUID()
+    const finalBadgeId = badgeId || crypto.randomUUID()
 
     const fullBadge: Badge = {
       ...badge,
-      id: badgeId,
+      id: finalBadgeId,
       timestamp: now,
       nodeId,
     }

@@ -116,12 +116,10 @@ describe('LLM Request Node', () => {
 
   describe('Multi-turn Conversation', () => {
     it('should maintain conversation history', async () => {
-      // Use a fixed sessionId so the provider can maintain state across turns
-      const sessionId = 'test-multiturn-session'
+      // Conversation history is maintained in MainFlowContext.messageHistory
       const context = createTestContext({
         provider: 'openai',
-        model: 'gpt-4o-mini',
-        sessionId
+        model: 'gpt-4o-mini'
       })
       const config = createTestConfig()
 
@@ -136,7 +134,7 @@ describe('LLM Request Node', () => {
       expect(result1.status).toBe('success')
       expect(result1.context.messageHistory).toHaveLength(2)
 
-      // Second turn - use updated context with SAME sessionId
+      // Second turn - use updated context with conversation history
       const result2 = await withFixture(
         'llmRequest-openai-multiturn-2',
         async () => {
@@ -149,7 +147,7 @@ describe('LLM Request Node', () => {
       expect(result2.data).toBeDefined()
       expect(typeof result2.data).toBe('string')
 
-      // The response should mention "Alice" because the provider maintains session state
+      // The response should mention "Alice" because the full conversation history is sent
       if (testMode !== 'replay') {
         expect(result2.data.toLowerCase()).toContain('alice')
       }

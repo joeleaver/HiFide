@@ -16,7 +16,6 @@
  */
 
 import type { NodeFunction, NodeExecutionPolicy } from '../types'
-import { useMainStore } from '../../../store/index.js'
 
 /**
  * Node metadata
@@ -41,6 +40,7 @@ export const portalOutputNode: NodeFunction = async (contextIn, _dataIn, _inputs
   }
 
   // Retrieve data from portal registry (via store action)
+  const { useMainStore } = await import('../../../store/index.js')
   const portalData = useMainStore.getState().feGetPortalData(portalId)
 
   if (!portalData) {

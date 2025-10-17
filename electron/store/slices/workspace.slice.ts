@@ -103,32 +103,35 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
   
   hasUnsavedChanges: () => {
     const state = get() as any
-    
-    // Check if current session has unsaved messages
+
+    // Check if current session has unsaved items
     const current = state.sessions?.find((sess: any) => sess.id === state.currentId)
-    if (current && current.messages.length > 0) {
-      // Consider it "unsaved" if there are messages (user might want to keep them)
+    if (current && current.items && current.items.length > 0) {
+      // Consider it "unsaved" if there are items (user might want to keep them)
       return true
     }
-    
+
     return false
   },
   
   openFolder: async (folderPath: string) => {
+    // Store the old workspace root in case we need to restore it on error
+    const oldWorkspaceRoot = get().workspaceRoot
+
     try {
       const state = get() as any
-      
+
       // Don't allow opening folder while app is still initializing
       if (state.appBootstrapping) {
         return { ok: false, error: 'App is still initializing' }
       }
-      
+
       // Show loading screen
       if (state.setStartupMessage) {
         state.setStartupMessage('Opening workspace...')
       }
       set({ appBootstrapping: true } as any)
-      
+
       // 1. Check for unsaved changes
       if (state.hasUnsavedChanges?.()) {
       }
@@ -153,21 +156,19 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
         console.error('[workspace] Failed to clear explorer terminals:', e)
       }
 
-      // 4. Update workspace root (APP_ROOT and indexer)
+      // 4. Verify folder exists and reinitialize indexer
       if (state.setStartupMessage) state.setStartupMessage('Switching workspace...')
       try {
         const resolved = path.resolve(folderPath)
         // Verify the directory exists
         await fs.access(resolved)
 
-        // Update APP_ROOT
-        process.env.APP_ROOT = resolved
-
         // Reinitialize indexer with new root
         resetIndexer()
         getIndexer()
       } catch (error) {
-        set({ appBootstrapping: false } as any)
+        // Restore old workspace root on error
+        set({ appBootstrapping: false, workspaceRoot: oldWorkspaceRoot } as any)
         if (state.setStartupMessage) state.setStartupMessage(null)
         return { ok: false, error: String(error) }
       }
@@ -287,7 +288,8 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
       return { ok: true }
     } catch (error) {
       console.error('[workspace] Failed to open folder:', error)
-      set({ appBootstrapping: false } as any)
+      // Restore old workspace root on error
+      set({ appBootstrapping: false, workspaceRoot: oldWorkspaceRoot } as any)
       const state = get() as any
       if (state.setStartupMessage) state.setStartupMessage(null)
       return { ok: false, error: String(error) }

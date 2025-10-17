@@ -140,7 +140,8 @@ let indexer: Indexer | null = null
  */
 export function getIndexer(): Indexer {
   if (!indexer) {
-    indexer = new Indexer(process.env.APP_ROOT || process.cwd())
+    const { useMainStore } = require('../store/index.js')
+    indexer = new Indexer(useMainStore.getState().workspaceRoot || process.cwd())
   }
   return indexer
 }

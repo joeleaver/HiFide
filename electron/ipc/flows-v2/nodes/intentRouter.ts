@@ -22,7 +22,6 @@
 
 import type { NodeFunction, NodeExecutionPolicy } from '../types'
 import { llmService } from '../llm-service'
-import { useMainStore } from '../../../store'
 
 /**
  * Node metadata
@@ -119,6 +118,7 @@ Choose the intent that best matches the user's message.`
   }
 
   // Send intent detection event with provider/model info
+  const { useMainStore } = await import('../../../store/index.js')
   useMainStore.getState().feHandleIntentDetected(nodeId, matchedIntent, provider, model)
 
   // Return outputs only for the matched intent

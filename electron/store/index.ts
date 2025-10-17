@@ -159,7 +159,11 @@ export const useMainStore = create<AppStore>()(
         // - providerValid, modelsByProvider (these are loaded at runtime)
         // - indexing state, explorer state, planning state
       }),
-      onRehydrateStorage: () => () => {
+      onRehydrateStorage: () => (state) => {
+        // workspaceRoot is now the single source of truth - no need to sync to APP_ROOT
+        if (state?.workspaceRoot) {
+          console.log('[store] Restored workspaceRoot from persistence:', state.workspaceRoot)
+        }
       },
     }
   )

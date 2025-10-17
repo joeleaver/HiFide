@@ -4,34 +4,31 @@ import { validateJson } from './jsonschema'
 import { withRetries } from './retry'
 import { formatSummary } from '../agent/types'
 
-// Tiny non-crypto hash for preamble/tool schemas
-function hashStr(s: string): string {
-  let h = 2166136261 >>> 0
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0 }
-  return h.toString(16)
-}
-
+// Note: Anthropic has always been stateless - it requires full message history every time.
+// This is now consistent with our architecture where the scheduler manages all conversation state.
 
 export const AnthropicProvider: ProviderAdapter = {
   id: 'anthropic',
 
-  async chatStream({ apiKey, model, messages, onChunk, onDone, onError, onTokenUsage, onConversationMeta, sessionId }): Promise<StreamHandle> {
+  async chatStream({ apiKey, model, system, messages, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
     const client = new Anthropic({ apiKey, defaultHeaders: { 'anthropic-beta': 'prompt-caching-2024-07-31' } as any })
 
-    const systemText = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
-    // Use prompt caching for system prompt when available
-    const system: any = systemText ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }] : undefined
-    const conv = messages.filter(m => m.role !== 'system').map((m: ChatMessage) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+    // Messages are already formatted by llm-service
+    // system: array of content blocks with cache_control
+    // messages: array of {role: 'user'|'assistant', content: string}
 
     const holder: { abort?: () => void } = {}
 
     ;(async () => {
       try {
-        const stream: any = await withRetries(() => client.messages.create({ model, system: (system as any) || undefined, messages: conv as any, stream: true, max_tokens: 2048 }) as any)
+        const stream: any = await withRetries(() => client.messages.create({
+          model,
+          system: system || undefined,
+          messages: messages as any,
+          stream: true,
+          max_tokens: 2048
+        }) as any)
         holder.abort = () => { try { stream?.controller?.abort?.() } catch {} }
-
-        // Emit preamble hash (system only here) so UI can persist
-        try { onConversationMeta?.({ provider: 'anthropic', sessionId, preambleHash: hashStr(systemText) }) } catch {}
 
         let usage: any = null
 
@@ -83,7 +80,7 @@ export const AnthropicProvider: ProviderAdapter = {
   },
 
   // Agent streaming with tool-calling using Anthropic Messages API
-  async agentStream({ apiKey, model, messages, tools, responseSchema: _responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError, onConversationMeta, sessionId }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, system, messages, tools, responseSchema: _responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const client = new Anthropic({ apiKey, defaultHeaders: { 'anthropic-beta': 'prompt-caching-2024-07-31' } as any })
 
     // Map tools to Anthropic format
@@ -99,11 +96,11 @@ export const AnthropicProvider: ProviderAdapter = {
       : ''
     const toolBlocks: any = toolsDesc ? [{ type: 'text', text: toolsDesc, cache_control: { type: 'ephemeral' } }] : undefined
 
-    const systemText = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
-    const systemBlocks: any = systemText ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }] : undefined
-    const systemAllBlocks: any[] = [ ...(systemBlocks || []), ...((toolBlocks as any) || []) ]
+    // Combine system blocks (already formatted by llm-service) with tool blocks
+    const systemAllBlocks: any[] = [ ...(system || []), ...((toolBlocks as any) || []) ]
 
-    let conv: any[] = messages.filter(m => m.role !== 'system').map((m: any) => ({ role: m.role, content: m.content }))
+    // Messages are already formatted by llm-service as {role: 'user'|'assistant', content: string}[]
+    let conv: any[] = messages as any[]
     let cancelled = false
     let iteration = 0
 

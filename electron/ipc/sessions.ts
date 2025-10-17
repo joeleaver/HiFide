@@ -12,7 +12,8 @@ import fs from 'node:fs/promises'
  * Get the sessions directory path (workspace-relative)
  */
 async function getSessionsDir(): Promise<string> {
-  const baseDir = path.resolve(process.env.APP_ROOT || process.cwd())
+  const { useMainStore } = await import('../store/index.js')
+  const baseDir = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
   const privateDir = path.join(baseDir, '.hifide-private')
   const sessionsDir = path.join(privateDir, 'sessions')
 

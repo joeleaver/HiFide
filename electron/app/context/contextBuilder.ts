@@ -4,7 +4,8 @@ import { Indexer } from '../../indexing/indexer'
 
 let indexer: Indexer | null = null
 function getIndexer(): Indexer {
-  if (!indexer) indexer = new Indexer(process.env.APP_ROOT || process.cwd())
+  const { useMainStore } = require('../../store/index.js')
+  if (!indexer) indexer = new Indexer(useMainStore.getState().workspaceRoot || process.cwd())
   return indexer
 }
 
@@ -15,7 +16,8 @@ async function pathExists(p: string) {
 export async function buildContextMessages(query: string, k: number = 6): Promise<Array<{ role: 'user'; content: string }>> {
   const out: Array<{ role: 'user'; content: string }> = []
   try {
-    const baseDir = path.resolve(process.env.APP_ROOT || process.cwd())
+    const { useMainStore } = require('../../store/index.js')
+    const baseDir = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
     const contextMd = path.join(baseDir, '.hifide-public', 'context.md')
     if (await pathExists(contextMd)) {
       const projectContext = await fs.readFile(contextMd, 'utf-8')

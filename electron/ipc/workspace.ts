@@ -213,7 +213,8 @@ Be concise and specific to this repository.`
  * Get workspace settings file path
  */
 function getSettingsPath(): string {
-  const baseDir = path.resolve(process.env.APP_ROOT || process.cwd())
+  const { useMainStore } = require('../store/index.js')
+  const baseDir = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
   const privateDir = path.join(baseDir, '.hifide-private')
   return path.join(privateDir, 'settings.json')
 }
@@ -249,11 +250,13 @@ export function registerWorkspaceHandlers(ipcMain: IpcMain): void {
    * Get workspace root
    */
   ipcMain.handle('workspace:get-root', async () => {
-    return process.env.APP_ROOT || process.cwd()
+    const { useMainStore } = require('../store/index.js')
+    return useMainStore.getState().workspaceRoot || process.cwd()
   })
 
   /**
    * Set workspace root
+   * NOTE: This is deprecated - use the store's setWorkspaceRoot action instead
    */
   ipcMain.handle('workspace:set-root', async (_e, newRoot: string) => {
     try {
@@ -261,8 +264,9 @@ export function registerWorkspaceHandlers(ipcMain: IpcMain): void {
       // Verify the directory exists
       await fs.access(resolved)
 
-      // Update APP_ROOT
-      process.env.APP_ROOT = resolved
+      // Update store (single source of truth)
+      const { useMainStore } = require('../store/index.js')
+      useMainStore.getState().setWorkspaceRoot(resolved)
 
       // Reinitialize indexer with new root
       resetIndexer()
@@ -313,7 +317,8 @@ export function registerWorkspaceHandlers(ipcMain: IpcMain): void {
    */
   ipcMain.handle('workspace:bootstrap', async (_e, args: { baseDir?: string; preferAgent?: boolean; overwrite?: boolean }) => {
     try {
-      const baseDir = path.resolve(String(args?.baseDir || process.env.APP_ROOT || process.cwd()))
+      const { useMainStore } = require('../store/index.js')
+      const baseDir = path.resolve(String(args?.baseDir || useMainStore.getState().workspaceRoot || process.cwd()))
       const publicDir = path.join(baseDir, '.hifide-public')
       const privateDir = path.join(baseDir, '.hifide-private')
       let createdPublic = false

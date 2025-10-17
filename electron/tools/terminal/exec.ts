@@ -1,6 +1,7 @@
 import type { AgentTool } from '../../providers/provider'
 import { getWebContents } from '../../core/state'
 import { logEvent, isRiskyCommand } from '../utils'
+import { useMainStore } from '../../store/index'
 import path from 'node:path'
 
 export const terminalExecTool: AgentTool = {
@@ -25,7 +26,7 @@ export const terminalExecTool: AgentTool = {
     const req = meta?.requestId || 'terminal'
 
     // Get or create session with optional cwd
-    const root = path.resolve(process.env.APP_ROOT || process.cwd())
+    const root = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
     const desiredCwd = args.cwd ? (path.isAbsolute(args.cwd) ? args.cwd : path.join(root, args.cwd)) : undefined
     const sid = await (globalThis as any).__getOrCreateAgentPtyFor(req, desiredCwd ? { cwd: desiredCwd } : undefined)
     const rec = (globalThis as any).__agentPtySessions.get(sid)

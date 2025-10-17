@@ -17,7 +17,6 @@
  */
 
 import type { NodeFunction, NodeExecutionPolicy } from '../types'
-import { useMainStore } from '../../../store/index.js'
 
 /**
  * Node metadata
@@ -56,6 +55,7 @@ export const portalInputNode: NodeFunction = async (contextIn, dataIn, _inputs, 
     }
   }
 
+  const { useMainStore } = await import('../../../store/index.js')
   useMainStore.getState().feSetPortalData(
     portalId,
     hasContext ? contextIn : undefined,

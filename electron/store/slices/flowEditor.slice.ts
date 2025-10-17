@@ -152,9 +152,9 @@ export interface FlowEditorSlice {
   feUpdateMainFlowContext: (context: MainFlowContext) => void
   feHandleIO: (nodeId: string, data: string) => void
   feHandleChunk: (text: string) => void
-  feHandleToolStart: (toolName: string) => void
-  feHandleToolEnd: (toolName: string) => void
-  feHandleToolError: (toolName: string, error: string) => void
+  feHandleToolStart: (toolName: string, nodeId?: string, toolArgs?: any, callId?: string) => void
+  feHandleToolEnd: (toolName: string, callId?: string) => void
+  feHandleToolError: (toolName: string, error: string, callId?: string) => void
   feHandleIntentDetected: (nodeId: string, intent: string, provider?: string, model?: string) => void
   feHandleTokenUsage: (provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }) => void
   feHandleWaitingForInput: (nodeId: string, requestId: string) => void
@@ -1256,6 +1256,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             type: 'message',
             role: 'assistant',
             content: streamingText,
+            nodeId,  // Include nodeId so message can be grouped with badges
             nodeLabel: node?.data?.label || 'LLM Request',
             nodeKind: node?.data?.kind || 'llmRequest',
             cost: tokenCost || undefined,
@@ -1339,7 +1340,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feHandleToolStart: (toolName: string) => {
+  feHandleToolStart: (toolName: string, nodeId?: string, toolArgs?: any, callId?: string) => {
     const activeTools = new Set(get().feActiveTools)
     activeTools.add(toolName)
     set({ feActiveTools: activeTools })
@@ -1354,23 +1355,81 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       })
     }
 
+    // IMPORTANT: Flush any accumulated streaming text to a message BEFORE adding the tool badge
+    // This ensures proper intermixing: chat → tool → chat → tool (not all tools grouped together)
+    const streamingText = get().feStreamingText
+    if (streamingText && nodeId) {
+      const flowDef = get().feFlowDef
+      const node = flowDef?.nodes.find(n => n.id === nodeId)
+
+      if (state.addSessionItem) {
+        state.addSessionItem({
+          type: 'message',
+          role: 'assistant',
+          content: streamingText,
+          nodeId,
+          nodeLabel: node?.data?.label || 'LLM Request',
+          nodeKind: node?.data?.kind || 'llmRequest',
+        })
+        set({ feStreamingText: '' })
+      }
+    }
+
+    // Get node label from flow definition if nodeId is provided
+    let nodeLabel = 'Tools'
+    let nodeKind = 'llmRequest'
+    if (nodeId) {
+      const flowDef = get().feFlowDef
+      const node = flowDef?.nodes.find(n => n.id === nodeId)
+      if (node) {
+        nodeLabel = node.data?.label || 'LLM Request'
+        nodeKind = node.data?.kind || 'llmRequest'
+      }
+    }
+
+    // Format badge label with contextual information
+    // Tool name in uppercase, file/folder name in original case
+    let badgeLabel = toolName.toUpperCase()
+    if (toolArgs) {
+      // Extract file/folder name for fs tools
+      if (toolName === 'fs_read_file' || toolName === 'fs_write_file') {
+        const path = toolArgs.path || toolArgs.file_path
+        if (path) {
+          // Get just the filename from the path
+          const filename = path.split(/[/\\]/).pop()
+          badgeLabel = `${toolName.toUpperCase()}: ${filename}`
+        }
+      } else if (toolName === 'fs_read_dir' || toolName === 'fs_create_dir') {
+        const path = toolArgs.path || toolArgs.dir_path
+        if (path) {
+          // Get just the folder name from the path
+          const foldername = path.split(/[/\\]/).pop() || path
+          badgeLabel = `${toolName.toUpperCase()}: ${foldername}`
+        }
+      }
+    }
+
     // Add tool badge to session
+    // Use callId as badge ID so we can find and update it when tool completes
     if (state.addBadge) {
       state.addBadge({
         badge: {
           type: 'tool' as const,
-          label: toolName,
+          label: badgeLabel,
           icon: '🔧',
           color: 'orange',
           variant: 'filled' as const,
           status: 'running' as const,
         },
-        nodeLabel: 'Tools',
+        badgeId: callId,  // Use provider's callId as badge ID for tracking
+        nodeId,
+        nodeLabel,
+        nodeKind,
       })
     }
   },
 
-  feHandleToolEnd: (toolName: string) => {
+  feHandleToolEnd: (toolName: string, callId?: string) => {
     const activeTools = new Set(get().feActiveTools)
     activeTools.delete(toolName)
     set({ feActiveTools: activeTools })
@@ -1385,34 +1444,20 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       })
     }
 
-    // Update tool badge in session
-    if (state.updateBadge) {
-      // Find the most recent running tool badge with this name
-      const currentSession = state.sessions?.find((s: any) => s.id === state.currentId)
-      if (currentSession) {
-        for (let i = currentSession.items.length - 1; i >= 0; i--) {
-          const item = currentSession.items[i]
-          if (item.type === 'badge-group') {
-            for (const badge of item.badges) {
-              if (badge.type === 'tool' && badge.label === toolName && badge.status === 'running') {
-                state.updateBadge({
-                  badgeId: badge.id,
-                  updates: {
-                    status: 'success' as const,
-                    color: 'green',
-                    variant: 'light' as const,
-                  },
-                })
-                break
-              }
-            }
-          }
-        }
-      }
+    // Update tool badge in session using callId
+    if (state.updateBadge && callId) {
+      state.updateBadge({
+        badgeId: callId,
+        updates: {
+          status: 'success' as const,
+          color: 'green',
+          variant: 'light' as const,
+        },
+      })
     }
   },
 
-  feHandleToolError: (toolName: string, error: string) => {
+  feHandleToolError: (toolName: string, error: string, callId?: string) => {
     const activeTools = new Set(get().feActiveTools)
     activeTools.delete(toolName)
     set({ feActiveTools: activeTools })
@@ -1428,31 +1473,17 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       })
     }
 
-    // Update tool badge in session with error
-    if (state.updateBadge) {
-      // Find the most recent running tool badge with this name
-      const currentSession = state.sessions?.find((s: any) => s.id === state.currentId)
-      if (currentSession) {
-        for (let i = currentSession.items.length - 1; i >= 0; i--) {
-          const item = currentSession.items[i]
-          if (item.type === 'badge-group') {
-            for (const badge of item.badges) {
-              if (badge.type === 'tool' && badge.label === toolName && badge.status === 'running') {
-                state.updateBadge({
-                  badgeId: badge.id,
-                  updates: {
-                    status: 'error' as const,
-                    color: 'red',
-                    variant: 'light' as const,
-                    error,
-                  },
-                })
-                break
-              }
-            }
-          }
-        }
-      }
+    // Update tool badge in session with error using callId
+    if (state.updateBadge && callId) {
+      state.updateBadge({
+        badgeId: callId,
+        updates: {
+          status: 'error' as const,
+          color: 'red',
+          variant: 'light' as const,
+          error,
+        },
+      })
     }
   },
 
@@ -1583,6 +1614,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           type: 'message',
           role: 'assistant',
           content: streamingText,
+          nodeId,  // Include nodeId so message can be grouped with badges
           nodeLabel: node?.data?.label || 'LLM Request',
           nodeKind: node?.data?.kind || 'llmRequest',
         })
@@ -1694,6 +1726,13 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     let syncTimeout: NodeJS.Timeout | null = null
 
     return (context: MainFlowContext) => {
+      console.log('[feUpdateMainFlowContext] Updating context:', {
+        provider: context.provider,
+        model: context.model,
+        systemInstructions: context.systemInstructions?.substring(0, 50) + '...',
+        messageHistoryLength: context.messageHistory.length
+      })
+
       // Update the live main flow context immediately
       set({ feMainFlowContext: context })
 
@@ -1702,6 +1741,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       syncTimeout = setTimeout(() => {
         const state = store.getState() as any
         if (state.updateCurrentContext) {
+          console.log('[feUpdateMainFlowContext] Syncing to session.currentContext')
           // Sync shallow copy to session (only fields that exist in both)
           state.updateCurrentContext({
             provider: context.provider,

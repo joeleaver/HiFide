@@ -17,13 +17,24 @@ import type {
   FlowExecutionArgs,
 } from './types'
 import { getNodeFunction } from './nodes'
-import { useMainStore } from '../../store'
 
 export class FlowScheduler {
   // Graph structure
   private flowDef: FlowDefinition
   private incomingEdges = new Map<string, Edge[]>()
   private outgoingEdges = new Map<string, Edge[]>()
+
+  // Cached store reference (lazy-loaded to avoid circular dependency)
+  private storeCache: any = null
+
+  // Helper to get store (avoids circular dependency)
+  private async getStore() {
+    if (!this.storeCache) {
+      const mod = await import('../../store')
+      this.storeCache = mod.useMainStore.getState
+    }
+    return this.storeCache()
+  }
 
   // Execution context
   private requestId: string
@@ -122,7 +133,8 @@ export class FlowScheduler {
     } catch (e: any) {
       const error = e?.message || String(e)
       console.error('[FlowScheduler] Error:', error)
-      useMainStore.getState().feHandleError(error)
+      const store = await this.getStore()
+      store.feHandleError(error)
       return { ok: false, error }
     }
   }
@@ -182,7 +194,8 @@ export class FlowScheduler {
   ): Promise<NodeOutput> {
     const startTime = Date.now()
 
-    useMainStore.getState().feHandleNodeStart(nodeId)
+    const store = await this.getStore()
+    store.feHandleNodeStart(nodeId)
 
     try {
       // Refresh provider/model from Zustand before executing
@@ -247,7 +260,7 @@ export class FlowScheduler {
 
       // Update main flow context in store if context was modified
       if (result.context) {
-        useMainStore.getState().feUpdateMainFlowContext(result.context)
+        store.feUpdateMainFlowContext(result.context)
       }
 
       // Cache result if this was a pull
@@ -256,7 +269,7 @@ export class FlowScheduler {
       }
 
       const durationMs = Date.now() - startTime
-      useMainStore.getState().feHandleNodeEnd(nodeId, durationMs)
+      store.feHandleNodeEnd(nodeId, durationMs)
 
       // PUSH PHASE: Call successors with our outputs
       // Note: Some nodes (like tools) are pull-only and don't push to successors
@@ -300,7 +313,8 @@ export class FlowScheduler {
     } catch (e: any) {
       const error = e?.message || String(e)
       console.error(`[FlowScheduler] Error in ${nodeId}:`, error)
-      useMainStore.getState().feHandleError(error)
+      const store = await this.getStore()
+      store.feHandleError(error)
       throw e
     }
   }
@@ -340,8 +354,8 @@ export class FlowScheduler {
   private async getNodeConfig(nodeId: string): Promise<Record<string, any>> {
     try {
       // Read directly from main store (no IPC needed!)
-      const store = useMainStore.getState()
-      const node = store.feNodes.find(n => n.id === nodeId)
+      const store = await this.getStore()
+      const node = store.feNodes.find((n: any) => n.id === nodeId)
       const config = (node?.data as any)?.config || {}
 
       // Return a copy to prevent mutations
@@ -359,7 +373,7 @@ export class FlowScheduler {
   private async refreshProviderModel(): Promise<void> {
     try {
       // Read directly from main store (no IPC needed!)
-      const store = useMainStore.getState()
+      const store = await this.getStore()
       const provider = store.selectedProvider
       const model = store.selectedModel
 
@@ -376,7 +390,8 @@ export class FlowScheduler {
    * Wait for user input (called by userInput node)
    */
   async waitForUserInput(nodeId: string): Promise<string> {
-    useMainStore.getState().feHandleWaitingForInput(nodeId, this.requestId)
+    const store = await this.getStore()
+    store.feHandleWaitingForInput(nodeId, this.requestId)
 
     // Create a promise that will be resolved when resumeWithInput is called
     const userInput = await new Promise<string>((resolve) => {

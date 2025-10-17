@@ -9,45 +9,26 @@ function toResponsesInput(messages: ChatMessage[]) {
   return messages.map((m) => ({ role: m.role as any, content: m.content }))
 }
 
-// Tiny non-crypto hash for preamble/tool schemas
-function hashStr(s: string): string {
-  let h = 2166136261 >>> 0
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0 }
-  return h.toString(16)
-}
-
-// In-memory conversation state keyed by sessionId for Responses API chaining and invalidation
-const openAIConversations = new Map<string, { lastResponseId?: string; systemHash?: string; toolsHash?: string }>()
+// Note: We no longer maintain session state for conversation chaining.
+// The scheduler manages all conversation history and passes full message arrays.
+// This makes providers stateless and simplifies context management.
 
 
 export const OpenAIProvider: ProviderAdapter = {
   id: 'openai',
 
   // Plain chat (Responses API). We use non-stream + chunked emit for reliability; can be upgraded to true streaming.
-  async chatStream({ apiKey, model, messages, onChunk, onDone, onError, onTokenUsage, onConversationMeta, sessionId }): Promise<StreamHandle> {
+  async chatStream({ apiKey, model, messages, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey })
 
     const holder: { stream?: any; cancelled?: boolean } = {}
 
-      // Invalidate previous_response_id when preamble (system) changes
-      try {
-        const stateKey = sessionId || 'global'
-        const systemText = (messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')) || ''
-        const sysHash = hashStr(systemText)
-        const st = openAIConversations.get(stateKey)
-        if (!st || st.systemHash !== sysHash) {
-          openAIConversations.set(stateKey, { lastResponseId: undefined, systemHash: sysHash, toolsHash: st?.toolsHash })
-        }
-      } catch {}
-
     ;(async () => {
       try {
-        const stateKey = sessionId || 'global'
-        const prev = openAIConversations.get(stateKey)?.lastResponseId
+        // Stateless: just send the messages, no session chaining
         const stream: any = await withRetries(() => Promise.resolve(client.responses.stream({
           model,
           input: toResponsesInput(messages),
-          ...(prev ? { previous_response_id: prev } : {}),
         })))
         holder.stream = stream
         try {
@@ -68,19 +49,6 @@ export const OpenAIProvider: ProviderAdapter = {
           // Extract token usage from final response
           try {
             const finalResponse = await stream.finalResponse()
-            // Persist response id for session chaining
-            try {
-              const stateKey = sessionId || 'global'
-              if (finalResponse?.id) {
-                const prevState = openAIConversations.get(stateKey) || {}
-                openAIConversations.set(stateKey, { ...prevState, lastResponseId: String(finalResponse.id) })
-              }
-            } catch {}
-            // Emit conversation meta so renderer can persist
-            try {
-              const sysText = (messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')) || ''
-              onConversationMeta?.({ provider: 'openai', sessionId, lastResponseId: String(finalResponse?.id || ''), preambleHash: hashStr(sysText) })
-            } catch {}
             if (finalResponse?.usage && onTokenUsage) {
               const usage = {
                 inputTokens: finalResponse.usage.input_tokens || 0,
@@ -88,7 +56,6 @@ export const OpenAIProvider: ProviderAdapter = {
                 totalTokens: finalResponse.usage.total_tokens || 0,
               }
               onTokenUsage(usage)
-            } else {
             }
           } catch (e) {
             // Token usage extraction failed, continue anyway
@@ -122,7 +89,7 @@ export const OpenAIProvider: ProviderAdapter = {
   },
 
   // Agent loop with tool-calling via Responses API
-  async agentStream({ apiKey, model, messages, tools, responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError, onConversationMeta, sessionId }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, messages, tools, responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey })
 
     // Validate tools array
@@ -214,27 +181,10 @@ export const OpenAIProvider: ProviderAdapter = {
             return opts
           }
 
-          // Invalidate previous_response_id when system/tools change (agent mode)
-          try {
-            const stateKey = sessionId || 'global'
-            const systemText = (messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')) || ''
-            const sysHash = hashStr(systemText)
-            const toolsHash = hashStr(JSON.stringify(oaTools))
-            const st = openAIConversations.get(stateKey)
-            if (!st || st.systemHash !== sysHash || st.toolsHash !== toolsHash) {
-              openAIConversations.set(stateKey, { lastResponseId: undefined, systemHash: sysHash, toolsHash })
-            }
-          } catch {}
-
           let stream: any
           try {
             const opts = mkOpts(useResponseFormat)
-            // Chain with previous response when available for this session
-            try {
-              const stateKey = sessionId || 'global'
-              const prev = openAIConversations.get(stateKey)?.lastResponseId
-              if (prev) (opts as any).previous_response_id = prev
-            } catch {}
+            // Stateless: no session chaining
             stream = await withRetries(() => Promise.resolve(client.responses.stream(opts)))
           } catch (err: any) {
             const msg = err?.message || ''
@@ -282,19 +232,6 @@ export const OpenAIProvider: ProviderAdapter = {
 
           // After stream completes, get the final response with complete output array
           const finalResponse = await stream.finalResponse()
-          // Persist response id for session chaining
-          try {
-            const stateKey = sessionId || 'global'
-            if (finalResponse?.id) {
-              const prevState = openAIConversations.get(stateKey) || {}
-              openAIConversations.set(stateKey, { ...prevState, lastResponseId: String(finalResponse.id) })
-            }
-          } catch {}
-          // Emit conversation meta so renderer can persist
-          try {
-            const sysText = (messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')) || ''
-            onConversationMeta?.({ provider: 'openai', sessionId, lastResponseId: String(finalResponse?.id || ''), preambleHash: hashStr(sysText) })
-          } catch {}
 
           // Extract function calls from the output array and add them to conversation
           const toolCalls: Array<{ id: string; name: string; arguments: any }> = []

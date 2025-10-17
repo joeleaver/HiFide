@@ -25,28 +25,37 @@ export interface AgentTool {
 
 export interface ProviderAdapter {
   id: string
+
   // Basic chat streaming (no tool-calling)
+  // Providers are stateless and accept messages in their native format
+  // llm-service is responsible for formatting MainFlowContext into provider-specific format
   chatStream(opts: {
     apiKey: string
     model: string
-    messages: ChatMessage[]
+    // Provider-specific message format (formatted by llm-service):
+    // - OpenAI: ChatMessage[]
+    // - Anthropic: { system: any, messages: Array<{role: 'user'|'assistant', content: string}> }
+    // - Gemini: { systemInstruction: string, contents: Array<{role: string, parts: Array<{text: string}>}> }
+    messages?: ChatMessage[]  // For OpenAI
+    system?: any  // For Anthropic
+    contents?: any[]  // For Gemini
+    systemInstruction?: string  // For Gemini
     onChunk: (text: string) => void
     onDone: () => void
     onError: (error: string) => void
     onTokenUsage?: (usage: TokenUsage) => void
-    // Provider can emit conversation metadata (e.g., lastResponseId, preamble hashes)
-    onConversationMeta?: (meta: { provider: string; sessionId?: string; lastResponseId?: string; preambleHash?: string; lastToolsHash?: string }) => void
-    // Optional session identifier to enable provider-native conversation state
-    sessionId?: string
-    // Optional signal from caller to reset native conversation state for this session
-    resetConversation?: boolean
   }): Promise<StreamHandle>
 
   // Optional provider-native agent streaming with tool-calling and optional structured outputs
+  // Providers are stateless and accept messages in their native format
   agentStream?: (opts: {
     apiKey: string
     model: string
-    messages: ChatMessage[]
+    // Provider-specific message format (formatted by llm-service):
+    messages?: ChatMessage[]  // For OpenAI
+    system?: any  // For Anthropic
+    contents?: any[]  // For Gemini
+    systemInstruction?: string  // For Gemini
     tools: AgentTool[]
     // Optional JSON Schema to enforce structured outputs (e.g., edits schema)
     responseSchema?: any
@@ -60,11 +69,5 @@ export interface ProviderAdapter {
     onToolError?: (ev: { callId?: string; name: string; error: string }) => void
     // Optional metadata passed to tools (e.g., requestId for session tracking)
     toolMeta?: { requestId?: string; [key: string]: any }
-    // Provider can emit conversation metadata (e.g., lastResponseId, preamble hashes)
-    onConversationMeta?: (meta: { provider: string; sessionId?: string; lastResponseId?: string; preambleHash?: string; lastToolsHash?: string }) => void
-    // Optional session identifier to enable provider-native conversation state
-    sessionId?: string
-    // Optional signal from caller to reset native conversation state for this session
-    resetConversation?: boolean
   }) => Promise<StreamHandle>
 }

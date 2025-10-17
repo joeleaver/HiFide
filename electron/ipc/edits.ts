@@ -20,7 +20,8 @@ import { verifyTypecheck as tsVerify } from '../refactors/ts'
  * Resolve path within workspace (security check)
  */
 function resolveWithinWorkspace(p: string): string {
-  const root = path.resolve(process.env.APP_ROOT || process.cwd())
+  const { useMainStore } = require('../store/index.js')
+  const root = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
   const abs = path.isAbsolute(p) ? p : path.join(root, p)
   const norm = path.resolve(abs)
   const guard = root.endsWith(path.sep) ? root : root + path.sep

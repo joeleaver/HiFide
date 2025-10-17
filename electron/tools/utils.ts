@@ -6,12 +6,13 @@ import path from 'node:path'
 import fs from 'node:fs/promises'
 import * as logging from '../utils/logging'
 import * as edits from '../ipc/edits'
+import { useMainStore } from '../store/index'
 
 /**
  * Resolve a path within the workspace, preventing directory traversal
  */
 export function resolveWithinWorkspace(p: string): string {
-  const root = path.resolve(process.env.APP_ROOT || process.cwd())
+  const root = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
   const abs = path.isAbsolute(p) ? p : path.join(root, p)
   const norm = path.resolve(abs)
   const guard = root.endsWith(path.sep) ? root : root + path.sep

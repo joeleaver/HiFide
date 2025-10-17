@@ -212,7 +212,8 @@ Be concise and specific to this repository.`
  */
 export async function bootstrapWorkspace(args: { baseDir?: string; preferAgent?: boolean; overwrite?: boolean }) {
   try {
-    const baseDir = path.resolve(String(args?.baseDir || process.env.APP_ROOT || process.cwd()))
+    const { useMainStore } = await import('../index.js')
+    const baseDir = path.resolve(String(args?.baseDir || useMainStore.getState().workspaceRoot || process.cwd()))
     const publicDir = path.join(baseDir, '.hifide-public')
     const privateDir = path.join(baseDir, '.hifide-private')
     let createdPublic = false

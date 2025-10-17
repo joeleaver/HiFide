@@ -35,6 +35,7 @@ export function BadgeGroup({ badgeGroup }: BadgeGroupProps) {
               variant={badge.variant || 'light'}
               size="sm"
               leftSection={badge.icon}
+              tt="none"
               style={{
                 opacity: badge.status === 'running' ? 0.7 : 1,
               }}

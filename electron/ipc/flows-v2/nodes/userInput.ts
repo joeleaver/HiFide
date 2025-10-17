@@ -13,7 +13,6 @@
  */
 
 import type { NodeFunction, NodeExecutionPolicy } from '../types'
-import { useMainStore } from '../../../store/index.js'
 
 /**
  * Node metadata
@@ -32,6 +31,7 @@ export const userInputNode: NodeFunction = async (contextIn, _dataIn, _inputs, _
 
   // Call store action to wait for user input
   // This creates a promise that will be resolved when the user submits
+  const { useMainStore } = await import('../../../store/index.js')
   const userInput = await useMainStore.getState().feWaitForUserInput(nodeId)
 
   return {

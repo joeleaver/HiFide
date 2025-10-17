@@ -1,27 +1,27 @@
 /**
  * LLM Service - Unified abstraction layer for all LLM provider interactions
- * 
+ *
  * This service handles:
  * - Provider selection and API key retrieval
- * - Context/conversation management (provider-specific session state)
- * - Message history formatting
+ * - Message history management (scheduler owns the conversation state)
  * - Tool execution coordination
  * - Event emission (chunks, tokens, tool lifecycle)
  * - Error handling
- * 
+ *
  * Benefits:
  * - Nodes are provider-agnostic (no provider-specific logic in nodes)
  * - Event handling is centralized (no duplication)
- * - Context management is unified (single source of truth)
+ * - Conversation management is unified (scheduler owns all state)
+ * - Providers are stateless (just accept messages, stream responses)
  * - Easy to test (mock the service, not individual providers)
  * - Provider switching is built-in
+ * - Easy to implement context windowing (scheduler controls what messages are sent)
  */
 
 import type { MainFlowContext } from './types'
 import type { AgentTool, TokenUsage, ChatMessage } from '../../providers/provider'
 import { providers } from '../../core/state'
 import { getProviderKey } from '../../core/state'
-import { useMainStore } from '../../store'
 
 /**
  * Request to the LLM service
@@ -67,96 +67,79 @@ export interface LLMServiceResponse {
 }
 
 /**
- * Provider-specific session state
+ * Format messages for OpenAI
+ * OpenAI accepts our ChatMessage format directly
  */
-interface ProviderSessionState {
-  // OpenAI state
-  openai?: {
-    lastResponseId?: string
-    systemHash?: string
-    toolsHash?: string
+function formatMessagesForOpenAI(context: MainFlowContext): ChatMessage[] {
+  const messages: ChatMessage[] = []
+
+  // Add system instructions if present
+  if (context.systemInstructions) {
+    messages.push({ role: 'system', content: context.systemInstructions })
   }
-  
-  // Gemini state
-  gemini?: {
-    chatInstance?: any
-    agentContents?: any[]
-  }
-  
-  // Anthropic needs no state (sends full history every time)
+
+  // Add all message history
+  messages.push(...context.messageHistory)
+
+  return messages
 }
 
 /**
- * Context Manager - handles provider-specific session state and message formatting
+ * Format messages for Anthropic
+ * Anthropic separates system messages and uses prompt caching
  */
-class ContextManager {
-  // Session state keyed by contextId-sessionId
-  private sessions = new Map<string, ProviderSessionState>()
-  
-  /**
-   * Get messages to send to provider
-   * Handles provider-specific logic for message history
-   */
-  getMessagesToSend(context: MainFlowContext): ChatMessage[] {
-    const messages: ChatMessage[] = []
+function formatMessagesForAnthropic(context: MainFlowContext): {
+  system: any
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>
+} {
+  // Extract system instructions
+  const systemText = context.systemInstructions || ''
 
-    // Add system instructions if present
-    // Note: Always include for all providers - they handle it appropriately:
-    // - OpenAI: Accepts system message in every request
-    // - Gemini: Extracts it and uses it when creating Chat instance
-    // - Anthropic: Accepts system message in every request
-    if (context.systemInstructions) {
-      messages.push({ role: 'system', content: context.systemInstructions })
-    }
+  // Use prompt caching for system prompt when available
+  const system: any = systemText
+    ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }]
+    : undefined
 
-    // All providers currently need full history
-    // - OpenAI uses previous_response_id for optimization (handled in provider)
-    // - Gemini uses Chat class for optimization (handled in provider)
-    // - Anthropic needs full history every time
-    messages.push(...context.messageHistory)
+  // Convert message history (exclude system messages, only user/assistant)
+  const messages = context.messageHistory
+    .filter(m => m.role !== 'system')
+    .map(m => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content
+    }))
 
-    return messages
-  }
-  
-  /**
-   * Get session state for a context
-   * Session ID is derived from contextId (internal plumbing, not part of MainFlowContext)
-   */
-  getSessionState(context: MainFlowContext): ProviderSessionState {
-    const key = this.getSessionKey(context)
-    let state = this.sessions.get(key)
-    if (!state) {
-      state = {}
-      this.sessions.set(key, state)
-    }
-    return state
-  }
+  return { system, messages }
+}
 
-  /**
-   * Clear session state (useful for provider switching)
-   */
-  clearSessionState(context: MainFlowContext): void {
-    const key = this.getSessionKey(context)
-    this.sessions.delete(key)
-  }
+/**
+ * Format messages for Gemini
+ * Gemini uses 'model' instead of 'assistant' and a different structure
+ */
+function formatMessagesForGemini(context: MainFlowContext): {
+  systemInstruction: string
+  contents: Array<{ role: string; parts: Array<{ text: string }> }>
+} {
+  // Extract system instructions
+  const systemInstruction = context.systemInstructions || ''
 
-  /**
-   * Get session key for a context
-   * Uses contextId as the session ID (internal plumbing)
-   */
-  private getSessionKey(context: MainFlowContext): string {
-    return context.contextId
-  }
+  // Convert message history to Gemini format
+  const contents = context.messageHistory
+    .filter(m => m.role !== 'system')
+    .map(msg => ({
+      role: msg.role === 'assistant' ? 'model' : msg.role,
+      parts: [{ text: msg.content }]
+    }))
+
+  return { systemInstruction, contents }
 }
 
 /**
  * LLM Service - main service class
+ * Now stateless - all conversation state is managed by the scheduler
  */
 class LLMService {
-  private contextManager: ContextManager
-  
   constructor() {
-    this.contextManager = new ContextManager()
+    // No state needed - providers are stateless
   }
   
   /**
@@ -206,30 +189,53 @@ class LLMService {
       }
     }
 
-    // 4. Get messages to send (provider-specific logic)
-    let messagesToSend: ChatMessage[]
+    // 4. Format messages for the specific provider
+    // llm-service is responsible for converting MainFlowContext to provider-specific format
+    let formattedMessages: any
+
     if (skipHistory) {
-      // For stateless calls, just send the message directly
-      messagesToSend = [{ role: 'user', content: message }]
+      // For stateless calls (like intentRouter), just send the message directly
+      // Format it appropriately for each provider
+      if (provider === 'anthropic') {
+        formattedMessages = {
+          system: undefined,
+          messages: [{ role: 'user' as const, content: message }]
+        }
+      } else if (provider === 'gemini') {
+        formattedMessages = {
+          systemInstruction: '',
+          contents: [{ role: 'user', parts: [{ text: message }] }]
+        }
+      } else {
+        // OpenAI and others
+        formattedMessages = [{ role: 'user' as const, content: message }]
+      }
     } else {
-      messagesToSend = this.contextManager.getMessagesToSend(updatedContext)
+      // Normal case: format full conversation history for the provider
+      if (provider === 'anthropic') {
+        formattedMessages = formatMessagesForAnthropic(updatedContext)
+      } else if (provider === 'gemini') {
+        formattedMessages = formatMessagesForGemini(updatedContext)
+      } else {
+        // OpenAI and others
+        formattedMessages = formatMessagesForOpenAI(updatedContext)
+      }
     }
 
     // 5. Set up event handlers - uses existing sendFlowEvent!
     // Pass skipHistory flag to suppress chunk events for internal calls
-    const eventHandlers = this.createEventHandlers(context, nodeId, provider, model, skipHistory)
+    const eventHandlers = await this.createEventHandlers(context, nodeId, provider, model, skipHistory)
 
-    // 6. Call provider
+    // 6. Call provider with formatted messages
     let response = ''
 
     try {
       await new Promise<void>(async (resolve, reject) => {
         try {
-          const streamOpts = {
+          // Base stream options (common to all providers)
+          const baseStreamOpts = {
             apiKey,
             model,
-            messages: messagesToSend,
-            sessionId: context.contextId, // Use contextId as sessionId (internal plumbing)
             onChunk: (text: string) => {
               // Skip duplicate final chunks (some providers send the full response as a final chunk)
               if (text === response) {
@@ -242,7 +248,29 @@ class LLMService {
             onError: (error: string) => reject(new Error(error)),
             onTokenUsage: eventHandlers.onTokenUsage
           }
-          
+
+          // Provider-specific options
+          let streamOpts: any
+          if (provider === 'anthropic') {
+            streamOpts = {
+              ...baseStreamOpts,
+              system: formattedMessages.system,
+              messages: formattedMessages.messages
+            }
+          } else if (provider === 'gemini') {
+            streamOpts = {
+              ...baseStreamOpts,
+              systemInstruction: formattedMessages.systemInstruction,
+              contents: formattedMessages.contents
+            }
+          } else {
+            // OpenAI and others use standard ChatMessage[] format
+            streamOpts = {
+              ...baseStreamOpts,
+              messages: formattedMessages
+            }
+          }
+
           // Use agentStream if:
           // 1. We have tools to use, OR
           // 2. We have a responseSchema (structured output), OR
@@ -311,46 +339,41 @@ class LLMService {
    *
    * @param skipHistory - If true, suppresses chunk events (for internal/stateless calls like intentRouter)
    */
-  private createEventHandlers(_context: MainFlowContext, _nodeId: string, provider: string, model: string, skipHistory?: boolean) {
-    // Note: requestId and nodeId are available in context but not currently used
-    // They're kept as parameters for future use (e.g., tracking per-node events)
+  private async createEventHandlers(_context: MainFlowContext, nodeId: string, provider: string, model: string, skipHistory?: boolean) {
+    const { useMainStore } = await import('../../store/index.js')
+    const store = useMainStore.getState()
 
     return {
       onChunk: (text: string) => {
         // Don't emit chunk events for internal/stateless calls (like intentRouter)
         // These are not part of the user conversation and shouldn't be displayed
         if (!skipHistory) {
-          useMainStore.getState().feHandleChunk(text)
+          store.feHandleChunk(text)
         }
       },
 
       onTokenUsage: (usage: TokenUsage) => {
-        useMainStore.getState().feHandleTokenUsage(provider, model, usage)
+        store.feHandleTokenUsage(provider, model, usage)
       },
 
-      onToolStart: (ev: { callId?: string; name: string }) => {
-        useMainStore.getState().feHandleToolStart(ev.name)
+      onToolStart: (ev: { callId?: string; name: string; arguments?: any }) => {
+        // Pass callId, nodeId and arguments so tool badges can be tracked and updated
+        store.feHandleToolStart(ev.name, nodeId, ev.arguments, ev.callId)
       },
 
       onToolEnd: (ev: { callId?: string; name: string }) => {
-        useMainStore.getState().feHandleToolEnd(ev.name)
+        // Pass callId so we can find and update the specific badge
+        store.feHandleToolEnd(ev.name, ev.callId)
       },
 
       onToolError: (ev: { callId?: string; name: string; error: string }) => {
-        useMainStore.getState().feHandleToolError(ev.name, ev.error)
+        store.feHandleToolError(ev.name, ev.error, ev.callId)
       },
 
       onError: (error: string) => {
-        useMainStore.getState().feHandleError(error)
+        store.feHandleError(error)
       }
     }
-  }
-  
-  /**
-   * Get the context manager (for advanced use cases)
-   */
-  getContextManager(): ContextManager {
-    return this.contextManager
   }
 }
 

@@ -4,7 +4,7 @@
  * Tests that conversation context is preserved when switching between providers mid-flow.
  */
 
-import { chatNode } from '../chat'
+import { llmRequestNode } from '../llmRequest'
 import type { ExecutionContext } from '../../types'
 import { createTestContext, createTestConfig, getTestApiKey } from '../../../../__tests__/utils/testHelpers'
 import { withFixture, getTestMode } from '../../../../__tests__/utils/fixtures'
@@ -48,7 +48,7 @@ describe('Provider Switching', () => {
       const result1 = await withFixture(
         'provider-switch-openai-to-gemini-msg1-v2',
         async () => {
-          return await chatNode(context1, message1, {}, config)
+          return await llmRequestNode(context1, message1, {}, config)
         }
       )
 
@@ -69,7 +69,7 @@ describe('Provider Switching', () => {
       const result2 = await withFixture(
         'provider-switch-openai-to-gemini-msg2-v2',
         async () => {
-          return await chatNode(context2, message2, {}, config)
+          return await llmRequestNode(context2, message2, {}, config)
         }
       )
 
@@ -100,7 +100,7 @@ describe('Provider Switching', () => {
       const result1 = await withFixture(
         'provider-switch-gemini-to-openai-msg1',
         async () => {
-          return await chatNode(context1, message1, {}, config)
+          return await llmRequestNode(context1, message1, {}, config)
         }
       )
       
@@ -120,7 +120,7 @@ describe('Provider Switching', () => {
       const result2 = await withFixture(
         'provider-switch-gemini-to-openai-msg2',
         async () => {
-          return await chatNode(context2, message2, {}, config)
+          return await llmRequestNode(context2, message2, {}, config)
         }
       )
       
@@ -146,7 +146,7 @@ describe('Provider Switching', () => {
       const result1 = await withFixture(
         'provider-switch-multi-msg1',
         async () => {
-          return await chatNode(context1, 'Count: 1. Just say "OK" and nothing else.', {}, config)
+          return await llmRequestNode(context1, 'Count: 1. Just say "OK" and nothing else.', {}, config)
         }
       )
 
@@ -162,7 +162,7 @@ describe('Provider Switching', () => {
       const result2 = await withFixture(
         'provider-switch-multi-msg2',
         async () => {
-          return await chatNode(context2, 'Count: 2. Just say "OK" and nothing else.', {}, config)
+          return await llmRequestNode(context2, 'Count: 2. Just say "OK" and nothing else.', {}, config)
         }
       )
 
@@ -178,7 +178,7 @@ describe('Provider Switching', () => {
       const result3 = await withFixture(
         'provider-switch-multi-msg3',
         async () => {
-          return await chatNode(
+          return await llmRequestNode(
             context3,
             'What were all the count numbers I mentioned? List them separated by commas and nothing else.',
             {},
@@ -210,7 +210,7 @@ describe('Provider Switching', () => {
       const result1 = await withFixture(
         'provider-switch-history-msg1',
         async () => {
-          return await chatNode(context1, 'First message', {}, config)
+          return await llmRequestNode(context1, 'First message', {}, config)
         }
       )
       
@@ -226,7 +226,7 @@ describe('Provider Switching', () => {
       const result2 = await withFixture(
         'provider-switch-history-msg2',
         async () => {
-          return await chatNode(context2, 'Second message', {}, config)
+          return await llmRequestNode(context2, 'Second message', {}, config)
         }
       )
       
@@ -254,7 +254,7 @@ describe('Provider Switching', () => {
       const result1 = await withFixture(
         'provider-switch-system-msg1',
         async () => {
-          return await chatNode(context1, 'Hello', {}, config)
+          return await llmRequestNode(context1, 'Hello', {}, config)
         }
       )
 
@@ -271,7 +271,7 @@ describe('Provider Switching', () => {
       const result2 = await withFixture(
         'provider-switch-system-msg2',
         async () => {
-          return await chatNode(context2, 'Hi again', {}, config)
+          return await llmRequestNode(context2, 'Hi again', {}, config)
         }
       )
 
@@ -280,40 +280,7 @@ describe('Provider Switching', () => {
     })
   })
 
-  describe('Session ID Consistency', () => {
-    it('should maintain the same sessionId across provider switches', async () => {
-      const context1 = createTestContext({
-        provider: 'openai',
-        model: 'gpt-4o-mini'
-      })
-      const config = createTestConfig()
-      
-      const result1 = await withFixture(
-        'provider-switch-session-msg1',
-        async () => {
-          return await chatNode(context1, 'Test message', {}, config)
-        }
-      )
-      
-      const originalSessionId = result1.context.sessionId
-      
-      // Switch provider
-      const context2: ExecutionContext = {
-        ...result1.context,
-        provider: 'gemini',
-        model: 'gemini-2.0-flash-exp'
-      }
-      
-      const result2 = await withFixture(
-        'provider-switch-session-msg2',
-        async () => {
-          return await chatNode(context2, 'Another message', {}, config)
-        }
-      )
-      
-      // Session ID should remain the same
-      expect(result2.context.sessionId).toBe(originalSessionId)
-    })
-  })
+  // Note: Session ID tests removed - providers are now stateless
+  // The scheduler manages all conversation state via MainFlowContext.messageHistory
 })
 
