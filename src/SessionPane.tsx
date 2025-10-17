@@ -1,7 +1,7 @@
-import { Stack, Textarea, Card, ScrollArea, Text, Badge, Group, Badge as MantineBadge } from '@mantine/core'
+import { Stack, Textarea, Card, ScrollArea, Text, Group, Badge as MantineBadge } from '@mantine/core'
 import { useAppStore, useDispatch, selectSessions, selectCurrentId } from './store'
 import Markdown from './components/Markdown'
-import StreamingMarkdown from './components/StreamingMarkdown'
+
 import { BadgeGroup } from './components/BadgeGroup'
 import { NodeOutputBox } from './components/NodeOutputBox'
 import { FlowStatusIndicator } from './components/FlowStatusIndicator'
@@ -17,9 +17,7 @@ export default function SessionPane() {
 
   // Flow execution state - these DO cause re-renders when they change
   const feStatus = useAppStore((s) => s.feStatus)
-  const feStreamingText = useAppStore((s) => s.feStreamingText)
-  const feNodes = useAppStore((s) => s.feNodes)
-  const feNodeExecutionState = useAppStore((s) => s.feNodeExecutionState)
+
 
   // Use local state for input to avoid lag on every keystroke
   const [localInput, setLocalInput] = useState('')

@@ -218,7 +218,9 @@ export const AnthropicProvider: ProviderAdapter = {
                     })
                   }
                   completed.push({ id: item.id, name: item.name, input: parsed })
-                  delete active[id]
+                  if (id !== undefined) {
+                    delete active[id]
+                  }
                 }
               } else if (evt?.type === 'message_start') {
                 // Capture usage from message_start event

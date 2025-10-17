@@ -711,7 +711,6 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     if (userInput) {
       console.log('[feResume] Adding user message to session:', {
         userInputLength: userInput.length,
-        hasAddSessionItem: !!store.getState().addSessionItem,
       })
       const state = store.getState() as any
       if (state.addSessionItem) {

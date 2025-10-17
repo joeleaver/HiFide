@@ -15,7 +15,7 @@ import { createUseStore, useDispatch as useZubridgeDispatch } from '@zubridge/el
 import type { AppStore } from '../../electron/store'
 
 // Re-export types that are used by components
-export type { ViewType, ModelPricing, PricingConfig } from '../../electron/store/types'
+export type { ViewType, ModelPricing } from '../../electron/store/types'
 export type { RateLimitKind } from '../../electron/store/types'
 
 /**
@@ -169,7 +169,6 @@ export type {
   IndexProgress,
   RouteRecord,
   ApiKeys,
-  PricingConfig,
   RateLimitConfig,
   DebugLogEntry,
   RecentFolder,

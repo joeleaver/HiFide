@@ -422,7 +422,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
         }
       })
 
-      console.log('[addSessionItem] Updated sessions, new item count:', sessions.find(s => s.id === s.currentId)?.items.length)
+      console.log('[addSessionItem] Updated sessions, new item count:', sessions.find(s => s.id === get().currentId)?.items.length)
       return { sessions }
     })
 

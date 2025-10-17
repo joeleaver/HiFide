@@ -169,7 +169,7 @@ type PricingTableProps = {
   onUpdate: (model: string, pricing: ModelPricing) => void
 }
 
-function PricingTable({ provider, models, pricing, defaultPricing, onUpdate }: PricingTableProps) {
+function PricingTable({ models, pricing, defaultPricing, onUpdate }: PricingTableProps) {
   // Show all available models, even if they don't have default pricing
   const availableModels = models
 

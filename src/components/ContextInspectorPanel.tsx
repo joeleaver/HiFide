@@ -112,7 +112,7 @@ export default function ContextInspectorPanel() {
               <ScrollArea style={{ height: '100%' }} type="auto">
                 <div style={{ padding: '8px' }}>
                   <JsonView
-                    value={context}
+                    value={context as object}
                     style={darkTheme}
                     collapsed={false}
                     displayDataTypes={false}
