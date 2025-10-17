@@ -1,6 +1,7 @@
 import { Text, Checkbox, Accordion } from '@mantine/core'
 import { useAppStore } from '../../store'
 import { useMemo, useState, useEffect } from 'react'
+import InjectMessagesConfig from './InjectMessagesConfig'
 
 interface NodeConfigProps {
   nodeId: string
@@ -122,6 +123,9 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
           </label>
         </div>
       )}
+
+      {/* injectMessages node configuration */}
+      {kind === 'injectMessages' && <InjectMessagesConfig nodeId={nodeId} config={config} onConfigChange={onConfigChange} />}
 
       {/* tools node configuration */}
       {kind === 'tools' && <ToolsConfig config={config} onConfigChange={onConfigChange} />}

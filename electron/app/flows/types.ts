@@ -4,6 +4,7 @@ export type NodeKind =
   | 'manualInput'
   | 'llmRequest'
   | 'tools'
+  | 'injectMessages'
   | 'approvalGate'
   | 'budgetGuard'
   | 'errorDetection'

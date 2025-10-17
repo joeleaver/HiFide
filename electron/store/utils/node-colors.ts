@@ -10,6 +10,7 @@ export const NODE_COLORS: Record<string, string> = {
   newContext: '#9b59b6',
   llmRequest: '#1e3a8a',      // Dark blue - easy on the eyes for the most common node
   tools: '#f97316',
+  injectMessages: '#06b6d4',  // Cyan - message injection/context manipulation
   intentRouter: '#f39c12',
   redactor: '#14b8a6',
   budgetGuard: '#f59e0b',
@@ -31,6 +32,7 @@ export const NODE_KIND_LABELS: Record<string, string> = {
   newContext: 'New Context',
   llmRequest: 'LLM Request',
   tools: 'Tools',
+  injectMessages: 'Inject Messages',
   intentRouter: 'Intent Router',
   parallelSplit: 'Split',
   parallelJoin: 'Merge',
@@ -61,6 +63,7 @@ export const NODE_CATEGORIES: Record<string, NodeCategory> = {
   llmRequest: 'llm',
   tools: 'llm',
   newContext: 'llm',
+  injectMessages: 'llm',
   intentRouter: 'flow-control',
   parallelSplit: 'flow-control',
   parallelJoin: 'flow-control',

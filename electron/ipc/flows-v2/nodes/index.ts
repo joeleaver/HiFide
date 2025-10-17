@@ -14,6 +14,7 @@ import { manualInputNode, metadata as manualInputMetadata } from './manualInput'
 import { intentRouterNode, metadata as intentRouterMetadata } from './intentRouter'
 import { portalInputNode, metadata as portalInputMetadata } from './portalInput'
 import { portalOutputNode, metadata as portalOutputMetadata } from './portalOutput'
+import { injectMessagesNode, metadata as injectMessagesMetadata } from './injectMessages'
 
 /**
  * Node metadata
@@ -59,6 +60,10 @@ const NODE_REGISTRY: Record<string, NodeMetadata> = {
   portalOutput: {
     fn: portalOutputNode,
     ...portalOutputMetadata
+  },
+  injectMessages: {
+    fn: injectMessagesNode,
+    ...injectMessagesMetadata
   },
 }
 

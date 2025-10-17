@@ -54,6 +54,11 @@ export default function NodeHandles({ kind, config }: NodeHandlesProps) {
     // Tools node has optional Context In and Data In
     inputs.push({ id: 'context', label: 'Context In', color: CONNECTION_COLORS.context })
     inputs.push({ id: 'data', label: 'Data In', color: CONNECTION_COLORS.data })
+  } else if (kind === 'injectMessages') {
+    // InjectMessages node has Context In and optional dynamic message inputs
+    inputs.push({ id: 'context', label: 'Context In', color: CONNECTION_COLORS.context })
+    inputs.push({ id: 'userMessage', label: 'User Message', color: CONNECTION_COLORS.data })
+    inputs.push({ id: 'assistantMessage', label: 'Assistant Message', color: CONNECTION_COLORS.data })
   } else if (!isEntryNode) {
     // All other nodes have Context In and Data In
     inputs.push({ id: 'context', label: 'Context In', color: CONNECTION_COLORS.context })

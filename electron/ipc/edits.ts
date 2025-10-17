@@ -190,7 +190,8 @@ export function registerEditsHandlers(ipcMain: IpcMain): void {
     messages.push({ role: 'system', content: buildEditsSchemaPrompt() })
 
     try {
-      const res = await getIndexer().search(args.instruction.slice(0, 2000), args.k ?? 6)
+      const indexer = await getIndexer()
+      const res = await indexer.search(args.instruction.slice(0, 2000), args.k ?? 6)
       if (res?.chunks?.length) {
         const ctx = res.chunks.map((c) => `• ${c.path}:${c.startLine}-${c.endLine}\n${(c.text || '').slice(0, 600)}`).join('\n\n')
         messages.push({ role: 'user', content: `Context from repository (top matches):\n\n${ctx}\n\nUse this context if helpful.` })

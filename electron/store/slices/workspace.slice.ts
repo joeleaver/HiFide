@@ -115,6 +115,7 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
   },
   
   openFolder: async (folderPath: string) => {
+    console.log('[workspace] openFolder called with:', folderPath)
     // Store the old workspace root in case we need to restore it on error
     const oldWorkspaceRoot = get().workspaceRoot
 
@@ -123,6 +124,7 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
 
       // Don't allow opening folder while app is still initializing
       if (state.appBootstrapping) {
+        console.log('[workspace] App is still bootstrapping, rejecting folder open')
         return { ok: false, error: 'App is still initializing' }
       }
 
@@ -133,40 +135,50 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
       set({ appBootstrapping: true } as any)
 
       // 1. Check for unsaved changes
+      console.log('[workspace] Step 1: Checking for unsaved changes')
       if (state.hasUnsavedChanges?.()) {
       }
 
       // 2. Save current session before switching
+      console.log('[workspace] Step 2: Saving current session')
       if (state.setStartupMessage) state.setStartupMessage('Saving current session...')
       try {
         if (state.saveCurrentSession) {
           await state.saveCurrentSession()
         }
+        console.log('[workspace] Step 2 complete')
       } catch (e) {
         console.error('[workspace] Failed to save current session:', e)
       }
 
       // 3. Clear all explorer terminals
+      console.log('[workspace] Step 3: Clearing terminals')
       if (state.setStartupMessage) state.setStartupMessage('Cleaning up terminals...')
       try {
         if (state.clearExplorerTerminals) {
           await state.clearExplorerTerminals()
         }
+        console.log('[workspace] Step 3 complete')
       } catch (e) {
         console.error('[workspace] Failed to clear explorer terminals:', e)
       }
 
       // 4. Verify folder exists and reinitialize indexer
+      console.log('[workspace] Step 4: Verifying folder and reinitializing indexer')
       if (state.setStartupMessage) state.setStartupMessage('Switching workspace...')
       try {
         const resolved = path.resolve(folderPath)
+        console.log('[workspace] Resolved path:', resolved)
         // Verify the directory exists
         await fs.access(resolved)
+        console.log('[workspace] Directory exists, reinitializing indexer')
 
         // Reinitialize indexer with new root
         resetIndexer()
-        getIndexer()
+        await getIndexer()
+        console.log('[workspace] Step 4 complete')
       } catch (error) {
+        console.error('[workspace] Step 4 failed:', error)
         // Restore old workspace root on error
         set({ appBootstrapping: false, workspaceRoot: oldWorkspaceRoot } as any)
         if (state.setStartupMessage) state.setStartupMessage(null)
@@ -174,13 +186,17 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
       }
       
       // 5. Add to recent folders
+      console.log('[workspace] Step 5: Adding to recent folders')
       state.addRecentFolder(folderPath)
-      
+      console.log('[workspace] Step 5 complete')
+
       // 6. Bootstrap workspace folders (.hifide-public, .hifide-private, etc.)
+      console.log('[workspace] Step 6: Bootstrapping workspace folders')
       if (state.setStartupMessage) state.setStartupMessage('Initializing workspace folders...')
       try {
         // Create folders and basic context (no LLM call - fast)
         await bootstrapWorkspace({ baseDir: folderPath, preferAgent: false, overwrite: false })
+        console.log('[workspace] Step 6 complete')
       } catch (e) {
         console.error('[workspace] Failed to bootstrap workspace:', e)
       }
@@ -191,40 +207,59 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
           console.error('[workspace] Failed to generate AI context:', e)
         })
       }, 100)
-      
-      // 7. Reload sessions from new workspace
+
+      // 7. Update workspace root BEFORE loading sessions
+      // This ensures that session loading, flow loading, and settings saving all use the correct workspace
+      console.log('[workspace] Setting workspaceRoot to:', folderPath)
+      set({
+        workspaceRoot: folderPath,
+        explorerOpenFolders: [folderPath],
+        explorerChildrenByDir: {}
+      } as any)
+      console.log('[workspace] workspaceRoot updated, current value:', get().workspaceRoot)
+
+      // 8. Reload sessions from new workspace
+      console.log('[workspace] Step 8: Loading sessions')
       if (state.setStartupMessage) state.setStartupMessage('Loading sessions...')
       try {
         if (state.loadSessions) {
           await state.loadSessions()
         }
+        console.log('[workspace] Step 8 complete')
       } catch (e) {
         console.error('[workspace] Failed to load sessions:', e)
       }
 
-      // 8. Ensure a session is present
+      // 9. Ensure a session is present
+      console.log('[workspace] Step 9: Ensuring session present')
       let createdNewSession = false
       try {
         if (state.ensureSessionPresent) {
           createdNewSession = state.ensureSessionPresent()
         }
+        console.log('[workspace] Step 9 complete, createdNewSession:', createdNewSession)
       } catch (e) {
         console.error('[workspace] Failed to ensure session:', e)
       }
 
-      // 8b. Initialize the current session (loads flow, resumes if paused)
+      // 9b. Initialize the current session (loads flow, resumes if paused)
       // Only if we didn't create a new session (newSession already initializes)
+      console.log('[workspace] Step 9b: Initializing session')
       if (!createdNewSession) {
         try {
           if (state.initializeSession) {
             await state.initializeSession()
           }
+          console.log('[workspace] Step 9b complete')
         } catch (e) {
           console.error('[workspace] Failed to initialize session:', e)
         }
+      } else {
+        console.log('[workspace] Step 9b skipped (new session already initialized)')
       }
-      
-      // 9. Start a new explorer terminal
+
+      // 10. Start a new explorer terminal
+      console.log('[workspace] Step 10: Setting up terminal')
       if (state.setStartupMessage) state.setStartupMessage('Setting up terminal...')
       try {
         const newTabId = crypto.randomUUID()
@@ -232,20 +267,18 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
           explorerTerminalTabs: [newTabId],
           explorerActiveTerminal: newTabId
         } as any)
+        console.log('[workspace] Step 10 complete')
       } catch (e) {
         console.error('[workspace] Failed to create terminal:', e)
       }
-      
-      // 10. Update workspace root and load file tree
+
+      // 11. Load file tree
+      console.log('[workspace] Step 11: Loading file tree')
       if (state.setStartupMessage) state.setStartupMessage('Loading file tree...')
-      set({
-        workspaceRoot: folderPath,
-        explorerOpenFolders: [folderPath],
-        explorerChildrenByDir: {}
-      } as any)
-      
-      // 10b. Check index status and build if needed
+
+      // 11b. Check index status and build if needed
       try {
+        console.log('[workspace] Step 11b: Checking code index')
         if (state.setStartupMessage) state.setStartupMessage('Checking code index...')
         if (state.refreshIndexStatus) {
           await state.refreshIndexStatus()
@@ -253,38 +286,46 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
         const st = state.idxStatus
         const ready = !!st?.ready
         const chunks = st?.chunks ?? 0
+        console.log('[workspace] Index status - ready:', ready, 'chunks:', chunks)
         if (!ready && chunks === 0) {
+          console.log('[workspace] Rebuilding index...')
           if (state.rebuildIndex) {
             await state.rebuildIndex()
           }
         }
+        console.log('[workspace] Step 11b complete')
       } catch (e) {
         console.error('[workspace] Failed to check/rebuild index:', e)
       }
-      
+
       // Refresh context
+      console.log('[workspace] Refreshing context')
       try {
         await state.refreshContext?.()
+        console.log('[workspace] Context refresh complete')
       } catch (e) {
         console.error('[workspace] Failed to refresh context:', e)
       }
-      
+
       // Load initial file tree
+      console.log('[workspace] Loading initial file tree')
       try {
         if (state.loadExplorerDir) {
           await state.loadExplorerDir(folderPath)
         }
+        console.log('[workspace] File tree loaded')
       } catch (e) {
         console.error('[workspace] Failed to load file tree:', e)
       }
-      
-      // 11. File watching is handled by the IPC layer (fs:watchStart)
+
+      // 12. File watching is handled by the IPC layer (fs:watchStart)
       // The renderer will set up file watching via window.fs.watchDir
       // This is intentionally left to the renderer since it needs to subscribe to events
       
       // Done
       set({ appBootstrapping: false } as any)
       if (state.setStartupMessage) state.setStartupMessage(null)
+      console.log('[workspace] openFolder completed successfully')
       return { ok: true }
     } catch (error) {
       console.error('[workspace] Failed to open folder:', error)

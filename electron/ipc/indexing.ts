@@ -19,26 +19,27 @@ export function registerIndexingHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('index:rebuild', async () => {
     try {
       const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-      
-      await getIndexer().rebuild((p) => {
+
+      const indexer = await getIndexer()
+      await indexer.rebuild((p) => {
         try {
           wc?.send('index:progress', p)
         } catch {}
       })
-      
+
       // Begin watching for incremental changes after a successful rebuild
       try {
-        getIndexer().startWatch((p) => {
+        indexer.startWatch((p) => {
           try {
             wc?.send('index:progress', p)
           } catch {}
         })
       } catch {}
-      
+
       // Opportunistically (re)generate context pack; won't overwrite existing
       // This is handled by the workspace module to avoid circular dependencies
-      
-      return { ok: true, status: getIndexer().status() }
+
+      return { ok: true, status: indexer.status() }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
     }
@@ -49,7 +50,8 @@ export function registerIndexingHandlers(ipcMain: IpcMain): void {
    */
   ipcMain.handle('index:status', async () => {
     try {
-      return { ok: true, status: getIndexer().status() }
+      const indexer = await getIndexer()
+      return { ok: true, status: indexer.status() }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
     }
@@ -60,7 +62,8 @@ export function registerIndexingHandlers(ipcMain: IpcMain): void {
    */
   ipcMain.handle('index:cancel', async () => {
     try {
-      getIndexer().cancel()
+      const indexer = await getIndexer()
+      indexer.cancel()
       return { ok: true }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
@@ -72,7 +75,8 @@ export function registerIndexingHandlers(ipcMain: IpcMain): void {
    */
   ipcMain.handle('index:clear', async () => {
     try {
-      getIndexer().clear()
+      const indexer = await getIndexer()
+      indexer.clear()
       return { ok: true }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
@@ -84,7 +88,8 @@ export function registerIndexingHandlers(ipcMain: IpcMain): void {
    */
   ipcMain.handle('index:search', async (_e, args: { query: string; k?: number }) => {
     try {
-      const res = await getIndexer().search(args.query, args.k ?? 8)
+      const indexer = await getIndexer()
+      const res = await indexer.search(args.query, args.k ?? 8)
       return { ok: true, ...res }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }

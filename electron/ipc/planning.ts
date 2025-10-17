@@ -31,7 +31,7 @@ export function registerPlanningHandlers(ipcMain: IpcMain): void {
    */
   ipcMain.handle('planning:save-approved', async (_e, plan: any) => {
     try {
-      const { useMainStore } = require('../store/index.js')
+      const { useMainStore } = await import('../store/index.js')
       const baseDir = path.resolve(String(useMainStore.getState().workspaceRoot || process.cwd()))
       const privateDir = path.join(baseDir, '.hifide-private')
       await ensureDir(privateDir)
@@ -48,7 +48,7 @@ export function registerPlanningHandlers(ipcMain: IpcMain): void {
    */
   ipcMain.handle('planning:load-approved', async () => {
     try {
-      const { useMainStore } = require('../store/index.js')
+      const { useMainStore } = await import('../store/index.js')
       const baseDir = path.resolve(String(useMainStore.getState().workspaceRoot || process.cwd()))
       const file = path.join(baseDir, '.hifide-private', 'approved-plan.json')
       const text = await fs.readFile(file, 'utf-8').catch(() => '')

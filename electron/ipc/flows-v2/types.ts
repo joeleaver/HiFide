@@ -47,6 +47,30 @@ export interface MainFlowContext {
   messageHistory: Array<{
     role: 'system' | 'user' | 'assistant'
     content: string
+
+    /**
+     * Optional metadata for message management and context windowing
+     */
+    metadata?: {
+      /**
+       * Unique identifier for this message (auto-generated)
+       * Used for idempotent message injection and updates
+       */
+      id: string
+
+      /**
+       * If true, this message is pinned to the top during context windowing
+       * Pinned messages maintain their relative order
+       */
+      pinned?: boolean
+
+      /**
+       * Priority for pinned messages (higher = more important)
+       * When windowing needs to remove pinned messages, lower priority goes first
+       * Default: 50
+       */
+      priority?: number
+    }
   }>
 }
 

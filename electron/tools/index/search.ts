@@ -12,7 +12,8 @@ export const indexSearchTool: AgentTool = {
   },
   run: async ({ query, k = 8 }: { query: string; k?: number }) => {
     try {
-      const res = await getIndexer().search(query.slice(0, 2000), k)
+      const indexer = await getIndexer()
+      const res = await indexer.search(query.slice(0, 2000), k)
       return { ok: true, ...res }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }

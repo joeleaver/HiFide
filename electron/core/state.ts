@@ -138,9 +138,9 @@ let indexer: Indexer | null = null
 /**
  * Get or create the indexer instance
  */
-export function getIndexer(): Indexer {
+export async function getIndexer(): Promise<Indexer> {
   if (!indexer) {
-    const { useMainStore } = require('../store/index.js')
+    const { useMainStore } = await import('../store/index.js')
     indexer = new Indexer(useMainStore.getState().workspaceRoot || process.cwd())
   }
   return indexer

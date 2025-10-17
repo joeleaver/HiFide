@@ -3,8 +3,8 @@ import path from 'node:path'
 import { Indexer } from '../../indexing/indexer'
 
 let indexer: Indexer | null = null
-function getIndexer(): Indexer {
-  const { useMainStore } = require('../../store/index.js')
+async function getIndexer(): Promise<Indexer> {
+  const { useMainStore } = await import('../../store/index.js')
   if (!indexer) indexer = new Indexer(useMainStore.getState().workspaceRoot || process.cwd())
   return indexer
 }
@@ -28,7 +28,8 @@ export async function buildContextMessages(query: string, k: number = 6): Promis
   try {
     const q = (query || '').slice(0, 2000)
     if (q) {
-      const res = await getIndexer().search(q, k)
+      const indexer = await getIndexer()
+      const res = await indexer.search(q, k)
       if (res?.chunks?.length) {
         const ctx = res.chunks.map((c: any) => `• ${c.path}:${c.startLine}-${c.endLine}\n${(c.text||'').slice(0, 600)}`).join('\n\n')
         out.push({ role: 'user', content: `Relevant code from repository:\n\n${ctx}` })

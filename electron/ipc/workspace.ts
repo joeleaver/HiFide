@@ -212,8 +212,8 @@ Be concise and specific to this repository.`
 /**
  * Get workspace settings file path
  */
-function getSettingsPath(): string {
-  const { useMainStore } = require('../store/index.js')
+async function getSettingsPath(): Promise<string> {
+  const { useMainStore } = await import('../store/index.js')
   const baseDir = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
   const privateDir = path.join(baseDir, '.hifide-private')
   return path.join(privateDir, 'settings.json')
@@ -224,7 +224,7 @@ function getSettingsPath(): string {
  */
 export async function loadWorkspaceSettings(): Promise<Record<string, any>> {
   try {
-    const settingsPath = getSettingsPath()
+    const settingsPath = await getSettingsPath()
     const content = await fs.readFile(settingsPath, 'utf-8')
     return JSON.parse(content)
   } catch {
@@ -236,7 +236,7 @@ export async function loadWorkspaceSettings(): Promise<Record<string, any>> {
  * Save workspace settings
  */
 export async function saveWorkspaceSettings(settings: Record<string, any>): Promise<void> {
-  const settingsPath = getSettingsPath()
+  const settingsPath = await getSettingsPath()
   const privateDir = path.dirname(settingsPath)
   await ensureDir(privateDir)
   await atomicWrite(settingsPath, JSON.stringify(settings, null, 2))
@@ -250,7 +250,7 @@ export function registerWorkspaceHandlers(ipcMain: IpcMain): void {
    * Get workspace root
    */
   ipcMain.handle('workspace:get-root', async () => {
-    const { useMainStore } = require('../store/index.js')
+    const { useMainStore } = await import('../store/index.js')
     return useMainStore.getState().workspaceRoot || process.cwd()
   })
 
@@ -265,12 +265,12 @@ export function registerWorkspaceHandlers(ipcMain: IpcMain): void {
       await fs.access(resolved)
 
       // Update store (single source of truth)
-      const { useMainStore } = require('../store/index.js')
+      const { useMainStore } = await import('../store/index.js')
       useMainStore.getState().setWorkspaceRoot(resolved)
 
       // Reinitialize indexer with new root
       resetIndexer()
-      getIndexer()
+      await getIndexer()
 
       return { ok: true }
     } catch (error) {
@@ -317,7 +317,7 @@ export function registerWorkspaceHandlers(ipcMain: IpcMain): void {
    */
   ipcMain.handle('workspace:bootstrap', async (_e, args: { baseDir?: string; preferAgent?: boolean; overwrite?: boolean }) => {
     try {
-      const { useMainStore } = require('../store/index.js')
+      const { useMainStore } = await import('../store/index.js')
       const baseDir = path.resolve(String(args?.baseDir || useMainStore.getState().workspaceRoot || process.cwd()))
       const publicDir = path.join(baseDir, '.hifide-public')
       const privateDir = path.join(baseDir, '.hifide-private')

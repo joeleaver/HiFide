@@ -68,7 +68,7 @@ export interface LLMServiceResponse {
 
 /**
  * Format messages for OpenAI
- * OpenAI accepts our ChatMessage format directly
+ * OpenAI accepts our ChatMessage format directly (but we strip metadata)
  */
 function formatMessagesForOpenAI(context: MainFlowContext): ChatMessage[] {
   const messages: ChatMessage[] = []
@@ -78,8 +78,11 @@ function formatMessagesForOpenAI(context: MainFlowContext): ChatMessage[] {
     messages.push({ role: 'system', content: context.systemInstructions })
   }
 
-  // Add all message history
-  messages.push(...context.messageHistory)
+  // Add all message history (strip metadata - OpenAI doesn't accept extra fields)
+  messages.push(...context.messageHistory.map(m => ({
+    role: m.role,
+    content: m.content
+  })))
 
   return messages
 }
