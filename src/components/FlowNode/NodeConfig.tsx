@@ -372,6 +372,66 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
               </div>
             )}
 
+            {/* Override provider/model when context IS connected */}
+            {isContextConnected && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
+                <Checkbox
+                  label="Override provider/model"
+                  checked={config.overrideEnabled || false}
+                  onChange={(e) => onConfigChange({ overrideEnabled: e.currentTarget.checked })}
+                  size="xs"
+                  styles={{
+                    label: { fontSize: 10, color: '#cccccc', fontWeight: 600 },
+                  }}
+                />
+
+                {config.overrideEnabled && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Provider:</span>
+                      <select
+                        value={config.overrideProvider || 'openai'}
+                        onChange={(e) => onConfigChange({ overrideProvider: e.target.value, overrideModel: '' })}
+                        className="nodrag"
+                        style={{
+                          padding: '4px 6px',
+                          background: '#252526',
+                          color: '#cccccc',
+                          border: '1px solid #3e3e42',
+                          borderRadius: 3,
+                          fontSize: 10,
+                        }}
+                      >
+                        {providerOptions.map((p) => (
+                          <option key={p.value} value={p.value}>{p.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Model:</span>
+                      <select
+                        value={config.overrideModel || (modelOptions[0]?.value || '')}
+                        onChange={(e) => onConfigChange({ overrideModel: e.target.value })}
+                        className="nodrag"
+                        style={{
+                          padding: '4px 6px',
+                          background: '#252526',
+                          color: '#cccccc',
+                          border: '1px solid #3e3e42',
+                          borderRadius: 3,
+                          fontSize: 10,
+                        }}
+                      >
+                        {modelOptions.map((m: any) => (
+                          <option key={m.value} value={m.value}>{m.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Retry settings - always show */}
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
               <span style={{ fontSize: 10, color: '#888', width: 80 }}>Retry attempts:</span>

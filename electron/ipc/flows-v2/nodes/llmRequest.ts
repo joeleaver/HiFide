@@ -12,6 +12,9 @@
  * Config:
  * - provider: Provider to use when no context is connected (default: 'openai')
  * - model: Model to use when no context is connected (default: first available model)
+ * - overrideEnabled: Whether to override the context provider/model (default: false)
+ * - overrideProvider: Provider to use when override is enabled
+ * - overrideModel: Model to use when override is enabled
  *
  * Outputs:
  * - context: Updated context with message history
@@ -59,6 +62,19 @@ export const llmRequestNode: NodeFunction = async (contextIn, dataIn, inputs, co
   if (contextIn && contextIn.provider && contextIn.model) {
     // Use provided context if it has provider/model
     context = contextIn
+
+    // If override is enabled, update the provider/model in the context
+    if ((config.overrideEnabled as boolean) && config.overrideProvider && config.overrideModel) {
+      context = {
+        ...context,
+        provider: config.overrideProvider as string,
+        model: config.overrideModel as string
+      }
+      console.log(`[llmRequest] ${nodeId} - Override enabled, using provider/model:`, {
+        provider: context.provider,
+        model: context.model
+      })
+    }
   } else {
     // No context provided or incomplete - create new context from config
     const provider = (config.provider as string) || 'openai'
