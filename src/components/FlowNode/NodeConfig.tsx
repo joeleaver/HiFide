@@ -9,10 +9,11 @@ interface NodeConfigProps {
   onConfigChange: (patch: any) => void
 }
 
-export default function NodeConfig({ kind, config, onConfigChange }: NodeConfigProps) {
+export default function NodeConfig({ nodeId, kind, config, onConfigChange }: NodeConfigProps) {
   // Get provider/model data for newContext node
   const providerValid = useAppStore((s) => s.providerValid)
   const modelsByProvider = useAppStore((s) => s.modelsByProvider)
+  const feNodes = useAppStore((s) => s.feNodes)
 
   const providerOptions = useMemo(() => {
     return Object.entries(providerValid || {})
@@ -24,6 +25,31 @@ export default function NodeConfig({ kind, config, onConfigChange }: NodeConfigP
     const provider = config.provider || 'openai'
     return (modelsByProvider[provider as keyof typeof modelsByProvider] || [])
   }, [config.provider, modelsByProvider])
+
+  // Portal Input validation - check for duplicate IDs
+  const portalInputValidation = useMemo(() => {
+    if (kind !== 'portalInput') return { isValid: true, error: null }
+
+    const portalId = config.id
+    if (!portalId) return { isValid: false, error: 'Portal ID is required' }
+
+    // Find all Portal Input nodes with the same ID
+    const duplicates = feNodes.filter(
+      (n: any) =>
+        (n.data as any)?.kind === 'portalInput' &&
+        (n.data as any)?.config?.id === portalId &&
+        n.id !== nodeId // Exclude self
+    )
+
+    if (duplicates.length > 0) {
+      return {
+        isValid: false,
+        error: `Duplicate Portal ID! ${duplicates.length + 1} Portal Input node(s) use "${portalId}"`
+      }
+    }
+
+    return { isValid: true, error: null }
+  }, [kind, config.id, feNodes, nodeId])
 
 
 
@@ -139,11 +165,76 @@ export default function NodeConfig({ kind, config, onConfigChange }: NodeConfigP
                 fontSize: 10,
               }}
             >
-              {modelOptions.map((m) => (
+              {modelOptions.map((m: any) => (
                 <option key={m.value} value={m.value}>{m.label}</option>
               ))}
             </select>
           </label>
+        </div>
+      )}
+
+      {/* portalInput node configuration */}
+      {kind === 'portalInput' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
+          <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
+            📥 Stores context and data for retrieval by Portal Output nodes. Reduces edge crossings in complex flows.
+          </Text>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Portal ID:</span>
+            <input
+              type="text"
+              value={config.id || ''}
+              onChange={(e) => onConfigChange({ id: e.target.value })}
+              placeholder="Enter unique portal ID (e.g., 'loop-back')"
+              style={{
+                padding: '4px 6px',
+                background: '#252526',
+                color: '#cccccc',
+                border: portalInputValidation.isValid ? '1px solid #3e3e42' : '1px solid #ef4444',
+                borderRadius: 3,
+                fontSize: 10,
+                fontFamily: 'monospace',
+              }}
+            />
+          </label>
+          {!portalInputValidation.isValid && (
+            <Text size="xs" style={{ fontSize: 9, lineHeight: 1.3, color: '#ef4444', fontWeight: 600 }}>
+              ⚠️ {portalInputValidation.error}
+            </Text>
+          )}
+          <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3, fontStyle: 'italic' }}>
+            Portal Output nodes with matching ID will retrieve data from this node.
+          </Text>
+        </div>
+      )}
+
+      {/* portalOutput node configuration */}
+      {kind === 'portalOutput' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
+          <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
+            📤 Retrieves context and data from matching Portal Input node. Reduces edge crossings in complex flows.
+          </Text>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Portal ID:</span>
+            <input
+              type="text"
+              value={config.id || ''}
+              onChange={(e) => onConfigChange({ id: e.target.value })}
+              placeholder="Enter portal ID to match (e.g., 'loop-back')"
+              style={{
+                padding: '4px 6px',
+                background: '#252526',
+                color: '#cccccc',
+                border: '1px solid #3e3e42',
+                borderRadius: 3,
+                fontSize: 10,
+                fontFamily: 'monospace',
+              }}
+            />
+          </label>
+          <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3, fontStyle: 'italic' }}>
+            Must match the ID of a Portal Input node to retrieve its data.
+          </Text>
         </div>
       )}
 
@@ -200,7 +291,7 @@ export default function NodeConfig({ kind, config, onConfigChange }: NodeConfigP
         </div>
       )}
 
-      {kind === 'chat' && (
+      {kind === 'llmRequest' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
             <span style={{ fontSize: 10, color: '#888', width: 80 }}>Retry attempts:</span>
@@ -377,7 +468,7 @@ export default function NodeConfig({ kind, config, onConfigChange }: NodeConfigP
                   }}
                 >
                   <option value="">Select model...</option>
-                  {modelOptions.map((m) => (
+                  {modelOptions.map((m: any) => (
                     <option key={m.value} value={m.value}>
                       {m.label}
                     </option>

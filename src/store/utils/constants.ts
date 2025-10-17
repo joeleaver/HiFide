@@ -21,6 +21,7 @@ export const LS_KEYS = {
   SIDEBAR_COLLAPSED: 'hifide:sidebarCollapsed',
   DEBUG_PANEL_COLLAPSED: 'hifide:debugPanelCollapsed',
   DEBUG_PANEL_HEIGHT: 'hifide:debugPanelHeight',
+  CHAT_PANEL_HEIGHT: 'hifide:chatPanelHeight',
   AGENT_TERMINAL_PANEL_OPEN: 'hifide:agentTerminalPanelOpen',
   AGENT_TERMINAL_PANEL_HEIGHT: 'hifide:agentTerminalPanelHeight',
   EXPLORER_TERMINAL_PANEL_OPEN: 'hifide:explorerTerminalPanelOpen',
@@ -39,7 +40,6 @@ export const LS_KEYS = {
   // Settings
   AUTO_APPROVE_ENABLED: 'hifide:autoApproveEnabled',
   AUTO_APPROVE_THRESHOLD: 'hifide:autoApproveThreshold',
-  AUTO_ENFORCE_EDITS_SCHEMA: 'hifide:autoEnforceEditsSchema',
   PRICING_CONFIG: 'hifide:pricingConfig',
   RATE_LIMIT_CONFIG: 'hifide:rateLimitConfig',
   
@@ -66,6 +66,7 @@ export const DEFAULTS = {
   SIDEBAR_COLLAPSED: false,
   DEBUG_PANEL_COLLAPSED: false,
   DEBUG_PANEL_HEIGHT: 300,
+  CHAT_PANEL_HEIGHT: 400,
   AGENT_TERMINAL_PANEL_OPEN: false,
   AGENT_TERMINAL_PANEL_HEIGHT: 300,
   EXPLORER_TERMINAL_PANEL_OPEN: false,

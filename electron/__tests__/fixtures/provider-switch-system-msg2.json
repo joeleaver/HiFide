@@ -1,0 +1,29 @@
+{
+  "context": {
+    "provider": "gemini",
+    "model": "gemini-2.0-flash-exp",
+    "systemInstructions": "You are a helpful assistant. Always be concise.",
+    "messageHistory": [
+      {
+        "role": "user",
+        "content": "Hello"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello! How can I assist you today?"
+      },
+      {
+        "role": "user",
+        "content": "Hi again"
+      },
+      {
+        "role": "assistant",
+        "content": "Hi again! What can I help you with this time?\n"
+      }
+    ],
+    "currentOutput": "Hi again! What can I help you with this time?\n",
+    "sessionId": "test-session-1760553013398"
+  },
+  "data": "Hi again! What can I help you with this time?\n",
+  "status": "success"
+}

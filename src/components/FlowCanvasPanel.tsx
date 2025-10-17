@@ -1,30 +1,36 @@
-import { useRef, useMemo, useCallback } from 'react'
+import { useRef, useMemo, useCallback, useState, useEffect } from 'react'
 import ReactFlow, {
   Background,
   Controls,
   MiniMap,
+  applyNodeChanges,
+  useReactFlow,
   type Connection,
   type NodeChange,
   type EdgeChange,
+  type Node as FlowNode,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
-import { useAppStore } from '../store'
-import { Button, Group, Badge, ActionIcon, TextInput, Modal, Text, Menu, Divider } from '@mantine/core'
-import { IconPlayerStop, IconChevronRight, IconChevronLeft, IconLayoutDistributeVertical, IconChevronDown, IconPlus, IconCopy, IconTrash, IconRefresh } from '@tabler/icons-react'
-import FlowNode from './FlowNode'
-import { isSystemTemplate } from '../services/flowProfiles'
+import { useAppStore, useDispatch } from '../store'
+import { Button, Group, Badge, TextInput, Modal, Text, Menu, Divider } from '@mantine/core'
+import { IconPlayerStop, IconLayoutDistributeVertical, IconChevronDown, IconPlus, IconCopy, IconTrash, IconRefresh } from '@tabler/icons-react'
+import FlowNodeComponent from './FlowNode'
 import { getLayoutedElements } from '../utils/autoLayout'
+import { getNodeColor } from '../../electron/store/utils/node-colors'
+import { getConnectionColorFromHandles, CONNECTION_COLORS } from '../../electron/store/utils/connection-colors'
 
-const nodeTypes = { hifiNode: FlowNode }
+const nodeTypes = { hifiNode: FlowNodeComponent }
 
 // Node palette definitions (excludes defaultContextStart - always present, can't be added/removed)
 const NODE_PALETTE: Array<{ kind: string; label: string; icon: string; description: string }> = [
   { kind: 'userInput', label: 'User Input', icon: '👤', description: 'Accept user input (entry point or pause mid-flow)' },
   { kind: 'manualInput', label: 'Manual Input', icon: '✍️', description: 'Send pre-configured user message mid-flow' },
   { kind: 'newContext', label: 'New Context', icon: '🔀', description: 'Create new execution context with different model/provider' },
-  { kind: 'chat', label: 'LLM Message', icon: '💬', description: 'LLM conversation' },
+  { kind: 'llmRequest', label: 'LLM Request', icon: '💬', description: 'Send a request to the LLM' },
   { kind: 'tools', label: 'Tools', icon: '🔧', description: 'Provide tools to LLM (auto or specific list)' },
   { kind: 'intentRouter', label: 'Intent Router', icon: '🔀', description: 'Route based on LLM-classified user intent' },
+  { kind: 'portalInput', label: 'Portal In', icon: '📥', description: 'Store data for portal output (reduces edge crossings)' },
+  { kind: 'portalOutput', label: 'Portal Out', icon: '📤', description: 'Retrieve data from portal input (reduces edge crossings)' },
   { kind: 'parallelSplit', label: 'Split', icon: '⑂', description: 'Split flow into two parallel branches' },
   { kind: 'parallelJoin', label: 'Merge', icon: '🔗', description: 'Merge multiple inputs into one output' },
   { kind: 'redactor', label: 'Redactor', icon: '🧹', description: 'Redact sensitive data' },
@@ -33,36 +39,22 @@ const NODE_PALETTE: Array<{ kind: string; label: string; icon: string; descripti
   { kind: 'approvalGate', label: 'Approval Gate', icon: '✅', description: 'Require manual approval' },
 ]
 
-// Color map for node palette
-const KIND_COLORS: Record<string, string> = {
-  defaultContextStart: '#3b82f6',
-  userInput: '#4a9eff',
-  manualInput: '#06b6d4',
-  newContext: '#9b59b6',
-  chat: '#a855f7',
-  redactor: '#14b8a6',
-  budgetGuard: '#f59e0b',
-  errorDetection: '#f97316',
-  approvalGate: '#ef4444',
-  parallelSplit: '#8b5cf6',
-  parallelJoin: '#10b981',
-  intentRouter: '#f39c12',
-}
 
-interface FlowCanvasPanelProps {
-  collapsed: boolean
-  onToggleCollapse: () => void
-  width: number
-  onResize: (width: number) => void
-}
 
-export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, onResize }: FlowCanvasPanelProps) {
+
+interface FlowCanvasPanelProps {}
+
+export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   const rfRef = useRef<any>(null)
-  const resizeRef = useRef<HTMLDivElement>(null)
-  const isDraggingRef = useRef(false)
+  const reactFlowInstance = useReactFlow()
+
+  // Use dispatch for actions
+  const dispatch = useDispatch()
 
   // Get state values - use individual selectors to avoid re-render issues
-  const nodes = useAppStore((s) => s.feNodes)
+  // For nodes, we use local state for smooth dragging, so we only get the initial value
+  const storeNodes = useAppStore((s) => s.feNodes)
+  const executionState = useAppStore((s) => s.feNodeExecutionState)
   const edges = useAppStore((s) => s.feEdges)
   const status = useAppStore((s) => s.feStatus)
   const pausedNode = useAppStore((s) => s.fePausedNode)
@@ -71,24 +63,15 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
   const templatesLoaded = useAppStore((s) => s.feTemplatesLoaded)
   const selectedTemplate = useAppStore((s) => s.feSelectedTemplate)
   const hasUnsavedChanges = useAppStore((s) => s.feHasUnsavedChanges)
+
+  // Helper to check if a template is from system library
+  const isSystemTemplate = useCallback((templateId: string) => {
+    const template = availableTemplates.find((t: any) => t.id === templateId)
+    return template?.library === 'system'
+  }, [availableTemplates])
   const saveAsModalOpen = useAppStore((s) => s.feSaveAsModalOpen)
   const newProfileName = useAppStore((s) => s.feNewProfileName)
   const loadTemplateModalOpen = useAppStore((s) => s.feLoadTemplateModalOpen)
-
-  // Get action functions separately (these are stable references)
-  const setNodes = useAppStore((s) => s.feSetNodes)
-  const setEdges = useAppStore((s) => s.feSetEdges)
-  const addNode = useAppStore((s) => s.feAddNode)
-  const updateNodePosition = useAppStore((s) => s.feUpdateNodePosition)
-  const stop = useAppStore((s) => s.feStop)
-  const feInit = useAppStore((s) => s.feInit)
-  const loadTemplate = useAppStore((s) => s.feLoadTemplate)
-  const saveAsProfile = useAppStore((s) => s.feSaveAsProfile)
-  const deleteProfile = useAppStore((s) => s.feDeleteProfile)
-  const setSelectedTemplate = useAppStore((s) => s.feSetSelectedTemplate)
-  const setSaveAsModalOpen = useAppStore((s) => s.feSetSaveAsModalOpen)
-  const setNewProfileName = useAppStore((s) => s.feSetNewProfileName)
-  const setLoadTemplateModalOpen = useAppStore((s) => s.feSetLoadTemplateModalOpen)
 
   // Memoize template options for Select component
   const templateOptions = useMemo(() => {
@@ -101,9 +84,8 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
       const systemTemplates: Array<{ value: string; label: string }> = []
       const userTemplates: Array<{ value: string; label: string }> = []
 
-      availableTemplates.forEach(template => {
+      availableTemplates.forEach((template: any) => {
         if (!template || !template.id || !template.name) {
-          console.warn('Invalid template:', template)
           return
         }
 
@@ -153,118 +135,173 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
     // Check for unsaved changes before loading
     if (hasUnsavedChanges) {
       // Store the pending selection and show confirmation modal
-      setSelectedTemplate(value)
-      setLoadTemplateModalOpen(true)
+      dispatch('feSetSelectedTemplate', value)
+      dispatch('feSetLoadTemplateModalOpen', true)
       return
     }
 
     // Load directly if no unsaved changes
-    setSelectedTemplate(value)
-    loadTemplate(value)
-  }, [hasUnsavedChanges, setSelectedTemplate, setLoadTemplateModalOpen, loadTemplate])
+    dispatch('feSetSelectedTemplate', value)
+    dispatch('feLoadTemplate', value)
+  }, [hasUnsavedChanges, dispatch])
 
   // Handle save as (create new profile)
   const handleSaveAs = useCallback(async () => {
     if (!newProfileName.trim()) return
-    await saveAsProfile(newProfileName)
-  }, [newProfileName, saveAsProfile])
+    await dispatch('feSaveAsProfile', newProfileName)
+  }, [newProfileName, dispatch])
 
   // Actually load the template/profile (called from modal)
   const loadSelectedTemplate = useCallback(async () => {
     if (!selectedTemplate) return
-    await loadTemplate(selectedTemplate)
-    setLoadTemplateModalOpen(false)
-  }, [selectedTemplate, loadTemplate, setLoadTemplateModalOpen])
+    await dispatch('feLoadTemplate', selectedTemplate)
+    dispatch('feSetLoadTemplateModalOpen', false)
+  }, [selectedTemplate, dispatch])
 
   // Handle modal cancel - revert selection to currently loaded flow
   const handleCancelLoad = useCallback(() => {
     // Revert selection to the currently loaded flow
     const currentlyLoaded = currentProfile || 'default'
-    setSelectedTemplate(currentlyLoaded)
-    setLoadTemplateModalOpen(false)
-  }, [currentProfile, setSelectedTemplate, setLoadTemplateModalOpen])
+    dispatch('feSetSelectedTemplate', currentlyLoaded)
+    dispatch('feSetLoadTemplateModalOpen', false)
+  }, [currentProfile, dispatch])
 
   // Auto-layout handler
   const handleAutoLayout = useCallback(() => {
     // Get current nodes and edges from store to avoid stale closure
-    const currentNodes = nodes
+    const currentNodes = storeNodes
     const currentEdges = edges
     const layoutedNodes = getLayoutedElements(currentNodes, currentEdges, 'LR')
-    setNodes(layoutedNodes)
+    dispatch('feSetNodes', layoutedNodes)
 
     // Fit view after layout
     setTimeout(() => {
       rfRef.current?.fitView({ padding: 0.2, duration: 300 })
     }, 50)
-  }, [nodes, edges, setNodes])
+  }, [storeNodes, edges, dispatch])
 
-  // Prepare nodes for UI
-  const uiNodes = useMemo(() => {
-    // Safety check: ensure nodes is an array
-    if (!Array.isArray(nodes)) {
-      console.warn('[FlowCanvasPanel] nodes is not an array:', nodes)
-      return []
-    }
-    return nodes
-  }, [nodes])
-  
+  // Local nodes state for ReactFlow - starts from store, updates during drag
+  const [localNodes, setLocalNodes] = useState<FlowNode[]>([])
+
+  // Track measured dimensions in a ref (doesn't trigger re-renders)
+  const nodeDimensionsRef = useRef<Record<string, { width?: number; height?: number }>>({})
+
+  // Sync from store when store changes
+  useEffect(() => {
+    if (!Array.isArray(storeNodes)) return
+
+    // Merge execution state AND preserve ReactFlow's measured dimensions
+    const merged = storeNodes.map(node => {
+      const execState = executionState?.[node.id]
+      const dims = nodeDimensionsRef.current[node.id]
+
+      // CRITICAL: Preserve width/height from ref (ReactFlow sets these after measuring)
+      // Without these, ReactFlow sets visibility:hidden
+      return {
+        ...node,
+        width: dims?.width || node.width,
+        height: dims?.height || node.height,
+        style: execState?.style || node.style,
+        data: {
+          ...node.data,
+          status: execState?.status,
+          cacheHit: execState?.cacheHit,
+          durationMs: execState?.durationMs,
+          costUSD: execState?.costUSD,
+          detectedIntent: execState?.detectedIntent,
+        },
+      }
+    })
+
+    setLocalNodes(merged)
+  }, [storeNodes, executionState])
+
+  const uiNodes = localNodes
+
   const onNodesChange = useCallback((changes: NodeChange[]) => {
-    // Filter out dimension changes which can cause infinite loops
+    // Handle dimension changes by storing them in ref
+    const dimensionChanges = changes.filter(ch => ch.type === 'dimensions') as any[]
+    for (const change of dimensionChanges) {
+      if (change.id && change.dimensions) {
+        nodeDimensionsRef.current[change.id] = {
+          width: change.dimensions.width,
+          height: change.dimensions.height,
+        }
+      }
+    }
+
+    // Filter out dimension changes for further processing
     const relevantChanges = changes.filter(change =>
       change.type !== 'dimensions'
     )
 
     if (relevantChanges.length === 0) return
 
-    // Update positions in store
-    relevantChanges.forEach((change) => {
-      if (change.type === 'position' && change.position && !change.dragging) {
-        updateNodePosition(change.id, change.position)
+    // Apply ALL changes to local state immediately for smooth dragging
+    setLocalNodes((nodes: FlowNode[]) => {
+      const updated = applyNodeChanges(relevantChanges, nodes) as FlowNode[]
+      // Also update dimensions ref from the updated nodes
+      for (const node of updated) {
+        if (node.width !== undefined && node.width !== null && node.height !== undefined && node.height !== null) {
+          nodeDimensionsRef.current[node.id] = {
+            width: node.width,
+            height: node.height,
+          }
+        }
       }
+      return updated
     })
 
-    // Apply all changes using functional update to avoid dependency on nodes
-    setNodes((currentNodes) => {
-      let newNodes = [...currentNodes]
-      relevantChanges.forEach((change) => {
-        if (change.type === 'remove') {
-          newNodes = newNodes.filter(n => n.id !== change.id)
-        } else if (change.type === 'select') {
-          newNodes = newNodes.map(n => n.id === change.id ? { ...n, selected: change.selected } : n)
-        } else if (change.type === 'position' && change.position) {
-          newNodes = newNodes.map(n => n.id === change.id ? { ...n, position: change.position! } : n)
+    // Separate position changes from others
+    const positionChanges = relevantChanges.filter(ch => ch.type === 'position') as any[]
+    const otherChanges = relevantChanges.filter(ch => ch.type !== 'position')
+
+    // Only dispatch position changes when drag ends
+    const endedDrags = positionChanges.filter(ch => !ch.dragging)
+    if (endedDrags.length > 0) {
+      // Get final positions from local state
+      setLocalNodes((nodes: FlowNode[]) => {
+        const finalChanges = endedDrags.map(ch => {
+          const node = nodes.find((n: FlowNode) => n.id === ch.id)
+          return node ? { ...ch, position: node.position } : null
+        }).filter(ch => ch && ch.position)
+
+        if (finalChanges.length > 0) {
+          dispatch('feApplyNodeChanges', finalChanges)
         }
+        return nodes
       })
-      return newNodes
-    })
-  }, [setNodes, updateNodePosition])
-  
+    }
+
+    // Dispatch non-position changes immediately
+    if (otherChanges.length > 0) {
+      dispatch('feApplyNodeChanges', otherChanges)
+    }
+  }, [dispatch])
+
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
-    setEdges((currentEdges) => {
-      return changes.reduce((acc, change) => {
-        if (change.type === 'remove') {
-          return acc.filter(e => e.id !== change.id)
-        } else if (change.type === 'select') {
-          return acc.map(e => e.id === change.id ? { ...e, selected: change.selected } : e)
-        }
-        return acc
-      }, currentEdges)
-    })
-  }, [setEdges])
+    // Compute new edges from current edges + changes
+    const newEdges = changes.reduce((acc: any, change) => {
+      if (change.type === 'remove') {
+        return acc.filter((e: any) => e.id !== change.id)
+      } else if (change.type === 'select') {
+        return acc.map((e: any) => e.id === change.id ? { ...e, selected: change.selected } : e)
+      }
+      return acc
+    }, edges)
+
+    // Only dispatch if edges actually changed
+    if (newEdges !== edges) {
+      dispatch('feSetEdges', newEdges)
+    }
+  }, [edges, dispatch])
 
   const onConnect = useCallback((connection: Connection) => {
     const sourceHandle = connection.sourceHandle
     const targetHandle = connection.targetHandle
 
-    // Determine edge color based on handles
-    let color = '#666' // Default gray
-    if (sourceHandle === 'context' || targetHandle === 'context' || targetHandle === 'input') {
-      color = '#9b59b6' // Purple for context edges
-    } else if (targetHandle === 'tools') {
-      color = '#f97316' // Orange for tools edges
-    } else if (sourceHandle === 'result' || sourceHandle === 'data') {
-      color = '#2ecc71' // Green for result/data edges
-    }
+    // Determine edge color based on handles using centralized logic
+    const color = getConnectionColorFromHandles(sourceHandle || undefined, targetHandle || undefined)
 
     const newEdge = {
       id: `${connection.source}-${connection.target}-${sourceHandle || 'data'}-${targetHandle || 'data'}`,
@@ -276,123 +313,47 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
       style: { stroke: color, strokeWidth: 2 },
       markerEnd: { type: 'arrowclosed' as any, color },
     }
-    setEdges((currentEdges) => [...currentEdges, newEdge])
-  }, [setEdges])
+    dispatch('feSetEdges', [...edges, newEdge])
+  }, [edges, dispatch])
 
   // Enhance edges with selection styling and handle-based colors
   const styledEdges = useMemo(() => {
     // Safety check: ensure edges is an array
     if (!Array.isArray(edges)) {
-      console.warn('[FlowCanvasPanel] edges is not an array:', edges)
       return []
     }
     return edges.map(edge => {
       const sourceHandle = (edge as any).sourceHandle
       const targetHandle = (edge as any).targetHandle
 
-      // Determine edge color based on handles
-      let color = '#666' // Default gray
-      if (sourceHandle === 'context' || targetHandle === 'context' || targetHandle === 'input') {
-        color = '#9b59b6' // Purple for context edges
-      } else if (targetHandle === 'tools') {
-        color = '#f97316' // Orange for tools edges
-      } else if (sourceHandle === 'result' || sourceHandle === 'data') {
-        color = '#2ecc71' // Green for result/data edges
-      }
+      // Determine edge color based on handles using centralized logic
+      const color = getConnectionColorFromHandles(sourceHandle, targetHandle)
 
       return {
         ...edge,
         type: 'smoothstep',
         animated: false,
         style: edge.selected
-          ? { stroke: '#007acc', strokeWidth: 3 }
+          ? { stroke: CONNECTION_COLORS.selected, strokeWidth: 3 }
           : { stroke: color, strokeWidth: 2 },
         markerEnd: {
           type: 'arrowclosed' as any,
-          color: edge.selected ? '#007acc' : color
+          color: edge.selected ? CONNECTION_COLORS.selected : color
         },
       }
     })
   }, [edges])
 
-  // Handle resize drag
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    isDraggingRef.current = true
-    e.preventDefault()
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDraggingRef.current) return
-      const newWidth = window.innerWidth - e.clientX
-      if (newWidth >= 200 && newWidth <= 1200) {
-        onResize(newWidth)
-      }
-    }
-
-    const handleMouseUp = () => {
-      isDraggingRef.current = false
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-    }
-
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-  }, [onResize])
-
-  if (collapsed) {
-    return (
-      <div style={{ 
-        width: 40, 
-        background: '#252526', 
-        borderLeft: '1px solid #3e3e42',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        paddingTop: 12
-      }}>
-        <ActionIcon
-          onClick={onToggleCollapse}
-          variant="subtle"
-          color="gray"
-          title="Expand flow canvas"
-        >
-          <IconChevronLeft size={18} />
-        </ActionIcon>
-      </div>
-    )
-  }
-  
   return (
     <div style={{
-      width,
+      width: '100%',
+      height: '100%',
       display: 'flex',
       flexDirection: 'column',
       borderLeft: '1px solid #3e3e42',
       background: '#1e1e1e',
       position: 'relative'
     }}>
-      {/* Resize handle */}
-      <div
-        ref={resizeRef}
-        onMouseDown={handleMouseDown}
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: 4,
-          cursor: 'ew-resize',
-          zIndex: 10,
-          background: 'transparent',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = '#007acc'
-        }}
-        onMouseLeave={(e) => {
-          if (!isDraggingRef.current) {
-            e.currentTarget.style.background = 'transparent'
-          }
-        }}
-      />
       {/* Toolbar */}
       <div style={{
         padding: '8px 12px',
@@ -404,15 +365,6 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
         gap: 12
       }}>
         <Group gap="xs">
-          <ActionIcon
-            onClick={onToggleCollapse}
-            variant="subtle"
-            color="gray"
-            size="sm"
-            title="Collapse flow canvas"
-          >
-            <IconChevronRight size={16} />
-          </ActionIcon>
 
           {/* Hybrid Flow Selector with CRUD operations */}
           <Menu shadow="md" width={280} position="bottom-start">
@@ -468,7 +420,7 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
 
               <Menu.Item
                 leftSection={<IconPlus size={14} />}
-                onClick={() => setSaveAsModalOpen(true)}
+                onClick={() => dispatch('feSetSaveAsModalOpen', true)}
                 style={{ fontSize: 12 }}
               >
                 Save As New...
@@ -480,9 +432,9 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
                     leftSection={<IconCopy size={14} />}
                     onClick={() => {
                       // Duplicate: open save as with current name + " Copy"
-                      const currentName = availableTemplates?.find(t => t.id === selectedTemplate)?.name || selectedTemplate
-                      setNewProfileName(`${currentName} Copy`)
-                      setSaveAsModalOpen(true)
+                      const currentName = availableTemplates?.find((t: any) => t.id === selectedTemplate)?.name || selectedTemplate
+                      dispatch('feSetNewProfileName', `${currentName} Copy`)
+                      dispatch('feSetSaveAsModalOpen', true)
                     }}
                     style={{ fontSize: 12 }}
                   >
@@ -494,7 +446,7 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
                     color="red"
                     onClick={async () => {
                       if (confirm(`Delete profile "${selectedTemplate}"?`)) {
-                        await deleteProfile(selectedTemplate)
+                        await dispatch('feDeleteProfile', selectedTemplate)
                       }
                     }}
                     style={{ fontSize: 12 }}
@@ -531,10 +483,9 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
           </Button>
 
           {status === 'running' && <Badge size="sm" color="green">Running</Badge>}
-          {(status === 'paused' || status === 'waitingForInput') && (
+          {status === 'waitingForInput' && (
             <Badge size="sm" color="yellow">
-              {status === 'waitingForInput' ? 'Waiting' : 'Paused'}
-              {pausedNode ? ` at ${pausedNode}` : ''}
+              Waiting{pausedNode ? ` at ${pausedNode}` : ''}
             </Badge>
           )}
         </Group>
@@ -545,7 +496,7 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
               <Button
                 size="xs"
                 leftSection={<IconPlayerStop size={14} />}
-                onClick={stop}
+                onClick={() => dispatch('feStop')}
                 variant="filled"
                 color="red"
               >
@@ -553,12 +504,12 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
               </Button>
             </>
           )}
-          {(status === 'paused' || status === 'waitingForInput') && (
+          {status === 'waitingForInput' && (
             <>
               <Button
                 size="xs"
                 leftSection={<IconPlayerStop size={14} />}
-                onClick={stop}
+                onClick={() => dispatch('feStop')}
                 variant="filled"
                 color="red"
               >
@@ -566,11 +517,11 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
               </Button>
             </>
           )}
-          {status !== 'running' && status !== 'paused' && status !== 'waitingForInput' && (
+          {status === 'stopped' && (
             <Button
               size="xs"
               leftSection={<IconRefresh size={14} />}
-              onClick={feInit}
+              onClick={() => dispatch('flowInit')}
               variant="filled"
               color="blue"
             >
@@ -584,8 +535,8 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
       <Modal
         opened={saveAsModalOpen}
         onClose={() => {
-          setSaveAsModalOpen(false)
-          setNewProfileName('')
+          dispatch('feSetSaveAsModalOpen', false)
+          dispatch('feSetNewProfileName', '')
         }}
         title="Save Flow Profile As"
         size="sm"
@@ -594,7 +545,7 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
           label="Profile Name"
           placeholder="Enter profile name"
           value={newProfileName}
-          onChange={(e) => setNewProfileName(e.currentTarget.value)}
+          onChange={(e) => dispatch('feSetNewProfileName', e.currentTarget.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               handleSaveAs()
@@ -606,8 +557,8 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
           <Button
             variant="subtle"
             onClick={() => {
-              setSaveAsModalOpen(false)
-              setNewProfileName('')
+              dispatch('feSetSaveAsModalOpen', false)
+              dispatch('feSetNewProfileName', '')
             }}
           >
             Cancel
@@ -649,68 +600,9 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
 
       {/* ReactFlow Canvas */}
       <div style={{ flex: 1, background: '#1e1e1e', position: 'relative' }}>
-        {/* Floating Node Palette */}
-        <div style={{
-          position: 'absolute',
-          top: 12,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 10,
-          background: '#252526',
-          border: '1px solid #3e3e42',
-          borderRadius: 8,
-          padding: '8px 12px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-          display: 'flex',
-          gap: 8,
-          alignItems: 'center',
-          maxWidth: '90%',
-          overflowX: 'auto'
-        }}>
-          <Text size="xs" fw={600} c="dimmed" style={{ marginRight: 4 }}>Add Node:</Text>
-          {NODE_PALETTE.map((p) => (
-            <div
-              key={p.kind}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData('application/reactflow', p.kind)
-                e.dataTransfer.effectAllowed = 'move'
-              }}
-              style={{
-                padding: '6px 12px',
-                background: KIND_COLORS[p.kind] || '#4a4a4a',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 6,
-                cursor: 'grab',
-                color: '#ffffff',
-                fontSize: 12,
-                fontWeight: 500,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                whiteSpace: 'nowrap',
-                transition: 'all 0.2s ease',
-                boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = 'translateY(-2px)'
-                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.3)'
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = 'translateY(0)'
-                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)'
-              }}
-              title={p.description}
-            >
-              <span style={{ fontSize: 14 }}>{p.icon}</span>
-              <span>{p.label}</span>
-            </div>
-          ))}
-        </div>
-
         <ReactFlow
           ref={rfRef}
-          nodes={uiNodes}
+          nodes={uiNodes as FlowNode[]}
           edges={styledEdges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
@@ -719,13 +611,19 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
             event.preventDefault()
             const kind = event.dataTransfer.getData('application/reactflow')
             if (!kind) return
-            const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
-            const point = rfRef.current?.project
-              ? rfRef.current.project({ x: event.clientX - bounds.left, y: event.clientY - bounds.top })
-              : { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+
+            // Get the ReactFlow wrapper bounds
+
+            // Calculate position in flow coordinates using screenToFlowPosition
+            const position = reactFlowInstance.screenToFlowPosition({
+              x: event.clientX,
+              y: event.clientY,
+            })
+
+
             const match = NODE_PALETTE.find((p) => p.kind === kind)
             const label = match?.label || kind
-            addNode(kind, point, label)
+            dispatch('feAddNode', { kind, pos: position, label })
           }}
           onDragOver={(event) => {
             event.preventDefault()
@@ -735,8 +633,8 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
           defaultEdgeOptions={{
             type: 'smoothstep',
             animated: false,
-            style: { stroke: '#666', strokeWidth: 2 },
-            markerEnd: { type: 'arrowclosed' as any, color: '#666' }
+            style: { stroke: CONNECTION_COLORS.default, strokeWidth: 2 },
+            markerEnd: { type: 'arrowclosed' as any, color: CONNECTION_COLORS.default }
           }}
           fitView
           style={{ background: '#1e1e1e' }}
@@ -749,15 +647,7 @@ export default function FlowCanvasPanel({ collapsed, onToggleCollapse, width, on
             style={{ background: '#252526', border: '1px solid #3e3e42' }}
             nodeColor={(node) => {
               const kind = (node.data as any)?.kind
-              const colors: Record<string, string> = {
-                userMessage: '#4a9eff',
-                chat: '#a855f7',
-                redactor: '#14b8a6',
-                budgetGuard: '#f59e0b',
-                errorDetection: '#f97316',
-                approvalGate: '#ef4444',
-              }
-              return colors[kind] || '#808080'
+              return getNodeColor(kind)
             }}
           />
         </ReactFlow>

@@ -221,7 +221,7 @@ function getSettingsPath(): string {
 /**
  * Load workspace settings
  */
-async function loadWorkspaceSettings(): Promise<Record<string, any>> {
+export async function loadWorkspaceSettings(): Promise<Record<string, any>> {
   try {
     const settingsPath = getSettingsPath()
     const content = await fs.readFile(settingsPath, 'utf-8')
@@ -234,7 +234,7 @@ async function loadWorkspaceSettings(): Promise<Record<string, any>> {
 /**
  * Save workspace settings
  */
-async function saveWorkspaceSettings(settings: Record<string, any>): Promise<void> {
+export async function saveWorkspaceSettings(settings: Record<string, any>): Promise<void> {
   const settingsPath = getSettingsPath()
   const privateDir = path.dirname(settingsPath)
   await ensureDir(privateDir)
@@ -256,27 +256,18 @@ export function registerWorkspaceHandlers(ipcMain: IpcMain): void {
    * Set workspace root
    */
   ipcMain.handle('workspace:set-root', async (_e, newRoot: string) => {
-    const t0 = performance.now()
-    console.log('[workspace] workspace:set-root starting...')
     try {
-      const t1 = performance.now()
       const resolved = path.resolve(newRoot)
       // Verify the directory exists
       await fs.access(resolved)
-      console.log(`[workspace] Verify directory: ${(performance.now() - t1).toFixed(2)}ms`)
 
       // Update APP_ROOT
-      const t2 = performance.now()
       process.env.APP_ROOT = resolved
-      console.log(`[workspace] Update APP_ROOT: ${(performance.now() - t2).toFixed(2)}ms`)
 
       // Reinitialize indexer with new root
-      const t3 = performance.now()
       resetIndexer()
       getIndexer()
-      console.log(`[workspace] Reinitialize indexer: ${(performance.now() - t3).toFixed(2)}ms`)
 
-      console.log(`[workspace] workspace:set-root TOTAL: ${(performance.now() - t0).toFixed(2)}ms`)
       return { ok: true }
     } catch (error) {
       return { ok: false, error: String(error) }

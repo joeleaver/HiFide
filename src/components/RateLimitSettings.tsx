@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { RateLimitKind } from '../store'
 
 import { Card, Stack, Group, Text, Accordion, Table, NumberInput, Switch, Badge } from '@mantine/core'
-import { useAppStore, selectModelsByProvider, selectRateLimitConfig } from '../store'
+import { useAppStore, useDispatch, selectModelsByProvider, selectRateLimitConfig } from '../store'
 import { DEFAULT_PRICING } from '../data/defaultPricing'
 
 export default function RateLimitSettings() {
@@ -10,11 +10,8 @@ export default function RateLimitSettings() {
   const modelsByProvider = useAppStore(selectModelsByProvider)
   const rateLimitConfig = useAppStore(selectRateLimitConfig)
 
-  // Actions only - these don't cause re-renders
-  const loadRateLimitConfig = useAppStore((s) => s.loadRateLimitConfig)
-  const toggleRateLimiting = useAppStore((s) => s.toggleRateLimiting)
-
-  useEffect(() => { loadRateLimitConfig() }, [loadRateLimitConfig])
+  // Use dispatch to call actions
+  const dispatch = useDispatch()
 
   const [expanded, setExpanded] = useState<string | null>(null)
 
@@ -33,7 +30,7 @@ export default function RateLimitSettings() {
             <Switch
               size="sm"
               checked={!!rateLimitConfig.enabled}
-              onChange={(e) => toggleRateLimiting(e.currentTarget.checked)}
+              onChange={(e) => dispatch('toggleRateLimiting', e.currentTarget.checked)}
               onLabel="On"
               offLabel="Off"
             />
@@ -60,7 +57,7 @@ export default function RateLimitSettings() {
 
 function ProviderLimits({ provider, title, models }: { provider: 'openai'|'anthropic'|'gemini'; title: string; models: Array<{ value: string; label: string }> }) {
   const rateLimitConfig = useAppStore((s) => s.rateLimitConfig)
-  const setRateLimitForModel = useAppStore((s) => s.setRateLimitForModel)
+  const dispatch = useDispatch()
 
   // Show fields only for the filtered list of models we already surface in Pricing (those with default pricing entries)
   const rows = useMemo(() => {
@@ -114,23 +111,23 @@ function ProviderLimits({ provider, title, models }: { provider: 'openai'|'anthr
                 <Table.Tr key={m.value}>
                   <Table.Td><Text size="xs" c="#cccccc">{m.label}</Text></Table.Td>
                   <Table.Td>
-                    <NumberInput size="xs" value={limits.rpm ?? '' as any} onChange={(v) => setRateLimitForModel(provider, m.value, { ...limits, rpm: typeof v === 'number' ? v : undefined })} min={0} step={1}
+                    <NumberInput size="xs" value={limits.rpm ?? '' as any} onChange={(v) => dispatch('setRateLimitForModel', { provider, model: m.value, limits: { ...limits, rpm: typeof v === 'number' ? v : undefined } })} min={0} step={1}
                       styles={{ input: { backgroundColor: '#252526', border: '1px solid #3e3e42', color: '#cccccc' } }} />
                   </Table.Td>
                   <Table.Td>
-                    <NumberInput size="xs" value={limits.tpmTotal ?? '' as any} onChange={(v) => setRateLimitForModel(provider, m.value, { ...limits, tpmTotal: typeof v === 'number' ? v : undefined })} min={0} step={100}
+                    <NumberInput size="xs" value={limits.tpmTotal ?? '' as any} onChange={(v) => dispatch('setRateLimitForModel', { provider, model: m.value, limits: { ...limits, tpmTotal: typeof v === 'number' ? v : undefined } })} min={0} step={100}
                       styles={{ input: { backgroundColor: '#252526', border: '1px solid #3e3e42', color: '#cccccc' } }} />
                   </Table.Td>
                   <Table.Td>
-                    <NumberInput size="xs" value={limits.tpmInput ?? '' as any} onChange={(v) => setRateLimitForModel(provider, m.value, { ...limits, tpmInput: typeof v === 'number' ? v : undefined })} min={0} step={100}
+                    <NumberInput size="xs" value={limits.tpmInput ?? '' as any} onChange={(v) => dispatch('setRateLimitForModel', { provider, model: m.value, limits: { ...limits, tpmInput: typeof v === 'number' ? v : undefined } })} min={0} step={100}
                       styles={{ input: { backgroundColor: '#252526', border: '1px solid #3e3e42', color: '#cccccc' } }} />
                   </Table.Td>
                   <Table.Td>
-                    <NumberInput size="xs" value={limits.tpmOutput ?? '' as any} onChange={(v) => setRateLimitForModel(provider, m.value, { ...limits, tpmOutput: typeof v === 'number' ? v : undefined })} min={0} step={100}
+                    <NumberInput size="xs" value={limits.tpmOutput ?? '' as any} onChange={(v) => dispatch('setRateLimitForModel', { provider, model: m.value, limits: { ...limits, tpmOutput: typeof v === 'number' ? v : undefined } })} min={0} step={100}
                       styles={{ input: { backgroundColor: '#252526', border: '1px solid #3e3e42', color: '#cccccc' } }} />
                   </Table.Td>
                   <Table.Td>
-                    <NumberInput size="xs" value={limits.maxConcurrent ?? '' as any} onChange={(v) => setRateLimitForModel(provider, m.value, { ...limits, maxConcurrent: typeof v === 'number' ? v : undefined })} min={0} step={1}
+                    <NumberInput size="xs" value={limits.maxConcurrent ?? '' as any} onChange={(v) => dispatch('setRateLimitForModel', { provider, model: m.value, limits: { ...limits, maxConcurrent: typeof v === 'number' ? v : undefined } })} min={0} step={1}
                       styles={{ input: { backgroundColor: '#252526', border: '1px solid #3e3e42', color: '#cccccc' } }} />
                   </Table.Td>
                 </Table.Tr>

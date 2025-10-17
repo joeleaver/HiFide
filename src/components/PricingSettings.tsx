@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Card, Stack, Group, Text, Button, Accordion, Table, NumberInput, Badge } from '@mantine/core'
-import { useAppStore, selectModelsByProvider, selectPricingConfig } from '../store'
+import { useAppStore, useDispatch, selectModelsByProvider, selectPricingConfig } from '../store'
 import { DEFAULT_PRICING, type ModelPricing } from '../data/defaultPricing'
 
 export default function PricingSettings() {
@@ -8,10 +8,8 @@ export default function PricingSettings() {
   const modelsByProvider = useAppStore(selectModelsByProvider)
   const pricingConfig = useAppStore(selectPricingConfig)
 
-  // Actions only - these don't cause re-renders
-  const setPricingForModel = useAppStore((s) => s.setPricingForModel)
-  const resetPricingToDefaults = useAppStore((s) => s.resetPricingToDefaults)
-  const resetProviderPricing = useAppStore((s) => s.resetProviderPricing)
+  // Use dispatch for actions
+  const dispatch = useDispatch()
   
   const [expanded, setExpanded] = useState<string | null>(null)
   
@@ -32,7 +30,7 @@ export default function PricingSettings() {
             size="xs"
             variant="light"
             color="red"
-            onClick={() => resetPricingToDefaults()}
+            onClick={() => dispatch('resetPricingToDefaults')}
             disabled={!pricingConfig.customRates}
           >
             Reset All to Defaults
@@ -70,7 +68,7 @@ export default function PricingSettings() {
                   style={{ cursor: 'pointer', textDecoration: 'underline' }}
                   onClick={(e) => {
                     e.stopPropagation()
-                    resetProviderPricing('openai')
+                    dispatch('resetProviderPricing', 'openai')
                   }}
                 >
                   Reset
@@ -82,7 +80,7 @@ export default function PricingSettings() {
                 provider="openai"
                 models={modelsByProvider.openai || []}
                 pricing={pricingConfig.openai}
-                onUpdate={(model, pricing) => setPricingForModel('openai', model, pricing)}
+                onUpdate={(model, pricing) => dispatch('setPricingForModel', { provider: 'openai', model, pricing })}
               />
             </Accordion.Panel>
           </Accordion.Item>
@@ -98,7 +96,7 @@ export default function PricingSettings() {
                   style={{ cursor: 'pointer', textDecoration: 'underline' }}
                   onClick={(e) => {
                     e.stopPropagation()
-                    resetProviderPricing('anthropic')
+                    dispatch('resetProviderPricing', 'anthropic')
                   }}
                 >
                   Reset
@@ -110,7 +108,7 @@ export default function PricingSettings() {
                 provider="anthropic"
                 models={modelsByProvider.anthropic || []}
                 pricing={pricingConfig.anthropic}
-                onUpdate={(model, pricing) => setPricingForModel('anthropic', model, pricing)}
+                onUpdate={(model, pricing) => dispatch('setPricingForModel', { provider: 'anthropic', model, pricing })}
               />
             </Accordion.Panel>
           </Accordion.Item>
@@ -126,7 +124,7 @@ export default function PricingSettings() {
                   style={{ cursor: 'pointer', textDecoration: 'underline' }}
                   onClick={(e) => {
                     e.stopPropagation()
-                    resetProviderPricing('gemini')
+                    dispatch('resetProviderPricing', 'gemini')
                   }}
                 >
                   Reset
@@ -138,7 +136,7 @@ export default function PricingSettings() {
                 provider="gemini"
                 models={modelsByProvider.gemini || []}
                 pricing={pricingConfig.gemini}
-                onUpdate={(model, pricing) => setPricingForModel('gemini', model, pricing)}
+                onUpdate={(model, pricing) => dispatch('setPricingForModel', { provider: 'gemini', model, pricing })}
               />
             </Accordion.Panel>
           </Accordion.Item>

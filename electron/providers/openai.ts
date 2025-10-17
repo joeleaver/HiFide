@@ -81,20 +81,14 @@ export const OpenAIProvider: ProviderAdapter = {
               const sysText = (messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')) || ''
               onConversationMeta?.({ provider: 'openai', sessionId, lastResponseId: String(finalResponse?.id || ''), preambleHash: hashStr(sysText) })
             } catch {}
-            console.log('[OpenAI chatStream] Final response usage:', finalResponse?.usage)
             if (finalResponse?.usage && onTokenUsage) {
               const usage = {
                 inputTokens: finalResponse.usage.input_tokens || 0,
                 outputTokens: finalResponse.usage.output_tokens || 0,
                 totalTokens: finalResponse.usage.total_tokens || 0,
               }
-              console.log('[OpenAI chatStream] Calling onTokenUsage with:', usage)
               onTokenUsage(usage)
             } else {
-              console.log('[OpenAI chatStream] No usage data or no callback:', {
-                hasUsage: !!finalResponse?.usage,
-                hasCallback: !!onTokenUsage
-              })
             }
           } catch (e) {
             // Token usage extraction failed, continue anyway
@@ -165,14 +159,6 @@ export const OpenAIProvider: ProviderAdapter = {
       })
 
     // Debug logging
-    console.log('[OpenAI Provider] agentStream called with:', {
-      model,
-      toolCount: tools.length,
-      oaToolsCount: oaTools.length,
-      toolNames: tools.map(t => t?.name),
-      hasResponseSchema: !!responseSchema
-    })
-    console.log('[OpenAI Provider] Formatted tools (Responses API format):', JSON.stringify(oaTools.slice(0, 2), null, 2))
 
     // Responses API uses a different format than Chat Completions
     // Input can be: { role, content } OR { type, call_id, output } for function results
@@ -249,18 +235,10 @@ export const OpenAIProvider: ProviderAdapter = {
               const prev = openAIConversations.get(stateKey)?.lastResponseId
               if (prev) (opts as any).previous_response_id = prev
             } catch {}
-            console.log('[OpenAI Provider] Sending request with options:', JSON.stringify({
-              model: opts.model,
-              hasTools: !!opts.tools,
-              toolsCount: opts.tools?.length,
-              firstToolName: opts.tools?.[0]?.function?.name,
-              toolChoice: opts.tool_choice
-            }, null, 2))
             stream = await withRetries(() => Promise.resolve(client.responses.stream(opts)))
           } catch (err: any) {
             const msg = err?.message || ''
             if (useResponseFormat && (err?.status === 400 || /response_format|text\.format|json_schema|unsupported/i.test(msg))) {
-              console.warn('[OpenAI Provider] Structured output failed, retrying without schema:', msg)
               useResponseFormat = false
               stream = await withRetries(() => Promise.resolve(client.responses.stream(mkOpts(false))))
             } else {
@@ -294,7 +272,6 @@ export const OpenAIProvider: ProviderAdapter = {
                 if (textToAdd) {
                   // Skip if this would create a duplicate (text equals entire buffer so far)
                   if (textToAdd === turnBuffer) {
-                    console.log('[OpenAI Provider] Skipping duplicate text chunk:', textToAdd.substring(0, 50))
                   } else {
                     turnBuffer += textToAdd
                   }
@@ -305,9 +282,6 @@ export const OpenAIProvider: ProviderAdapter = {
 
           // After stream completes, get the final response with complete output array
           const finalResponse = await stream.finalResponse()
-          console.log('[OpenAI Provider] Final response output:', JSON.stringify(finalResponse?.output, null, 2))
-          console.log('[OpenAI Provider] Final response usage:', JSON.stringify(finalResponse?.usage, null, 2))
-          console.log('[OpenAI Provider] Final response keys:', Object.keys(finalResponse || {}))
           // Persist response id for session chaining
           try {
             const stateKey = sessionId || 'global'
@@ -345,7 +319,6 @@ export const OpenAIProvider: ProviderAdapter = {
             }
           }
 
-          console.log('[OpenAI Provider] Parsed tool calls:', toolCalls.map(tc => ({ id: tc.id, name: tc.name })))
 
           if (toolCalls.length > 0) {
             // Execute tool calls sequentially to avoid rate limits
@@ -418,21 +391,15 @@ export const OpenAIProvider: ProviderAdapter = {
           }
           // Extract token usage from final response
           try {
-            console.log('[OpenAI agentStream] Final response usage:', finalResponse?.usage)
             if (finalResponse?.usage && onTokenUsage) {
               const usage = {
                 inputTokens: finalResponse.usage.input_tokens || 0,
                 outputTokens: finalResponse.usage.output_tokens || 0,
                 totalTokens: finalResponse.usage.total_tokens || 0,
               }
-              console.log('[OpenAI agentStream] Calling onTokenUsage with:', usage)
               cumulativeTokens += usage.totalTokens
               onTokenUsage(usage)
             } else {
-              console.log('[OpenAI agentStream] No usage data or no callback:', {
-                hasUsage: !!finalResponse?.usage,
-                hasCallback: !!onTokenUsage
-              })
             }
           } catch (e) {
             console.error('[OpenAI agentStream] Error extracting token usage:', e)

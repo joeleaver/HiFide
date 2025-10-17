@@ -5,12 +5,15 @@
  */
 
 /**
- * ExecutionContext - The execution environment for a node
- * 
- * This is the primary object passed through the flow execution.
- * It contains everything a node needs to execute and communicate with LLMs.
+ * MainFlowContext - Pure conversation state passed through the flow
+ *
+ * This is the essential conversation state that nodes need to maintain
+ * conversation continuity. It contains only what's needed to continue
+ * a conversation with an LLM - no internal plumbing or scheduler state.
+ *
+ * This type will be used later when we support multiple disconnected contexts.
  */
-export interface ExecutionContext {
+export interface MainFlowContext {
   /**
    * Unique identifier for this context (e.g., 'main', or a newContext node ID)
    * Multiple nodes can share the same context to maintain conversation continuity.
@@ -24,56 +27,36 @@ export interface ExecutionContext {
   provider: string
 
   /**
-   * Model identifier (e.g., 'gpt-5', 'claude-3-3-sonnet', 'gemini-1.5-pro')
+   * Model identifier (e.g., 'gpt-4o', 'claude-3-5-sonnet', 'gemini-1.5-pro')
    * Specific model within the provider to use.
    */
   model: string
 
   /**
    * Optional system instructions for this context
-   * Sent as the first message to guide the LLM's behavior.
-   * Only sent once at the start of a conversation.
+   * Corresponds to developer message in GPT (may differ in other models).
+   * Sent to guide the LLM's behavior.
    */
   systemInstructions?: string
 
   /**
    * Conversation history for this context
    * Shared across all nodes using the same contextId.
-   * 
-   * For OpenAI/Gemini: Only used for tracking, actual history managed server-side via sessionId
-   * For Anthropic: Sent with every request (no server-side session management)
+   * Contains the full conversation between user and assistant.
    */
   messageHistory: Array<{
     role: 'system' | 'user' | 'assistant'
     content: string
   }>
+}
 
-  /**
-   * Session ID for provider-native session management
-   * Used by OpenAI and Gemini to maintain server-side conversation state.
-   * Allows sending only the current message instead of full history.
-   * 
-   * Format: `${contextId}` (same as contextId for simplicity)
-   */
+/**
+ * @deprecated Use MainFlowContext instead
+ * Kept temporarily for backwards compatibility during refactor
+ */
+export type ExecutionContext = MainFlowContext & {
   sessionId: string
-
-  /**
-   * Current output value from the most recent node in this context
-   * Used for context propagation - when a node passes context to the next node,
-   * this contains the output that should be used as input.
-   */
   currentOutput: string
-
-  /**
-   * Internal: WebContents for sending events to renderer
-   * Prefixed with _ to indicate it's not part of the conversation state
-   */
-  _wc?: any
-
-  /**
-   * Internal: Request ID for this flow execution
-   * Prefixed with _ to indicate it's not part of the conversation state
-   */
   _requestId?: string
 }
 
@@ -90,19 +73,19 @@ export interface ExecutionContext {
 export interface NodeOutput {
   /**
    * Context output - ALWAYS present
-   * The updated execution context after this node runs.
+   * The updated main flow context after this node runs.
    * Flows through 'context' handle.
    *
    * Every node must output context, even if unchanged.
    */
-  context: ExecutionContext
+  context: MainFlowContext
 
   /**
    * Data output - OPTIONAL
    * Simple data values produced by this node.
    * Examples:
    * - userInput node: the user's message string
-   * - chat node: the assistant's response string
+   * - llmRequest node: the assistant's response string
    *
    * Flows through 'data' handle.
    */
@@ -110,7 +93,7 @@ export interface NodeOutput {
 
   /**
    * Tools output - OPTIONAL
-   * Array of tool definitions for chat nodes.
+   * Array of tool definitions for LLM Request nodes.
    * Only used by tools node.
    * Flows through 'tools' handle.
    */
@@ -145,14 +128,14 @@ export interface NodeOutput {
  * NodeFunction - The signature for all node implementations
  *
  * Nodes receive three types of inputs:
- * 1. contextIn: Execution context from predecessor (via context edge)
+ * 1. context: Main flow context from predecessor (via context edge)
  * 2. dataIn: Simple data value from predecessor (via data edge)
  * 3. config: Node-specific configuration
  *
  * Additional inputs (like tools) come via the inputs object.
  */
 export type NodeFunction = (
-  contextIn: ExecutionContext,
+  context: MainFlowContext,
   dataIn: any,
   inputs: Record<string, any>,
   config: Record<string, any>
@@ -199,7 +182,7 @@ export type NodeReExecutable = boolean
  */
 export interface FlowNode {
   id: string
-  type: string // Node type (e.g., 'chat', 'userInput', 'tools')
+  type: string // Node type (e.g., 'llmRequest', 'userInput', 'tools')
   config?: Record<string, any> // Node-specific configuration
   position?: { x: number; y: number } // UI position
   data?: any // Additional data

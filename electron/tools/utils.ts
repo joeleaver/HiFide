@@ -4,6 +4,8 @@
 
 import path from 'node:path'
 import fs from 'node:fs/promises'
+import * as logging from '../utils/logging'
+import * as edits from '../ipc/edits'
 
 /**
  * Resolve a path within the workspace, preventing directory traversal
@@ -30,7 +32,6 @@ export async function atomicWrite(filePath: string, content: string) {
  */
 export async function logEvent(sessionId: string, type: string, payload: any) {
   try {
-    const logging = await import('../utils/logging')
     await logging.logEvent(sessionId, type, payload)
   } catch {}
 }
@@ -75,8 +76,7 @@ export function redactOutput(input: string): { redacted: string; bytesRedacted: 
 /**
  * Apply file edits using the edits module
  */
-export async function applyFileEditsInternal(edits: any[] = [], opts: { dryRun?: boolean; verify?: boolean; tsconfigPath?: string } = {}) {
-  const mod = await import('../ipc/edits')
-  return (mod as any).applyFileEditsInternal(edits, opts)
+export async function applyFileEditsInternal(editsArray: any[] = [], opts: { dryRun?: boolean; verify?: boolean; tsconfigPath?: string } = {}) {
+  return (edits as any).applyFileEditsInternal(editsArray, opts)
 }
 

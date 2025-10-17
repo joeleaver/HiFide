@@ -1,0 +1,21 @@
+{
+  "context": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [],
+    "currentOutput": "",
+    "sessionId": "test-session-1760553298840"
+  },
+  "data": "Yes, that sounds good",
+  "status": "success",
+  "yes-context": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [],
+    "currentOutput": "",
+    "sessionId": "test-session-1760553298840"
+  },
+  "yes-data": "Yes, that sounds good"
+}

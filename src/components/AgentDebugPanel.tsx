@@ -1,20 +1,53 @@
 import { Stack, Text, ScrollArea, Badge, Group, UnstyledButton } from '@mantine/core'
-import { IconTrash, IconChevronDown, IconChevronUp } from '@tabler/icons-react'
-import { useAppStore, selectDebugPanelCollapsed } from '../store'
+import { IconTrash } from '@tabler/icons-react'
+import { useAppStore, useDispatch, selectDebugPanelCollapsed, selectSessions, selectCurrentId } from '../store'
+import { useRef, useEffect, useState } from 'react'
+import CollapsiblePanel from './CollapsiblePanel'
 
 export default function AgentDebugPanel() {
-  // Use selectors for better performance
-  const debugPanelCollapsed = useAppStore(selectDebugPanelCollapsed)
+  const dispatch = useDispatch()
 
-  // Flow events
-  const flowEvents = useAppStore((s) => s.feEvents)
+  // Read from windowState
+  const initialCollapsed = useAppStore(selectDebugPanelCollapsed)
+  const initialHeight = useAppStore((s) => s.windowState.debugPanelHeight)
 
-  // Get actions
-  const { setDebugPanelCollapsed, feClearLogs } = useAppStore()
+  const [collapsed, setCollapsed] = useState(initialCollapsed)
+  const [height, setHeight] = useState(initialHeight)
+
+  const sessions = useAppStore(selectSessions)
+  const currentId = useAppStore(selectCurrentId)
+
+  // Get flow debug logs from current session
+  const currentSession = sessions.find((s) => s.id === currentId)
+  const flowEvents = currentSession?.flowDebugLogs || []
+
+  // Smart auto-scroll: track if user has manually scrolled up
+  const scrollAreaRef = useRef<HTMLDivElement>(null)
+  const [userHasScrolledUp, setUserHasScrolledUp] = useState(false)
+  const prevEventsLengthRef = useRef(flowEvents.length)
+
+  // Auto-scroll to bottom when new events arrive (unless user has scrolled up)
+  useEffect(() => {
+    if (flowEvents.length > prevEventsLengthRef.current && !userHasScrolledUp) {
+      // New events arrived and user hasn't scrolled up - scroll to bottom
+      const viewport = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]')
+      if (viewport) {
+        viewport.scrollTop = viewport.scrollHeight
+      }
+    }
+    prevEventsLengthRef.current = flowEvents.length
+  }, [flowEvents.length, userHasScrolledUp])
+
+  // Detect when user scrolls up
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const viewport = e.currentTarget
+    const isAtBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 10
+    setUserHasScrolledUp(!isAtBottom)
+  }
 
   // Clear flow events
   const handleClearAll = () => {
-    feClearLogs()
+    dispatch('clearFlowDebugLogs')
   }
 
   const formatTime = (timestamp: number) => {
@@ -29,85 +62,63 @@ export default function AgentDebugPanel() {
     return `${timeStr}.${ms}`
   }
 
-  return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#1e1e1e' }}>
-      {/* Header bar - always visible */}
-      <div
-        style={{
-          padding: debugPanelCollapsed ? '6px 12px' : '6px 12px 5px 12px',
-          borderBottom: debugPanelCollapsed ? 'none' : '1px solid #3e3e42',
-          backgroundColor: '#252526',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <Group gap="xs">
-          <Text size="xs" fw={600} c="dimmed">
-            FLOW DEBUG
-          </Text>
-          {flowEvents.length > 0 && (
-            <Badge size="xs" variant="light" color="gray">
-              {flowEvents.length}
-            </Badge>
-          )}
-        </Group>
-        <Group gap="xs">
-          {flowEvents.length > 0 && !debugPanelCollapsed && (
-            <UnstyledButton
-              onClick={handleClearAll}
-              title="Clear all logs"
-              style={{
-                color: '#888',
-                display: 'flex',
-                alignItems: 'center',
-                padding: '2px',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.color = '#fff'
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.color = '#888'
-              }}
-            >
-              <IconTrash size={14} />
-            </UnstyledButton>
-          )}
-          <UnstyledButton
-            onClick={() => setDebugPanelCollapsed(!debugPanelCollapsed)}
-            style={{
-              color: '#888',
-              display: 'flex',
-              alignItems: 'center',
-              padding: '2px',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = '#fff'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = '#888'
-            }}
-          >
-            {debugPanelCollapsed ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
-          </UnstyledButton>
-        </Group>
-      </div>
+  const clearButton = flowEvents.length > 0 && !collapsed ? (
+    <UnstyledButton
+      onClick={handleClearAll}
+      title="Clear all logs"
+      style={{
+        color: '#888',
+        display: 'flex',
+        alignItems: 'center',
+        padding: '2px',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.color = '#fff'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.color = '#888'
+      }}
+    >
+      <IconTrash size={14} />
+    </UnstyledButton>
+  ) : null
 
-      {/* Content area - hidden when collapsed */}
-      {!debugPanelCollapsed && (
-        <div style={{ flex: 1, overflow: 'hidden' }}>
-          {flowEvents.length === 0 ? (
-            <div style={{ padding: '12px' }}>
-              <Text size="xs" c="dimmed" style={{ fontStyle: 'italic' }}>
-                No flow events yet. Events will appear here when the flow executes.
-              </Text>
-            </div>
-          ) : (
-            <ScrollArea style={{ height: '100%' }} type="auto">
-              <div style={{ padding: '12px' }}>
-                <Stack gap={4}>
+  return (
+    <CollapsiblePanel
+      title="FLOW DEBUG"
+      collapsed={collapsed}
+      onToggleCollapse={() => {
+        const newCollapsed = !collapsed
+        setCollapsed(newCollapsed)
+        dispatch('updateWindowState', { debugPanelCollapsed: newCollapsed })
+      }}
+      height={height}
+      onHeightChange={(newHeight) => {
+        setHeight(newHeight)
+        dispatch('updateWindowState', { debugPanelHeight: newHeight })
+      }}
+      minHeight={150}
+      maxHeight={600}
+      badge={flowEvents.length > 0 ? flowEvents.length : undefined}
+      actions={clearButton}
+    >
+      {flowEvents.length === 0 ? (
+        <div style={{ padding: '12px' }}>
+          <Text size="xs" c="dimmed" style={{ fontStyle: 'italic' }}>
+            No flow events yet. Events will appear here when the flow executes.
+          </Text>
+        </div>
+      ) : (
+        <ScrollArea
+          ref={scrollAreaRef}
+          style={{ height: '100%' }}
+          type="auto"
+          onScrollCapture={handleScroll}
+        >
+          <div style={{ padding: '12px' }}>
+            <Stack gap={4}>
                   {/* Flow Events */}
-                  {flowEvents.map((event, idx) => (
+                  {flowEvents.map((event: any, idx: number) => (
                     <div
                       key={`flow-${idx}`}
                       style={{
@@ -189,9 +200,7 @@ export default function AgentDebugPanel() {
               </div>
             </ScrollArea>
           )}
-        </div>
-      )}
-    </div>
+    </CollapsiblePanel>
   )
 }
 

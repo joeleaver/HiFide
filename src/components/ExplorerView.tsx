@@ -2,7 +2,7 @@ import { Group, Stack, Text, ScrollArea, UnstyledButton } from '@mantine/core'
 import { IconFile, IconFolder, IconChevronRight, IconChevronDown } from '@tabler/icons-react'
 import Editor from '@monaco-editor/react'
 import { Profiler } from 'react'
-import { useAppStore, selectOpenedFile, selectWorkspaceRoot, selectExplorerOpenFolders, selectExplorerChildrenByDir, selectExplorerTerminalPanelOpen, selectExplorerTerminalPanelHeight } from '../store'
+import { useAppStore, useDispatch, selectOpenedFile, selectWorkspaceRoot, selectExplorerOpenFolders, selectExplorerChildrenByDir, selectExplorerTerminalPanelOpen, selectExplorerTerminalPanelHeight } from '../store'
 import TerminalPanel from './TerminalPanel'
 
 interface FileTreeItemProps {
@@ -76,16 +76,15 @@ export default function ExplorerView() {
   const explorerTerminalPanelOpen = useAppStore(selectExplorerTerminalPanelOpen)
   const explorerTerminalPanelHeight = useAppStore(selectExplorerTerminalPanelHeight)
 
-  // Actions only - these don't cause re-renders
-  const toggleExplorerFolder = useAppStore((s) => s.toggleExplorerFolder)
-  const openFile = useAppStore((s) => s.openFile)
+  // Use dispatch for actions
+  const dispatch = useDispatch()
 
   // Render a directory's entries recursively
   const renderDir = (dirPath: string, level: number) => {
     const entries = childrenByDir[dirPath] || []
     return entries.map((entry) => {
       if (entry.isDirectory) {
-        const isOpen = openFolders.has(entry.path)
+        const isOpen = openFolders.includes(entry.path)
         return (
           <div key={entry.path}>
             <FileTreeItem
@@ -93,7 +92,7 @@ export default function ExplorerView() {
               type="folder"
               level={level}
               isOpen={isOpen}
-              onToggle={() => toggleExplorerFolder(entry.path)}
+              onToggle={() => dispatch('toggleExplorerFolder', entry.path)}
             />
             {isOpen && <>{renderDir(entry.path, level + 1)}</>}
           </div>
@@ -115,15 +114,14 @@ export default function ExplorerView() {
 
 
   const handleFileClick = async (filePath: string, _fileName: string) => {
-    try { await openFile(filePath) } catch {}
+    try { await dispatch('openFile', filePath) } catch {}
   }
 
   return (
     <Profiler
       id="ExplorerView"
-      onRender={(id, phase, actualDuration) => {
+      onRender={(_id, _phase, actualDuration) => {
         if (actualDuration > 16) {
-          console.log(`[Profiler] ${id} ${phase}: ${actualDuration.toFixed(2)}ms`)
         }
       }}
     >
@@ -170,10 +168,10 @@ export default function ExplorerView() {
                   name={(workspaceRoot.split(/[\/\\]/).pop() || workspaceRoot)}
                   type="folder"
                   level={0}
-                  isOpen={openFolders.has(workspaceRoot)}
-                  onToggle={() => toggleExplorerFolder(workspaceRoot)}
+                  isOpen={openFolders.includes(workspaceRoot)}
+                  onToggle={() => dispatch('toggleExplorerFolder', workspaceRoot)}
                 />
-                {openFolders.has(workspaceRoot) && (
+                {openFolders.includes(workspaceRoot) && (
                   <>
                     {renderDir(workspaceRoot, 1)}
                   </>

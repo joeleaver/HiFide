@@ -23,6 +23,8 @@ export class Indexer {
   private data: IndexData | null = null
   private root: string
   private indexPath: string
+  private indexDir: string
+  private readonly CHUNKS_PER_FILE = 1000 // Split into files of 1000 chunks each
 
   // progress & cancel
   private inProgress = false
@@ -40,17 +42,28 @@ export class Indexer {
     this.root = root
     // Store index in workspace .hifide-private/indexes/
     const privateDir = path.join(root, '.hifide-private')
-    const indexesDir = path.join(privateDir, 'indexes')
-    this.indexPath = path.join(indexesDir, 'index.json')
-    fs.mkdirSync(path.dirname(this.indexPath), { recursive: true })
+    this.indexDir = path.join(privateDir, 'indexes')
+    this.indexPath = path.join(this.indexDir, 'meta.json')
+    fs.mkdirSync(this.indexDir, { recursive: true })
   }
 
   status() {
     const exists = fs.existsSync(this.indexPath)
     const elapsedMs = this.progress.startedAt ? Date.now() - this.progress.startedAt : 0
+
+    // Get chunk count from metadata file if available
+    let chunkCount = this.data?.chunks.length ?? 0
+    if (chunkCount === 0 && exists) {
+      try {
+        const metaRaw = fs.readFileSync(this.indexPath, 'utf-8')
+        const { totalChunks } = JSON.parse(metaRaw)
+        chunkCount = totalChunks || 0
+      } catch {}
+    }
+
     return {
       ready: !!this.data,
-      chunks: this.data?.chunks.length ?? 0,
+      chunks: chunkCount,
       modelId: this.data?.meta.modelId,
       dim: this.data?.meta.dim,
       indexPath: this.indexPath,
@@ -68,6 +81,13 @@ export class Indexer {
   clear() {
     this.data = null
     try { fs.unlinkSync(this.indexPath) } catch {}
+    // Remove all chunk files
+    try {
+      const chunkFiles = fs.readdirSync(this.indexDir).filter(f => f.startsWith('chunks-'))
+      for (const f of chunkFiles) {
+        try { fs.unlinkSync(path.join(this.indexDir, f)) } catch {}
+      }
+    } catch {}
   }
 
   private defaultExcludes = new Set([
@@ -163,18 +183,59 @@ export class Indexer {
     this.progress.phase = 'embedding'
     onProgress?.(this.status())
 
-    const vectors = await this.engine.embed(chunks.map((c) => c.text))
-    this.progress.processedChunks = vectors.length
+    // Embed in batches to avoid memory issues with large codebases
+    const EMBED_BATCH_SIZE = 100
+    const vectors: number[][] = []
+    for (let i = 0; i < chunks.length; i += EMBED_BATCH_SIZE) {
+      if (this.cancelled) { this.progress.phase = 'cancelled'; this.inProgress = false; onProgress?.(this.status()); return }
+      const batchEnd = Math.min(i + EMBED_BATCH_SIZE, chunks.length)
+      const batchTexts = chunks.slice(i, batchEnd).map((c) => c.text)
+      const batchVectors = await this.engine.embed(batchTexts)
+      vectors.push(...batchVectors)
+      this.progress.processedChunks = vectors.length
+      onProgress?.(this.status())
+    }
 
     this.progress.phase = 'saving'
     onProgress?.(this.status())
 
-    const full: IndexData = {
-      meta: { modelId: this.engine.id, dim: this.engine.dim, createdAt: Date.now() },
-      chunks: chunks.map((c, i) => ({ ...c, vector: vectors[i] })),
+    const meta: IndexMeta = { modelId: this.engine.id, dim: this.engine.dim, createdAt: Date.now() }
+
+    // Clear old chunk files
+    try {
+      const oldFiles = fs.readdirSync(this.indexDir).filter(f => f.startsWith('chunks-'))
+      for (const f of oldFiles) {
+        try { fs.unlinkSync(path.join(this.indexDir, f)) } catch {}
+      }
+    } catch {}
+
+    // Write metadata
+    fs.writeFileSync(this.indexPath, JSON.stringify({ meta, totalChunks: chunks.length }), 'utf-8')
+
+    // Write chunks in separate files (1000 chunks per file)
+    // Process in batches to avoid creating huge arrays in memory
+    for (let i = 0; i < chunks.length; i += this.CHUNKS_PER_FILE) {
+      const batchSize = Math.min(this.CHUNKS_PER_FILE, chunks.length - i)
+      const batch: Chunk[] = []
+
+      for (let j = 0; j < batchSize; j++) {
+        const idx = i + j
+        batch.push({ ...chunks[idx], vector: vectors[idx] })
+      }
+
+      const chunkFile = path.join(this.indexDir, `chunks-${Math.floor(i / this.CHUNKS_PER_FILE)}.json`)
+      try {
+        fs.writeFileSync(chunkFile, JSON.stringify(batch), 'utf-8')
+      } catch (e: any) {
+        console.error(`[indexer] Failed to write chunk file ${chunkFile}:`, e.message)
+        throw new Error(`Failed to save index chunk ${Math.floor(i / this.CHUNKS_PER_FILE)}: ${e.message}`)
+      }
     }
-    this.data = full
-    fs.writeFileSync(this.indexPath, JSON.stringify(full, null, 2), 'utf-8')
+
+    // Don't store full chunks in memory - load on demand from disk
+    // Just store metadata so status() works
+    this.data = { meta, chunks: [] }
+
 
     this.inProgress = false
     this.progress.phase = 'done'
@@ -184,9 +245,29 @@ export class Indexer {
   ensureLoadedFromDisk() {
     if (this.data) return
     try {
-      const raw = fs.readFileSync(this.indexPath, 'utf-8')
-      this.data = JSON.parse(raw)
-    } catch {
+      // Read metadata
+      const metaRaw = fs.readFileSync(this.indexPath, 'utf-8')
+      const { meta } = JSON.parse(metaRaw)
+
+      // Read all chunk files
+      const allChunks: Chunk[] = []
+      const chunkFiles = fs.readdirSync(this.indexDir)
+        .filter(f => f.startsWith('chunks-'))
+        .sort((a, b) => {
+          const aNum = parseInt(a.replace('chunks-', '').replace('.json', ''))
+          const bNum = parseInt(b.replace('chunks-', '').replace('.json', ''))
+          return aNum - bNum
+        })
+
+      for (const file of chunkFiles) {
+        const chunkRaw = fs.readFileSync(path.join(this.indexDir, file), 'utf-8')
+        const batch: Chunk[] = JSON.parse(chunkRaw)
+        allChunks.push(...batch)
+      }
+
+      this.data = { meta, chunks: allChunks }
+    } catch (e) {
+      console.error('[indexer] Failed to load index from disk:', e)
       // no-op
     }
   }
@@ -196,16 +277,13 @@ export class Indexer {
     if (!this.data) return { chunks: [] }
     if (!this.engine) this.engine = await getLocalEngine()
 
-    console.log(`[indexer] search query="${query}", total chunks=${this.data.chunks.length}`)
     const [qv] = await this.engine.embed([query])
     const scored = this.data.chunks
       .map((c) => ({ c, score: cosine(qv, c.vector) }))
       .sort((a, b) => b.score - a.score)
 
     // Log top 10 results with scores
-    console.log('[indexer] Top 10 results:')
-    scored.slice(0, 10).forEach((x, i) => {
-      console.log(`  ${i+1}. score=${x.score.toFixed(4)} path=${x.c.path}:${x.c.startLine}-${x.c.endLine}`)
+    scored.slice(0, 10).forEach(() => {
     })
 
     const results = scored.slice(0, k).map((x) => x.c)
@@ -240,7 +318,27 @@ export class Indexer {
             this.data.chunks = this.data.chunks.filter(c => c.path !== rel)
             // add new ones
             this.data.chunks.push(...newChunks)
-            fs.writeFileSync(this.indexPath, JSON.stringify(this.data, null, 2), 'utf-8')
+
+            // Save updated index using chunked storage
+            try {
+              // Clear old chunk files
+              const oldFiles = fs.readdirSync(this.indexDir).filter(f => f.startsWith('chunks-'))
+              for (const f of oldFiles) {
+                try { fs.unlinkSync(path.join(this.indexDir, f)) } catch {}
+              }
+
+              // Write metadata
+              fs.writeFileSync(this.indexPath, JSON.stringify({ meta: this.data.meta, totalChunks: this.data.chunks.length }), 'utf-8')
+
+              // Write chunks in separate files
+              for (let i = 0; i < this.data.chunks.length; i += this.CHUNKS_PER_FILE) {
+                const batch = this.data.chunks.slice(i, i + this.CHUNKS_PER_FILE)
+                const chunkFile = path.join(this.indexDir, `chunks-${Math.floor(i / this.CHUNKS_PER_FILE)}.json`)
+                fs.writeFileSync(chunkFile, JSON.stringify(batch), 'utf-8')
+              }
+            } catch (e: any) {
+              console.error('[indexer] Failed to save incremental update:', e)
+            }
             onEvent?.(this.status())
           } catch { /* ignore */ }
         }, 500)

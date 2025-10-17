@@ -97,8 +97,6 @@ function initialize(): void {
     buildMenu()
   })
 
-  console.log('[main] HiFide initialized successfully')
-  console.log('[main] Agent tools registered:', agentTools.length)
 }
 
 // Start the application

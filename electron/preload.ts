@@ -1,10 +1,16 @@
 import { ipcRenderer, contextBridge } from 'electron'
+import { preloadBridge } from '@zubridge/electron/preload'
+
+// --------- Set up zubridge for state synchronization ---------
+const { handlers } = preloadBridge()
+contextBridge.exposeInMainWorld('zubridge', handlers)
 
 // --------- Expose some API to the Renderer process ---------
 contextBridge.exposeInMainWorld('ipcRenderer', {
   on(...args: Parameters<typeof ipcRenderer.on>) {
     const [channel, listener] = args
-    return ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
+    // Don't pass the event object - it contains non-cloneable properties
+    return ipcRenderer.on(channel, (_event, ...args) => listener(null as any, ...args))
   },
   off(...args: Parameters<typeof ipcRenderer.off>) {
     const [channel, ...omit] = args
@@ -24,49 +30,13 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 })
 
 
-// Secure secrets API
-contextBridge.exposeInMainWorld('secrets', {
-  setApiKey: (k: string) => {
-    return ipcRenderer.invoke('secrets:set', k)
-  },
-  getApiKey: async () => {
-    try { return await ipcRenderer.invoke('secrets:get') } catch { return null }
-  },
-  setApiKeyFor: (provider: string, key: string) => {
-    console.log(`[preload] setApiKeyFor(${provider}): saving via IPC, key=${key ? key.slice(0, 10) + '...' : 'empty'}`)
-    return ipcRenderer.invoke('secrets:setFor', { provider, key })
-  },
-  getApiKeyFor: async (provider: string) => {
-    try {
-      const fromMain = await ipcRenderer.invoke('secrets:getFor', provider)
-      console.log(`[preload] getApiKeyFor(${provider}): from main=${fromMain ? fromMain.slice(0, 10) + '...' : 'null'}`)
-      return fromMain
-    } catch {
-      console.log(`[preload] getApiKeyFor(${provider}): main process returned null`)
-      return null
-    }
-  },
-  validateApiKeyFor: (provider: string, key: string, model?: string) => ipcRenderer.invoke('secrets:validateFor', { provider, key, model }),
-  presence: () => ipcRenderer.invoke('secrets:presence'),
-  onPresenceChanged: (listener: (p: { openai: boolean; anthropic: boolean; gemini: boolean }) => void) => {
-    const fn = (_: any, payload: any) => listener(payload)
-    ipcRenderer.on('secrets:presence-changed', fn)
-    return () => ipcRenderer.off('secrets:presence-changed', fn)
-  },
-
-})
-
-// Keys are now stored in electron-store in the main process - no localStorage needed!
-
+// Legacy secrets and models APIs removed - now managed via Zustand store
+// - API keys: use settingsApiKeys in settings slice
+// - Model listing: use refreshModels() action in provider slice
+// - Validation: use validateApiKeys() action in settings slice
 
 contextBridge.exposeInMainWorld('llm', {
   cancel: (requestId: string) => ipcRenderer.invoke('llm:cancel', { requestId }),
-})
-
-
-// Models API: list models for a provider
-contextBridge.exposeInMainWorld('models', {
-  list: (provider: string) => ipcRenderer.invoke('models:list', provider),
 })
 
 // File system API
@@ -227,54 +197,16 @@ contextBridge.exposeInMainWorld('flows', {
   save: (flowId: string, def: any) => ipcRenderer.invoke('flows:save', { id: flowId, def }),
   getTools: () => ipcRenderer.invoke('flows:getTools'),
 })
+// NOTE: Flow execution is now handled via store actions (flowInit, feStop, feResume)
+// No need for window.flowExec.run/stop/resume anymore - use dispatch() instead!
 
+// Flow events are still sent via IPC for real-time updates
 contextBridge.exposeInMainWorld('flowExec', {
-  // V2 handlers - clean function-based execution
-  run: (args: { requestId: string; flowId?: string; flowDef?: any; input?: string; model?: string; provider?: string; sessionId?: string }) =>
-    ipcRenderer.invoke('flow:run:v2', args),
-  resume: (requestId: string, userInput?: string) => ipcRenderer.invoke('flow:resume:v2', { requestId, userInput }),
-  stop: (requestId: string) => ipcRenderer.invoke('flow:cancel:v2', { requestId }),
-
-  // Legacy handlers (not implemented in V2 yet)
-  init: (_args: { requestId: string; flowId?: string; flowDef?: any; model?: string; provider?: string; sessionId?: string }) => {
-    console.warn('[flowExec.init] Not implemented in V2, use run instead')
-    return Promise.resolve({ ok: false, error: 'Not implemented in V2' })
-  },
-  pause: (_requestId: string) => {
-    console.warn('[flowExec.pause] Not implemented in V2')
-    return Promise.resolve({ ok: false, error: 'Not implemented in V2' })
-  },
-  step: (_requestId: string) => {
-    console.warn('[flowExec.step] Not implemented in V2')
-    return Promise.resolve({ ok: false, error: 'Not implemented in V2' })
-  },
-  setBreakpoints: (_args: { requestId: string; nodeIds: string[] }) => {
-    console.warn('[flowExec.setBreakpoints] Not implemented in V2')
-    return Promise.resolve({ ok: false, error: 'Not implemented in V2' })
-  },
-
   onEvent: (listener: (ev: { requestId: string; type: string; nodeId?: string; data?: any; error?: string; prompt?: string }) => void) => {
     const fn = (_: any, payload: any) => listener(payload)
     ipcRenderer.on('flow:event', fn)
     return () => ipcRenderer.off('flow:event', fn)
   },
-  })
-
-// Models helper APIs
-contextBridge.exposeInMainWorld('models', {
-  cheapestClassifier: (provider: string) => ipcRenderer.invoke('models:cheapestClassifier', { provider }),
-})
-
-// Flow state persistence (Watch Mode)
-contextBridge.exposeInMainWorld('flowState', {
-  load: () => ipcRenderer.invoke('flowState:load'),
-  save: (state: any) => ipcRenderer.invoke('flowState:save', { state }),
-})
-
-
-// Trace export bridge
-contextBridge.exposeInMainWorld('flowTrace', {
-  export: (events: any[], label?: string) => ipcRenderer.invoke('flow:trace:export', { events, label }),
 })
 
 

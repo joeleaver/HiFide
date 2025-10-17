@@ -1,4 +1,4 @@
-import type { Session } from '../types'
+import type { Session } from '../../../electron/store/types'
 import { LS_KEYS } from './constants'
 
 export async function loadSessions(): Promise<{ sessions: Session[]; currentId: string | null }> {
@@ -6,10 +6,9 @@ export async function loadSessions(): Promise<{ sessions: Session[]; currentId: 
     const listed = await (window.sessions?.list?.() as Promise<{ ok: boolean; sessions?: Session[] } | undefined>)
     let sessions = (listed && listed.ok && Array.isArray(listed.sessions)) ? (listed.sessions as Session[]) : []
 
-    // Ensure backward compatibility - add toolCalls field if missing
+    // Ensure backward compatibility - toolCalls field is deprecated, no longer needed
     sessions = sessions.map(session => ({
-      ...session,
-      toolCalls: session.toolCalls || []
+      ...session
     }))
 
     // Get currentId from localStorage
@@ -17,7 +16,6 @@ export async function loadSessions(): Promise<{ sessions: Session[]; currentId: 
 
     // Validate that currentId exists in loaded sessions
     if (currentId && !sessions.some(s => s.id === currentId)) {
-      console.warn('[sessions] Saved currentId not found in loaded sessions, clearing it')
       currentId = null
     }
 

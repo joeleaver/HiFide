@@ -1,0 +1,21 @@
+{
+  "context": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [],
+    "currentOutput": "",
+    "sessionId": "test-session-1760553294124"
+  },
+  "data": "Hello! How are you today?",
+  "status": "success",
+  "greeting-context": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [],
+    "currentOutput": "",
+    "sessionId": "test-session-1760553294124"
+  },
+  "greeting-data": "Hello! How are you today?"
+}

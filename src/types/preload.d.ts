@@ -10,6 +10,7 @@ declare global {
       validateApiKeyFor: (provider: string, key: string, model?: string) => Promise<{ ok: boolean; error?: string }>;
       presence: () => Promise<{ openai: boolean; anthropic: boolean; gemini: boolean }>;
       onPresenceChanged: (listener: (p: { openai: boolean; anthropic: boolean; gemini: boolean }) => void) => () => void;
+      saveAndValidate: (keys: { openai?: string; anthropic?: string; gemini?: string }) => Promise<{ ok: boolean; failures: string[] }>;
     };
     models?: {
       list: (provider: string) => Promise<{ ok: boolean; models?: Array<{ id: string; label?: string; supported?: string[] }>; error?: string }>;

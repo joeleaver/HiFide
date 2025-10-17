@@ -1,11 +1,14 @@
 import { useMemo } from 'react'
 import { Group, Text, UnstyledButton, Select } from '@mantine/core'
 import { IconFolder, IconChevronDown } from '@tabler/icons-react'
-import { useAppStore, selectWorkspaceRoot, selectSelectedModel, selectSelectedProvider, selectProviderValid, selectModelsByProvider, selectAgentMetrics, selectCurrentView } from '../store'
+import { useAppStore, useDispatch, selectWorkspaceRoot, selectSelectedModel, selectSelectedProvider, selectProviderValid, selectModelsByProvider, selectAgentMetrics, selectCurrentView } from '../store'
 
 const STATUS_BAR_HEIGHT = 24
 
 export default function StatusBar() {
+  // Use dispatch for actions
+  const dispatch = useDispatch()
+
   // Use selectors for better performance
   const workspaceRoot = useAppStore(selectWorkspaceRoot)
   const selectedModel = useAppStore(selectSelectedModel)
@@ -19,11 +22,6 @@ export default function StatusBar() {
   const feNodes = useAppStore((s) => s.feNodes)
   const feEdges = useAppStore((s) => s.feEdges)
   const feStatus = useAppStore((s) => s.feStatus)
-
-  // Actions only - these don't cause re-renders
-  const openFolder = useAppStore((s) => s.openFolder)
-  const setSelectedModel = useAppStore((s) => s.setSelectedModel)
-  const setSelectedProvider = useAppStore((s) => s.setSelectedProvider)
 
   const providerOptions = useMemo(() => {
     const all = [
@@ -40,7 +38,7 @@ export default function StatusBar() {
   const handleFolderClick = async () => {
     const result = await window.workspace?.openFolderDialog?.()
     if (result?.ok && result.path) {
-      await openFolder(result.path)
+      await dispatch('openFolder', result.path)
     }
   }
 
@@ -97,14 +95,14 @@ export default function StatusBar() {
               <Text size="xs" style={{ color: '#fff', opacity: 0.9 }}>
                 {feNodes.length} nodes · {feEdges.length} edges
               </Text>
-              {feStatus !== 'idle' && (
+              {feStatus !== 'stopped' && (
                 <>
                   <Text size="xs" c="dimmed" style={{ margin: '0 4px' }}>|</Text>
                   <Text size="xs" style={{
-                    color: feStatus === 'paused' || feStatus === 'waitingForInput' ? '#f59f00' : '#4caf50',
+                    color: feStatus === 'waitingForInput' ? '#f59f00' : '#4caf50',
                     fontWeight: 600
                   }}>
-                    {feStatus === 'paused' ? '⏸ PAUSED' : feStatus === 'waitingForInput' ? '⏸ WAITING' : '▶ RUNNING'}
+                    {feStatus === 'waitingForInput' ? '⏸ WAITING' : '▶ RUNNING'}
                   </Text>
                 </>
               )}
@@ -123,7 +121,7 @@ export default function StatusBar() {
               <Text size="xs" c="dimmed" style={{ margin: '0 4px' }}>|</Text>
               <Select
                 value={providerOptions.find((p) => p.value === selectedProvider) ? selectedProvider : undefined}
-                onChange={(v) => v && setSelectedProvider(v)}
+                onChange={(v) => v && dispatch('setSelectedProvider', v)}
                 data={providerOptions as any}
                 size="xs"
                 variant="unstyled"
@@ -139,7 +137,7 @@ export default function StatusBar() {
               <Text size="xs" c="dimmed" style={{ margin: '0 4px' }}>|</Text>
               <Select
                 value={selectedModel}
-                onChange={(v) => v && setSelectedModel(v)}
+                onChange={(v) => v && dispatch('setSelectedModel', v)}
                 data={modelOptions}
                 size="xs"
                 variant="unstyled"
@@ -163,7 +161,7 @@ export default function StatusBar() {
               )}
               <Select
                 value={providerOptions.find((p) => p.value === selectedProvider) ? selectedProvider : undefined}
-                onChange={(v) => v && setSelectedProvider(v)}
+                onChange={(v) => v && dispatch('setSelectedProvider', v)}
                 data={providerOptions as any}
                 size="xs"
                 variant="unstyled"
@@ -179,7 +177,7 @@ export default function StatusBar() {
               <Text size="xs" c="dimmed" style={{ margin: '0 4px' }}>|</Text>
               <Select
                 value={selectedModel}
-                onChange={(v) => v && setSelectedModel(v)}
+                onChange={(v) => v && dispatch('setSelectedModel', v)}
                 data={modelOptions}
                 size="xs"
                 variant="unstyled"

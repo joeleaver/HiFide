@@ -1,10 +1,10 @@
-import { useEffect } from 'react'
+import { useAppStore, useDispatch, selectModelsByProvider, selectProviderValid, selectDefaultModels, selectAutoRetry, selectAutoApproveEnabled, selectAutoApproveThreshold, selectSettingsApiKeys, selectSettingsSaving, selectSettingsSaved, selectStartupMessage } from './store'
 import { Button, Group, Stack, Text, TextInput, Title, Select, Switch, Slider, Progress, Divider, Card, Alert } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useAppStore, selectModelsByProvider, selectProviderValid, selectDefaultModels, selectAutoRetry, selectAutoApproveEnabled, selectAutoApproveThreshold, selectAutoEnforceEditsSchema, selectSettingsApiKeys, selectSettingsSaving, selectSettingsSaved, selectStartupMessage } from './store'
 import PricingSettings from './components/PricingSettings'
 
 import RateLimitSettings from './components/RateLimitSettings'
+import { useEffect } from 'react'
 
 export default function SettingsPane() {
   // Use selectors for better performance
@@ -14,52 +14,70 @@ export default function SettingsPane() {
   const autoRetry = useAppStore(selectAutoRetry)
   const autoApproveEnabled = useAppStore(selectAutoApproveEnabled)
   const autoApproveThreshold = useAppStore(selectAutoApproveThreshold)
-  const autoEnforceEditsSchema = useAppStore(selectAutoEnforceEditsSchema)
   const settingsApiKeys = useAppStore(selectSettingsApiKeys)
   const settingsSaving = useAppStore(selectSettingsSaving)
   const settingsSaved = useAppStore(selectSettingsSaved)
+  const settingsSaveResult = useAppStore((s) => s.settingsSaveResult)
+  const settingsValidateResult = useAppStore((s) => s.settingsValidateResult)
   const startupMessage = useAppStore(selectStartupMessage)
 
-  // Actions only - these don't cause re-renders
-  const setAutoRetry = useAppStore((s) => s.setAutoRetry)
-  const setDefaultModel = useAppStore((s) => s.setDefaultModel)
-  const setAutoApproveEnabled = useAppStore((s) => s.setAutoApproveEnabled)
-  const setAutoApproveThreshold = useAppStore((s) => s.setAutoApproveThreshold)
-  const setAutoEnforceEditsSchema = useAppStore((s) => s.setAutoEnforceEditsSchema)
-  const setSettingsApiKey = useAppStore((s) => s.setSettingsApiKey)
-  const loadSettingsApiKeys = useAppStore((s) => s.loadSettingsApiKeys)
-  const saveSettingsApiKeys = useAppStore((s) => s.saveSettingsApiKeys)
-
-  // Load keys on mount
-  useEffect(() => {
-    void loadSettingsApiKeys()
-  }, [loadSettingsApiKeys])
+  // Use dispatch to call actions
+  const dispatch = useDispatch()
 
   const openaiOptions = modelsByProvider.openai || []
   const anthropicOptions = modelsByProvider.anthropic || []
   const geminiOptions = modelsByProvider.gemini || []
 
   // Debug logging
-  console.log('[SettingsPane] defaultModels:', defaultModels)
-  console.log('[SettingsPane] geminiOptions:', geminiOptions)
-  console.log('[SettingsPane] providerValid:', providerValid)
 
 
   // Indexing state (centralized)
-  const {
-    idxStatus, idxLoading, idxQuery, idxResults, idxProg,
-    refreshIndexStatus, rebuildIndex,
-    clearIndex, setIdxQuery, searchIndex
-  } = useAppStore()
+  const idxStatus = useAppStore((s) => s.idxStatus)
+  const idxLoading = useAppStore((s) => s.idxLoading)
+  const idxQuery = useAppStore((s) => s.idxQuery ?? '')
+  const idxResults = useAppStore((s) => s.idxResults ?? [])
+  const idxProg = useAppStore((s) => s.idxProg)
 
   // Refresh index status on mount (subscription is initialized in store)
   useEffect(() => {
-    void refreshIndexStatus()
-  }, [refreshIndexStatus])
+    void dispatch('refreshIndexStatus')
+  }, [dispatch])
+
+  // Handle save/validate results reactively
+  useEffect(() => {
+    if (!settingsSaveResult) return
+
+    if (!settingsSaveResult.ok) {
+      notifications.show({
+        color: 'red',
+        title: 'Save failed',
+        message: settingsSaveResult.failures.join(' | ') || 'Failed to save API keys'
+      })
+      return
+    }
+
+    // Save succeeded, check validation result
+    if (!settingsValidateResult) return
+
+    if (settingsValidateResult.ok) {
+      notifications.show({
+        color: 'teal',
+        title: 'API keys saved',
+        message: 'Settings have been saved and validated successfully.'
+      })
+    } else {
+      const failures = settingsValidateResult.failures || []
+      notifications.show({
+        color: 'orange',
+        title: 'Some keys failed validation',
+        message: failures.join(' | ') || 'Unknown error'
+      })
+    }
+  }, [settingsSaveResult, settingsValidateResult])
 
 
   const doRebuildIndex = async () => {
-    const res = await rebuildIndex()
+    const res = await dispatch('rebuildIndex')
     if (res?.ok) {
       notifications.show({ color: 'teal', title: 'Index rebuilt', message: `Chunks: ${res?.status?.chunks ?? 0}` })
     } else if (res?.error) {
@@ -67,22 +85,27 @@ export default function SettingsPane() {
     }
   }
 
-  const doClearIndex = async () => { try { await clearIndex() } catch {} }
+  const doClearIndex = async () => { try { await dispatch('clearIndex') } catch {} }
 
-  const doSearchIndex = async () => { try { await searchIndex() } catch {} }
+  const doSearchIndex = async () => { try { await dispatch('searchIndex') } catch {} }
 
 
 
   const save = async () => {
     try {
-      const result = await saveSettingsApiKeys()
+      // Clear previous results
+      dispatch('clearSettingsResults')
 
-      if (result.ok) {
-        notifications.show({ color: 'teal', title: 'API keys validated', message: 'All configured provider keys look good.' })
-      } else {
-        notifications.show({ color: 'orange', title: 'Some keys failed validation', message: result.failures.join(' | ') })
-      }
+      // First save (marks as saved, auto-persisted via Zustand middleware)
+      await dispatch('saveSettingsApiKeys')
+
+      // Then validate the keys
+      await dispatch('validateApiKeys')
+
+      // Results will be available in state via settingsSaveResult and settingsValidateResult
+      // The useEffect below will handle showing notifications
     } catch (e: any) {
+      console.error('[SettingsPane] Save error:', e)
       notifications.show({ color: 'red', title: 'Save failed', message: e?.message || String(e) })
     }
   }
@@ -109,24 +132,24 @@ export default function SettingsPane() {
             label="OpenAI API Key"
             placeholder="sk-..."
             type="password"
-            value={settingsApiKeys.openai}
-            onChange={(e) => setSettingsApiKey('openai', e.currentTarget.value)}
+            value={settingsApiKeys.openai || ''}
+            onChange={(e) => dispatch('setOpenAiApiKey', e.currentTarget.value)}
             rightSection={providerValid.openai ? <Text size="xs" c="teal">✓</Text> : null}
           />
           <TextInput
             label="Anthropic API Key"
             placeholder="sk-ant-..."
             type="password"
-            value={settingsApiKeys.anthropic}
-            onChange={(e) => setSettingsApiKey('anthropic', e.currentTarget.value)}
+            value={settingsApiKeys.anthropic || ''}
+            onChange={(e) => dispatch('setAnthropicApiKey', e.currentTarget.value)}
             rightSection={providerValid.anthropic ? <Text size="xs" c="teal">✓</Text> : null}
           />
           <TextInput
             label="Gemini API Key"
             placeholder="AIza..."
             type="password"
-            value={settingsApiKeys.gemini}
-            onChange={(e) => setSettingsApiKey('gemini', e.currentTarget.value)}
+            value={settingsApiKeys.gemini || ''}
+            onChange={(e) => dispatch('setGeminiApiKey', e.currentTarget.value)}
             rightSection={providerValid.gemini ? <Text size="xs" c="teal">✓</Text> : null}
           />
         </Stack>
@@ -154,7 +177,7 @@ export default function SettingsPane() {
             placeholder="Select a model..."
             data={openaiOptions}
             value={defaultModels?.openai || null}
-            onChange={(v) => v && setDefaultModel('openai', v)}
+            onChange={(v) => v && dispatch('setDefaultModel', { provider: 'openai', model: v })}
             disabled={!providerValid.openai || openaiOptions.length === 0}
             description={!providerValid.openai ? 'Add an OpenAI API key first' : openaiOptions.length === 0 ? 'Loading models...' : undefined}
           />
@@ -163,7 +186,7 @@ export default function SettingsPane() {
             placeholder="Select a model..."
             data={anthropicOptions}
             value={defaultModels?.anthropic || null}
-            onChange={(v) => v && setDefaultModel('anthropic', v)}
+            onChange={(v) => v && dispatch('setDefaultModel', { provider: 'anthropic', model: v })}
             disabled={!providerValid.anthropic || anthropicOptions.length === 0}
             description={!providerValid.anthropic ? 'Add an Anthropic API key first' : anthropicOptions.length === 0 ? 'Loading models...' : undefined}
           />
@@ -172,7 +195,7 @@ export default function SettingsPane() {
             placeholder="Select a model..."
             data={geminiOptions}
             value={defaultModels?.gemini || null}
-            onChange={(v) => v && setDefaultModel('gemini', v)}
+            onChange={(v) => v && dispatch('setDefaultModel', { provider: 'gemini', model: v })}
             disabled={!providerValid.gemini || geminiOptions.length === 0}
             description={!providerValid.gemini ? 'Add a Gemini API key first' : geminiOptions.length === 0 ? 'Loading models...' : undefined}
           />
@@ -193,14 +216,14 @@ export default function SettingsPane() {
             label="Auto-retry on stream errors"
             description="Automatically retry when streaming responses fail"
             checked={autoRetry}
-            onChange={(e) => setAutoRetry(e.currentTarget.checked)}
+            onChange={(e) => dispatch('setAutoRetry', e.currentTarget.checked)}
           />
 
           <Switch
             label="Auto-approve risky commands"
             description="Allow agent to execute risky commands without confirmation when confidence is high"
             checked={autoApproveEnabled}
-            onChange={(e) => setAutoApproveEnabled(e.currentTarget.checked)}
+            onChange={(e) => dispatch('setAutoApproveEnabled', e.currentTarget.checked)}
           />
 
           {autoApproveEnabled && (
@@ -211,7 +234,7 @@ export default function SettingsPane() {
                 max={1}
                 step={0.05}
                 value={autoApproveThreshold}
-                onChange={setAutoApproveThreshold}
+                onChange={(v) => dispatch('setAutoApproveThreshold', v)}
                 marks={[
                   { value: 0, label: '0' },
                   { value: 0.5, label: '0.5' },
@@ -221,13 +244,6 @@ export default function SettingsPane() {
               <Text size="xs" c="dimmed">Commands with confidence above this threshold will be auto-approved</Text>
             </Stack>
           )}
-
-          <Switch
-            label="Enforce structured edits schema"
-            description="Require agent to use structured JSON format when proposing code changes"
-            checked={autoEnforceEditsSchema}
-            onChange={(e) => setAutoEnforceEditsSchema(e.currentTarget.checked)}
-          />
         </Stack>
       </Stack>
 
@@ -317,14 +333,14 @@ export default function SettingsPane() {
               style={{ flex: 1 }}
               placeholder="e.g. where do we validate provider keys?"
               value={idxQuery}
-              onChange={(e) => setIdxQuery(e.currentTarget.value)}
+              onChange={(e) => dispatch('setIdxQuery', e.currentTarget.value)}
             />
             <Button onClick={doSearchIndex} size="sm">Search</Button>
           </Group>
           {idxResults.length > 0 && (
             <Stack gap={4}>
               <Text size="xs" c="dimmed" fw={500}>Results ({idxResults.length}):</Text>
-              {idxResults.slice(0, 20).map((r, i) => (
+              {idxResults.slice(0, 20).map((r: any, i: number) => (
                 <Text key={i} size="xs" c="dimmed" ff="monospace">
                   {r.path}:{r.startLine}-{r.endLine}
                 </Text>

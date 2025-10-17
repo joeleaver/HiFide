@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import path from 'node:path'
 import electron from 'vite-plugin-electron/simple'
 import react from '@vitejs/plugin-react'
+import { copyFileSync, mkdirSync, readdirSync } from 'node:fs'
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -23,7 +24,16 @@ export default defineConfig({
               fileName: () => 'main.mjs',
             },
             rollupOptions: {
-              external: ['keytar', 'openai', '@homebridge/node-pty-prebuilt-multiarch', '@ast-grep/napi', '@ast-grep/napi-win32-x64-msvc', 'bufferutil', 'utf-8-validate'],
+              external: (id) => {
+                // Don't externalize electron built-ins
+                if (id === 'electron' || id.startsWith('electron/')) return false
+
+                // Don't externalize our own source files (they have absolute paths or start with .)
+                if (id.startsWith('.') || id.startsWith('/') || /^[A-Z]:/i.test(id)) return false
+
+                // Externalize all node_modules
+                return true
+              },
               output: {
                 format: 'es',
                 entryFileNames: 'main.mjs',
@@ -42,9 +52,9 @@ export default defineConfig({
           build: {
             rollupOptions: {
               output: {
-                // Ensure CommonJS output so `require` works in preload
-                format: 'cjs',
-                entryFileNames: 'preload.cjs',
+                // Modern Electron (v28+) supports ESM preload scripts
+                format: 'es',
+                entryFileNames: 'preload.mjs',
               },
             },
           },
@@ -58,5 +68,39 @@ export default defineConfig({
         ? undefined
         : {},
     }),
+    // Copy profiles directory to dist during build
+    {
+      name: 'copy-profiles',
+      closeBundle() {
+        const srcDir = path.join(__dirname, 'src', 'profiles')
+        const destDir = path.join(__dirname, 'dist', 'profiles')
+
+        try {
+          mkdirSync(destDir, { recursive: true })
+          const files = readdirSync(srcDir)
+
+          for (const file of files) {
+            if (file.endsWith('.json')) {
+              copyFileSync(
+                path.join(srcDir, file),
+                path.join(destDir, file)
+              )
+              console.log(`Copied profile: ${file}`)
+            }
+          }
+        } catch (error) {
+          console.error('Failed to copy profiles:', error)
+        }
+      }
+    }
   ],
+  build: {
+    rollupOptions: {
+      external: [
+        // Externalize electron modules that are dynamically imported in store slices
+        /^\.\.\/\.\.\/electron\//,
+      ],
+    },
+  },
+  publicDir: 'public',
 })

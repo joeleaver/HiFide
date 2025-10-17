@@ -1,13 +1,19 @@
 import { useEffect, useRef } from 'react'
 
 export function usePanelResize(params: {
-  getHeight: () => number
+  initialHeight: number
   setHeight: (n: number) => void
   min?: number
   max?: number
   onEnd?: () => void
+  /**
+   * Handle position: 'top' or 'bottom'
+   * - 'bottom': drag down = increase height (chat panel)
+   * - 'top': drag down = decrease height (debug panel)
+   */
+  handlePosition?: 'top' | 'bottom'
 }) {
-  const { getHeight, setHeight, min = 150, max = 600, onEnd } = params
+  const { initialHeight, setHeight, min = 150, max = 600, onEnd, handlePosition = 'bottom' } = params
   const isResizingRef = useRef(false)
 
   useEffect(() => {
@@ -25,15 +31,21 @@ export function usePanelResize(params: {
     e.preventDefault()
     isResizingRef.current = true
     const startY = e.clientY
-    const startH = getHeight()
+    const startH = initialHeight
 
     document.body.style.cursor = 'ns-resize'
     document.body.style.userSelect = 'none'
 
     const onMove = (ev: MouseEvent) => {
       if (!isResizingRef.current) return
-      const dy = startY - ev.clientY
+      // Calculate delta based on handle position
+      // - bottom handle: drag down = increase height (positive dy)
+      // - top handle: drag down = decrease height (negative dy)
+      const dy = handlePosition === 'bottom'
+        ? ev.clientY - startY
+        : startY - ev.clientY
       const next = Math.min(max, Math.max(min, startH + dy))
+      // Call setHeight immediately - it will handle debouncing if using useLocalPanelState
       setHeight(next)
     }
 
@@ -43,6 +55,7 @@ export function usePanelResize(params: {
       document.body.style.userSelect = ''
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
+
       try { onEnd?.() } catch {}
     }
 

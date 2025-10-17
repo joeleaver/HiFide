@@ -2,7 +2,7 @@ export type NodeKind =
   | 'defaultContextStart'
   | 'userMessage'
   | 'manualInput'
-  | 'chat'
+  | 'llmRequest'
   | 'tools'
   | 'approvalGate'
   | 'budgetGuard'
@@ -18,6 +18,8 @@ export type NodeKind =
   | 'cache'
   | 'toolSandbox'
   | 'newContext'
+  | 'portalInput'
+  | 'portalOutput'
   // Planned kinds (Phase 2/3+): intentClassifier, router, conditional, transform, merge, loop/while/until
   | (string & {})
 

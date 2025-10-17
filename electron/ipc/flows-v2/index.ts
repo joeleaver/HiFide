@@ -1,13 +1,13 @@
 /**
  * Flow Execution Engine V2 - Main Entry Point
- * 
+ *
  * Clean, function-based execution with explicit inputs/outputs
  */
 
 import type { IpcMain, WebContents } from 'electron'
 import { BrowserWindow } from 'electron'
 import { FlowScheduler } from './scheduler'
-import { sendFlowEvent } from './events'
+import { flowEvents, emitFlowEvent } from './events'
 import type { FlowExecutionArgs } from './types'
 
 // Active flow schedulers
@@ -30,30 +30,52 @@ export async function executeFlow(
 ): Promise<{ ok: boolean; error?: string }> {
   const { requestId, flowDef } = args
 
-  console.log('[executeFlow] Starting flow execution:', { requestId, nodeCount: flowDef.nodes.length, edgeCount: flowDef.edges.length })
-  sendFlowEvent(wc, requestId, { type: 'io', nodeId: 'system', data: `[Flow V2] Starting execution with ${flowDef.nodes.length} nodes, ${flowDef.edges.length} edges` })
+  // Subscribe to flow events and forward to renderer
+  // This decouples flow execution from IPC layer
+  const unsubscribe = flowEvents.onFlowEvent(requestId, (event) => {
+    if (wc) {
+      // Sanitize event to ensure it's serializable
+      // Do a JSON round-trip to strip out any non-serializable data
+      try {
+        const sanitized = JSON.parse(JSON.stringify(event))
+        wc.send('flow:event', sanitized)
+      } catch (error) {
+        console.error('[executeFlow] Failed to serialize event:', error, event)
+        // Send a minimal error event instead
+        wc.send('flow:event', {
+          requestId,
+          type: 'error',
+          error: 'Failed to serialize event data'
+        })
+      }
+    }
+  })
+
+  emitFlowEvent(requestId, { type: 'io', nodeId: 'system', data: `[Flow V2] Starting execution with ${flowDef.nodes.length} nodes, ${flowDef.edges.length} edges` })
 
   try {
     // Create scheduler
     const scheduler = new FlowScheduler(wc, requestId, flowDef, args)
     activeFlows.set(requestId, scheduler)
 
-    // Execute - the flow will run continuously in a loop
-    // It never "completes" - it just waits for user input at each iteration
+    // Execute - the flow runs until it hits a userInput node (which awaits indefinitely)
+    // The promise will only resolve if there's an error or the flow is explicitly cancelled
+    // Normal flows should NEVER complete - they wait at userInput nodes
     const result = await scheduler.execute()
 
-    // If we get here, the flow has completed (shouldn't happen in a loop flow)
-    activeFlows.delete(requestId)
-    sendFlowEvent(wc, requestId, { type: 'done' })
-
+    // Keep the flow active - don't emit "done" or clean up
+    // The flow can still be resumed with user input
     return result
   } catch (e: any) {
+    // Only clean up on actual errors
     activeFlows.delete(requestId)
+    unsubscribe()
+    flowEvents.cleanup(requestId)
     const error = e?.message || String(e)
     console.error('[executeFlow] Error:', error)
     console.error('[executeFlow] Stack:', e?.stack)
-    sendFlowEvent(wc, requestId, { type: 'error', error })
-    sendFlowEvent(wc, requestId, { type: 'done' })
+    emitFlowEvent(requestId, { type: 'error', error })
+    emitFlowEvent(requestId, { type: 'done' })
     return { ok: false, error }
   }
 }
@@ -62,9 +84,11 @@ export async function executeFlow(
  * Resume a paused flow with user input
  */
 export async function resumeFlow(
-  wc: WebContents | undefined,
+  _wc: WebContents | undefined,
   requestId: string,
-  userInput: string
+  userInput: string,
+  provider?: string,
+  model?: string
 ): Promise<{ ok: boolean; error?: string }> {
   const scheduler = activeFlows.get(requestId)
 
@@ -73,17 +97,45 @@ export async function resumeFlow(
   }
 
   try {
-    // Just resolve the promise that the userInput node is awaiting
+    // Update provider/model if specified (for mid-flow provider switching)
+    if (provider || model) {
+      scheduler.updateProviderModel(provider, model)
+    }
+
+    // Resolve the promise that the userInput node is awaiting
     // The flow never stopped - it's just waiting for this data
     // The nodeId is 'user-input' by convention (could be made configurable)
-    scheduler.resolveUserInput('user-input', userInput)
+    const { useMainStore } = await import('../../store/index.js')
+    useMainStore.getState().feResolveUserInput('user-input', userInput)
 
     return { ok: true }
   } catch (e: any) {
     const error = e?.message || String(e)
-    sendFlowEvent(wc, requestId, { type: 'error', error })
+    emitFlowEvent(requestId, { type: 'error', error })
     return { ok: false, error }
   }
+}
+
+/**
+ * Get an active flow scheduler (for backwards compatibility)
+ * @deprecated Nodes should use store actions instead of accessing the scheduler directly
+ */
+export function getActiveFlow(requestId: string) {
+  return activeFlows.get(requestId)
+}
+
+/**
+ * Cancel a flow
+ */
+export async function cancelFlow(requestId: string): Promise<{ ok: boolean; error?: string }> {
+  const scheduler = activeFlows.get(requestId)
+  if (scheduler) {
+    activeFlows.delete(requestId)
+    flowEvents.cleanup(requestId)
+    emitFlowEvent(requestId, { type: 'done' })
+    return { ok: true }
+  }
+  return { ok: false, error: 'Flow not found' }
 }
 
 /**
@@ -95,11 +147,8 @@ export function registerFlowHandlersV2(ipcMain: IpcMain): void {
    */
   ipcMain.handle('flow:run:v2', async (_event, args: FlowExecutionArgs) => {
     try {
-      console.log('[flow:run:v2] IPC handler called with args:', { requestId: args.requestId, hasFlowDef: !!args.flowDef })
       const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-      console.log('[flow:run:v2] WebContents available:', !!wc)
       const result = await executeFlow(wc, args)
-      console.log('[flow:run:v2] Flow execution completed:', result)
       return result
     } catch (error: any) {
       console.error('[flow:run:v2] Error executing flow:', error)
@@ -111,23 +160,16 @@ export function registerFlowHandlersV2(ipcMain: IpcMain): void {
   /**
    * Resume a paused flow
    */
-  ipcMain.handle('flow:resume:v2', async (_event, args: { requestId: string; userInput: string }) => {
+  ipcMain.handle('flow:resume:v2', async (_event, args: { requestId: string; userInput: string; provider?: string; model?: string }) => {
     const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-    return resumeFlow(wc, args.requestId, args.userInput)
+    return resumeFlow(wc, args.requestId, args.userInput, args.provider, args.model)
   })
 
   /**
    * Cancel a flow
    */
   ipcMain.handle('flow:cancel:v2', async (_event, args: { requestId: string }) => {
-    const scheduler = activeFlows.get(args.requestId)
-    if (scheduler) {
-      activeFlows.delete(args.requestId)
-      const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-      sendFlowEvent(wc, args.requestId, { type: 'done' })
-      return { ok: true }
-    }
-    return { ok: false, error: 'Flow not found' }
+    return cancelFlow(args.requestId)
   })
 
   /**
@@ -146,5 +188,6 @@ export function registerFlowHandlersV2(ipcMain: IpcMain): void {
       return []
     }
   })
+
 }
 

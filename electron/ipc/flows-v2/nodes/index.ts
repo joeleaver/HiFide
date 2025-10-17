@@ -8,10 +8,12 @@
 import type { FlowNode, NodeFunction, NodeExecutionPolicy } from '../types'
 import { defaultContextStartNode, metadata as defaultContextStartMetadata } from './defaultContextStart'
 import { userInputNode, metadata as userInputMetadata } from './userInput'
-import { chatNode, metadata as chatMetadata } from './chat'
+import { llmRequestNode, metadata as llmRequestMetadata } from './llmRequest'
 import { toolsNode, metadata as toolsMetadata } from './tools'
 import { manualInputNode, metadata as manualInputMetadata } from './manualInput'
 import { intentRouterNode, metadata as intentRouterMetadata } from './intentRouter'
+import { portalInputNode, metadata as portalInputMetadata } from './portalInput'
+import { portalOutputNode, metadata as portalOutputMetadata } from './portalOutput'
 
 /**
  * Node metadata
@@ -34,9 +36,9 @@ const NODE_REGISTRY: Record<string, NodeMetadata> = {
     fn: userInputNode,
     ...userInputMetadata
   },
-  chat: {
-    fn: chatNode,
-    ...chatMetadata
+  llmRequest: {
+    fn: llmRequestNode,
+    ...llmRequestMetadata
   },
   tools: {
     fn: toolsNode,
@@ -49,6 +51,14 @@ const NODE_REGISTRY: Record<string, NodeMetadata> = {
   intentRouter: {
     fn: intentRouterNode,
     ...intentRouterMetadata
+  },
+  portalInput: {
+    fn: portalInputNode,
+    ...portalInputMetadata
+  },
+  portalOutput: {
+    fn: portalOutputNode,
+    ...portalOutputMetadata
   },
 }
 

@@ -1,160 +1,63 @@
 /**
- * Combined Zustand Store
- *
- * This file combines all store slices into a single unified store.
- * Uses the official Zustand slices pattern for modularity and maintainability.
- *
- * Architecture:
- * - Each slice is independent and focused on a specific domain
- * - Slices can access other slices via get() for cross-slice communication
- * - Type safety is maintained throughout with TypeScript
- * - Persistence is handled per-slice where needed
- *
- * Slices:
- * 1. View - Current view state (agent/explorer)
- * 2. UI - UI panel states and toggles
- * 3. Debug - Debug logging
- * 4. Planning - Approved plan management
- * 5. App - Application initialization
- * 6. Workspace - Workspace management
- * 7. Explorer - File explorer
- * 8. Indexing - Code indexing
- * 9. Provider - Provider/model selection
- * 10. Settings - Settings & API keys
- * 11. Terminal - Terminal & PTY management
- * 12. Session - Chat sessions & LLM lifecycle
+ * Renderer Process Store Bridge
+ * 
+ * This creates a synced copy of the main process store in the renderer.
+ * All state updates are automatically synchronized via IPC.
+ * 
+ * Usage:
+ * - Import `useAppStore` from this file instead of './index'
+ * - The API is identical to the original Zustand store
+ * - State changes in main process are automatically reflected here
+ * - Actions called here are sent to main process via IPC
  */
 
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
-import { createViewSlice, type ViewSlice } from './slices/view.slice'
-import { createUiSlice, type UiSlice } from './slices/ui.slice'
-import { createDebugSlice, type DebugSlice } from './slices/debug.slice'
-import { createPlanningSlice, type PlanningSlice } from './slices/planning.slice'
-import { createAppSlice, type AppSlice } from './slices/app.slice'
-import { createWorkspaceSlice, type WorkspaceSlice } from './slices/workspace.slice'
-import { createExplorerSlice, type ExplorerSlice } from './slices/explorer.slice'
-import { createIndexingSlice, type IndexingSlice } from './slices/indexing.slice'
-import { createProviderSlice, type ProviderSlice } from './slices/provider.slice'
-import { createSettingsSlice, type SettingsSlice } from './slices/settings.slice'
-import { createTerminalSlice, type TerminalSlice } from './slices/terminal.slice'
-import { createSessionSlice, type SessionSlice } from './slices/session.slice'
-import { createFlowEditorSlice, type FlowEditorSlice } from './slices/flowEditor.slice'
+import { createUseStore, useDispatch as useZubridgeDispatch } from '@zubridge/electron'
+import type { AppStore } from '../../electron/store'
 
-
-// ============================================================================
-// Combined Store Type
-// ============================================================================
+// Re-export types that are used by components
+export type { ViewType } from '../../electron/store/types'
+export type { RateLimitKind } from '../../electron/store/types'
 
 /**
- * Combined store type that includes all slices.
- * This provides full type safety across the entire application.
+ * Create the renderer-side store hook
+ * This is a synced copy of the main process store
  */
-export type AppStore = ViewSlice &
-  UiSlice &
-  DebugSlice &
-  PlanningSlice &
-  AppSlice &
-  WorkspaceSlice &
-  ExplorerSlice &
-  IndexingSlice &
-  ProviderSlice &
-  SettingsSlice &
-  TerminalSlice &
-  SessionSlice &
-  FlowEditorSlice
-
-// ============================================================================
-// Create Combined Store
-// ============================================================================
+export const useAppStore = createUseStore<AppStore>()
 
 /**
- * Main application store combining all slices.
+ * Create a typed dispatch hook for calling store actions
+ * Use this to call any action methods on the store from the renderer
  *
- * Uses Zustand's persist middleware to save specific state to localStorage.
- * Each slice manages its own persistence where needed.
- *
- * Cross-slice communication:
- * - Slices can access other slices via get() with type casting
- * - The combined store provides full type safety
- * - Dependencies are documented in each slice file
+ * Example:
+ *   const dispatch = useDispatch()
+ *   dispatch('toggleRateLimiting', true)
+ *   dispatch('setRateLimitForModel', 'openai', 'gpt-4', { rpm: 100 })
  */
-
-// Generate a unique ID for this store instance (for HMR debugging)
-const storeInstanceId = `store-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-console.log('[store] Creating store instance:', storeInstanceId)
-
-export const useAppStore = create<AppStore>()(
-  persist(
-    (set, get, store) => {
-      // Add instance ID for debugging HMR issues
-      ;(store as any).__storeId = storeInstanceId
-
-      return {
-        // Simple Slices
-        ...createViewSlice(set, get, store),
-        ...createUiSlice(set, get, store),
-        ...createDebugSlice(set, get, store),
-        ...createPlanningSlice(set, get, store),
-
-        // Medium Slices
-        ...createAppSlice(set, get, store),
-        ...createWorkspaceSlice(set, get, store),
-        ...createExplorerSlice(set, get, store),
-        ...createIndexingSlice(set, get, store),
-
-        // Complex Slices
-        ...createProviderSlice(set, get, store),
-        ...createSettingsSlice(set, get, store),
-        ...createTerminalSlice(set, get, store),
-        ...createSessionSlice(set, get, store),
-        ...createFlowEditorSlice(set, get, store),
-      }
-    },
-    {
-      name: 'hifide-app-storage',
-      // Specify which parts of the state to persist
-      partialize: (state) => ({
-        // UI state
-        metaPanelOpen: state.metaPanelOpen,
-        sidebarCollapsed: state.sidebarCollapsed,
-        debugPanelCollapsed: state.debugPanelCollapsed,
-        agentTerminalPanelOpen: state.agentTerminalPanelOpen,
-        agentTerminalPanelHeight: state.agentTerminalPanelHeight,
-        explorerTerminalPanelOpen: state.explorerTerminalPanelOpen,
-        explorerTerminalPanelHeight: state.explorerTerminalPanelHeight,
-
-        // Pricing config
-        pricingConfig: state.pricingConfig,
-
-        // Note: Most other state is persisted individually by slices via localStorage
-        // or via IPC to the main process (e.g., sessions, API keys, rate limits)
-      }),
-    }
-  )
-)
-
-// ============================================================================
-// Selectors
-// ============================================================================
+export const useDispatch = () => useZubridgeDispatch<AppStore>()
 
 /**
- * Common selectors for performance optimization.
- * Use these to prevent unnecessary re-renders.
+ * Re-export all selectors for convenience
+ * These work exactly the same as before
  */
 
 // View selectors
 export const selectCurrentView = (state: AppStore) => state.currentView
 
-// UI selectors
-export const selectMetaPanelOpen = (state: AppStore) => state.metaPanelOpen
-export const selectSidebarCollapsed = (state: AppStore) => state.sidebarCollapsed
-export const selectDebugPanelCollapsed = (state: AppStore) => state.debugPanelCollapsed
+// UI selectors - read from windowState
+export const selectMetaPanelOpen = (state: AppStore) => state.windowState.metaPanelOpen
+export const selectSidebarCollapsed = (state: AppStore) => state.windowState.sidebarCollapsed
+export const selectDebugPanelCollapsed = (state: AppStore) => state.windowState.debugPanelCollapsed
 
 // Session selectors
 export const selectCurrentSession = (state: AppStore) =>
   state.sessions.find((s) => s.id === state.currentId)
-export const selectCurrentMessages = (state: AppStore) => state.getCurrentMessages()
+export const selectCurrentMessages = (state: AppStore) => {
+  const currentSession = state.sessions.find((s) => s.id === state.currentId)
+  return currentSession?.items.filter(i => i.type === 'message').map((i: any) => ({
+    role: i.role,
+    content: i.content
+  })) || []
+}
 export const selectSessions = (state: AppStore) => state.sessions
 export const selectCurrentId = (state: AppStore) => state.currentId
 
@@ -163,7 +66,6 @@ export const selectSelectedProvider = (state: AppStore) => state.selectedProvide
 export const selectSelectedModel = (state: AppStore) => state.selectedModel
 export const selectProviderValid = (state: AppStore) => state.providerValid
 export const selectModelsByProvider = (state: AppStore) => state.modelsByProvider
-
 export const selectDefaultModels = (state: AppStore) => state.defaultModels
 
 // Workspace selectors
@@ -210,15 +112,14 @@ export const selectCtxResult = (state: AppStore) => state.ctxResult
 // Explorer selectors
 export const selectExplorerOpenFolders = (state: AppStore) => state.explorerOpenFolders
 export const selectExplorerChildrenByDir = (state: AppStore) => state.explorerChildrenByDir
-export const selectExplorerTerminalPanelOpen = (state: AppStore) => state.explorerTerminalPanelOpen
-export const selectExplorerTerminalPanelHeight = (state: AppStore) => state.explorerTerminalPanelHeight
+export const selectExplorerTerminalPanelOpen = (state: AppStore) => state.windowState.explorerTerminalPanelOpen
+export const selectExplorerTerminalPanelHeight = (state: AppStore) => state.windowState.explorerTerminalPanelHeight
 
 // Rate limit selectors
 export const selectRateLimitConfig = (state: AppStore) => state.rateLimitConfig
 
 // Settings selectors
 export const selectAutoRetry = (state: AppStore) => state.autoRetry
-export const selectAutoEnforceEditsSchema = (state: AppStore) => state.autoEnforceEditsSchema
 export const selectSettingsApiKeys = (state: AppStore) => state.settingsApiKeys
 export const selectSettingsSaving = (state: AppStore) => state.settingsSaving
 export const selectSettingsSaved = (state: AppStore) => state.settingsSaved
@@ -227,71 +128,15 @@ export const selectStartupMessage = (state: AppStore) => state.startupMessage
 // Agent metrics selectors
 export const selectAgentMetrics = (state: AppStore) => state.agentMetrics
 
-// ============================================================================
-// Initialization
-// ============================================================================
-
 /**
- * Initialize the store on app startup.
- * This should be called once when the app starts.
+ * Note: No initialization function needed!
+ * The store is automatically initialized by the main process.
+ * The renderer just subscribes to updates.
  */
-let isInitializing = false
-let isInitialized = false
 
-export const initializeStore = async () => {
-  // Prevent double initialization (React StrictMode calls useEffect twice in dev)
-  if (isInitializing || isInitialized) {
-    console.log('[store] Already initialized or initializing, skipping...')
-    return
-  }
-
-  isInitializing = true
-  const store = useAppStore.getState()
-
-  console.log('[store] Initializing combined store...')
-
-  try {
-    // Register global flow event handler (FIRST - before any flow execution)
-    console.log('[store] Registering global flow event handler...')
-    store.registerGlobalFlowEventHandler()
-
-    // Initialize app (loads workspace, API keys, sessions, etc.)
-    await store.initializeApp()
-
-    // Initialize Flow Editor slice (loads templates, persistence)
-    await store.initFlowEditor()
-
-    console.log('[store] Combined store initialized')
-    isInitialized = true
-  } finally {
-    isInitializing = false
-  }
-}
-
-/**
- * Re-register event handlers after HMR
- * This is called automatically when the store module is hot-reloaded
- */
-if (import.meta.hot) {
-  import.meta.hot.accept(() => {
-    console.log('[store] HMR detected - re-registering event handlers...')
-    const store = useAppStore.getState()
-
-    // Force re-registration by clearing the flag
-    ;(window as any).__fe_event_handler_registered = false
-
-    // Re-register the event handler with the new store instance
-    store.registerGlobalFlowEventHandler()
-  })
-}
-
-// ============================================================================
-// Exports
-// ============================================================================
-
-// Export types for use in components
-
+// Re-export all types from the main store for convenience
 export type {
+  AppStore,
   ViewSlice,
   UiSlice,
   DebugSlice,
@@ -305,18 +150,18 @@ export type {
   TerminalSlice,
   SessionSlice,
   FlowEditorSlice,
-}
+} from '../../electron/store'
 
-// Re-export types from types.ts for convenience
+// Re-export all other types
 export type {
-  ViewType,
-  ChatMessage,
+  SessionMessage,
+  SessionBadgeGroup,
+  SessionItem,
   Session,
   TokenUsage,
   TokenCost,
   ModelOption,
   PtySession,
-  TerminalInstance,
   PlanStep,
   ApprovedPlan,
   IndexStatus,
@@ -325,12 +170,10 @@ export type {
   ApiKeys,
   PricingConfig,
   RateLimitConfig,
-  RateLimitKind,
   DebugLogEntry,
   RecentFolder,
   ExplorerEntry,
   OpenedFile,
   AgentMetrics,
   ActivityEvent,
-} from './types'
-
+} from '../../electron/store/types'

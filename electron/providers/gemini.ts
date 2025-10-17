@@ -5,16 +5,32 @@ import type { ProviderAdapter, StreamHandle, ChatMessage } from './provider'
 import { validateJson } from './jsonschema'
 import { withRetries } from './retry'
 
-// Gemini doesn't support additionalProperties or const in schemas, so strip them out recursively
+// Gemini doesn't support additionalProperties, const, default, or complex oneOf/anyOf/allOf in schemas
+// Strip them out recursively and simplify the schema
 function stripAdditionalProperties(schema: any): any {
   if (!schema || typeof schema !== 'object') return schema
   const cleaned = { ...schema }
   delete cleaned.additionalProperties
 
+  // Gemini Flash doesn't support "default" values in schemas
+  delete cleaned.default
+
   // Gemini doesn't support "const" - convert to enum with single value
   if ('const' in cleaned) {
     cleaned.enum = [cleaned.const]
     delete cleaned.const
+  }
+
+  // Remove oneOf/anyOf/allOf - these cause INTERNAL errors in Gemini Flash
+  // If present, just use the first option (tools should be pre-flattened anyway)
+  if (cleaned.oneOf) {
+    delete cleaned.oneOf
+  }
+  if (cleaned.anyOf) {
+    delete cleaned.anyOf
+  }
+  if (cleaned.allOf) {
+    delete cleaned.allOf
   }
 
   // Recursively clean nested schemas
@@ -25,15 +41,6 @@ function stripAdditionalProperties(schema: any): any {
   }
   if (cleaned.items) {
     cleaned.items = stripAdditionalProperties(cleaned.items)
-  }
-  if (cleaned.oneOf) {
-    cleaned.oneOf = cleaned.oneOf.map(stripAdditionalProperties)
-  }
-  if (cleaned.anyOf) {
-    cleaned.anyOf = cleaned.anyOf.map(stripAdditionalProperties)
-  }
-  if (cleaned.allOf) {
-    cleaned.allOf = cleaned.allOf.map(stripAdditionalProperties)
   }
 
   return cleaned
@@ -57,6 +64,7 @@ const geminiAgentContents = new Map<string, any[]>()
 export const GeminiProvider: ProviderAdapter = {
   id: 'gemini',
   async chatStream({ apiKey, model, messages, onChunk, onDone, onError, onTokenUsage, sessionId, onConversationMeta }): Promise<StreamHandle> {
+
     const ai = new GoogleGenAI({ apiKey })
     const systemInstruction = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
 
@@ -70,6 +78,7 @@ export const GeminiProvider: ProviderAdapter = {
         role: msg.role === 'assistant' ? 'model' : msg.role,
         parts: [{ text: msg.content }],
       }))
+
 
     const holder: { abort?: () => void } = {}
 
@@ -132,7 +141,6 @@ export const GeminiProvider: ProviderAdapter = {
 
               // Log cache hits
               if (cachedTokens > 0) {
-                console.log(`[Gemini] Cache hit: ${cachedTokens} tokens served from cache`)
               }
             }
           } catch {}
@@ -175,7 +183,6 @@ export const GeminiProvider: ProviderAdapter = {
 
               // Log cache hits
               if (cachedTokens > 0) {
-                console.log(`[Gemini] Cache hit: ${cachedTokens} tokens served from cache`)
               }
             }
           } catch (e) {
@@ -212,7 +219,6 @@ export const GeminiProvider: ProviderAdapter = {
 
               // Log cache hits
               if (cachedTokens > 0) {
-                console.log(`[Gemini] Cache hit: ${cachedTokens} tokens served from cache`)
               }
             }
           } catch (e) {
@@ -412,7 +418,6 @@ export const GeminiProvider: ProviderAdapter = {
 
             // Log cache hits
             if (cachedTokens > 0) {
-              console.log(`[Gemini agentStream] Cache hit: ${cachedTokens} tokens served from cache`)
             }
           }
 

@@ -25,11 +25,10 @@ import { OpenAIProvider } from './providers/openai'
 import { AnthropicProvider } from './providers/anthropic'
 import { GeminiProvider } from './providers/gemini'
 import { registerRateLimitIpc } from './providers/ratelimit'
-import type { AgentTool } from './providers/provider'
-import { verifyTypecheck as tsVerify } from './refactors/ts'
 
 // State management
 import { providers, providerCapabilities } from './core/state'
+import { initializeMainStore } from './store'
 
 // Agent dependencies
 import { initAgentSessionsCleanup } from './session/agentSessions'
@@ -69,7 +68,10 @@ providerCapabilities.gemini = { tools: true, jsonSchema: true, vision: true, str
 /**
  * Initialize the application
  */
-function initialize(): void {
+async function initialize(): Promise<void> {
+  // Initialize main process store FIRST
+  await initializeMainStore()
+
   // Register all IPC handlers
   registerAllHandlers(ipcMain)
 
@@ -85,8 +87,6 @@ function initialize(): void {
     buildMenu()
   })
 
-  console.log('[main] HiFide initialized successfully')
-  console.log('[main] Agent tools registered:', agentTools.length)
 }
 
 // Start the application

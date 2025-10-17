@@ -1,0 +1,21 @@
+{
+  "context": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [],
+    "currentOutput": "",
+    "sessionId": "test-session-1760553297105"
+  },
+  "data": "Please create a new file called test.txt",
+  "status": "success",
+  "command-context": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [],
+    "currentOutput": "",
+    "sessionId": "test-session-1760553297105"
+  },
+  "command-data": "Please create a new file called test.txt"
+}

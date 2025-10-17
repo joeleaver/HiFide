@@ -1,6 +1,6 @@
 import { Stack, UnstyledButton, Tooltip } from '@mantine/core'
 import { IconMessageCircle, IconFolder, IconGitBranch, IconSettings } from '@tabler/icons-react'
-import { useAppStore, selectCurrentView, type ViewType } from '../store'
+import { useAppStore, useDispatch, selectCurrentView, type ViewType } from '../store'
 
 const ACTIVITY_BAR_WIDTH = 48
 
@@ -48,7 +48,7 @@ function ActivityButton({ icon, label, view: _view, active, onClick }: ActivityB
 
 export default function ActivityBar() {
   const currentView = useAppStore(selectCurrentView)
-  const { setCurrentView } = useAppStore()
+  const dispatch = useDispatch()
 
   return (
     <Stack
@@ -66,21 +66,21 @@ export default function ActivityBar() {
         label="Agent"
         view="agent"
         active={currentView === 'agent'}
-        onClick={() => setCurrentView('agent')}
+        onClick={() => dispatch('setCurrentView', 'agent')}
       />
       <ActivityButton
         icon={<IconFolder size={24} stroke={1.5} />}
         label="Explorer"
         view="explorer"
         active={currentView === 'explorer'}
-        onClick={() => setCurrentView('explorer')}
+        onClick={() => dispatch('setCurrentView', 'explorer')}
       />
       <ActivityButton
         icon={<IconGitBranch size={24} stroke={1.5} />}
         label="Source Control"
         view="sourceControl"
         active={currentView === 'sourceControl'}
-        onClick={() => setCurrentView('sourceControl')}
+        onClick={() => dispatch('setCurrentView', 'sourceControl')}
       />
 
       {/* Spacer to push settings to bottom */}
@@ -91,7 +91,7 @@ export default function ActivityBar() {
         label="Settings"
         view="settings"
         active={currentView === 'settings'}
-        onClick={() => setCurrentView('settings')}
+        onClick={() => dispatch('setCurrentView', 'settings')}
       />
     </Stack>
   )

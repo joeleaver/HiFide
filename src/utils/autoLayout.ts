@@ -35,20 +35,6 @@ export function getLayoutedElements(
     return kind === 'defaultContextStart' || n.id === 'defaultContextStart' || n.id.startsWith('defaultContextStart')
   })
 
-  console.log('Auto-layout: Found start node:', startNode?.id, 'kind:', (startNode?.data as any)?.kind)
-  console.log('Auto-layout: Total nodes:', nodes.length, 'Total edges:', edges.length)
-
-  // Debug: Find all root nodes (nodes with no incoming edges)
-  const nodesWithIncoming = new Set(edges.map(e => e.target))
-  const rootNodes = nodes.filter(n => !nodesWithIncoming.has(n.id))
-  console.log('Auto-layout: Root nodes (no incoming edges):', rootNodes.map(n => n.id))
-
-  // Debug: Check all edges
-  console.log('Auto-layout: All edges:')
-  edges.forEach(e => {
-    console.log(`  ${e.source} -> ${e.target} (sourceHandle: ${e.sourceHandle}, targetHandle: ${e.targetHandle})`)
-  })
-
   // Add a virtual root node to force defaultContextStart to the top
   const VIRTUAL_ROOT = '__virtual_root__'
   if (startNode) {
@@ -83,13 +69,6 @@ export function getLayoutedElements(
 
   // Calculate layout
   dagre.layout(dagreGraph)
-
-  // Debug: Check the calculated positions
-  console.log('Auto-layout: Node data after layout:')
-  nodes.forEach((node) => {
-    const dagreNode = dagreGraph.node(node.id)
-    console.log(`  ${node.id}:`, dagreNode)
-  })
 
   // Apply calculated positions to nodes
   const layoutedNodes = nodes.map((node) => {

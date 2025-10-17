@@ -9,35 +9,29 @@ export const applyEditsTool: AgentTool = {
     properties: {
       edits: {
         type: 'array',
+        description: 'List of edits to apply',
         items: {
           type: 'object',
-          oneOf: [
-            {
-              type: 'object',
-              properties: { type: { const: 'replaceOnce' }, path: { type: 'string' }, oldText: { type: 'string' }, newText: { type: 'string' } },
-              required: ['type', 'path', 'oldText', 'newText'],
-              additionalProperties: false,
-            },
-            {
-              type: 'object',
-              properties: { type: { const: 'insertAfterLine' }, path: { type: 'string' }, line: { type: 'integer' }, text: { type: 'string' } },
-              required: ['type', 'path', 'line', 'text'],
-              additionalProperties: false,
-            },
-            {
-              type: 'object',
-              properties: { type: { const: 'replaceRange' }, path: { type: 'string' }, start: { type: 'integer' }, end: { type: 'integer' }, text: { type: 'string' } },
-              required: ['type', 'path', 'start', 'end', 'text'],
-              additionalProperties: false,
-            },
-          ],
+          properties: {
+            type: { type: 'string', enum: ['replaceOnce', 'insertAfterLine', 'replaceRange'], description: 'Type of edit' },
+            path: { type: 'string', description: 'File path relative to workspace' },
+            // For replaceOnce
+            oldText: { type: 'string', description: 'Text to find and replace (for replaceOnce)' },
+            newText: { type: 'string', description: 'Replacement text (for replaceOnce)' },
+            // For insertAfterLine
+            line: { type: 'integer', description: 'Line number to insert after (for insertAfterLine)' },
+            text: { type: 'string', description: 'Text to insert (for insertAfterLine or replaceRange)' },
+            // For replaceRange
+            start: { type: 'integer', description: 'Start character offset (for replaceRange)' },
+            end: { type: 'integer', description: 'End character offset (for replaceRange)' },
+          },
+          required: ['type', 'path']
         },
       },
-      verify: { type: 'boolean', default: true },
-      tsconfigPath: { type: 'string' },
+      verify: { type: 'boolean', default: true, description: 'Run TypeScript verification after edits' },
+      tsconfigPath: { type: 'string', description: 'Path to tsconfig.json for verification' },
     },
     required: ['edits'],
-    additionalProperties: false,
   },
   run: async ({ edits, verify = true, tsconfigPath }: { edits: any[]; verify?: boolean; tsconfigPath?: string }) => {
     const res = await applyFileEditsInternal(edits, { verify, tsconfigPath })

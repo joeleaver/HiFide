@@ -1,69 +1,147 @@
-import { Group, Stack, Text, UnstyledButton, ScrollArea, Card, Select, Button, Badge } from '@mantine/core'
+import { Text, UnstyledButton, Select, Button } from '@mantine/core'
 import { IconChevronLeft, IconChevronRight, IconPlus } from '@tabler/icons-react'
-import { useAppStore, selectSessions, selectCurrentId, selectWorkspaceRoot, selectMetaPanelOpen, selectDebugPanelCollapsed, selectCtxRefreshing, selectCtxResult, selectLastRequestTokenUsage } from '../store'
-import { usePanelResize } from '../hooks/usePanelResize'
-import ChatPane from '../ChatPane'
+import { useRef, useState, useEffect, useCallback } from 'react'
+import {
+  useAppStore,
+  useDispatch,
+  selectMetaPanelOpen,
+  selectSessions,
+  selectCurrentId,
+} from '../store'
+import SessionPane from '../SessionPane'
 import TerminalPanel from './TerminalPanel'
 import AgentDebugPanel from './AgentDebugPanel'
 import FlowCanvasPanel from './FlowCanvasPanel'
+import NodePalettePanel from './NodePalettePanel'
+import ContextInspectorPanel from './ContextInspectorPanel'
+import TokensCostsPanel from './TokensCostsPanel'
+import { ReactFlowProvider } from 'reactflow'
 
 
 
 export default function AgentView() {
+  // Use dispatch for actions
+  const dispatch = useDispatch()
+
   // Use selectors for better performance
   const metaPanelOpen = useAppStore(selectMetaPanelOpen)
-  const debugPanelCollapsed = useAppStore(selectDebugPanelCollapsed)
-  const debugPanelHeight = useAppStore((s) => s.debugPanelHeight)
-  const setDebugPanelHeight = useAppStore((s) => s.setDebugPanelHeight)
   const sessions = useAppStore(selectSessions)
   const currentId = useAppStore(selectCurrentId)
-  const workspaceRoot = useAppStore(selectWorkspaceRoot)
 
-  // Flow canvas state
-  const flowCanvasCollapsed = useAppStore((s) => s.flowCanvasCollapsed)
-  const setFlowCanvasCollapsed = useAppStore((s) => s.setFlowCanvasCollapsed)
-  const flowCanvasWidth = useAppStore((s) => s.flowCanvasWidth)
-  const setFlowCanvasWidth = useAppStore((s) => s.setFlowCanvasWidth)
+  // Session panel state - subscribe to windowState reactively
+  const sessionPanelWidth = useAppStore((s) => s.windowState.sessionPanelWidth)
 
-  // Context state - use selectors
-  const ctxRefreshing = useAppStore(selectCtxRefreshing)
-  const ctxResult = useAppStore(selectCtxResult)
-  const lastRequest = useAppStore(selectLastRequestTokenUsage)
+  // Local state for smooth resizing - use ref to avoid stale closure
+  const [localSessionPanelWidth, setLocalSessionPanelWidth] = useState(sessionPanelWidth)
+  const localSessionPanelWidthRef = useRef(sessionPanelWidth)
+  const isDraggingSessionPanelRef = useRef(false)
 
-  // Actions only - these don't cause re-renders
-  const setMetaPanelOpen = useAppStore((s) => s.setMetaPanelOpen)
-  const select = useAppStore((s) => s.select)
-  const refreshContext = useAppStore((s) => s.refreshContext)
-  const newSession = useAppStore((s) => s.newSession)
-  const calculateCost = useAppStore((s) => s.calculateCost)
+  // Update local width when store value changes
+  useEffect(() => {
+    setLocalSessionPanelWidth(sessionPanelWidth)
+    localSessionPanelWidthRef.current = sessionPanelWidth
+  }, [sessionPanelWidth])
 
-  // Debug panel resize handler
-  const { onMouseDown, isResizingRef } = usePanelResize({
-    getHeight: () => debugPanelHeight,
-    setHeight: setDebugPanelHeight,
-    min: 150,
-    max: 600,
-  })
+  // Update ref when local state changes
+  useEffect(() => {
+    localSessionPanelWidthRef.current = localSessionPanelWidth
+  }, [localSessionPanelWidth])
+
+  // Meta panel (Tools) state - subscribe to windowState reactively
+  const metaPanelWidth = useAppStore((s) => s.windowState.metaPanelWidth)
+
+  // Local state for smooth resizing - use ref to avoid stale closure
+  const [localMetaPanelWidth, setLocalMetaPanelWidth] = useState(metaPanelWidth)
+  const localMetaPanelWidthRef = useRef(metaPanelWidth)
+  const isDraggingMetaPanelRef = useRef(false)
+
+  // Update local width when store value changes
+  useEffect(() => {
+    setLocalMetaPanelWidth(metaPanelWidth)
+    localMetaPanelWidthRef.current = metaPanelWidth
+  }, [metaPanelWidth])
+
+  // Update ref when local state changes
+  useEffect(() => {
+    localMetaPanelWidthRef.current = localMetaPanelWidth
+  }, [localMetaPanelWidth])
+
+  // Session panel resize handler
+  const handleSessionPanelMouseDown = useCallback((e: React.MouseEvent) => {
+    isDraggingSessionPanelRef.current = true
+    e.preventDefault()
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingSessionPanelRef.current) return
+      const newWidth = e.clientX
+      // Min 200px, max = ensure meta panel stays >= 200px
+      const metaPanelActualWidth = metaPanelOpen ? localMetaPanelWidth : 0
+      const maxWidth = window.innerWidth - metaPanelActualWidth - 200
+      if (newWidth >= 200 && newWidth <= maxWidth) {
+        setLocalSessionPanelWidth(newWidth)
+      }
+    }
+
+    const handleMouseUp = () => {
+      isDraggingSessionPanelRef.current = false
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      // Persist to store when drag ends - use ref to get current value
+      dispatch('updateWindowState', { sessionPanelWidth: localSessionPanelWidthRef.current })
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [dispatch, localSessionPanelWidth, metaPanelOpen, localMetaPanelWidth])
+
+  // Meta panel resize handler
+  const handleMetaPanelMouseDown = useCallback((e: React.MouseEvent) => {
+    isDraggingMetaPanelRef.current = true
+    e.preventDefault()
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingMetaPanelRef.current) return
+      const newWidth = window.innerWidth - e.clientX
+      // Min 200px, max = ensure session panel stays >= 200px
+      const maxWidth = window.innerWidth - localSessionPanelWidth - 200
+      if (newWidth >= 200 && newWidth <= maxWidth) {
+        setLocalMetaPanelWidth(newWidth)
+      }
+    }
+
+    const handleMouseUp = () => {
+      isDraggingMetaPanelRef.current = false
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      // Persist to store when drag ends - use ref to get current value
+      dispatch('updateWindowState', { metaPanelWidth: localMetaPanelWidthRef.current })
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [dispatch, localMetaPanelWidth, localSessionPanelWidth])
 
   return (
-    <Group
-      gap={0}
+    <div
       style={{
         flex: 1,
         height: '100%',
         overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'row',
       }}
-      align="stretch"
     >
-      {/* Main Chat Area */}
+      {/* Session Panel - Fixed width with resize handle */}
       <div
         style={{
-          flex: 1,
+          width: localSessionPanelWidth,
+          minWidth: 200,
           display: 'flex',
           flexDirection: 'column',
           height: '100%',
           backgroundColor: '#1e1e1e',
           overflow: 'hidden',
+          position: 'relative',
         }}
       >
         {/* Session Selector Bar */}
@@ -79,7 +157,7 @@ export default function AgentView() {
         >
           <Select
             value={currentId || undefined}
-            onChange={(v) => v && select(v)}
+            onChange={(v) => v && dispatch('select', v)}
             data={sessions.map((sess) => ({
               value: sess.id,
               label: sess.title || 'Untitled',
@@ -99,59 +177,110 @@ export default function AgentView() {
             size="xs"
             variant="light"
             leftSection={<IconPlus size={14} />}
-            onClick={() => newSession()}
+            onClick={() => dispatch('newSession')}
           >
             New
           </Button>
         </div>
 
-        {/* Chat + Terminal Panel (bottom) */}
+        {/* Session + Terminal Panel (bottom) */}
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ flex: 1, overflow: 'hidden' }}>
-            <ChatPane />
+          {/* Session Panel - takes remaining space */}
+          <div style={{
+            flex: 1,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
+          }}>
+            <SessionPane />
           </div>
-          {/* Bottom panel (agent context) */}
-          <div style={{ borderTop: '1px solid #3e3e42' }}>
-            <TerminalPanel context="agent" />
-          </div>
+
+          {/* Terminal Panel - fixed at bottom, collapses to header only when closed */}
+          <TerminalPanel context="agent" />
         </div>
+
+        {/* Resize handle for session panel */}
+        <div
+          onMouseDown={handleSessionPanelMouseDown}
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 4,
+            cursor: 'ew-resize',
+            backgroundColor: 'transparent',
+            zIndex: 10,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = '#007acc'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent'
+          }}
+        />
       </div>
 
-      {/* Flow Canvas Panel */}
-      <FlowCanvasPanel
-        collapsed={flowCanvasCollapsed}
-        onToggleCollapse={() => setFlowCanvasCollapsed(!flowCanvasCollapsed)}
-        width={flowCanvasWidth}
-        onResize={setFlowCanvasWidth}
-      />
+      {/* Flow Canvas Panel - Takes remaining space */}
+      <div style={{ flex: 1, overflow: 'hidden' }}>
+        <ReactFlowProvider>
+          <FlowCanvasPanel />
+        </ReactFlowProvider>
+      </div>
 
       {/* Meta Panel */}
       {metaPanelOpen && (
         <div
           style={{
-            width: 300,
+            width: localMetaPanelWidth,
             height: '100%',
             backgroundColor: '#252526',
             borderLeft: '1px solid #3e3e42',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
+            position: 'relative',
           }}
         >
+          {/* Resize handle */}
+          <div
+            onMouseDown={handleMetaPanelMouseDown}
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: 4,
+              cursor: 'ew-resize',
+              zIndex: 10,
+              background: 'transparent',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#007acc'
+            }}
+            onMouseLeave={(e) => {
+              if (!isDraggingMetaPanelRef.current) {
+                e.currentTarget.style.background = 'transparent'
+              }
+            }}
+          />
           {/* Meta Panel Header */}
-          <Group
-            justify="space-between"
+          <div
             style={{
               padding: '8px 12px',
               borderBottom: '1px solid #3e3e42',
               backgroundColor: '#2d2d30',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
             }}
           >
             <Text size="sm" fw={600}>
-              Agent Info
+              Tools
             </Text>
             <UnstyledButton
-              onClick={() => setMetaPanelOpen(false)}
+              onClick={() => dispatch('updateWindowState', { metaPanelOpen: false })}
               style={{
                 color: '#cccccc',
                 display: 'flex',
@@ -170,261 +299,28 @@ export default function AgentView() {
             >
               <IconChevronRight size={16} />
             </UnstyledButton>
-          </Group>
-
-          {/* Meta Panel Content - Scrollable */}
-          <ScrollArea style={{ flex: 1 }} p="md">
-            <Stack gap="md">
-              <Card withBorder style={{ backgroundColor: '#1e1e1e' }}>
-                <Stack gap="xs">
-                  <Text size="xs" fw={600} c="dimmed">CONTEXT</Text>
-                  <Group justify="space-between">
-                    <Button size="xs" variant="light" onClick={refreshContext} loading={ctxRefreshing} disabled={!workspaceRoot}>
-                      Refresh Context
-                    </Button>
-                    {ctxResult ? (
-                      ctxResult.ok ? (
-                        <Badge color="teal" variant="light" size="xs">OK</Badge>
-                      ) : (
-                        <Badge color="red" variant="light" size="xs">ERROR</Badge>
-                      )
-                    ) : null}
-                  </Group>
-                  <Stack gap={2}>
-                    <Text size="xs" c="dimmed">Folder: {workspaceRoot || '—'}</Text>
-                    {ctxResult?.ok ? (
-                      <Text size="xs" c="dimmed">
-                        {ctxResult.createdPublic ? 'Created .hifide-public; ' : ''}
-                        {ctxResult.createdPrivate ? 'Created .hifide-private; ' : ''}
-                        {ctxResult.ensuredGitIgnore ? 'Updated .gitignore; ' : ''}
-                        {ctxResult.generatedContext ? 'Generated context' : 'Context already present'}
-                      </Text>
-                    ) : ctxResult?.error ? (
-                      <Text size="xs" c="red.4">{ctxResult.error}</Text>
-                    ) : (
-                      <Text size="xs" c="dimmed">No recent action</Text>
-                    )}
-                  </Stack>
-                </Stack>
-              </Card>
-
-              <Card withBorder style={{ backgroundColor: '#1e1e1e' }}>
-                <Stack gap="md">
-                  <Text size="xs" fw={600} c="dimmed">
-                    TOKEN USAGE & COSTS
-                  </Text>
-
-                  {/* Session Total */}
-                  {(() => {
-                    const currentSession = sessions.find((sess) => sess.id === currentId)
-                    if (!currentSession) return <Text size="sm" c="dimmed">No session selected</Text>
-
-                    const { total, byProvider } = currentSession.tokenUsage
-                    const costs = currentSession.costs || { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }
-                    const { totalCost, byProviderAndModel } = costs
-                    const hasUsage = total.totalTokens > 0
-
-                    return (
-                      <Stack gap="md">
-                        {/* Session Totals */}
-                        <div>
-                          <Text size="xs" fw={600} c="blue" mb={4}>SESSION TOTALS</Text>
-                          <Group gap="xs" mb={2}>
-                            <Text size="xs" c="dimmed" style={{ minWidth: '60px' }}>Tokens:</Text>
-                            <Text size="xs">
-                              <span style={{ color: '#4fc3f7' }}>{total.inputTokens.toLocaleString()}</span>
-                              <span style={{ color: '#666' }}> in</span>
-                              {total.cachedTokens && total.cachedTokens > 0 && (
-                                <>
-                                  <span style={{ color: '#666' }}> (</span>
-                                  <span style={{ color: '#ffa726' }}>💾 {total.cachedTokens.toLocaleString()} cached</span>
-                                  <span style={{ color: '#666' }}>)</span>
-                                </>
-                              )}
-                              <span style={{ color: '#666' }}> + </span>
-                              <span style={{ color: '#81c784' }}>{total.outputTokens.toLocaleString()}</span>
-                              <span style={{ color: '#666' }}> out</span>
-                              <span style={{ color: '#666' }}> = </span>
-                              <span style={{ color: '#fff' }}>{total.totalTokens.toLocaleString()}</span>
-                            </Text>
-                          </Group>
-                          {totalCost > 0 && (
-                            <Group gap="xs">
-                              <Text size="xs" c="dimmed" style={{ minWidth: '60px' }}>Cost:</Text>
-                              <Text size="xs">
-                                <span style={{ color: '#4ade80', fontWeight: 600 }}>${totalCost.toFixed(4)}</span>
-                                {(() => {
-                                  // Calculate total savings across all providers/models
-                                  let totalSavings = 0
-                                  Object.entries(byProviderAndModel).forEach(([, models]) => {
-                                    Object.entries(models).forEach(([, cost]) => {
-                                      if (cost.savings) totalSavings += cost.savings
-                                    })
-                                  })
-                                  if (totalSavings > 0) {
-                                    const totalWithoutSavings = totalCost + totalSavings
-                                    const savingsPercent = (totalSavings / totalWithoutSavings) * 100
-                                    return (
-                                      <span style={{ color: '#66bb6a', marginLeft: 8 }}>
-                                        (saved ${totalSavings.toFixed(4)} · {savingsPercent.toFixed(0)}%)
-                                      </span>
-                                    )
-                                  }
-                                  return null
-                                })()}
-                              </Text>
-                            </Group>
-                          )}
-                        </div>
-
-                        {/* By Provider & Model */}
-                        {hasUsage && Object.keys(byProviderAndModel).length > 0 && (
-                          <div>
-                            <Text size="xs" fw={600} c="dimmed" mb={4}>BY PROVIDER & MODEL</Text>
-                            <Stack gap={6}>
-                              {Object.entries(byProviderAndModel).map(([provider, models]) => (
-                                <div key={provider}>
-                                  {Object.entries(models).map(([model, cost]) => {
-                                    // Get token usage for this provider/model combination
-                                    const providerUsage = byProvider[provider]
-
-                                    return (
-                                      <div key={`${provider}-${model}`} style={{ marginBottom: '6px' }}>
-                                        <Text size="xs" c="#888" mb={2}>
-                                          {provider} / {model}
-                                        </Text>
-                                        <Group gap="xs" ml="md">
-                                          <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Tokens:</Text>
-                                          <Text size="xs" c="dimmed">
-                                            {providerUsage ? providerUsage.totalTokens.toLocaleString() : '—'}
-                                          </Text>
-                                        </Group>
-                                        <Group gap="xs" ml="md">
-                                          <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Cost:</Text>
-                                          <Text size="xs" c="#4ade80">
-                                            ${cost.totalCost.toFixed(4)}
-                                          </Text>
-                                          <Text size="xs" c="dimmed">
-                                            (${cost.inputCost.toFixed(4)} in + ${cost.outputCost.toFixed(4)} out)
-                                          </Text>
-                                        </Group>
-                                      </div>
-                                    )
-                                  })}
-                                </div>
-                              ))}
-                            </Stack>
-                          </div>
-                        )}
-
-                        {/* Last Request */}
-                        {(() => {
-                          const lr = lastRequest
-                          if (!lr) return null
-
-                          const cost = calculateCost(
-                            lr.provider,
-                            lr.model,
-                            lr.usage
-                          )
-
-                          return (
-                            <div>
-                              <Text size="xs" fw={600} c="orange" mb={4}>LAST REQUEST</Text>
-                              <Text size="xs" c="#888" mb={2}>
-                                {lr.provider} / {lr.model}
-                              </Text>
-                              <Group gap="xs" ml="md">
-                                <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Tokens:</Text>
-                                <Text size="xs">
-                                  <span style={{ color: '#4fc3f7' }}>{lr.usage.inputTokens.toLocaleString()}</span>
-                                  <span style={{ color: '#666' }}> in</span>
-                                  {lr.usage.cachedTokens && lr.usage.cachedTokens > 0 && (
-                                    <>
-                                      <span style={{ color: '#666' }}> (</span>
-                                      <span style={{ color: '#ffa726' }}>💾 {lr.usage.cachedTokens.toLocaleString()} cached</span>
-                                      <span style={{ color: '#666' }}>)</span>
-                                    </>
-                                  )}
-                                  <span style={{ color: '#666' }}> + </span>
-                                  <span style={{ color: '#81c784' }}>{lr.usage.outputTokens.toLocaleString()}</span>
-                                  <span style={{ color: '#666' }}> out</span>
-                                  <span style={{ color: '#666' }}> = </span>
-                                  <span style={{ color: '#ccc' }}>{lr.usage.totalTokens.toLocaleString()}</span>
-                                </Text>
-                              </Group>
-                              <Group gap="xs" ml="md">
-                                <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Cost:</Text>
-                                {cost ? (
-                                  <Text size="xs">
-                                    <span style={{ color: '#4ade80' }}>${cost.totalCost.toFixed(4)}</span>
-                                    {cost.savings && cost.savings > 0 && (
-                                      <span style={{ color: '#66bb6a', marginLeft: 8 }}>
-                                        (saved ${cost.savings.toFixed(4)} · {cost.savingsPercent?.toFixed(0)}%)
-                                      </span>
-                                    )}
-                                  </Text>
-                                ) : (
-                                  <Text size="xs" c="dimmed" fs="italic">
-                                    Unknown (no pricing configured)
-                                  </Text>
-                                )}
-                              </Group>
-                            </div>
-                          )
-                        })()}
-                      </Stack>
-                    )
-                  })()}
-                </Stack>
-              </Card>
-            </Stack>
-          </ScrollArea>
-
-          {/* Agent Debug Panel - Fixed at bottom with resize handle */}
-          <div style={{
-            borderTop: '1px solid #3e3e42',
-            height: debugPanelCollapsed ? 'auto' : `${debugPanelHeight}px`,
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            position: 'relative',
-          }}>
-            {/* Resize handle - only show when not collapsed */}
-            {!debugPanelCollapsed && (
-              <div
-                onMouseDown={onMouseDown}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: '4px',
-                  cursor: 'ns-resize',
-                  backgroundColor: 'transparent',
-                  zIndex: 10,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#007acc'
-                }}
-                onMouseLeave={(e) => {
-                  if (!isResizingRef.current) {
-                    e.currentTarget.style.backgroundColor = 'transparent'
-                  }
-                }}
-              />
-            )}
-            <div style={{ flex: debugPanelCollapsed ? 'none' : 1, overflow: 'hidden' }}>
-              <AgentDebugPanel />
-            </div>
           </div>
+
+          {/* Node Palette - Takes remaining space */}
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <NodePalettePanel />
+          </div>
+
+          {/* Context Inspector Panel */}
+          <ContextInspectorPanel />
+
+          {/* Tokens & Costs Panel */}
+          <TokensCostsPanel />
+
+          {/* Flow Debug Panel - Fixed at bottom */}
+          <AgentDebugPanel />
         </div>
       )}
 
       {/* Toggle button when panel is closed */}
       {!metaPanelOpen && (
         <UnstyledButton
-          onClick={() => setMetaPanelOpen(true)}
+          onClick={() => dispatch('updateWindowState', { metaPanelOpen: true })}
           style={{
             width: 24,
             height: '100%',
@@ -448,7 +344,7 @@ export default function AgentView() {
           <IconChevronLeft size={16} />
         </UnstyledButton>
       )}
-    </Group>
+    </div>
   )
 }
 

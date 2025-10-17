@@ -1,0 +1,21 @@
+{
+  "context": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [
+      {
+        "role": "user",
+        "content": "Test message"
+      },
+      {
+        "role": "assistant",
+        "content": "Test message received! How can I assist you today?"
+      }
+    ],
+    "currentOutput": "Test message received! How can I assist you today?",
+    "sessionId": "test-session-1760553015753"
+  },
+  "data": "Test message received! How can I assist you today?",
+  "status": "success"
+}

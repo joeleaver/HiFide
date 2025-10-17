@@ -1,26 +1,10 @@
 import type { NodeProps } from 'reactflow'
-import { useAppStore } from '../../store'
+import { useAppStore, useDispatch } from '../../store'
 import NodeHandles from './NodeHandles'
 import NodeHeader from './NodeHeader'
 import NodeStatusBadges from './NodeStatusBadges'
 import NodeConfig from './NodeConfig'
-
-// Enhanced color map by node kind
-const KIND_COLORS: Record<string, string> = {
-  defaultContextStart: '#3b82f6',
-  userInput: '#4a9eff',
-  manualInput: '#06b6d4',
-  newContext: '#9b59b6',
-  chat: '#a855f7',
-  tools: '#f97316',
-  intentRouter: '#f39c12',
-  redactor: '#14b8a6',
-  budgetGuard: '#f59e0b',
-  errorDetection: '#f97316',
-  approvalGate: '#ef4444',
-  parallelSplit: '#8b5cf6',
-  parallelJoin: '#10b981',
-}
+import { getNodeColor } from '../../../electron/store/utils/node-colors'
 
 function getKindFromIdOrData(id: string, data: any): string {
   if (data?.kind) return data.kind
@@ -32,33 +16,32 @@ export default function FlowNode(props: NodeProps<any>) {
   const { id, data, selected } = props
   const style = (props as any).style
   const kind = getKindFromIdOrData(id, data)
-  const color = KIND_COLORS[kind] || '#4a4a4a'
+  const color = getNodeColor(kind)
   const label = data?.labelBase || data?.label || id
   const status = data?.status as string | undefined
   const durationMs = data?.durationMs as number | undefined
   const costUSD = data?.costUSD as number | undefined
   const config = data?.config || {}
 
-  // Get store actions for inline editing
-  const setNodeLabel = useAppStore((s) => s.feSetNodeLabel)
-  const patchNodeConfig = useAppStore((s) => s.fePatchNodeConfig)
+  // Use dispatch for actions
+  const dispatch = useDispatch()
+  const feNodes = useAppStore((s) => s.feNodes)
 
   // Expandable state from node data
   const expanded = data?.expanded || false
   const toggleExpanded = () => {
-    const nodes = useAppStore.getState().feNodes
-    const updatedNodes = nodes.map((n) =>
+    const updatedNodes = feNodes.map((n: any) =>
       n.id === id ? { ...n, data: { ...n.data, expanded: !expanded } } : n
     )
-    useAppStore.getState().feSetNodes(updatedNodes)
+    dispatch('feSetNodes', updatedNodes)
   }
 
   const handleLabelChange = (newLabel: string) => {
-    setNodeLabel(id, newLabel)
+    dispatch('feSetNodeLabel', { id, label: newLabel })
   }
 
   const handleConfigChange = (patch: any) => {
-    patchNodeConfig(id, patch)
+    dispatch('fePatchNodeConfig', { id, patch })
   }
 
   // Determine border and shadow based on status and selection
@@ -113,7 +96,7 @@ export default function FlowNode(props: NodeProps<any>) {
           overflow: 'visible', // Allow handles to extend outside
         }}
       >
-        <NodeHandles kind={kind} config={config} />
+        <NodeHandles kind={kind} config={config} nodeId={id} />
       </div>
 
       {/* Content area - separate from handles */}

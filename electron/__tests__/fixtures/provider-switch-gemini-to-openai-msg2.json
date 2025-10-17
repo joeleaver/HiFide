@@ -1,0 +1,29 @@
+{
+  "context": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [
+      {
+        "role": "user",
+        "content": "The capital of France is Paris. Just say \"Noted\" and nothing else."
+      },
+      {
+        "role": "assistant",
+        "content": "Noted\n"
+      },
+      {
+        "role": "user",
+        "content": "What did I say the capital of France is? Just say the city name and nothing else."
+      },
+      {
+        "role": "assistant",
+        "content": "Paris"
+      }
+    ],
+    "currentOutput": "Paris",
+    "sessionId": "test-session-1760553005894"
+  },
+  "data": "Paris",
+  "status": "success"
+}

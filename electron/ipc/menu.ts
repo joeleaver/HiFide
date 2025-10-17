@@ -80,6 +80,26 @@ export function buildMenu(): void {
           },
           { type: 'separator' as const },
         ] : []),
+        // Agent view specific menu items
+        ...(currentViewForMenu === 'agent' ? [
+          {
+            label: 'Import Flow...',
+            accelerator: isMac ? 'Cmd+I' : 'Ctrl+I',
+            click: () => {
+              const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
+              wc?.send('menu:import-flow')
+            },
+          },
+          {
+            label: 'Export Flow...',
+            accelerator: isMac ? 'Cmd+E' : 'Ctrl+E',
+            click: () => {
+              const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
+              wc?.send('menu:export-flow')
+            },
+          },
+          { type: 'separator' as const },
+        ] : []),
         // Standard menu items for other views
         ...(currentViewForMenu !== 'flowEditor' ? [
           {

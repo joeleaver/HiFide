@@ -1,0 +1,21 @@
+{
+  "context": {
+    "provider": "gemini",
+    "model": "gemini-2.0-flash-exp",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [
+      {
+        "role": "user",
+        "content": "The capital of France is Paris. Just say \"Noted\" and nothing else."
+      },
+      {
+        "role": "assistant",
+        "content": "Noted\n"
+      }
+    ],
+    "currentOutput": "Noted\n",
+    "sessionId": "test-session-1760553005894"
+  },
+  "data": "Noted\n",
+  "status": "success"
+}

@@ -1,3 +1,5 @@
+import { NODE_KIND_LABELS } from '../../../electron/store/utils/node-colors'
+
 interface NodeHeaderProps {
   kind: string
   color: string
@@ -5,22 +7,6 @@ interface NodeHeaderProps {
   expanded: boolean
   onLabelChange: (label: string) => void
   onToggleExpanded: () => void
-}
-
-const NODE_KIND_LABELS: Record<string, string> = {
-  defaultContextStart: 'Context Start',
-  userInput: 'User Input',
-  manualInput: 'Manual Input',
-  newContext: 'New Context',
-  chat: 'LLM Message',
-  tools: 'Tools',
-  intentRouter: 'Intent Router',
-  parallelSplit: 'Split',
-  parallelJoin: 'Merge',
-  redactor: 'Redactor',
-  budgetGuard: 'Budget Guard',
-  errorDetection: 'Error Detection',
-  approvalGate: 'Approval Gate',
 }
 
 export default function NodeHeader({

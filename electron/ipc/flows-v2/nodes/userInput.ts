@@ -13,6 +13,7 @@
  */
 
 import type { NodeFunction, NodeExecutionPolicy } from '../types'
+import { useMainStore } from '../../../store/index.js'
 
 /**
  * Node metadata
@@ -26,19 +27,12 @@ export const metadata = {
  * Node implementation
  */
 export const userInputNode: NodeFunction = async (contextIn, _dataIn, _inputs, _config) => {
-  // We need access to the scheduler to wait for user input
-  // The scheduler reference is passed via context._scheduler (a bit hacky but works)
-  const scheduler = (contextIn as any)._scheduler
-
-  if (!scheduler) {
-    throw new Error('userInput node requires scheduler reference in context')
-  }
-
   // Get the node ID from config (passed by scheduler)
   const nodeId = (_config as any)._nodeId || 'user-input'
 
-  // Await user input - this naturally pauses execution until user submits
-  const userInput = await scheduler.waitForUserInput(nodeId)
+  // Call store action to wait for user input
+  // This creates a promise that will be resolved when the user submits
+  const userInput = await useMainStore.getState().feWaitForUserInput(nodeId)
 
   return {
     context: contextIn, // Pass through the context

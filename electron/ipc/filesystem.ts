@@ -71,10 +71,7 @@ async function addWatchersRecursively(
       }
     } catch {}
   }
-
-  const t0 = performance.now()
   await walk(root)
-  console.log(`[filesystem] addWatchersRecursively: ${dirCount} directories, ${(performance.now() - t0).toFixed(2)}ms`)
 
   return () => {
     for (const w of watchers) {

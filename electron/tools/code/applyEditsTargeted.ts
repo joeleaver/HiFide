@@ -12,87 +12,94 @@ export const applyEditsTargetedTool: AgentTool = {
     properties: {
       textEdits: {
         type: 'array',
+        description: 'Simple text edits (replace, insert, or replace range)',
         items: {
           type: 'object',
-          oneOf: [
-            {
-              type: 'object',
-              properties: { type: { const: 'replaceOnce' }, path: { type: 'string' }, oldText: { type: 'string' }, newText: { type: 'string' } },
-              required: ['type', 'path', 'oldText', 'newText'],
-              additionalProperties: false,
-            },
-            {
-              type: 'object',
-              properties: { type: { const: 'insertAfterLine' }, path: { type: 'string' }, line: { type: 'integer' }, text: { type: 'string' } },
-              required: ['type', 'path', 'line', 'text'],
-              additionalProperties: false,
-            },
-            {
-              type: 'object',
-              properties: { type: { const: 'replaceRange' }, path: { type: 'string' }, start: { type: 'integer' }, end: { type: 'integer' }, text: { type: 'string' } },
-              required: ['type', 'path', 'start', 'end', 'text'],
-              additionalProperties: false,
-            },
-          ],
+          properties: {
+            type: { type: 'string', enum: ['replaceOnce', 'insertAfterLine', 'replaceRange'], description: 'Type of text edit' },
+            path: { type: 'string', description: 'File path relative to workspace' },
+            // For replaceOnce
+            oldText: { type: 'string', description: 'Text to find and replace (for replaceOnce)' },
+            newText: { type: 'string', description: 'Replacement text (for replaceOnce)' },
+            // For insertAfterLine
+            line: { type: 'integer', description: 'Line number to insert after (for insertAfterLine)' },
+            text: { type: 'string', description: 'Text to insert (for insertAfterLine)' },
+            // For replaceRange
+            start: { type: 'integer', description: 'Start character offset (for replaceRange)' },
+            end: { type: 'integer', description: 'End character offset (for replaceRange)' },
+          },
+          required: ['type', 'path']
         },
       },
       astRewrites: {
         type: 'array',
+        description: 'AST-based rewrites using ast-grep patterns',
         items: {
           type: 'object',
           properties: {
-            pattern: { type: 'string' },
-            rewrite: { type: 'string' },
-            languages: { type: 'array', items: { type: 'string' } },
-            includeGlobs: { type: 'array', items: { type: 'string' } },
-            excludeGlobs: { type: 'array', items: { type: 'string' } },
-            perFileLimit: { type: 'integer', minimum: 1, maximum: 1000 },
-            totalLimit: { type: 'integer', minimum: 1, maximum: 100000 },
-            maxFileBytes: { type: 'integer', minimum: 1 },
-            concurrency: { type: 'integer', minimum: 1, maximum: 32 },
+            pattern: { type: 'string', description: 'ast-grep pattern to match' },
+            rewrite: { type: 'string', description: 'ast-grep rewrite template' },
+            languages: { type: 'array', items: { type: 'string' }, description: 'Languages to target (e.g., ["typescript", "javascript"])' },
+            includeGlobs: { type: 'array', items: { type: 'string' }, description: 'File patterns to include' },
+            excludeGlobs: { type: 'array', items: { type: 'string' }, description: 'File patterns to exclude' },
+            perFileLimit: { type: 'integer', minimum: 1, maximum: 1000, description: 'Max matches per file' },
+            totalLimit: { type: 'integer', minimum: 1, maximum: 100000, description: 'Max total matches' },
+            maxFileBytes: { type: 'integer', minimum: 1, description: 'Max file size to process' },
+            concurrency: { type: 'integer', minimum: 1, maximum: 32, description: 'Parallel processing limit' },
           },
-          required: ['pattern', 'rewrite'],
-          additionalProperties: false,
+          required: ['pattern', 'rewrite']
         },
       },
       advancedTextEdits: {
         type: 'array',
+        description: 'Advanced text edits with flexible selectors and actions',
         items: {
           type: 'object',
           properties: {
-            path: { type: 'string' },
-            guard: {
-              type: 'object',
-              properties: { expectedBefore: { type: 'string' }, checksum: { type: 'string' } },
-              additionalProperties: false
-            },
-            selector: {
-              oneOf: [
-                { type: 'object', properties: { range: { type: 'object', properties: { start: { type: 'object', properties: { line: { type: 'integer' }, column: { type: 'integer' } }, required: ['line','column'] }, end: { type: 'object', properties: { line: { type: 'integer' }, column: { type: 'integer' } }, required: ['line','column'] } }, required: ['start','end'] } }, required: ['range'] },
-                { type: 'object', properties: { anchors: { type: 'object', properties: { before: { type: 'string' }, after: { type: 'string' }, occurrence: { type: 'integer', minimum: 1 } } } }, required: ['anchors'] },
-                { type: 'object', properties: { regex: { type: 'object', properties: { pattern: { type: 'string' }, flags: { type: 'string' }, occurrence: { type: 'integer', minimum: 1 } }, required: ['pattern'] } }, required: ['regex'] },
-                { type: 'object', properties: { structuralMatch: { type: 'object', properties: { file: { type: 'string' }, start: { type: 'object', properties: { line: { type: 'integer' }, column: { type: 'integer' } }, required: ['line','column'] }, end: { type: 'object', properties: { line: { type: 'integer' }, column: { type: 'integer' } }, required: ['line','column'] } }, required: ['file','start','end'] } }, required: ['structuralMatch'] }
-              ]
-            },
-            action: {
-              oneOf: [
-                { type: 'object', properties: { 'text.replace': { type: 'object', properties: { newText: { type: 'string' } }, required: ['newText'] } }, required: ['text.replace'] },
-                { type: 'object', properties: { 'text.insert': { type: 'object', properties: { position: { enum: ['before','after','start','end'] }, text: { type: 'string' } }, required: ['position','text'] } }, required: ['text.insert'] },
-                { type: 'object', properties: { 'text.delete': { type: 'object' } }, required: ['text.delete'] },
-                { type: 'object', properties: { 'text.wrap': { type: 'object', properties: { prefix: { type: 'string' }, suffix: { type: 'string' } }, required: ['prefix','suffix'] } }, required: ['text.wrap'] }
-              ]
-            }
+            path: { type: 'string', description: 'File path relative to workspace' },
+            // Guard properties (optional)
+            guardExpectedBefore: { type: 'string', description: 'Text that must be present in selection before edit' },
+            guardChecksum: { type: 'string', description: 'SHA1 checksum of file before edit' },
+            // Selector type
+            selectorType: { type: 'string', enum: ['range', 'anchors', 'regex', 'structural'], description: 'How to select the text to edit' },
+            // Range selector properties
+            rangeStartLine: { type: 'integer', description: 'Start line (1-based) for range selector' },
+            rangeStartColumn: { type: 'integer', description: 'Start column (1-based) for range selector' },
+            rangeEndLine: { type: 'integer', description: 'End line (1-based) for range selector' },
+            rangeEndColumn: { type: 'integer', description: 'End column (1-based) for range selector' },
+            // Anchors selector properties
+            anchorBefore: { type: 'string', description: 'Text before selection for anchors selector' },
+            anchorAfter: { type: 'string', description: 'Text after selection for anchors selector' },
+            anchorOccurrence: { type: 'integer', minimum: 1, description: 'Which occurrence to match (default: 1)' },
+            // Regex selector properties
+            regexPattern: { type: 'string', description: 'Regex pattern for regex selector' },
+            regexFlags: { type: 'string', description: 'Regex flags (e.g., "g", "i")' },
+            regexOccurrence: { type: 'integer', minimum: 1, description: 'Which match to select (default: 1)' },
+            // Structural selector properties
+            structuralFile: { type: 'string', description: 'File path for structural match' },
+            structuralStartLine: { type: 'integer', description: 'Start line for structural match' },
+            structuralStartColumn: { type: 'integer', description: 'Start column for structural match' },
+            structuralEndLine: { type: 'integer', description: 'End line for structural match' },
+            structuralEndColumn: { type: 'integer', description: 'End column for structural match' },
+            // Action type
+            actionType: { type: 'string', enum: ['replace', 'insert', 'delete', 'wrap'], description: 'What to do with selected text' },
+            // Replace action properties
+            replaceNewText: { type: 'string', description: 'New text for replace action' },
+            // Insert action properties
+            insertPosition: { type: 'string', enum: ['before', 'after', 'start', 'end'], description: 'Where to insert for insert action' },
+            insertText: { type: 'string', description: 'Text to insert for insert action' },
+            // Wrap action properties
+            wrapPrefix: { type: 'string', description: 'Prefix for wrap action' },
+            wrapSuffix: { type: 'string', description: 'Suffix for wrap action' },
           },
-          required: ['path','selector','action'],
-          additionalProperties: false
+          required: ['path', 'selectorType', 'actionType']
         }
       },
-      dryRun: { type: 'boolean', default: false },
-      rangesOnly: { type: 'boolean', default: false },
-      verify: { type: 'boolean', default: true },
-      tsconfigPath: { type: 'string' }
+      dryRun: { type: 'boolean', default: false, description: 'Preview changes without applying' },
+      rangesOnly: { type: 'boolean', default: false, description: 'Return only affected ranges' },
+      verify: { type: 'boolean', default: true, description: 'Run TypeScript verification after edits' },
+      tsconfigPath: { type: 'string', description: 'Path to tsconfig.json for verification' }
     },
-    additionalProperties: false,
   },
   run: async (args: { textEdits?: any[]; astRewrites?: any[]; advancedTextEdits?: any[]; dryRun?: boolean; rangesOnly?: boolean; verify?: boolean; tsconfigPath?: string }) => {
     const dryRun = !!args.dryRun
@@ -100,7 +107,61 @@ export const applyEditsTargetedTool: AgentTool = {
     const verify = args.verify !== false
     const textEdits = Array.isArray(args.textEdits) ? args.textEdits : []
     const astOps = Array.isArray(args.astRewrites) ? args.astRewrites : []
-    const advOps = Array.isArray(args.advancedTextEdits) ? args.advancedTextEdits : []
+    const advOpsFlat = Array.isArray(args.advancedTextEdits) ? args.advancedTextEdits : []
+
+    // Convert flattened advancedTextEdits back to nested format for internal processing
+    const advOps = advOpsFlat.map((flat: any) => {
+      const op: any = { path: flat.path }
+
+      // Guard
+      if (flat.guardExpectedBefore || flat.guardChecksum) {
+        op.guard = {}
+        if (flat.guardExpectedBefore) op.guard.expectedBefore = flat.guardExpectedBefore
+        if (flat.guardChecksum) op.guard.checksum = flat.guardChecksum
+      }
+
+      // Selector
+      op.selector = {}
+      if (flat.selectorType === 'range') {
+        op.selector.range = {
+          start: { line: flat.rangeStartLine, column: flat.rangeStartColumn },
+          end: { line: flat.rangeEndLine, column: flat.rangeEndColumn }
+        }
+      } else if (flat.selectorType === 'anchors') {
+        op.selector.anchors = {
+          before: flat.anchorBefore,
+          after: flat.anchorAfter,
+          occurrence: flat.anchorOccurrence
+        }
+      } else if (flat.selectorType === 'regex') {
+        op.selector.regex = {
+          pattern: flat.regexPattern,
+          flags: flat.regexFlags,
+          occurrence: flat.regexOccurrence
+        }
+      } else if (flat.selectorType === 'structural') {
+        op.selector.structuralMatch = {
+          file: flat.structuralFile,
+          start: { line: flat.structuralStartLine, column: flat.structuralStartColumn },
+          end: { line: flat.structuralEndLine, column: flat.structuralEndColumn }
+        }
+      }
+
+      // Action
+      op.action = {}
+      if (flat.actionType === 'replace') {
+        op.action['text.replace'] = { newText: flat.replaceNewText }
+      } else if (flat.actionType === 'insert') {
+        op.action['text.insert'] = { position: flat.insertPosition, text: flat.insertText }
+      } else if (flat.actionType === 'delete') {
+        op.action['text.delete'] = {}
+      } else if (flat.actionType === 'wrap') {
+        op.action['text.wrap'] = { prefix: flat.wrapPrefix, suffix: flat.wrapSuffix }
+      }
+
+      return op
+    })
+
     try {
       const resText = textEdits.length ? await applyFileEditsInternal(textEdits, { dryRun, verify: false }) : { applied: 0, results: [] as any[] }
       const astResults: any[] = []

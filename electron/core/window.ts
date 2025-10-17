@@ -8,6 +8,7 @@ import { BrowserWindow, screen } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setWindow, windowStateStore } from './state'
+import { registerWindow, unregisterWindow } from '../store/bridge'
 
 // Environment variables from Vite
 const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
@@ -115,7 +116,6 @@ function loadWindowState(): WindowState {
   try {
     const saved = windowStateStore.get('windowState') as WindowState | undefined
     if (saved) {
-      console.log('[main] Loaded window state:', saved)
       return validateWindowState(saved)
     }
   } catch (e) {
@@ -123,7 +123,6 @@ function loadWindowState(): WindowState {
   }
 
   const defaultState = getDefaultWindowState()
-  console.log('[main] Using default window state:', defaultState)
   return defaultState
 }
 
@@ -192,7 +191,7 @@ export function createWindow(): BrowserWindow {
     x: windowState.x,
     y: windowState.y,
     webPreferences: {
-      preload: path.join(DIRNAME, 'preload.cjs'),
+      preload: path.join(DIRNAME, 'preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -216,6 +215,8 @@ export function createWindow(): BrowserWindow {
       clearTimeout(saveWindowStateTimeout)
     }
     saveWindowState()
+    // Unregister from store bridge
+    unregisterWindow(win)
   })
 
   // Test active push message to Renderer-process
@@ -229,11 +230,31 @@ export function createWindow(): BrowserWindow {
     win.webContents.openDevTools({ mode: 'detach' })
   } else {
     win.loadFile(path.join(DIRNAME, '../dist/index.html'))
+    // Also open dev tools in production for debugging
+    win.webContents.openDevTools({ mode: 'detach' })
   }
+
+  // Add F12 shortcut to toggle dev tools
+  win.webContents.on('before-input-event', (_event, input) => {
+    if (input.key === 'F12' && input.type === 'keyDown') {
+      win.webContents.toggleDevTools()
+    }
+  })
 
   // Update global state
   setWindow(win)
 
+  // Register window with store bridge
+  registerWindow(win)
+
   return win
+}
+
+/**
+ * Get the main window
+ */
+export function getWindow(): BrowserWindow | null {
+  const windows = BrowserWindow.getAllWindows()
+  return windows.length > 0 ? windows[0] : null
 }
 

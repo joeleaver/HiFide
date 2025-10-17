@@ -32,23 +32,17 @@ export const metadata = {
 export const toolsNode: NodeFunction = async (contextIn, dataIn, _inputs, config) => {
   const toolsConfig = config.tools || 'auto'
 
-  console.log('[tools] Config:', { toolsConfig, dataIn })
-
   // Get all available tools from globalThis
   const allTools = (globalThis as any).__agentTools || []
-  console.log('[tools] Total available tools:', allTools.length)
 
   let selectedTools: any[] = []
 
   if (toolsConfig === 'auto') {
     // Auto mode - provide all tools
     selectedTools = allTools
-    console.log('[tools] Auto mode - providing all tools')
   } else if (Array.isArray(toolsConfig)) {
     // Specific tools mode - filter by name
     selectedTools = allTools.filter((t: any) => toolsConfig.includes(t.name))
-    console.log('[tools] Specific mode - config has:', toolsConfig)
-    console.log('[tools] Filtered to:', selectedTools.map((t: any) => t.name))
   }
 
   // Check if dataIn overrides config (dynamic tool selection)
@@ -57,14 +51,11 @@ export const toolsNode: NodeFunction = async (contextIn, dataIn, _inputs, config
       const inputTools = JSON.parse(dataIn)
       if (Array.isArray(inputTools)) {
         selectedTools = allTools.filter((t: any) => inputTools.includes(t.name))
-        console.log('[tools] Dynamic override from dataIn:', inputTools)
       }
     } catch {
       // Not JSON, ignore
     }
   }
-
-  console.log('[tools] Returning', selectedTools.length, 'tools:', selectedTools.map((t: any) => t.name).join(', '))
 
   return {
     context: contextIn,

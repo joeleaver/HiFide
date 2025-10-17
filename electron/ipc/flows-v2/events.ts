@@ -2,7 +2,7 @@
  * Flow event helpers
  */
 
-import type { WebContents } from 'electron'
+import { EventEmitter } from 'events'
 
 export type FlowEvent =
   | { type: 'nodeStart'; nodeId: string }
@@ -18,30 +18,48 @@ export type FlowEvent =
   | { type: 'intentDetected'; nodeId: string; intent: string }
   | { type: 'tokenUsage'; nodeId: string; provider: string; model: string; usage: { inputTokens: number; outputTokens: number; totalTokens: number } }
 
-export function sendFlowEvent(
-  wc: WebContents | undefined,
-  requestId: string,
-  event: FlowEvent
-): void {
-  if (!wc) {
-    console.error('[sendFlowEvent] No WebContents available!')
-    return
+/**
+ * Flow event emitter - decouples flow execution from IPC layer
+ *
+ * Flow execution emits events, IPC layer subscribes and forwards to renderer
+ */
+class FlowEventEmitter extends EventEmitter {
+  /**
+   * Emit a flow event for a specific request
+   */
+  emitFlowEvent(requestId: string, event: FlowEvent): void {
+    const payload = {
+      requestId,
+      ...event
+    }
+
+    // Emit on the requestId channel
+    this.emit(requestId, payload)
   }
 
-  const payload = {
-    requestId,
-    ...event
+  /**
+   * Subscribe to events for a specific request
+   */
+  onFlowEvent(requestId: string, listener: (event: FlowEvent & { requestId: string }) => void): () => void {
+    this.on(requestId, listener)
+    return () => this.off(requestId, listener)
   }
 
-  console.log('[sendFlowEvent]', {
-    requestId,
-    type: event.type,
-    nodeId: (event as any).nodeId,
-    data: (event as any).data?.substring?.(0, 100),
-    text: (event as any).text?.substring?.(0, 100),
-    fullPayload: payload
-  })
+  /**
+   * Clean up all listeners for a request (call when flow completes)
+   */
+  cleanup(requestId: string): void {
+    this.removeAllListeners(requestId)
+  }
+}
 
-  wc.send('flow:event', payload)
+// Global singleton instance
+export const flowEvents = new FlowEventEmitter()
+
+/**
+ * Emit a flow event (replaces sendFlowEvent)
+ */
+export function emitFlowEvent(requestId: string, event: FlowEvent): void {
+  flowEvents.emitFlowEvent(requestId, event)
 }
 

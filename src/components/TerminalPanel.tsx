@@ -1,7 +1,8 @@
 import { Group, Text, UnstyledButton, Badge } from '@mantine/core'
 import { IconPlus, IconX, IconChevronUp, IconChevronDown } from '@tabler/icons-react'
-import { useAppStore, selectAgentTerminalTabs, selectAgentActiveTerminal, selectExplorerTerminalTabs, selectExplorerActiveTerminal } from '../store'
+import { useAppStore, useDispatch, selectAgentTerminalTabs, selectAgentActiveTerminal, selectExplorerTerminalTabs, selectExplorerActiveTerminal } from '../store'
 import { usePanelResize } from '../hooks/usePanelResize'
+import { useState } from 'react'
 import TerminalView from './TerminalView'
 
 export default function TerminalPanel({ context }: { context: 'agent' | 'explorer' }) {
@@ -9,40 +10,44 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
   const tabs = useAppStore(context === 'agent' ? selectAgentTerminalTabs : selectExplorerTerminalTabs)
   const activeTab = useAppStore(context === 'agent' ? selectAgentActiveTerminal : selectExplorerActiveTerminal)
 
-  // Get state and actions
-  const open = useAppStore((s) => context === 'agent' ? s.agentTerminalPanelOpen : s.explorerTerminalPanelOpen)
-  const height = useAppStore((s) => context === 'agent' ? s.agentTerminalPanelHeight : s.explorerTerminalPanelHeight)
-  const setHeight = useAppStore((s) => context === 'agent' ? s.setAgentTerminalPanelHeight : s.setExplorerTerminalPanelHeight)
+  // Read from windowState
+  const initialOpen = useAppStore((s) => context === 'agent' ? s.windowState.agentTerminalPanelOpen : s.windowState.explorerTerminalPanelOpen)
+  const initialHeight = useAppStore((s) => context === 'agent' ? s.windowState.agentTerminalPanelHeight : s.windowState.explorerTerminalPanelHeight)
 
-  const {
-    toggleExplorerTerminalPanel: toggleExplorer,
-    setAgentTerminalPanelOpen: setAgentOpen,
-    addTerminalTab,
-    removeTerminalTab,
-    setActiveTerminal,
-    fitAllTerminals,
-  } = useAppStore()
+  const [open, setOpen] = useState(initialOpen)
+  const [height, setHeight] = useState(initialHeight)
+
+  // Use dispatch for actions
+  const dispatch = useDispatch()
 
   const addTab = () => {
-    addTerminalTab(context)
+    dispatch('addTerminalTab', context)
   }
 
   const closeTab = (id: string) => {
-    removeTerminalTab(context, id)
+    dispatch('removeTerminalTab', { context, tabId: id })
   }
 
-
   const onToggleClick = () => {
-    if (context === 'explorer') toggleExplorer()
-    else if (context === 'agent') setAgentOpen(!open)
+    const newOpen = !open
+    setOpen(newOpen)
+    dispatch('updateWindowState', {
+      [context === 'agent' ? 'agentTerminalPanelOpen' : 'explorerTerminalPanelOpen']: newOpen
+    })
   }
 
   const { onMouseDown, isResizingRef } = usePanelResize({
-    getHeight: () => height,
-    setHeight,
+    initialHeight: height,
+    setHeight: (newHeight) => {
+      setHeight(newHeight)
+      dispatch('updateWindowState', {
+        [context === 'agent' ? 'agentTerminalPanelHeight' : 'explorerTerminalPanelHeight']: newHeight
+      })
+    },
     min: 160,
     max: 800,
-    onEnd: () => fitAllTerminals(context),
+    handlePosition: 'top',
+    onEnd: () => dispatch('fitAllTerminals', context),
   })
 
   return (
@@ -55,7 +60,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
         flexShrink: 0,
       }}
     >
-      {/* Resize handle */}
+      {/* Resize handle at top - shown when open */}
       {open && (
         <div
           onMouseDown={onMouseDown}
@@ -119,6 +124,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
               <IconPlus size={14} />
             </UnstyledButton>
           )}
+          {/* Collapse button */}
           <UnstyledButton
             onClick={onToggleClick}
             style={{
@@ -157,7 +163,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
               <div
                 key={id}
                 onClick={() => {
-                  setActiveTerminal(context, id)
+                  dispatch('setActiveTerminal', { context, tabId: id })
                 }}
                 style={{
                   height: '32px',

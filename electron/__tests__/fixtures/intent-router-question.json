@@ -1,0 +1,21 @@
+{
+  "context": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [],
+    "currentOutput": "",
+    "sessionId": "test-session-1760553296330"
+  },
+  "data": "What is the capital of France?",
+  "status": "success",
+  "question-context": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [],
+    "currentOutput": "",
+    "sessionId": "test-session-1760553296330"
+  },
+  "question-data": "What is the capital of France?"
+}

@@ -1,0 +1,37 @@
+{
+  "context": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [
+      {
+        "role": "user",
+        "content": "Count: 1. Just say \"OK\" and nothing else."
+      },
+      {
+        "role": "assistant",
+        "content": "OK"
+      },
+      {
+        "role": "user",
+        "content": "Count: 2. Just say \"OK\" and nothing else."
+      },
+      {
+        "role": "assistant",
+        "content": "OK\n"
+      },
+      {
+        "role": "user",
+        "content": "What were all the count numbers I mentioned? List them separated by commas and nothing else."
+      },
+      {
+        "role": "assistant",
+        "content": "1, 2"
+      }
+    ],
+    "currentOutput": "1, 2",
+    "sessionId": "test-session-1760553009535"
+  },
+  "data": "1, 2",
+  "status": "success"
+}

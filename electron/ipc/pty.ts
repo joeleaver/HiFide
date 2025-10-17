@@ -299,7 +299,6 @@ export function registerPtyHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('pty:write', async (_event, args: { sessionId: string; data: string }) => {
     const s = ptySessions.get(args.sessionId)
     if (!s) {
-      console.warn('[pty:write] no session', args.sessionId, 'len', args.data?.length)
       return { ok: false }
     }
     try {

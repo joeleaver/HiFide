@@ -1,0 +1,21 @@
+{
+  "context": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemInstructions": "You are a helpful assistant.",
+    "messageHistory": [
+      {
+        "role": "user",
+        "content": "Count: 1. Just say \"OK\" and nothing else."
+      },
+      {
+        "role": "assistant",
+        "content": "OK"
+      }
+    ],
+    "currentOutput": "OK",
+    "sessionId": "test-session-1760553009535"
+  },
+  "data": "OK",
+  "status": "success"
+}

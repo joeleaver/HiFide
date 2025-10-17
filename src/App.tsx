@@ -1,6 +1,7 @@
 import { useEffect, Profiler } from 'react'
 import { Button, Group, Title } from '@mantine/core'
-import { useAppStore, selectCurrentView, initializeStore } from './store'
+import { notifications } from '@mantine/notifications'
+import { useAppStore, useDispatch, selectCurrentView } from './store'
 import ActivityBar from './components/ActivityBar'
 import StatusBar from './components/StatusBar'
 import AgentView from './components/AgentView'
@@ -9,30 +10,54 @@ import SourceControlView from './components/SourceControlView'
 import SettingsPane from './SettingsPane'
 import LoadingScreen from './components/LoadingScreen'
 
+// We need a dispatch instance for menu handlers
+// This will be set when the App component mounts
+let globalDispatch: ReturnType<typeof useDispatch> | null = null
+
 // Menu event handlers - defined once at module level
 const menuHandlers = {
   openSettings: () => {
-    useAppStore.getState().setCurrentView('settings')
+    globalDispatch?.('setCurrentView', 'settings')
   },
-  openChat: () => {
-    useAppStore.getState().setCurrentView('agent')
+  openSession: () => {
+    globalDispatch?.('setCurrentView', 'agent')
   },
   toggleTerminalPanel: () => {
-    const s = useAppStore.getState()
-    s.setCurrentView('explorer')
-    s.setExplorerTerminalPanelOpen(!s.explorerTerminalPanelOpen)
+    globalDispatch?.('setCurrentView', 'explorer')
+    const currentOpen = useAppStore.getState().windowState.explorerTerminalPanelOpen
+    globalDispatch?.('updateWindowState', { explorerTerminalPanelOpen: !currentOpen })
   },
   openFolder: async () => {
     const result = await window.workspace?.openFolderDialog?.()
     if (result?.ok && result.path) {
-      await useAppStore.getState().openFolder(result.path)
+      globalDispatch?.('openFolder', result.path)
     }
   },
   openRecentFolder: async (_e: any, folderPath: string) => {
-    await useAppStore.getState().openFolder(folderPath)
+    globalDispatch?.('openFolder', folderPath)
   },
   clearRecentFolders: () => {
-    useAppStore.getState().clearRecentFolders()
+    globalDispatch?.('clearRecentFolders')
+  },
+  exportFlow: () => {
+
+    if (!globalDispatch) {
+      console.error('[exportFlow] globalDispatch not available yet')
+      return
+    }
+
+    // Call via dispatch - action runs in main process
+    globalDispatch('feExportFlow')
+  },
+  importFlow: () => {
+
+    if (!globalDispatch) {
+      console.error('[importFlow] globalDispatch not available yet')
+      return
+    }
+
+    // Call via dispatch - action runs in main process
+    globalDispatch('feImportFlow')
   }
 }
 
@@ -40,31 +65,87 @@ const menuHandlers = {
 let handlersRegistered = false
 
 function App() {
+  // Get dispatch for menu handlers
+  const dispatch = useDispatch()
+
   // Use selector for better performance
   const currentView = useAppStore(selectCurrentView)
   const appBootstrapping = useAppStore((s) => s.appBootstrapping)
   const startupMessage = useAppStore((s) => s.startupMessage)
+  const exportResult = useAppStore((s) => s.feExportResult)
+  const importResult = useAppStore((s) => s.feImportResult)
+
+  // Set global dispatch for menu handlers
+  useEffect(() => {
+    globalDispatch = dispatch
+  }, [dispatch])
 
   // Expose store to window for debugging
   useEffect(() => {
     (window as any).debugStore = useAppStore
   }, [])
 
+  // Show notification when export completes
+  useEffect(() => {
+    if (!exportResult) return
+
+    if (exportResult.success && exportResult.path) {
+      notifications.show({
+        title: 'Flow Exported',
+        message: `Saved to ${exportResult.path}`,
+        color: 'green',
+      })
+    } else if (exportResult.error) {
+      notifications.show({
+        title: 'Export Failed',
+        message: exportResult.error,
+        color: 'red',
+      })
+    }
+
+    // Clear the result after showing notification
+    dispatch('feClearExportResult')
+  }, [exportResult, dispatch])
+
+  // Show notification when import completes
+  useEffect(() => {
+    if (!importResult) return
+
+    if (importResult.success && importResult.name) {
+      notifications.show({
+        title: 'Flow Imported',
+        message: `"${importResult.name}" has been added to your library`,
+        color: 'green',
+      })
+    } else if (importResult.error) {
+      notifications.show({
+        title: 'Import Failed',
+        message: importResult.error,
+        color: 'red',
+      })
+    }
+
+    // Clear the result after showing notification
+    dispatch('feClearImportResult')
+  }, [importResult, dispatch])
+
   // Register menu handlers once
-  if (!handlersRegistered && window.ipcRenderer) {
+  useEffect(() => {
+    if (handlersRegistered || !window.ipcRenderer) return
+
     handlersRegistered = true
     window.ipcRenderer.on('menu:open-settings', menuHandlers.openSettings)
-    window.ipcRenderer.on('menu:open-chat', menuHandlers.openChat)
+    window.ipcRenderer.on('menu:open-session', menuHandlers.openSession)
     window.ipcRenderer.on('menu:toggle-terminal-panel', menuHandlers.toggleTerminalPanel)
     window.ipcRenderer.on('menu:open-folder', menuHandlers.openFolder)
     window.ipcRenderer.on('menu:open-recent-folder', menuHandlers.openRecentFolder)
     window.ipcRenderer.on('menu:clear-recent-folders', menuHandlers.clearRecentFolders)
-  }
-
-  // Initialize store on first mount
-  useEffect(() => {
-    void initializeStore()
+    window.ipcRenderer.on('menu:export-flow', menuHandlers.exportFlow)
+    window.ipcRenderer.on('menu:import-flow', menuHandlers.importFlow)
   }, [])
+
+  // Note: Store initialization is now handled by the main process via zubridge
+  // No need to call initializeStore() here
 
 
   // Keep main-process menu state in sync with current view (for enabling/disabling items)
@@ -122,9 +203,8 @@ function App() {
   return (
     <Profiler
       id="App"
-      onRender={(id, phase, actualDuration) => {
+      onRender={(_id, _phase, actualDuration) => {
         if (actualDuration > 16) {
-          console.log(`[Profiler] ${id} ${phase}: ${actualDuration.toFixed(2)}ms`)
         }
       }}
     >

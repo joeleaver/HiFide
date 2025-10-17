@@ -6,7 +6,6 @@
 
 import type { IpcMain } from 'electron'
 import { registerCapabilitiesHandlers } from './capabilities'
-import { registerSecretsHandlers } from './secrets'
 import { registerSessionsHandlers } from './sessions'
 import { registerPlanningHandlers } from './planning'
 import { registerFilesystemHandlers } from './filesystem'
@@ -19,17 +18,18 @@ import { registerPtyHandlers } from './pty'
 import { registerLlmCoreHandlers } from './llm-core'
 import { registerFlowHandlersV2 } from './flows-v2'
 import { registerFlowProfilesHandlers } from './flowProfiles'
+// Note: flowState handlers removed - state is now accessible via zubridge
+// Note: secrets handlers removed - API keys are now managed via Zustand store (settingsApiKeys)
 
 /**
  * Register all IPC handlers
- * 
+ *
  * This is the single entry point for registering all IPC handlers.
  * Call this once during app initialization.
  */
 export function registerAllHandlers(ipcMain: IpcMain): void {
   // Simple modules
   registerCapabilitiesHandlers(ipcMain)
-  registerSecretsHandlers(ipcMain)
   registerSessionsHandlers(ipcMain)
   registerPlanningHandlers(ipcMain)
 
@@ -46,7 +46,7 @@ export function registerAllHandlers(ipcMain: IpcMain): void {
   registerLlmCoreHandlers(ipcMain)
   registerFlowHandlersV2(ipcMain) // V2: Clean function-based execution
   registerFlowProfilesHandlers(ipcMain)
+  // Note: flowState handlers removed - state is now accessible via zubridge
 
-  console.log('[registry] All IPC handlers registered (using Flow Engine V2)')
 }
 

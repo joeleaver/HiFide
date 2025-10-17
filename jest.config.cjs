@@ -23,7 +23,8 @@ module.exports = {
   },
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
-    '^electron$': '<rootDir>/electron/__mocks__/electron.ts'
+    '^electron$': '<rootDir>/electron/__mocks__/electron.ts',
+    '^electron-store$': '<rootDir>/electron/__mocks__/electron-store.ts'
   },
   setupFilesAfterEnv: ['<rootDir>/electron/__tests__/setup.ts'],
   collectCoverageFrom: [

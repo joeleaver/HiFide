@@ -1,23 +1,24 @@
 import { useEffect, useRef } from 'react'
-import 'xterm/css/xterm.css'
-import { useAppStore } from '../store'
+import '@xterm/xterm/css/xterm.css'
+import { useDispatch } from '../store'
+import { getTerminalInstance } from '../services/terminalInstances'
 
 export default function TerminalView({ tabId, context = 'explorer' }: { tabId: string; context?: 'agent' | 'explorer' }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mountedRef = useRef(false)
+  const dispatch = useDispatch()
 
   useEffect(() => {
     if (!containerRef.current || mountedRef.current) return
 
-    const { terminals, mountTerminal, remountTerminal } = useAppStore.getState()
-    const existingTerminal = terminals[tabId]
+    const existingTerminal = getTerminalInstance(tabId)
 
     if (existingTerminal) {
       // Terminal already exists, just remount it to the new container
-      remountTerminal(tabId, containerRef.current)
+      dispatch('remountTerminal', { tabId, container: containerRef.current })
     } else {
       // Create new terminal
-      mountTerminal(tabId, containerRef.current, context)
+      dispatch('mountTerminal', { tabId, container: containerRef.current, context })
     }
 
     mountedRef.current = true

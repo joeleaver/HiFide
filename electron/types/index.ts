@@ -50,11 +50,6 @@ export interface WindowState {
 }
 
 /**
- * Provider key names
- */
-export type ProviderKeyName = 'openai' | 'anthropic' | 'gemini'
-
-/**
  * Provider presence information
  */
 export interface ProviderPresence {
