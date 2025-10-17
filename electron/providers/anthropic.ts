@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import type { ProviderAdapter, StreamHandle, ChatMessage, AgentTool } from './provider'
+import type { ProviderAdapter, StreamHandle, AgentTool } from './provider'
 import { validateJson } from './jsonschema'
 import { withRetries } from './retry'
 import { formatSummary } from '../agent/types'
@@ -132,20 +132,6 @@ export const AnthropicProvider: ProviderAdapter = {
             stream: true,
             max_tokens: 2048,
           }) as any)
-
-	          // Emit preamble + tools hash for persistence/visibility (once per turn)
-	          try {
-	            const toolsHash = hashStr(JSON.stringify(anthTools))
-
-	          // Emit preamble + tools hash for persistence/visibility (once per turn)
-	          try {
-	            const toolsHash = hashStr(JSON.stringify(anthTools))
-	            onConversationMeta?.({ provider: 'anthropic', sessionId, preambleHash: hashStr(systemText || ''), lastToolsHash: toolsHash })
-	          } catch {}
-
-	            onConversationMeta?.({ provider: 'anthropic', sessionId, preambleHash: hashStr(systemText || ''), lastToolsHash: toolsHash })
-	          } catch {}
-
 
           // Accumulate tool_use inputs incrementally and track usage
           const active: Record<string, { id: string; name: string; inputText: string }> = {}

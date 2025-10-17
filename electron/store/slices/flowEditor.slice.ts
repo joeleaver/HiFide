@@ -1359,8 +1359,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     // This ensures proper intermixing: chat → tool → chat → tool (not all tools grouped together)
     const streamingText = get().feStreamingText
     if (streamingText && nodeId) {
-      const flowDef = get().feFlowDef
-      const node = flowDef?.nodes.find(n => n.id === nodeId)
+      const nodes = get().feNodes
+      const node = nodes?.find((n: any) => n.id === nodeId)
 
       if (state.addSessionItem) {
         state.addSessionItem({
@@ -1379,8 +1379,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     let nodeLabel = 'Tools'
     let nodeKind = 'llmRequest'
     if (nodeId) {
-      const flowDef = get().feFlowDef
-      const node = flowDef?.nodes.find(n => n.id === nodeId)
+      const nodes = get().feNodes
+      const node = nodes?.find((n: any) => n.id === nodeId)
       if (node) {
         nodeLabel = node.data?.label || 'LLM Request'
         nodeKind = node.data?.kind || 'llmRequest'

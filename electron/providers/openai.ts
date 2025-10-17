@@ -28,7 +28,7 @@ export const OpenAIProvider: ProviderAdapter = {
         // Stateless: just send the messages, no session chaining
         const stream: any = await withRetries(() => Promise.resolve(client.responses.stream({
           model,
-          input: toResponsesInput(messages),
+          input: toResponsesInput(messages || []),
         })))
         holder.stream = stream
         try {
@@ -129,7 +129,7 @@ export const OpenAIProvider: ProviderAdapter = {
 
     // Responses API uses a different format than Chat Completions
     // Input can be: { role, content } OR { type, call_id, output } for function results
-    let conv: Array<any> = messages
+    let conv: Array<any> = (messages || [])
       .map((m) => ({ role: m.role, content: m.content || '' }))
       .filter(m => m.content !== '') // Remove messages with empty content
 
@@ -139,7 +139,7 @@ export const OpenAIProvider: ProviderAdapter = {
 
     // Helper to prune conversation when agent requests it
     const pruneConversation = (summary: any) => {
-      const systemMsgs = messages.filter(m => m.role === 'system')
+      const systemMsgs = (messages || []).filter(m => m.role === 'system')
       const recent = conv.slice(-5) // Keep last 5 messages
 
       const summaryMsg = {

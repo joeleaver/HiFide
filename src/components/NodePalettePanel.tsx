@@ -7,6 +7,7 @@ const NODE_PALETTE: Array<{ kind: string; label: string; icon: string; descripti
   { kind: 'newContext', label: 'New Context', icon: '🔀', description: 'Create new execution context with different model/provider' },
   { kind: 'llmRequest', label: 'LLM Request', icon: '💬', description: 'Send a request to the LLM' },
   { kind: 'tools', label: 'Tools', icon: '🔧', description: 'Provide tools to LLM (auto or specific list)' },
+  { kind: 'injectMessages', label: 'Inject Messages', icon: '💉', description: 'Inject user/assistant message pair into conversation history' },
   { kind: 'intentRouter', label: 'Intent Router', icon: '🔀', description: 'Route based on LLM-classified user intent' },
   { kind: 'portalInput', label: 'Portal In', icon: '📥', description: 'Store data for portal output (reduces edge crossings)' },
   { kind: 'portalOutput', label: 'Portal Out', icon: '📤', description: 'Retrieve data from portal input (reduces edge crossings)' },

@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai'
 import { formatSummary } from '../agent/types'
 
-import type { ProviderAdapter, StreamHandle, ChatMessage } from './provider'
+import type { ProviderAdapter, StreamHandle } from './provider'
 import { validateJson } from './jsonschema'
 import { withRetries } from './retry'
 
@@ -68,7 +68,7 @@ export const GeminiProvider: ProviderAdapter = {
         // Stateless: always use generateContentStream with full message history
         const res: any = await withRetries(() => ai.models.generateContentStream({
           model,
-          contents,
+          contents: contents || [],
           config: {
             systemInstruction: systemInstruction || undefined,
           },
@@ -114,7 +114,7 @@ export const GeminiProvider: ProviderAdapter = {
         try {
           const res: any = await withRetries(() => ai.models.generateContent({
             model,
-            contents,
+            contents: contents || [],
             config: {
               systemInstruction: systemInstruction || undefined,
             },
