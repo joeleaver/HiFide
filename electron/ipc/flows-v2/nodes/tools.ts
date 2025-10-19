@@ -29,28 +29,43 @@ export const metadata = {
 /**
  * Node implementation
  */
-export const toolsNode: NodeFunction = async (contextIn, dataIn, _inputs, config) => {
+export const toolsNode: NodeFunction = async (flow, context, dataIn, inputs, config) => {
+  // Get context - use pushed context, or pull if edge connected (tools node is context-agnostic, just passes through)
+  const executionContext = context ?? (inputs.has('context') ? await inputs.pull('context') : null)
+
   const toolsConfig = config.tools || 'auto'
 
-  // Get all available tools from globalThis
-  const allTools = (globalThis as any).__agentTools || []
+  // Get all available tools from FlowAPI
+  const allTools = flow.tools.list()
 
   let selectedTools: any[] = []
 
   if (toolsConfig === 'auto') {
     // Auto mode - provide all tools
     selectedTools = allTools
+    flow.log.debug('Providing all tools', { count: allTools.length })
   } else if (Array.isArray(toolsConfig)) {
     // Specific tools mode - filter by name
     selectedTools = allTools.filter((t: any) => toolsConfig.includes(t.name))
+    flow.log.debug('Providing specific tools', {
+      requested: toolsConfig,
+      found: selectedTools.length
+    })
   }
 
-  // Check if dataIn overrides config (dynamic tool selection)
-  if (dataIn && typeof dataIn === 'string') {
+  // Get dynamic tool selection - use dataIn if provided (push), otherwise pull from input
+  const dynamicInput = dataIn ?? (inputs.has('data') ? await inputs.pull('data') : null)
+
+  // Check if dynamic input overrides config
+  if (dynamicInput && typeof dynamicInput === 'string') {
     try {
-      const inputTools = JSON.parse(dataIn)
+      const inputTools = JSON.parse(dynamicInput)
       if (Array.isArray(inputTools)) {
         selectedTools = allTools.filter((t: any) => inputTools.includes(t.name))
+        flow.log.debug('Dynamic tool selection from input', {
+          requested: inputTools,
+          found: selectedTools.length
+        })
       }
     } catch {
       // Not JSON, ignore
@@ -58,7 +73,7 @@ export const toolsNode: NodeFunction = async (contextIn, dataIn, _inputs, config
   }
 
   return {
-    context: contextIn,
+    context: executionContext,
     tools: selectedTools, // Array of tool objects for chat nodes
     status: 'success'
   }

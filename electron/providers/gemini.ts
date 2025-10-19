@@ -52,7 +52,7 @@ function stripAdditionalProperties(schema: any): any {
 
 export const GeminiProvider: ProviderAdapter = {
   id: 'gemini',
-  async chatStream({ apiKey, model, systemInstruction, contents, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async chatStream({ apiKey, model, systemInstruction, contents, emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
 
     const ai = new GoogleGenAI({ apiKey })
 
@@ -79,26 +79,34 @@ export const GeminiProvider: ProviderAdapter = {
           for await (const chunk of res) {
             try {
               const t = chunk?.text
-              if (t) onChunk(String(t))
-            } catch (e: any) { onError(e?.message || String(e)) }
+              if (t) {
+                const text = String(t)
+                onChunk(text)
+              }
+            } catch (e: any) {
+              const error = e?.message || String(e)
+              onError(error)
+            }
           }
         } catch (e: any) {
           // Stream iteration failed (e.g., parse error)
-          onError(e?.message || String(e))
+          const error = e?.message || String(e)
+          onError(error)
         }
 
         // Extract token usage from response
         try {
           const usage = res?.usageMetadata
-          if (usage && onTokenUsage) {
+          if (usage) {
             const cachedTokens = usage.cachedContentTokenCount || 0
-
-            onTokenUsage({
+            const tokenUsage = {
               inputTokens: usage.promptTokenCount || 0,
               outputTokens: usage.candidatesTokenCount || 0,
               totalTokens: usage.totalTokenCount || 0,
               cachedTokens,
-            })
+            }
+
+            if (onTokenUsage) onTokenUsage(tokenUsage)
 
             // Log cache hits
             if (cachedTokens > 0) {
@@ -107,6 +115,8 @@ export const GeminiProvider: ProviderAdapter = {
         } catch (e) {
           // Token usage extraction failed, continue anyway
         }
+
+        // Done
         onDone()
       } catch (e: any) {
         // Fallback: if streaming is not supported for this model/API version, try non-stream generateContent
@@ -120,20 +130,25 @@ export const GeminiProvider: ProviderAdapter = {
             },
           }) as any)
           const text = res?.text
-          if (text) onChunk(String(text))
+          if (text) {
+            const textStr = String(text)
+            onChunk(textStr)
+          }
 
           // Extract token usage from non-streaming response
           try {
             const usage = res?.usageMetadata
-            if (usage && onTokenUsage) {
+            if (usage) {
               const cachedTokens = usage.cachedContentTokenCount || 0
 
-              onTokenUsage({
+              const tokenUsage = {
                 inputTokens: usage.promptTokenCount || 0,
                 outputTokens: usage.candidatesTokenCount || 0,
                 totalTokens: usage.totalTokenCount || 0,
                 cachedTokens,
-              })
+              }
+
+              if (onTokenUsage) onTokenUsage(tokenUsage)
 
               // Log cache hits
               if (cachedTokens > 0) {
@@ -143,17 +158,18 @@ export const GeminiProvider: ProviderAdapter = {
             // Token usage extraction failed, continue anyway
           }
 
+          // Done
           onDone()
         } catch (e2: any) {
-          onError(e2?.message || String(e2))
+          const error = e2?.message || String(e2)
+          onError(error)
         }
       }
     })().catch((e: any) => {
-      // Handle any errors that occur after chatStream returns
-      // This prevents unhandled promise rejections
       console.error('[GeminiProvider] Unhandled error in chatStream:', e)
       try {
-        onError(e?.message || String(e))
+        const error = e?.message || String(e)
+        onError(error)
       } catch {}
     })
 
@@ -163,7 +179,7 @@ export const GeminiProvider: ProviderAdapter = {
   },
 
   // Agent streaming with Gemini function calling
-  async agentStream({ apiKey, model, systemInstruction, contents, tools, responseSchema: _responseSchema, toolMeta, onChunk, onDone, onError, onTokenUsage, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, systemInstruction, contents, tools, responseSchema: _responseSchema, toolMeta, emit, onChunk, onDone, onError, onTokenUsage, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const ai = new GoogleGenAI({ apiKey })
 
     // Messages are already formatted by llm-service
@@ -221,7 +237,10 @@ export const GeminiProvider: ProviderAdapter = {
               try {
                 // Stream text parts using new SDK format
                 const t = chunk?.text
-                if (t) onChunk(String(t))
+                if (t) {
+                  const text = String(t)
+                  onChunk(text)
+                }
 
                 // Capture functionCall parts if present
                 const parts = chunk?.candidates?.[0]?.content?.parts || []
@@ -233,11 +252,15 @@ export const GeminiProvider: ProviderAdapter = {
                     callAcc[key] = { name, args }
                   }
                 }
-              } catch (e: any) { onError(e?.message || String(e)) }
+              } catch (e: any) {
+                const error = e?.message || String(e)
+                onError(error)
+              }
             }
           } catch (e: any) {
             // Stream iteration failed (e.g., parse error)
-            onError(e?.message || String(e))
+            const error = e?.message || String(e)
+            onError(error)
           }
 
           // Extract and accumulate token usage
@@ -279,6 +302,9 @@ export const GeminiProvider: ProviderAdapter = {
                   toolResponses.push({ functionResponse: { name, response: { content: `Validation error: ${v.errors || 'invalid input'}` } } })
                   continue
                 }
+
+                // Generate tool execution ID
+                const toolExecutionId = crypto.randomUUID()
 
                 // Notify tool start
                 try { onToolStart?.({ callId, name, arguments: args }) } catch {}
@@ -328,20 +354,21 @@ export const GeminiProvider: ProviderAdapter = {
             }
           }
 
+          // Done
           onDone()
           return
         }
       } catch (e: any) {
-        onError(e?.message || String(e))
+        const error = e?.message || String(e)
+        onError(error)
       }
     }
 
     run().catch((e: any) => {
-      // Handle any errors that occur after agentStream returns
-      // This prevents unhandled promise rejections
       console.error('[GeminiProvider] Unhandled error in agentStream run():', e)
       try {
-        onError(e?.message || String(e))
+        const error = e?.message || String(e)
+        onError(error)
       } catch {}
     })
 

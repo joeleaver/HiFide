@@ -21,7 +21,7 @@ export function BadgeGroup({ badgeGroup }: BadgeGroupProps) {
   return (
     <NodeOutputBox
       nodeLabel={nodeLabel}
-      nodeKind={nodeKind}
+      nodeType={nodeKind}
       provider={provider}
       model={model}
       cost={cost}

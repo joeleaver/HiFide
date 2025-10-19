@@ -12,17 +12,17 @@ import { getNodeColor, formatNodeTitle } from '../../electron/store/utils/node-c
 
 interface NodeOutputBoxProps {
   nodeLabel?: string
-  nodeKind?: string
+  nodeType?: string
   provider?: string
   model?: string
   cost?: TokenCost
   children: ReactNode
 }
 
-export function NodeOutputBox({ nodeLabel, nodeKind, provider, model, cost, children }: NodeOutputBoxProps) {
+export function NodeOutputBox({ nodeLabel, nodeType, provider, model, cost, children }: NodeOutputBoxProps) {
   const showFooter = provider || model || (cost && cost.totalCost > 0)
-  const color = getNodeColor(nodeKind)
-  const displayTitle = formatNodeTitle(nodeKind, nodeLabel)
+  const color = getNodeColor(nodeType)
+  const displayTitle = formatNodeTitle(nodeType, nodeLabel)
 
   return (
     <Stack

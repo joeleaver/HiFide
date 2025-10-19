@@ -2,9 +2,11 @@
  * Test helper utilities for creating test contexts, configs, and mocks
  */
 
-import type { ExecutionContext } from '../../ipc/flows-v2/types'
+import type { ExecutionContext, MainFlowContext, NodeInputs } from '../../ipc/flows-v2/types'
+import type { FlowAPI, Badge, Tool, UsageReport } from '../../ipc/flows-v2/flow-api'
 import type { ProviderAdapter, ChatMessage, AgentTool } from '../../providers/provider'
 import { withFixture, getTestMode } from './fixtures'
+import { createContextAPI } from '../../ipc/flows-v2/context-api'
 
 /**
  * Create a test execution context with sensible defaults
@@ -160,11 +162,125 @@ export async function collectStreamChunks(
   streamFn: (onChunk: (text: string) => void) => Promise<void>
 ): Promise<string> {
   let result = ''
-  
+
   await streamFn((chunk) => {
     result += chunk
   })
-  
+
   return result
+}
+
+/**
+ * Create a mock FlowAPI for testing nodes
+ */
+export function createMockFlowAPI(overrides?: Partial<FlowAPI>): FlowAPI {
+  const logs: Array<{ level: string; message: string; data?: any }> = []
+  const badges: Map<string, Badge> = new Map()
+  const streamChunks: string[] = []
+  const usageReports: UsageReport[] = []
+
+  const mockStore: any = {
+    getNodeCache: jest.fn(() => null),
+    setNodeCache: jest.fn(),
+    clearNodeCache: jest.fn(),
+    feSetPortalData: jest.fn(),
+    feGetPortalData: jest.fn(() => null),
+    feHandleIntentDetected: jest.fn(),
+    feWaitForUserInput: jest.fn(() => Promise.resolve('mock user input'))
+  }
+
+  const mockFlowAPI: FlowAPI = {
+    nodeId: 'test-node',
+    requestId: 'test-request',
+    signal: new AbortController().signal,
+    checkCancelled: jest.fn(),
+    store: mockStore,
+    context: createContextAPI(),
+    conversation: {
+      streamChunk: jest.fn((chunk: string) => {
+        streamChunks.push(chunk)
+      }),
+      addBadge: jest.fn((badge: Badge) => {
+        const id = `badge-${badges.size + 1}`
+        badges.set(id, badge)
+        return id
+      }),
+      updateBadge: jest.fn((badgeId: string, updates: Partial<Badge>) => {
+        const existing = badges.get(badgeId)
+        if (existing) {
+          badges.set(badgeId, { ...existing, ...updates })
+        }
+      })
+    },
+    log: {
+      debug: jest.fn((message: string, data?: any) => {
+        logs.push({ level: 'debug', message, data })
+      }),
+      info: jest.fn((message: string, data?: any) => {
+        logs.push({ level: 'info', message, data })
+      }),
+      warn: jest.fn((message: string, data?: any) => {
+        logs.push({ level: 'warn', message, data })
+      }),
+      error: jest.fn((message: string, data?: any) => {
+        logs.push({ level: 'error', message, data })
+      })
+    },
+    tools: {
+      execute: jest.fn(async (toolName: string, args: any) => {
+        return { result: `Mock execution of ${toolName}` }
+      }),
+      list: jest.fn(() => [])
+    },
+    usage: {
+      report: jest.fn((report: UsageReport) => {
+        usageReports.push(report)
+      })
+    },
+    waitForUserInput: jest.fn(() => mockStore.feWaitForUserInput()),
+
+    // Expose test helpers
+    _testHelpers: {
+      logs,
+      badges,
+      streamChunks,
+      usageReports
+    },
+
+    ...overrides
+  }
+
+  return mockFlowAPI
+}
+
+/**
+ * Create mock NodeInputs for testing
+ */
+export function createMockNodeInputs(
+  pushedInputs: Record<string, any> = {}
+): NodeInputs {
+  return {
+    has: jest.fn((inputName: string) => inputName in pushedInputs),
+    pull: jest.fn(async (inputName: string) => {
+      if (inputName in pushedInputs) {
+        return pushedInputs[inputName]
+      }
+      throw new Error(`No input available for: ${inputName}`)
+    })
+  }
+}
+
+/**
+ * Create a MainFlowContext for testing (replaces createTestContext for new architecture)
+ */
+export function createMainFlowContext(overrides?: Partial<MainFlowContext>): MainFlowContext {
+  return {
+    contextId: 'test-context-' + Date.now(),
+    provider: 'anthropic',
+    model: 'claude-3-5-sonnet-20241022',
+    systemInstructions: 'You are a helpful assistant.',
+    messageHistory: [],
+    ...overrides
+  }
 }
 

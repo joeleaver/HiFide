@@ -17,10 +17,16 @@
  */
 
 import type { StateCreator } from 'zustand'
-import type { Session, TokenUsage, TokenCost, AgentMetrics, ActivityEvent, SessionItem, SessionMessage, SessionBadgeGroup, Badge } from '../types'
+import type { Session, TokenUsage, TokenCost, AgentMetrics, ActivityEvent, SessionItem, SessionMessage, Badge } from '../types'
 import { LS_KEYS, MAX_SESSIONS } from '../utils/constants'
 import { deriveTitle } from '../utils/sessions'
 import { loadAllSessions, sessionSaver, deleteSessionFromDisk } from '../utils/session-persistence'
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+
 
 // ============================================================================
 // Types
@@ -31,6 +37,10 @@ export interface SessionSlice {
   sessions: Session[]
   currentId: string | null
   sessionsLoaded: boolean
+
+  // Current Node Execution State (simplified model)
+  // Maps nodeId -> boxId for currently open boxes
+  openExecutionBoxes: Record<string, string>
 
   // LLM Request State
   currentRequestId: string | null
@@ -63,9 +73,18 @@ export interface SessionSlice {
 
   // Session Item Actions
   addSessionItem: (item: Omit<SessionItem, 'id' | 'timestamp'>) => void
-  updateSessionItem: (params: { id: string; updates: Partial<SessionItem> }) => void
-  appendToLastMessage: (content: string) => void  // For streaming chunks
-  appendToLastMessageWithNodeId: (content: string, nodeId: string) => void  // For streaming chunks with nodeId
+
+  // Node Execution Box Actions (simplified model)
+  appendToNodeExecution: (params: {
+    nodeId: string
+    nodeLabel: string
+    nodeKind: string
+    content: { type: 'text'; text: string } | { type: 'badge'; badge: Badge }
+    provider?: string
+    model?: string
+  }) => void
+  updateBadgeInNodeExecution: (params: { nodeId: string; badgeId: string; updates: Partial<Badge> }) => void
+  finalizeNodeExecution: (params: { nodeId: string; cost?: TokenCost }) => void
 
   // Context Management
   updateCurrentContext: (params: {
@@ -73,19 +92,18 @@ export interface SessionSlice {
     model?: string
     systemInstructions?: string
     temperature?: number
+    messageHistory?: Array<{
+      role: 'system' | 'user' | 'assistant'
+      content: string
+      metadata?: {
+        id: string
+        pinned?: boolean
+        priority?: number
+      }
+    }>
   }) => void
 
-  // Badge Helper Actions
-  addBadge: (params: {
-    badge: Omit<Badge, 'id' | 'timestamp'>
-    nodeId?: string
-    nodeLabel?: string
-    nodeKind?: string
-    provider?: string
-    model?: string
-    cost?: TokenCost
-  }) => void
-  updateBadge: (params: { badgeId: string; updates: Partial<Badge> }) => void
+
 
   // Token Usage Actions
   recordTokenUsage: (params: { provider: string; model: string; usage: TokenUsage }) => void
@@ -93,6 +111,11 @@ export interface SessionSlice {
   // Flow Debug Log Actions
   addFlowDebugLog: (log: Omit<NonNullable<Session['flowDebugLogs']>[number], 'timestamp'>) => void
   clearFlowDebugLogs: () => void
+
+  // Flow Cache Actions
+  getNodeCache: (nodeId: string) => { data: any; timestamp: number } | undefined
+  setNodeCache: (nodeId: string, cache: { data: any; timestamp: number }) => Promise<void>
+  clearNodeCache: (nodeId: string) => Promise<void>
 
   // Activity Actions
   getActivityForRequest: (requestId: string) => ActivityEvent[]
@@ -116,6 +139,8 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
   sessionsLoaded: false,
 
   currentRequestId: null,
+  openExecutionBoxes: {},
+
   streamingText: '',
   chunkStats: { count: 0, totalChars: 0 },
   retryCount: 0,
@@ -223,12 +248,6 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       return
     }
 
-    console.log('[saveCurrentSession] Saving session:', {
-      sessionId: current.id,
-      itemCount: current.items.length,
-      immediate,
-    })
-
     // Save to disk using debounced saver
     sessionSaver.save(current, immediate)
 
@@ -265,10 +284,11 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     }
 
     // Initialize the selected session (loads flow and resumes if paused)
-    const state = get() as any
-    if (state.initializeSession) {
+    const state = get()
+    const stateAny = state as any
+    if (stateAny.initializeSession) {
       setTimeout(() => {
-        void state.initializeSession()
+        void stateAny.initializeSession()
       }, 100)
     }
   },
@@ -308,6 +328,9 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     if (state.clearAgentTerminals) {
       void state.clearAgentTerminals()
     }
+
+    // Clear global flow cache for new session (don't inherit cache from previous session)
+    ;(globalThis as any).__hifideSessionFlowCache = {}
 
     set((s) => {
       const sessions = [session, ...s.sessions].slice(0, MAX_SESSIONS)
@@ -453,80 +476,23 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     get().saveCurrentSession()
   },
 
-  appendToLastMessage: (content: string) => {
-    set((s) => {
-      if (!s.currentId) return {}
 
-      const sessions = s.sessions.map((sess) => {
-        if (sess.id !== s.currentId) return sess
-
-        // Find the last message item
-        const items = [...sess.items]
-        for (let i = items.length - 1; i >= 0; i--) {
-          if (items[i].type === 'message') {
-            const msg = items[i] as SessionMessage
-            items[i] = {
-              ...msg,
-              content: msg.content + content,
-            }
-            break
-          }
-        }
-
-        return {
-          ...sess,
-          items,
-          updatedAt: Date.now(),
-        }
-      })
-
-      return { sessions }
-    })
-
-    // Debounced save after append
-    get().saveCurrentSession()
-  },
-
-  appendToLastMessageWithNodeId: (content: string, nodeId: string) => {
-    set((s) => {
-      if (!s.currentId) return {}
-
-      const sessions = s.sessions.map((sess) => {
-        if (sess.id !== s.currentId) return sess
-
-        // Find the last message item with matching nodeId
-        const items = [...sess.items]
-        for (let i = items.length - 1; i >= 0; i--) {
-          if (items[i].type === 'message' && items[i].nodeId === nodeId) {
-            const msg = items[i] as SessionMessage
-            items[i] = {
-              ...msg,
-              content: msg.content + content,
-            }
-            break
-          }
-        }
-
-        return {
-          ...sess,
-          items,
-          updatedAt: Date.now(),
-        }
-      })
-
-      return { sessions }
-    })
-
-    // Debounced save after append
-    get().saveCurrentSession()
-  },
 
   // Context Management
-  updateCurrentContext: ({ provider, model, systemInstructions, temperature }: {
+  updateCurrentContext: ({ provider, model, systemInstructions, temperature, messageHistory }: {
     provider?: string
     model?: string
     systemInstructions?: string
     temperature?: number
+    messageHistory?: Array<{
+      role: 'system' | 'user' | 'assistant'
+      content: string
+      metadata?: {
+        id: string
+        pinned?: boolean
+        priority?: number
+      }
+    }>
   }) => {
     set((s) => {
       if (!s.currentId) return {}
@@ -542,6 +508,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
             ...(model !== undefined && { model }),
             ...(systemInstructions !== undefined && { systemInstructions }),
             ...(temperature !== undefined && { temperature }),
+            ...(messageHistory !== undefined && { messageHistory }),
           },
           updatedAt: Date.now(),
         }
@@ -554,116 +521,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     get().saveCurrentSession()
   },
 
-  // Badge Helper Actions
-  addBadge: ({ badge, nodeId, nodeLabel, nodeKind, provider, model, cost, badgeId }: {
-    badge: Omit<Badge, 'id' | 'timestamp'>
-    nodeId?: string
-    nodeLabel?: string
-    nodeKind?: string
-    provider?: string
-    model?: string
-    cost?: TokenCost
-    badgeId?: string  // Optional: use specific ID (e.g., tool callId) instead of generating UUID
-  }) => {
-    const now = Date.now()
-    const finalBadgeId = badgeId || crypto.randomUUID()
 
-    const fullBadge: Badge = {
-      ...badge,
-      id: finalBadgeId,
-      timestamp: now,
-      nodeId,
-    }
-
-    // Check if we should add to existing badge group or create new one
-    set((s) => {
-      if (!s.currentId) return {}
-
-      const sessions = s.sessions.map((sess) => {
-        if (sess.id !== s.currentId) return sess
-
-        const items = [...sess.items]
-
-        // Try to find the most recent badge group from the same node
-        let addedToExisting = false
-        if (nodeId) {
-          for (let i = items.length - 1; i >= 0; i--) {
-            const item = items[i]
-            if (item.type === 'badge-group' && item.nodeId === nodeId) {
-              // Add to existing group
-              items[i] = {
-                ...item,
-                badges: [...item.badges, fullBadge],
-              }
-              addedToExisting = true
-              break
-            }
-            // Stop if we hit a message (don't group across messages)
-            if (item.type === 'message') break
-          }
-        }
-
-        // If not added to existing group, create new group
-        if (!addedToExisting) {
-          const newGroup: SessionBadgeGroup = {
-            type: 'badge-group',
-            id: crypto.randomUUID(),
-            nodeId,
-            nodeLabel,
-            nodeKind,
-            timestamp: now,
-            badges: [fullBadge],
-            provider,
-            model,
-            cost,
-          }
-          items.push(newGroup)
-        }
-
-        return {
-          ...sess,
-          items,
-          updatedAt: now,
-        }
-      })
-
-      return { sessions }
-    })
-
-    // Debounced save
-    get().saveCurrentSession()
-  },
-
-  updateBadge: ({ badgeId, updates }: { badgeId: string; updates: Partial<Badge> }) => {
-    set((s) => {
-      if (!s.currentId) return {}
-
-      const sessions = s.sessions.map((sess) => {
-        if (sess.id !== s.currentId) return sess
-
-        return {
-          ...sess,
-          items: sess.items.map(item => {
-            if (item.type === 'badge-group') {
-              return {
-                ...item,
-                badges: item.badges.map(badge =>
-                  badge.id === badgeId ? { ...badge, ...updates } : badge
-                ),
-              }
-            }
-            return item
-          }),
-          updatedAt: Date.now(),
-        }
-      })
-
-      return { sessions }
-    })
-
-    // Debounced save
-    get().saveCurrentSession()
-  },
 
   // Token Usage Actions
   recordTokenUsage: ({ provider, model, usage }: { provider: string; model: string; usage: TokenUsage }) => {
@@ -800,6 +658,70 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 
     // Save after clearing logs
     get().saveCurrentSession()
+  },
+
+  // Flow Cache Actions
+  getNodeCache: (nodeId: string) => {
+    const currentId = get().currentId
+    if (!currentId) return undefined
+
+    const currentSession = get().sessions.find((s) => s.id === currentId)
+    return currentSession?.flowCache?.[nodeId]
+  },
+
+  setNodeCache: async (nodeId: string, cache: { data: any; timestamp: number }) => {
+    const currentId = get().currentId
+    if (!currentId) return
+
+    console.log('[session] Setting cache for node:', nodeId)
+
+    set((s) => {
+      const sessions = s.sessions.map((sess) => {
+        if (sess.id !== currentId) return sess
+
+        // Update the node's cache entry
+        const flowCache = { ...sess.flowCache, [nodeId]: cache }
+
+        return {
+          ...sess,
+          flowCache,
+          updatedAt: Date.now(),
+        }
+      })
+
+      return { sessions }
+    })
+
+    // Save after setting cache
+    await get().saveCurrentSession() // debounced save
+  },
+
+  clearNodeCache: async (nodeId: string) => {
+    const currentId = get().currentId
+    if (!currentId) return
+
+    console.log('[session] Clearing cache for node:', nodeId)
+
+    set((s) => {
+      const sessions = s.sessions.map((sess) => {
+        if (sess.id !== currentId) return sess
+
+        // Remove the node's cache entry
+        const flowCache = { ...sess.flowCache }
+        delete flowCache[nodeId]
+
+        return {
+          ...sess,
+          flowCache,
+          updatedAt: Date.now(),
+        }
+      })
+
+      return { sessions }
+    })
+
+    // Save after clearing cache
+    await get().saveCurrentSession(true) // immediate save
   },
 
   // Activity Actions
@@ -990,5 +912,288 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       } catch {}
     }
   })(),
+
+  // ============================================================================
+  // Node Execution Box Actions (Simplified Model)
+  // ============================================================================
+
+  /**
+   * Append content to a node's execution box
+   * Creates the box if it doesn't exist yet (first content from this node)
+   * Debounced for text chunks to prevent UI freezing during streaming
+   */
+  appendToNodeExecution: (() => {
+    // Buffer for accumulating text chunks per nodeId
+    const textBuffers = new Map<string, string>()
+    const badgeQueues = new Map<string, Array<{ type: 'badge'; badge: any }>>()
+    const flushTimeouts = new Map<string, NodeJS.Timeout>()
+    const nodeMetadata = new Map<string, { nodeLabel: string; nodeKind: string; provider?: string; model?: string }>()
+
+    const flush = (nodeId: string) => {
+      const textBuffer = textBuffers.get(nodeId) || ''
+      const badgeQueue = badgeQueues.get(nodeId) || []
+
+      const contentToAdd: Array<{ type: 'text'; text: string } | { type: 'badge'; badge: any }> = []
+
+      // Add buffered text if any
+      if (textBuffer) {
+        contentToAdd.push({ type: 'text', text: textBuffer })
+        textBuffers.delete(nodeId)
+      }
+
+      // Add queued badges
+      if (badgeQueue.length > 0) {
+        contentToAdd.push(...badgeQueue)
+        badgeQueues.delete(nodeId)
+      }
+
+      if (contentToAdd.length === 0) return
+
+      // Clear any pending timeout for this node
+      const existingTimeout = flushTimeouts.get(nodeId)
+      if (existingTimeout) {
+        clearTimeout(existingTimeout)
+        flushTimeouts.delete(nodeId)
+      }
+
+      // Apply all buffered content in a single state update
+      set((s) => {
+        if (!s.currentId) return {}
+
+        // Find existing open box for this nodeId
+        const openBoxId = s.openExecutionBoxes[nodeId]
+        let newBoxId: string | null = null
+
+        const sessions = s.sessions.map((sess) => {
+          if (sess.id !== s.currentId) return sess
+
+          const existingBoxIndex = openBoxId
+            ? sess.items.findIndex(item => item.id === openBoxId)
+            : -1
+
+          if (existingBoxIndex !== -1) {
+            // Box exists - append content
+            const items = [...sess.items]
+            const box = items[existingBoxIndex] as any
+            items[existingBoxIndex] = {
+              ...box,
+              content: [...box.content, ...contentToAdd]
+            }
+
+            return {
+              ...sess,
+              items,
+              updatedAt: Date.now()
+            }
+          } else {
+            // First content from this node - create new box
+            const metadata = nodeMetadata.get(nodeId)
+            if (!metadata) return sess // Shouldn't happen
+
+            newBoxId = `box-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+            const newBox: any = {
+              type: 'node-execution',
+              id: newBoxId,
+              nodeId,
+              nodeLabel: metadata.nodeLabel,
+              nodeKind: metadata.nodeKind,
+              timestamp: Date.now(),
+              content: contentToAdd,
+              provider: metadata.provider,
+              model: metadata.model
+            }
+
+            return {
+              ...sess,
+              items: [...sess.items, newBox],
+              updatedAt: Date.now()
+            }
+          }
+        })
+
+        // Update open boxes map if we created a new box
+        if (newBoxId) {
+          return {
+            sessions,
+            openExecutionBoxes: {
+              ...s.openExecutionBoxes,
+              [nodeId]: newBoxId
+            }
+          }
+        }
+
+        return { sessions }
+      })
+
+      // Debounced save
+      get().saveCurrentSession()
+    }
+
+    // Expose flush function for finalizeNodeExecution to use
+    // Store it on the global state object (hacky but works with closure)
+    const appendFn = ({ nodeId, nodeLabel, nodeKind, content, provider, model }: {
+      nodeId: string
+      nodeLabel: string
+      nodeKind: string
+      content: { type: 'text'; text: string } | { type: 'badge'; badge: any }
+      provider?: string
+      model?: string
+    }) => {
+      // Store/update metadata for this node (in case we need to create a box)
+      // Always update to ensure we capture the latest provider/model for each execution
+      const existingMetadata = nodeMetadata.get(nodeId)
+      nodeMetadata.set(nodeId, {
+        nodeLabel,
+        nodeKind,
+        // Use provided provider/model if available, otherwise keep existing
+        provider: provider || existingMetadata?.provider,
+        model: model || existingMetadata?.model
+      })
+
+      if (content.type === 'text') {
+        // Accumulate text chunks in buffer
+        const existing = textBuffers.get(nodeId) || ''
+        textBuffers.set(nodeId, existing + content.text)
+
+        // Debounce flush (100ms - fast enough for smooth streaming, slow enough to batch)
+        const existingTimeout = flushTimeouts.get(nodeId)
+        if (existingTimeout) clearTimeout(existingTimeout)
+        flushTimeouts.set(nodeId, setTimeout(() => flush(nodeId), 100))
+      } else {
+        // Badges are added immediately (flush any pending text first)
+        const textBuffer = textBuffers.get(nodeId)
+        if (textBuffer) {
+          flush(nodeId)
+        }
+
+        const queue = badgeQueues.get(nodeId) || []
+        queue.push(content)
+        badgeQueues.set(nodeId, queue)
+
+        // Flush badges immediately
+        const existingTimeout = flushTimeouts.get(nodeId)
+        if (existingTimeout) clearTimeout(existingTimeout)
+        flush(nodeId)
+      }
+    }
+
+    // Expose internal functions for finalizeNodeExecution to use
+    ;(appendFn as any).__flush = flush
+    ;(appendFn as any).__clearMetadata = (nodeId: string) => {
+      nodeMetadata.delete(nodeId)
+    }
+
+    return appendFn
+  })(),
+
+  /**
+   * Update a badge within a node's execution box
+   */
+  updateBadgeInNodeExecution: ({ nodeId, badgeId, updates }: { nodeId: string; badgeId: string; updates: Partial<any> }) => {
+    set((s) => {
+      if (!s.currentId) return {}
+
+      const openBoxId = s.openExecutionBoxes[nodeId]
+      if (!openBoxId) return {} // No open box for this node
+
+      const sessions = s.sessions.map((sess) => {
+        if (sess.id !== s.currentId) return sess
+
+        const boxIndex = sess.items.findIndex(item => item.id === openBoxId)
+        if (boxIndex === -1) return sess
+
+        const box = sess.items[boxIndex] as any
+        if (box.type !== 'node-execution') return sess
+
+        // Find and update the badge
+        const updatedContent = box.content.map((item: any) => {
+          if (item.type === 'badge' && item.badge.id === badgeId) {
+            return {
+              ...item,
+              badge: {
+                ...item.badge,
+                ...updates
+              }
+            }
+          }
+          return item
+        })
+
+        const items = [...sess.items]
+        items[boxIndex] = {
+          ...box,
+          content: updatedContent
+        }
+
+        return {
+          ...sess,
+          items,
+          updatedAt: Date.now()
+        }
+      })
+
+      return { sessions }
+    })
+
+    // Debounced save
+    get().saveCurrentSession()
+  },
+
+  /**
+   * Finalize a node's execution box (add cost, close the box)
+   * Note: We close the box here so that the next execution of the same node creates a new box
+   */
+  finalizeNodeExecution: ({ nodeId, cost }: { nodeId: string; cost?: any }) => {
+    // First, flush any pending text chunks for this node
+    // This ensures all content is in the box before we finalize it
+    const appendFn = get().appendToNodeExecution as any
+    if (appendFn && appendFn.__flush) {
+      appendFn.__flush(nodeId)
+    }
+
+    // Clear metadata for this node so next execution starts fresh with new provider/model
+    if (appendFn && appendFn.__clearMetadata) {
+      appendFn.__clearMetadata(nodeId)
+    }
+
+    set((s) => {
+      if (!s.currentId) return {}
+
+      const openBoxId = s.openExecutionBoxes[nodeId]
+      if (!openBoxId) return {} // No box to finalize
+
+      const sessions = s.sessions.map((sess) => {
+        if (sess.id !== s.currentId) return sess
+
+        const boxIndex = sess.items.findIndex(item => item.id === openBoxId)
+
+        if (boxIndex !== -1 && cost) {
+          const items = [...sess.items]
+          const box = items[boxIndex] as any
+          items[boxIndex] = {
+            ...box,
+            cost
+          }
+
+          return {
+            ...sess,
+            items,
+            updatedAt: Date.now()
+          }
+        }
+
+        return sess
+      })
+
+      // Remove from open boxes map so next execution creates a new box
+      const newOpenBoxes = { ...s.openExecutionBoxes }
+      delete newOpenBoxes[nodeId]
+
+      return { sessions, openExecutionBoxes: newOpenBoxes }
+    })
+
+    // Immediate save on finalize
+    get().saveCurrentSession(true)
+  },
 })
 

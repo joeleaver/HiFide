@@ -1,12 +1,18 @@
 /**
  * Intent Router Node Tests
- * 
+ *
  * Tests the intentRouter node which classifies user input into configured intents
  * and routes the flow accordingly.
  */
 
 import { intentRouterNode } from '../intentRouter'
-import { createTestContext, createTestConfig, getTestApiKey } from '../../../../__tests__/utils/testHelpers'
+import {
+  createMainFlowContext,
+  createTestConfig,
+  getTestApiKey,
+  createMockFlowAPI,
+  createMockNodeInputs
+} from '../../../../__tests__/utils/testHelpers'
 import { withFixture, getTestMode } from '../../../../__tests__/utils/fixtures'
 
 // Mock the state module to provide API keys
@@ -35,11 +41,12 @@ describe('Intent Router Node', () => {
 
   describe('Basic Intent Classification', () => {
     it('should classify a greeting intent', async () => {
-      const context = createTestContext({
+      const flow = createMockFlowAPI()
+      const context = createMainFlowContext({
         provider: 'openai',
         model: 'gpt-4o-mini'
       })
-      
+
       const config = createTestConfig({
         provider: 'openai',
         model: 'gpt-4o-mini',
@@ -49,16 +56,17 @@ describe('Intent Router Node', () => {
           command: 'User is giving a command or instruction'
         }
       })
-      
+
       const message = 'Hello! How are you today?'
-      
+      const inputs = createMockNodeInputs()
+
       const result = await withFixture(
         'intent-router-greeting',
         async () => {
-          return await intentRouterNode(context, message, {}, config)
+          return await intentRouterNode(flow, context, message, inputs, config)
         }
       )
-      
+
       expect(result.status).toBe('success')
       expect(result['greeting-context']).toBeDefined()
       expect(result['greeting-data']).toBe(message)
@@ -67,11 +75,12 @@ describe('Intent Router Node', () => {
     })
 
     it('should classify a question intent', async () => {
-      const context = createTestContext({
+      const flow = createMockFlowAPI()
+      const context = createMainFlowContext({
         provider: 'openai',
         model: 'gpt-4o-mini'
       })
-      
+
       const config = createTestConfig({
         provider: 'openai',
         model: 'gpt-4o-mini',
@@ -81,16 +90,17 @@ describe('Intent Router Node', () => {
           command: 'User is giving a command or instruction'
         }
       })
-      
+
       const message = 'What is the capital of France?'
-      
+      const inputs = createMockNodeInputs()
+
       const result = await withFixture(
         'intent-router-question',
         async () => {
-          return await intentRouterNode(context, message, {}, config)
+          return await intentRouterNode(flow, context, message, inputs, config)
         }
       )
-      
+
       expect(result.status).toBe('success')
       expect(result['question-context']).toBeDefined()
       expect(result['question-data']).toBe(message)
@@ -99,11 +109,12 @@ describe('Intent Router Node', () => {
     })
 
     it('should classify a command intent', async () => {
-      const context = createTestContext({
+      const flow = createMockFlowAPI()
+      const context = createMainFlowContext({
         provider: 'openai',
         model: 'gpt-4o-mini'
       })
-      
+
       const config = createTestConfig({
         provider: 'openai',
         model: 'gpt-4o-mini',
@@ -113,16 +124,17 @@ describe('Intent Router Node', () => {
           command: 'User is giving a command or instruction'
         }
       })
-      
+
       const message = 'Please create a new file called test.txt'
-      
+      const inputs = createMockNodeInputs()
+
       const result = await withFixture(
         'intent-router-command',
         async () => {
-          return await intentRouterNode(context, message, {}, config)
+          return await intentRouterNode(flow, context, message, inputs, config)
         }
       )
-      
+
       expect(result.status).toBe('success')
       expect(result['command-context']).toBeDefined()
       expect(result['command-data']).toBe(message)
@@ -133,11 +145,12 @@ describe('Intent Router Node', () => {
 
   describe('Different Providers', () => {
     it('should work with Gemini', async () => {
-      const context = createTestContext({
+      const flow = createMockFlowAPI()
+      const context = createMainFlowContext({
         provider: 'gemini',
         model: 'gemini-2.0-flash-exp'
       })
-      
+
       const config = createTestConfig({
         provider: 'gemini',
         model: 'gemini-2.0-flash-exp',
@@ -147,16 +160,17 @@ describe('Intent Router Node', () => {
           neutral: 'User is expressing neutral sentiment'
         }
       })
-      
+
       const message = 'This is amazing! I love it!'
-      
+      const inputs = createMockNodeInputs()
+
       const result = await withFixture(
         'intent-router-gemini-positive',
         async () => {
-          return await intentRouterNode(context, message, {}, config)
+          return await intentRouterNode(flow, context, message, inputs, config)
         }
       )
-      
+
       expect(result.status).toBe('success')
       expect(result['positive-context']).toBeDefined()
       expect(result['positive-data']).toBe(message)
@@ -165,11 +179,12 @@ describe('Intent Router Node', () => {
 
   describe('Edge Cases', () => {
     it('should handle binary classification', async () => {
-      const context = createTestContext({
+      const flow = createMockFlowAPI()
+      const context = createMainFlowContext({
         provider: 'openai',
         model: 'gpt-4o-mini'
       })
-      
+
       const config = createTestConfig({
         provider: 'openai',
         model: 'gpt-4o-mini',
@@ -178,16 +193,17 @@ describe('Intent Router Node', () => {
           no: 'User is disagreeing or saying no'
         }
       })
-      
+
       const message = 'Yes, that sounds good'
-      
+      const inputs = createMockNodeInputs()
+
       const result = await withFixture(
         'intent-router-binary-yes',
         async () => {
-          return await intentRouterNode(context, message, {}, config)
+          return await intentRouterNode(flow, context, message, inputs, config)
         }
       )
-      
+
       expect(result.status).toBe('success')
       expect(result['yes-context']).toBeDefined()
       expect(result['yes-data']).toBe(message)
@@ -195,11 +211,12 @@ describe('Intent Router Node', () => {
     })
 
     it('should handle many intents', async () => {
-      const context = createTestContext({
+      const flow = createMockFlowAPI()
+      const context = createMainFlowContext({
         provider: 'openai',
         model: 'gpt-4o-mini'
       })
-      
+
       const config = createTestConfig({
         provider: 'openai',
         model: 'gpt-4o-mini',
@@ -212,16 +229,17 @@ describe('Intent Router Node', () => {
           other: 'User is asking about something else'
         }
       })
-      
+
       const message = 'What time is it?'
-      
+      const inputs = createMockNodeInputs()
+
       const result = await withFixture(
         'intent-router-many-intents',
         async () => {
-          return await intentRouterNode(context, message, {}, config)
+          return await intentRouterNode(flow, context, message, inputs, config)
         }
       )
-      
+
       expect(result.status).toBe('success')
       expect(result['time-context']).toBeDefined()
       expect(result['time-data']).toBe(message)
@@ -230,7 +248,8 @@ describe('Intent Router Node', () => {
 
   describe('Error Handling', () => {
     it('should throw error when message is missing', async () => {
-      const context = createTestContext()
+      const flow = createMockFlowAPI()
+      const context = createMainFlowContext()
       const config = createTestConfig({
         provider: 'openai',
         model: 'gpt-4o-mini',
@@ -239,49 +258,56 @@ describe('Intent Router Node', () => {
           question: 'User is asking a question'
         }
       })
-      
+      const inputs = createMockNodeInputs()
+
       await expect(
-        intentRouterNode(context, '', {}, config)
+        intentRouterNode(flow, context, '', inputs, config)
       ).rejects.toThrow('intentRouter node requires data input')
     })
 
     it('should throw error when routes are missing', async () => {
-      const context = createTestContext()
+      const flow = createMockFlowAPI()
+      const context = createMainFlowContext()
       const config = createTestConfig({
         provider: 'openai',
         model: 'gpt-4o-mini'
       })
-      
+      const inputs = createMockNodeInputs()
+
       await expect(
-        intentRouterNode(context, 'Hello', {}, config)
+        intentRouterNode(flow, context, 'Hello', inputs, config)
       ).rejects.toThrow('intentRouter node requires at least one intent')
     })
 
     it('should throw error when provider is missing', async () => {
-      const context = createTestContext()
+      const flow = createMockFlowAPI()
+      const context = createMainFlowContext()
       const config = createTestConfig({
         model: 'gpt-4o-mini',
         routes: {
           greeting: 'User is greeting'
         }
       })
-      
+      const inputs = createMockNodeInputs()
+
       await expect(
-        intentRouterNode(context, 'Hello', {}, config)
+        intentRouterNode(flow, context, 'Hello', inputs, config)
       ).rejects.toThrow('intentRouter node requires provider and model')
     })
 
     it('should throw error when model is missing', async () => {
-      const context = createTestContext()
+      const flow = createMockFlowAPI()
+      const context = createMainFlowContext()
       const config = createTestConfig({
         provider: 'openai',
         routes: {
           greeting: 'User is greeting'
         }
       })
-      
+      const inputs = createMockNodeInputs()
+
       await expect(
-        intentRouterNode(context, 'Hello', {}, config)
+        intentRouterNode(flow, context, 'Hello', inputs, config)
       ).rejects.toThrow('intentRouter node requires provider and model')
     })
   })

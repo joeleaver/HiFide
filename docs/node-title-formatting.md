@@ -16,10 +16,10 @@ For example:
 
 All node title formatting logic is centralized in `electron/store/utils/node-colors.ts`:
 
-#### NODE_KIND_LABELS Mapping
+#### NODE_TYPE_LABELS Mapping
 
 ```typescript
-export const NODE_KIND_LABELS: Record<string, string> = {
+export const NODE_TYPE_LABELS: Record<string, string> = {
   defaultContextStart: 'Context Start',
   userInput: 'User Input',
   manualInput: 'Manual Input',
@@ -40,23 +40,23 @@ export const NODE_KIND_LABELS: Record<string, string> = {
 
 #### Helper Functions
 
-**`getNodeKindLabel(kind)`** - Get human-readable label for a node kind:
+**`getNodeTypeLabel(nodeType)`** - Get human-readable label for a node type:
 ```typescript
-getNodeKindLabel('llmRequest') // Returns: 'LLM Request'
-getNodeKindLabel('intentRouter') // Returns: 'Intent Router'
+getNodeTypeLabel('llmRequest') // Returns: 'LLM Request'
+getNodeTypeLabel('intentRouter') // Returns: 'Intent Router'
 ```
 
-**`formatNodeTitle(nodeKind, nodeLabel)`** - Format title for display:
+**`formatNodeTitle(nodeType, nodeLabel)`** - Format title for display:
 ```typescript
 // With custom label
 formatNodeTitle('llmRequest', 'My Custom Node')
 // Returns: 'LLM REQUEST: My Custom Node'
 
-// Without custom label (or label same as kind)
+// Without custom label (or label same as type)
 formatNodeTitle('llmRequest', 'LLM Request')
 // Returns: 'LLM REQUEST'
 
-// Unknown kind
+// Unknown type
 formatNodeTitle('unknown', 'Custom')
 // Returns: 'UNKNOWN: Custom'
 ```
@@ -68,9 +68,9 @@ formatNodeTitle('unknown', 'Custom')
 The `NodeOutputBox` component automatically formats titles:
 
 ```typescript
-export function NodeOutputBox({ nodeLabel, nodeKind, provider, model, cost, children }: NodeOutputBoxProps) {
-  const displayTitle = formatNodeTitle(nodeKind, nodeLabel)
-  
+export function NodeOutputBox({ nodeLabel, nodeType, provider, model, cost, children }: NodeOutputBoxProps) {
+  const displayTitle = formatNodeTitle(nodeType, nodeLabel)
+
   return (
     <Stack>
       {displayTitle && (
@@ -94,7 +94,7 @@ addSessionItem({
   role: 'assistant',
   content: streamingText,
   nodeLabel: node?.data?.label || 'LLM Request',  // Custom or default label
-  nodeKind: node?.data?.kind || 'llmRequest',     // Node type
+  nodeType: node?.data?.nodeType || 'llmRequest', // Node type
 })
 
 // Rendered as: "LLM REQUEST: Custom Label" or "LLM REQUEST"
@@ -106,7 +106,7 @@ addSessionItem({
 addBadge({
   badge: { type: 'tool', label: 'codebase-search', ... },
   nodeLabel: 'Tools',
-  nodeKind: 'tools',
+  nodeType: 'tools',
 })
 
 // Rendered as: "TOOLS"
@@ -183,24 +183,24 @@ addBadge({
 ## Files Changed
 
 1. **`electron/store/utils/node-colors.ts`**
-   - Added `NODE_KIND_LABELS` mapping
-   - Added `getNodeKindLabel()` helper
+   - Added `NODE_TYPE_LABELS` mapping
+   - Added `getNodeTypeLabel()` helper
    - Added `formatNodeTitle()` helper
 
 2. **`src/components/NodeOutputBox.tsx`**
    - Import `formatNodeTitle` function
-   - Use `formatNodeTitle(nodeKind, nodeLabel)` for display title
+   - Use `formatNodeTitle(nodeType, nodeLabel)` for display title
    - Changed header to use `displayTitle` instead of raw `nodeLabel`
 
 3. **`src/components/FlowNode/NodeHeader.tsx`**
-   - Removed local `NODE_KIND_LABELS` constant
+   - Removed local `NODE_TYPE_LABELS` constant
    - Import from shared `node-colors.ts` utility
 
 ## Benefits
 
 1. **Consistency**: All node titles follow the same format across the application
 2. **Clarity**: Users can immediately see both the node type and custom label
-3. **Maintainability**: Single source of truth for node kind labels
+3. **Maintainability**: Single source of truth for node type labels
 4. **Extensibility**: Easy to add new node types - just update the mapping
 
 ## Future Enhancements

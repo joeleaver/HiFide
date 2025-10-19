@@ -1,21 +1,22 @@
 import { Text, Checkbox, Accordion } from '@mantine/core'
-import { useAppStore } from '../../store'
+import { useAppStore, useDispatch } from '../../store'
 import { useMemo, useState, useEffect } from 'react'
 import InjectMessagesConfig from './InjectMessagesConfig'
 
 interface NodeConfigProps {
   nodeId: string
-  kind: string
+  nodeType: string
   config: any
   onConfigChange: (patch: any) => void
 }
 
-export default function NodeConfig({ nodeId, kind, config, onConfigChange }: NodeConfigProps) {
+export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }: NodeConfigProps) {
   // Get provider/model data for newContext node and llmRequest node
   const providerValid = useAppStore((s) => s.providerValid)
   const modelsByProvider = useAppStore((s) => s.modelsByProvider)
   const feNodes = useAppStore((s) => s.feNodes)
   const feEdges = useAppStore((s) => s.feEdges)
+  const dispatch = useDispatch()
 
   const providerOptions = useMemo(() => {
     return Object.entries(providerValid || {})
@@ -30,7 +31,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
 
   // Portal Input validation - check for duplicate IDs
   const portalInputValidation = useMemo(() => {
-    if (kind !== 'portalInput') return { isValid: true, error: null }
+    if (nodeType !== 'portalInput') return { isValid: true, error: null }
 
     const portalId = config.id
     if (!portalId) return { isValid: false, error: 'Portal ID is required' }
@@ -38,7 +39,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
     // Find all Portal Input nodes with the same ID
     const duplicates = feNodes.filter(
       (n: any) =>
-        (n.data as any)?.kind === 'portalInput' &&
+        (n.data as any)?.nodeType === 'portalInput' &&
         (n.data as any)?.config?.id === portalId &&
         n.id !== nodeId // Exclude self
     )
@@ -51,14 +52,14 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
     }
 
     return { isValid: true, error: null }
-  }, [kind, config.id, feNodes, nodeId])
+  }, [nodeType, config.id, feNodes, nodeId])
 
 
 
   return (
     <div className="nodrag" style={{ padding: 10, background: '#1e1e1e', borderTop: '1px solid #333', fontSize: 11, overflow: 'hidden', wordWrap: 'break-word' }}>
       {/* defaultContextStart node configuration */}
-      {kind === 'defaultContextStart' && (
+      {nodeType === 'defaultContextStart' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
           <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
             🎬 Flow entry point. Uses the global provider/model settings. Configure system instructions below.
@@ -86,7 +87,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
       )}
 
       {/* userInput node configuration */}
-      {kind === 'userInput' && (
+      {nodeType === 'userInput' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
           <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
             👤 Pauses flow execution and waits for user input. Use this to create interactive loops or get feedback mid-flow.
@@ -98,7 +99,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
       )}
 
       {/* manualInput node configuration */}
-      {kind === 'manualInput' && (
+      {nodeType === 'manualInput' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
           <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
             ✍️ Sends a pre-configured user message to the LLM in the current context. Useful for multi-turn conversations.
@@ -126,13 +127,13 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
       )}
 
       {/* injectMessages node configuration */}
-      {kind === 'injectMessages' && <InjectMessagesConfig nodeId={nodeId} config={config} onConfigChange={onConfigChange} />}
+      {nodeType === 'injectMessages' && <InjectMessagesConfig nodeId={nodeId} config={config} onConfigChange={onConfigChange} />}
 
       {/* tools node configuration */}
-      {kind === 'tools' && <ToolsConfig config={config} onConfigChange={onConfigChange} />}
+      {nodeType === 'tools' && <ToolsConfig config={config} onConfigChange={onConfigChange} />}
 
       {/* newContext node configuration */}
-      {kind === 'newContext' && (
+      {nodeType === 'newContext' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
           <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
             🔀 Creates an isolated execution context for parallel flows. Use this for bootstrap flows or background processing that shouldn't pollute the main conversation.
@@ -141,7 +142,14 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
             <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Provider:</span>
             <select
               value={config.provider || 'openai'}
-              onChange={(e) => onConfigChange({ provider: e.target.value })}
+              onChange={(e) => {
+                const newProvider = e.target.value
+                // Get models for the new provider
+                const newProviderModels = modelsByProvider[newProvider as keyof typeof modelsByProvider] || []
+                const firstModel = newProviderModels[0]?.value || ''
+                // Set both provider and model when provider changes
+                onConfigChange({ provider: newProvider, model: firstModel })
+              }}
               style={{
                 padding: '4px 6px',
                 background: '#252526',
@@ -160,7 +168,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
             <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Model:</span>
             <select
               value={config.model || (modelOptions[0]?.value || '')}
-              onChange={(e) => onConfigChange({ model: e.target.value })}
+              onChange={(e) => onConfigChange({ provider: config.provider || 'openai', model: e.target.value })}
               style={{
                 padding: '4px 6px',
                 background: '#252526',
@@ -198,7 +206,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
       )}
 
       {/* portalInput node configuration */}
-      {kind === 'portalInput' && (
+      {nodeType === 'portalInput' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
           <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
             📥 Stores context and data for retrieval by Portal Output nodes. Reduces edge crossings in complex flows.
@@ -233,7 +241,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
       )}
 
       {/* portalOutput node configuration */}
-      {kind === 'portalOutput' && (
+      {nodeType === 'portalOutput' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
           <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
             📤 Retrieves context and data from matching Portal Input node. Reduces edge crossings in complex flows.
@@ -265,7 +273,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
 
 
       {/* Node-specific config */}
-      {kind === 'approvalGate' && (
+      {nodeType === 'approvalGate' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc', fontSize: 10 }}>
             <input
@@ -283,7 +291,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
         </div>
       )}
 
-      {kind === 'budgetGuard' && (
+      {nodeType === 'budgetGuard' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
             <span style={{ fontSize: 10, color: '#888', width: 60 }}>Budget:</span>
@@ -315,7 +323,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
         </div>
       )}
 
-      {kind === 'llmRequest' && (() => {
+      {nodeType === 'llmRequest' && (() => {
         // Check if context input is connected
         const isContextConnected = feEdges.some((e: any) => e.target === nodeId && e.targetHandle === 'context')
 
@@ -352,7 +360,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
                     <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Model:</span>
                     <select
                       value={config.model || (modelOptions[0]?.value || '')}
-                      onChange={(e) => onConfigChange({ model: e.target.value })}
+                      onChange={(e) => onConfigChange({ provider: config.provider || 'openai', model: e.target.value })}
                       className="nodrag"
                       style={{
                         padding: '4px 6px',
@@ -474,7 +482,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
         )
       })()}
 
-      {kind === 'redactor' && (
+      {nodeType === 'redactor' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc', fontSize: 10 }}>
             <input
@@ -519,7 +527,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
         </div>
       )}
 
-      {kind === 'errorDetection' && (
+      {nodeType === 'errorDetection' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc', fontSize: 10 }}>
             <input
@@ -559,7 +567,7 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
         </div>
       )}
 
-      {kind === 'intentRouter' && (
+      {nodeType === 'intentRouter' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
             🔀 Routes flow based on LLM-classified user intent. Passes context through unchanged.
@@ -730,51 +738,110 @@ export default function NodeConfig({ nodeId, kind, config, onConfigChange }: Nod
       )}
 
       {/* cache node configuration */}
-      {kind === 'cache' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
-          <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
-            💾 Caches data from upstream nodes. Set TTL to 0 to disable caching.
-          </Text>
+      {nodeType === 'cache' && (() => {
+        const currentSession = useAppStore((s) => s.sessions?.find((sess: any) => sess.id === s.currentId))
+        const cacheData = currentSession?.flowCache?.[nodeId]
+        const cacheAge = cacheData ? ((Date.now() - cacheData.timestamp) / 1000).toFixed(1) : null
+        const ttl = config.ttl ?? 300
+        const isCacheValid = cacheData && ttl > 0 && parseFloat(cacheAge!) < ttl
 
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>TTL (seconds):</span>
-            <input
-              type="number"
-              min="0"
-              value={config.ttl ?? 300}
-              onChange={(e) => onConfigChange({ ttl: parseInt(e.target.value) || 0 })}
-              placeholder="300"
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
+            <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
+              💾 Caches data from upstream nodes. Set TTL to 0 to disable caching.
+            </Text>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>TTL (seconds):</span>
+              <input
+                type="number"
+                min="0"
+                value={config.ttl ?? 300}
+                onChange={(e) => onConfigChange({ ttl: parseInt(e.target.value) || 0 })}
+                placeholder="300"
+                style={{
+                  padding: '4px 6px',
+                  background: '#252526',
+                  color: '#cccccc',
+                  border: '1px solid #3e3e42',
+                  borderRadius: 3,
+                  fontSize: 10,
+                }}
+              />
+              <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
+                Default: 300 seconds (5 minutes). Set to 0 to disable caching.
+              </Text>
+            </label>
+
+            <button
+              onClick={async () => {
+                // Set invalidate timestamp for next execution
+                onConfigChange({ invalidate: Date.now() })
+                // Immediately clear the cache
+                await dispatch('clearNodeCache', nodeId)
+              }}
               style={{
-                padding: '4px 6px',
-                background: '#252526',
+                padding: '6px 10px',
+                background: '#3e3e42',
                 color: '#cccccc',
-                border: '1px solid #3e3e42',
+                border: '1px solid #555',
                 borderRadius: 3,
                 fontSize: 10,
+                cursor: 'pointer',
+                fontWeight: 600,
               }}
-            />
-            <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
-              Default: 300 seconds (5 minutes). Set to 0 to disable caching.
-            </Text>
-          </label>
+            >
+              🗑️ Invalidate Cache
+            </button>
 
-          <button
-            onClick={() => onConfigChange({ invalidate: Date.now() })}
-            style={{
-              padding: '6px 10px',
-              background: '#3e3e42',
-              color: '#cccccc',
-              border: '1px solid #555',
-              borderRadius: 3,
-              fontSize: 10,
-              cursor: 'pointer',
-              fontWeight: 600,
-            }}
-          >
-            🗑️ Invalidate Cache
-          </button>
-        </div>
-      )}
+            {/* Cache Inspector - Read-only view of current cache contents */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: 8, background: '#1a1a1a', borderRadius: 3, border: '1px solid #3e3e42' }}>
+              <Text size="xs" c="dimmed" style={{ fontSize: 9, fontWeight: 600, color: '#888' }}>
+                📊 Cache Status
+              </Text>
+
+              {cacheData ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 9 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: isCacheValid ? '#4ade80' : '#f87171' }}>
+                    <span>Status:</span>
+                    <span style={{ fontWeight: 600 }}>
+                      {isCacheValid ? '✓ Valid' : '✗ Expired'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#cccccc' }}>
+                    <span>Age:</span>
+                    <span>{cacheAge}s</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#cccccc' }}>
+                    <span>TTL:</span>
+                    <span>{ttl}s</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#cccccc' }}>
+                    <span>Data Type:</span>
+                    <span>{typeof cacheData.data}</span>
+                  </div>
+
+                  {/* Data preview */}
+                  <div style={{ marginTop: 4, padding: 6, background: '#252526', borderRadius: 2, border: '1px solid #3e3e42', maxHeight: 120, overflow: 'auto' }}>
+                    <Text size="xs" c="dimmed" style={{ fontSize: 8, color: '#888', marginBottom: 4 }}>
+                      Data Preview:
+                    </Text>
+                    <pre style={{ margin: 0, fontSize: 8, color: '#cccccc', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'monospace' }}>
+                      {typeof cacheData.data === 'string'
+                        ? cacheData.data.substring(0, 200) + (cacheData.data.length > 200 ? '...' : '')
+                        : JSON.stringify(cacheData.data, null, 2).substring(0, 200) + (JSON.stringify(cacheData.data).length > 200 ? '...' : '')}
+                    </pre>
+                  </div>
+                </div>
+              ) : (
+                <Text size="xs" c="dimmed" style={{ fontSize: 9, color: '#888', fontStyle: 'italic' }}>
+                  No cached data yet
+                </Text>
+              )}
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

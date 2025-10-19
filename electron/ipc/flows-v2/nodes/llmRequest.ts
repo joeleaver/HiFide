@@ -35,77 +35,94 @@ export const metadata = {
 /**
  * Node implementation
  */
-export const llmRequestNode: NodeFunction = async (contextIn, dataIn, inputs, config) => {
-  const nodeId = (config as any)?._nodeId || 'llmRequest'
-  const message = dataIn || ''
+export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs, config) => {
+  // Get message - use dataIn if provided (push), otherwise pull from input
+  const message = dataIn ?? (inputs.has('data') ? await inputs.pull('data') : '')
 
-  console.log(`[llmRequest] ${nodeId} - Starting execution:`, {
+  // Get context - use pushed context, or pull if edge connected, or create from config
+  let executionContext: MainFlowContext
+
+  if (context) {
+    // Context was pushed - use it
+    executionContext = context
+  } else if (inputs.has('context')) {
+    // Context edge connected but not pushed - pull it
+    executionContext = await inputs.pull('context')
+  } else {
+    // No context edge - create from config
+    const provider = (config.provider as string) || 'openai'
+    const model = (config.model as string) || 'gpt-4o'
+    executionContext = flow.context.create({
+      provider,
+      model,
+      systemInstructions: ''
+    })
+    flow.log.debug('No context provided, created from config', {
+      provider: executionContext.provider,
+      model: executionContext.model
+    })
+  }
+
+  flow.log.debug('Starting execution', {
     hasMessage: !!message,
     messageLength: message?.length,
-    hasTools: !!inputs.tools,
-    contextProvider: contextIn?.provider,
-    contextModel: contextIn?.model
+    hasDataIn: dataIn !== undefined,
+    hasDataInput: inputs.has('data'),
+    hasTools: inputs.has('tools'),
+    contextProvider: executionContext?.provider,
+    contextModel: executionContext?.model
   })
 
   if (!message) {
-    console.error(`[llmRequest] ${nodeId} - ERROR: No message provided`)
+    flow.log.error('No message provided')
     return {
-      context: contextIn,
+      context: executionContext,
       status: 'error',
       error: 'No message provided to LLM Request node'
     }
   }
 
-  // Determine context to use
-  let context: MainFlowContext
-
-  if (contextIn && contextIn.provider && contextIn.model) {
-    // Use provided context if it has provider/model
-    context = contextIn
-
-    // If override is enabled, update the provider/model in the context
-    if ((config.overrideEnabled as boolean) && config.overrideProvider && config.overrideModel) {
-      context = {
-        ...context,
-        provider: config.overrideProvider as string,
-        model: config.overrideModel as string
-      }
-      console.log(`[llmRequest] ${nodeId} - Override enabled, using provider/model:`, {
-        provider: context.provider,
-        model: context.model
-      })
-    }
+  // Apply override if enabled
+  if ((config.overrideEnabled as boolean) && config.overrideProvider && config.overrideModel) {
+    executionContext = flow.context.update(executionContext, {
+      provider: config.overrideProvider as string,
+      model: config.overrideModel as string
+    })
+    flow.log.debug('Override enabled', {
+      provider: executionContext.provider,
+      model: executionContext.model
+    })
   } else {
-    // No context provided or incomplete - create new context from config
-    const provider = (config.provider as string) || 'openai'
-    const model = (config.model as string) || 'gpt-4o'
-
-    context = {
-      contextId: `llm-${nodeId}-${Date.now()}`,
-      provider,
-      model,
-      systemInstructions: '',
-      messageHistory: []
-    }
+    flow.log.debug('Using context provider/model', {
+      provider: executionContext.provider,
+      model: executionContext.model
+    })
   }
 
-  // Call LLM service - it handles everything!
-  console.log(`[llmRequest] ${nodeId} - Calling LLM service:`, {
-    provider: context.provider,
-    model: context.model,
+  // Pull tools if connected (lazy evaluation)
+  const tools = inputs.has('tools') ? await inputs.pull('tools') : undefined
+
+  flow.log.debug('Calling LLM service', {
+    provider: executionContext.provider,
+    model: executionContext.model,
     messageLength: message.length,
-    hasTools: !!inputs.tools,
-    toolCount: inputs.tools?.length || 0
+    hasTools: !!tools,
+    toolCount: tools?.length || 0
   })
 
+  console.log(`[llmRequestNode] About to call llmService.chat()`)
+
+  // Call LLM service - it handles everything!
   const result = await llmService.chat({
     message,
-    tools: inputs.tools,
-    context,
-    nodeId
+    tools,
+    context: executionContext,
+    flowAPI: flow
   })
 
-  console.log(`[llmRequest] ${nodeId} - LLM service response:`, {
+  console.log(`[llmRequestNode] llmService.chat() returned`)
+
+  flow.log.debug('LLM service response', {
     hasError: !!result.error,
     error: result.error,
     textLength: result.text?.length || 0,
@@ -113,7 +130,7 @@ export const llmRequestNode: NodeFunction = async (contextIn, dataIn, inputs, co
   })
 
   if (result.error) {
-    console.error(`[llmRequest] ${nodeId} - ERROR from LLM service:`, result.error)
+    flow.log.error('ERROR from LLM service', { error: result.error })
     return {
       context: result.updatedContext,
       status: 'error',
@@ -121,15 +138,25 @@ export const llmRequestNode: NodeFunction = async (contextIn, dataIn, inputs, co
     }
   }
 
-  console.log(`[llmRequest] ${nodeId} - SUCCESS:`, {
+  flow.log.info('SUCCESS', {
     responseLength: result.text.length,
     responsePreview: result.text.substring(0, 100) + '...'
   })
 
-  return {
+  // TODO: Report usage via flow.usage.report() when llmService provides usage data
+
+  console.log(`[llmRequestNode] About to return from node function`)
+  const returnValue = {
     context: result.updatedContext,
     data: result.text,
     status: 'success'
   }
+  console.log(`[llmRequestNode] Returning:`, {
+    hasContext: !!returnValue.context,
+    messageHistoryLength: returnValue.context?.messageHistory?.length,
+    dataLength: returnValue.data?.length,
+    status: returnValue.status
+  })
+  return returnValue
 }
 

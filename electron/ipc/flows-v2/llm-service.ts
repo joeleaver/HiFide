@@ -19,9 +19,11 @@
  */
 
 import type { MainFlowContext } from './types'
+import type { FlowAPI } from './flow-api'
 import type { AgentTool, TokenUsage, ChatMessage } from '../../providers/provider'
 import { providers } from '../../core/state'
 import { getProviderKey } from '../../core/state'
+import { createCallbackEventEmitters } from './execution-events'
 
 /**
  * Request to the LLM service
@@ -36,8 +38,8 @@ export interface LLMServiceRequest {
   /** Main flow context (contains provider, model, history, etc.) */
   context: MainFlowContext
 
-  /** Node ID for event routing */
-  nodeId: string
+  /** FlowAPI instance for emitting execution events */
+  flowAPI: FlowAPI
 
   /** Optional JSON schema for structured output */
   responseSchema?: any
@@ -153,7 +155,7 @@ class LLMService {
    * event emission, and error handling.
    */
   async chat(request: LLMServiceRequest): Promise<LLMServiceResponse> {
-    const { message, tools, context, nodeId, responseSchema, overrideProvider, overrideModel, skipHistory } = request
+    const { message, tools, context, flowAPI, responseSchema, overrideProvider, overrideModel, skipHistory } = request
 
     // Use override provider/model if specified (for nodes like intentRouter)
     const provider = overrideProvider || context.provider
@@ -215,19 +217,48 @@ class LLMService {
       }
     } else {
       // Normal case: format full conversation history for the provider
+      console.log(`[LLMService] Formatting messages for ${provider}:`, {
+        contextMessageHistoryLength: updatedContext.messageHistory.length,
+        systemInstructions: updatedContext.systemInstructions?.substring(0, 50) + '...'
+      })
+
       if (provider === 'anthropic') {
         formattedMessages = formatMessagesForAnthropic(updatedContext)
+        console.log(`[LLMService] Anthropic formatted:`, {
+          systemLength: formattedMessages.system?.length || 0,
+          messagesLength: formattedMessages.messages?.length || 0,
+          messages: formattedMessages.messages
+        })
       } else if (provider === 'gemini') {
         formattedMessages = formatMessagesForGemini(updatedContext)
+        console.log(`[LLMService] Gemini formatted:`, {
+          systemInstructionLength: formattedMessages.systemInstruction?.length || 0,
+          contentsLength: formattedMessages.contents?.length || 0,
+          contents: formattedMessages.contents
+        })
       } else {
         // OpenAI and others
         formattedMessages = formatMessagesForOpenAI(updatedContext)
+        console.log(`[LLMService] OpenAI formatted:`, {
+          messagesLength: formattedMessages.length,
+          messages: formattedMessages
+        })
       }
     }
 
-    // 5. Set up event handlers - uses existing sendFlowEvent!
-    // Pass skipHistory flag to suppress chunk events for internal calls
-    const eventHandlers = await this.createEventHandlers(context, nodeId, provider, model, skipHistory)
+    // 5. Set up event handlers using the new execution event system
+    // Convert execution events to legacy callbacks for now (migration adapter)
+    // Wrap emitter to suppress chunk events if skipHistory is true
+    const emit = skipHistory
+      ? (event: any) => {
+          // Suppress chunk events for stateless calls (like intentRouter)
+          if (event.type !== 'chunk') {
+            flowAPI.emitExecutionEvent(event)
+          }
+        }
+      : flowAPI.emitExecutionEvent
+
+    const eventHandlers = createCallbackEventEmitters(emit, provider, model)
 
     // 6. Call provider with formatted messages
     console.log(`[LLMService] Starting stream:`, {
@@ -235,7 +266,8 @@ class LLMService {
       model,
       hasTools: !!tools && tools.length > 0,
       toolCount: tools?.length || 0,
-      messageHistoryLength: formattedMessages.messages?.length || 0
+      messageHistoryLength: formattedMessages.messages?.length || 0,
+      toolNames: tools?.map(t => t.name) || []
     })
 
     let response = ''
@@ -247,6 +279,7 @@ class LLMService {
           const baseStreamOpts = {
             apiKey,
             model,
+            // Callbacks that providers call - these are wrapped to emit ExecutionEvents
             onChunk: (text: string) => {
               // Skip duplicate final chunks (some providers send the full response as a final chunk)
               if (text === response) {
@@ -342,74 +375,25 @@ class LLMService {
         ...updatedContext,
         messageHistory: [...updatedContext.messageHistory, { role: 'assistant', content: response }]
       }
+
+      console.log(`[LLMService] Added assistant response to context:`, {
+        provider,
+        model,
+        messageHistoryLength: finalContext.messageHistory.length,
+        lastMessage: finalContext.messageHistory[finalContext.messageHistory.length - 1]
+      })
     }
+
+    console.log(`[LLMService] Returning from chat():`, {
+      provider,
+      model,
+      responseLength: response.length,
+      messageHistoryLength: finalContext.messageHistory.length
+    })
 
     return {
       text: response,
       updatedContext: finalContext
-    }
-  }
-  
-  /**
-   * Create event handlers that use the existing sendFlowEvent function
-   *
-   * This ensures events work exactly like they do now:
-   * - Globally registered in renderer
-   * - Survive HMR
-   * - Work when agent view is not active
-   *
-   * @param skipHistory - If true, suppresses chunk events (for internal/stateless calls like intentRouter)
-   */
-  private async createEventHandlers(_context: MainFlowContext, nodeId: string, provider: string, model: string, skipHistory?: boolean) {
-    // Try to get store, but gracefully handle if not available (e.g., in tests)
-    let store: any = null
-    try {
-      const { useMainStore } = await import('../../store/index.js')
-      store = useMainStore.getState()
-    } catch (e) {
-      // Store not available - event handlers will be no-ops
-    }
-
-    return {
-      onChunk: (text: string) => {
-        // Don't emit chunk events for internal/stateless calls (like intentRouter)
-        // These are not part of the user conversation and shouldn't be displayed
-        if (!skipHistory && store) {
-          store.feHandleChunk(text)
-        }
-      },
-
-      onTokenUsage: (usage: TokenUsage) => {
-        if (store) {
-          store.feHandleTokenUsage(provider, model, usage)
-        }
-      },
-
-      onToolStart: (ev: { callId?: string; name: string; arguments?: any }) => {
-        // Pass callId, nodeId and arguments so tool badges can be tracked and updated
-        if (store) {
-          store.feHandleToolStart(ev.name, nodeId, ev.arguments, ev.callId)
-        }
-      },
-
-      onToolEnd: (ev: { callId?: string; name: string }) => {
-        // Pass callId so we can find and update the specific badge
-        if (store) {
-          store.feHandleToolEnd(ev.name, ev.callId)
-        }
-      },
-
-      onToolError: (ev: { callId?: string; name: string; error: string }) => {
-        if (store) {
-          store.feHandleToolError(ev.name, ev.error, ev.callId)
-        }
-      },
-
-      onError: (error: string) => {
-        if (store) {
-          store.feHandleError(error)
-        }
-      }
     }
   }
 }

@@ -156,19 +156,46 @@ export interface NodeOutput {
 }
 
 /**
+ * Node inputs - lazy pull interface
+ *
+ * Nodes control when they pull from connected inputs.
+ * This enables lazy evaluation and conditional pulling (e.g., cache nodes).
+ */
+export interface NodeInputs {
+  /**
+   * Pull a value from a connected input
+   * Executes the source node if needed and returns the value
+   */
+  pull: (inputName: string) => Promise<any>
+
+  /**
+   * Check if an input was pushed (vs needs to be pulled)
+   * Returns true if the input was provided via push
+   */
+  has: (inputName: string) => boolean
+}
+
+/**
  * NodeFunction - The signature for all node implementations
  *
- * Nodes receive three types of inputs:
- * 1. context: Main flow context from predecessor (via context edge)
- * 2. dataIn: Simple data value from predecessor (via data edge)
- * 3. config: Node-specific configuration
+ * Nodes receive:
+ * 1. flow: FlowAPI instance for system communication (same for all nodes)
+ * 2. context: Main flow context (different per node, can have multiple contexts per flow)
+ * 3. dataIn: Simple data value pushed from predecessor (undefined if pulled)
+ * 4. inputs: Lazy pull interface for connected inputs
+ * 5. config: Node-specific configuration
  *
- * Additional inputs (like tools) come via the inputs object.
+ * Nodes are autonomous functions that:
+ * - Control when they pull inputs (lazy evaluation)
+ * - Decide when they're "done" (different logic per node type)
+ * - Call successors when complete (via return value)
+ * - Communicate with system via FlowAPI (logging, badges, streaming, etc.)
  */
 export type NodeFunction = (
+  flow: import('./flow-api').FlowAPI,
   context: MainFlowContext,
-  dataIn: any,
-  inputs: Record<string, any>,
+  dataIn: any | undefined,
+  inputs: NodeInputs,
   config: Record<string, any>
 ) => Promise<NodeOutput>
 
@@ -241,10 +268,23 @@ export interface FlowDefinition {
 export interface FlowExecutionArgs {
   requestId: string
   flowDef: FlowDefinition
-  provider?: string
-  model?: string
   input?: string
   sessionId?: string
+  // Session context is the single source of truth for provider/model/messageHistory
+  initialContext?: {
+    provider: string
+    model: string
+    systemInstructions?: string
+    messageHistory?: Array<{
+      role: 'system' | 'user' | 'assistant'
+      content: string
+      metadata?: {
+        id: string
+        pinned?: boolean
+        priority?: number
+      }
+    }>
+  }
 }
 
 /**

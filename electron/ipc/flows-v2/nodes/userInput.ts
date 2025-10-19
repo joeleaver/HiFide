@@ -25,18 +25,30 @@ export const metadata = {
 /**
  * Node implementation
  */
-export const userInputNode: NodeFunction = async (contextIn, _dataIn, _inputs, _config) => {
-  // Get the node ID from config (passed by scheduler)
-  const nodeId = (_config as any)._nodeId || 'user-input'
+export const userInputNode: NodeFunction = async (flow, context, _dataIn, inputs, _config) => {
+  // Get context - use pushed context, or pull if edge connected
+  const executionContext = context ?? (inputs.has('context') ? await inputs.pull('context') : null)
 
-  // Call store action to wait for user input
+  if (!executionContext) {
+    flow.log.error('Context is required')
+    return {
+      context: executionContext!,
+      status: 'error',
+      error: 'userInput node requires a context input'
+    }
+  }
+
+  flow.log.info('Waiting for user input...')
+
+  // Wait for user input via FlowAPI
   // This creates a promise that will be resolved when the user submits
-  const { useMainStore } = await import('../../../store/index.js')
-  const userInput = await useMainStore.getState().feWaitForUserInput(nodeId)
+  const userInput = await flow.waitForUserInput()
+
+  flow.log.debug('Received user input', { length: userInput.length })
 
   return {
-    context: contextIn, // Pass through the context
-    data: userInput,    // User's message
+    context: executionContext, // Pass through the context
+    data: userInput, // User's message
     status: 'success'
   }
 }

@@ -31,8 +31,8 @@ export function getLayoutedElements(
 
   // Find the defaultContextStart node
   const startNode = nodes.find((n) => {
-    const kind = (n.data as any)?.kind
-    return kind === 'defaultContextStart' || n.id === 'defaultContextStart' || n.id.startsWith('defaultContextStart')
+    const nodeType = (n.data as any)?.nodeType
+    return nodeType === 'defaultContextStart' || n.id === 'defaultContextStart' || n.id.startsWith('defaultContextStart')
   })
 
   // Add a virtual root node to force defaultContextStart to the top

@@ -6,8 +6,8 @@ import NodeStatusBadges from './NodeStatusBadges'
 import NodeConfig from './NodeConfig'
 import { getNodeColor } from '../../../electron/store/utils/node-colors'
 
-function getKindFromIdOrData(id: string, data: any): string {
-  if (data?.kind) return data.kind
+function getNodeTypeFromIdOrData(id: string, data: any): string {
+  if (data?.nodeType) return data.nodeType
   const base = id.split('-')[0]
   return base
 }
@@ -15,8 +15,8 @@ function getKindFromIdOrData(id: string, data: any): string {
 export default function FlowNode(props: NodeProps<any>) {
   const { id, data, selected } = props
   const style = (props as any).style
-  const kind = getKindFromIdOrData(id, data)
-  const color = getNodeColor(kind)
+  const nodeType = getNodeTypeFromIdOrData(id, data)
+  const color = getNodeColor(nodeType)
   const label = data?.labelBase || data?.label || id
   const status = data?.status as string | undefined
   const durationMs = data?.durationMs as number | undefined
@@ -76,7 +76,7 @@ export default function FlowNode(props: NodeProps<any>) {
     >
       {/* Header - full width, no handles here */}
       <NodeHeader
-        kind={kind}
+        nodeType={nodeType}
         color={color}
         label={label}
         expanded={expanded}
@@ -96,7 +96,7 @@ export default function FlowNode(props: NodeProps<any>) {
           overflow: 'visible', // Allow handles to extend outside
         }}
       >
-        <NodeHandles kind={kind} config={config} nodeId={id} />
+        <NodeHandles nodeType={nodeType} config={config} nodeId={id} />
       </div>
 
       {/* Content area - separate from handles */}
@@ -121,7 +121,7 @@ export default function FlowNode(props: NodeProps<any>) {
         {expanded && (
           <NodeConfig
             nodeId={id}
-            kind={kind}
+            nodeType={nodeType}
             config={config}
             onConfigChange={handleConfigChange}
           />

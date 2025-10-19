@@ -18,7 +18,7 @@ export const OpenAIProvider: ProviderAdapter = {
   id: 'openai',
 
   // Plain chat (Responses API). We use non-stream + chunked emit for reliability; can be upgraded to true streaming.
-  async chatStream({ apiKey, model, messages, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async chatStream({ apiKey, model, messages, emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey })
 
     const holder: { stream?: any; cancelled?: boolean } = {}
@@ -36,46 +36,59 @@ export const OpenAIProvider: ProviderAdapter = {
           for await (const evt of stream) {
             try {
               const type = evt?.type || ''
+              let text: string | null = null
+
               if (typeof evt?.delta === 'string') {
-                onChunk(evt.delta)
+                text = evt.delta
               } else if (typeof (evt as any)?.text === 'string') {
-                onChunk((evt as any).text)
+                text = (evt as any).text
               } else if (type?.includes('output_text') && typeof (evt as any)?.text === 'string') {
-                onChunk((evt as any).text)
+                text = (evt as any).text
               }
-            } catch (e: any) { onError(e?.message || String(e)) }
+
+              if (text) {
+                onChunk(text)
+              }
+            } catch (e: any) {
+              const error = e?.message || String(e)
+              onError(error)
+            }
           }
 
           // Extract token usage from final response
           try {
             const finalResponse = await stream.finalResponse()
-            if (finalResponse?.usage && onTokenUsage) {
+            if (finalResponse?.usage) {
               const usage = {
                 inputTokens: finalResponse.usage.input_tokens || 0,
                 outputTokens: finalResponse.usage.output_tokens || 0,
                 totalTokens: finalResponse.usage.total_tokens || 0,
               }
-              onTokenUsage(usage)
+              if (onTokenUsage) onTokenUsage(usage)
             }
           } catch (e) {
             // Token usage extraction failed, continue anyway
           }
 
+          // Done
           onDone()
         } catch (e: any) {
           if (e?.name === 'AbortError') return
-          onError(e?.message || String(e))
+          const error = e?.message || String(e)
+          onError(error)
         }
       } catch (e: any) {
         if (e?.name === 'AbortError') return
-        onError(e?.message || String(e))
+        const error = e?.message || String(e)
+        onError(error)
       }
     })().catch((e: any) => {
       // Handle any errors that occur after chatStream returns
       // This prevents unhandled promise rejections
       console.error('[OpenAIProvider] Unhandled error in chatStream:', e)
       try {
-        onError(e?.message || String(e))
+        const error = e?.message || String(e)
+        onError(error)
       } catch {}
     })
 
@@ -89,12 +102,13 @@ export const OpenAIProvider: ProviderAdapter = {
   },
 
   // Agent loop with tool-calling via Responses API
-  async agentStream({ apiKey, model, messages, tools, responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, messages, tools, responseSchema, emit, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey })
 
     // Validate tools array
     if (!Array.isArray(tools)) {
-      onError('Tools must be an array')
+      const error = 'Tools must be an array'
+      onError(error)
       return { cancel: () => {} }
     }
 
@@ -227,7 +241,10 @@ export const OpenAIProvider: ProviderAdapter = {
                   }
                 }
               }
-            } catch (e: any) { onError(e?.message || String(e)) }
+            } catch (e: any) {
+              const error = e?.message || String(e)
+              onError(error)
+            }
           }
 
           // After stream completes, get the final response with complete output array
@@ -263,9 +280,10 @@ export const OpenAIProvider: ProviderAdapter = {
             let pruneSummary: any = null
 
             for (const tc of toolCalls) {
+              const name = tc.name
+              let tool: any = null
               try {
-                const name = tc.name
-                const tool = toolMap.get(name)
+                tool = toolMap.get(name)
                 if (!tool) {
                   conv.push({
                     type: 'function_call_output',
@@ -286,9 +304,16 @@ export const OpenAIProvider: ProviderAdapter = {
                   continue
                 }
 
-                // Notify start, then execute tool (pass toolMeta)
+                // Generate tool execution ID
+                const toolExecutionId = crypto.randomUUID()
+
+                // Notify start
                 try { onToolStart?.({ callId: tc.id, name: String(name), arguments: args }) } catch {}
+
+                // Execute tool (pass toolMeta)
                 const result = await Promise.resolve(tool.run(args, toolMeta))
+
+                // Notify end
                 try { onToolEnd?.({ callId: tc.id, name: String(name), result }) } catch {}
 
                 // Check if tool requested pruning
@@ -304,6 +329,7 @@ export const OpenAIProvider: ProviderAdapter = {
                   output
                 })
               } catch (e: any) {
+                // Notify error
                 try { onToolError?.({ callId: tc.id, name: String(name), error: e?.message || String(e) }) } catch {}
                 conv.push({
                   type: 'function_call_output',
@@ -324,39 +350,53 @@ export const OpenAIProvider: ProviderAdapter = {
 
           // No tool calls in this streamed turn -> emit buffered assistant text now
           if (turnBuffer) {
-            try { onChunk(turnBuffer) } catch (e: any) { onError(e?.message || String(e)) }
+            try {
+              onChunk(turnBuffer)
+            } catch (e: any) {
+              const error = e?.message || String(e)
+              onError(error)
+              return
+            }
           }
           // Extract token usage from final response
           try {
-            if (finalResponse?.usage && onTokenUsage) {
+            if (finalResponse?.usage) {
               const usage = {
                 inputTokens: finalResponse.usage.input_tokens || 0,
                 outputTokens: finalResponse.usage.output_tokens || 0,
                 totalTokens: finalResponse.usage.total_tokens || 0,
               }
               cumulativeTokens += usage.totalTokens
-              onTokenUsage(usage)
-            } else {
+              if (onTokenUsage) {
+                onTokenUsage(usage)
+              }
             }
           } catch (e) {
             console.error('[OpenAI agentStream] Error extracting token usage:', e)
           }
 
+          // Done - ALWAYS call onDone() to resolve promise
           onDone()
           return
         }
       } catch (e: any) {
         if (e?.name === 'AbortError') return
-        onError(e?.message || String(e))
+        const error = e?.message || String(e)
+        onError(error)
+        return
       }
+
+      // If we exit the loop without returning (iteration limit or cancelled), call onDone
+      console.log('[OpenAI agentStream] Loop exited normally (iteration limit or cancelled)')
+      onDone()
     }
 
-    run().catch((e: any) => {
-      // Handle any errors that occur after agentStream returns
-      // This prevents unhandled promise rejections
-      console.error('[OpenAIProvider] Unhandled error in agentStream run():', e)
+    // Wait for run() to complete before returning
+    await run().catch((e: any) => {
+      console.error('[OpenAIProvider] Error in agentStream run():', e)
       try {
-        onError(e?.message || String(e))
+        const error = e?.message || String(e)
+        onError(error)
       } catch {}
     })
 

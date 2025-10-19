@@ -1,16 +1,21 @@
 /**
  * Portal Input node
  *
- * Stores context and data in the portal registry for retrieval by matching Portal Output nodes.
- * Acts as a transparent pass-through - execution flows through as if directly connected.
+ * Stores context and data in the portal registry, then triggers all matching Portal Output nodes.
+ * This enables non-linear flows (loops, callbacks) without visual edge clutter.
+ *
+ * Execution flow:
+ * 1. Receives context/data from predecessors
+ * 2. Stores in portal registry by ID
+ * 3. Triggers all Portal Output nodes with matching ID (push-based notification)
+ * 4. Portal Output nodes retrieve the data and continue their flows
  *
  * Inputs:
  * - context: Execution context (optional)
  * - data: Data value (optional)
  *
  * Outputs:
- * - context: Passes through the input context unchanged
- * - data: Passes through the input data unchanged
+ * - None (Portal Input has no outgoing edges - it triggers Portal Outputs directly)
  *
  * Config:
  * - id: Portal identifier (string) - must be unique among Portal Input nodes
@@ -29,12 +34,16 @@ export const metadata = {
 /**
  * Node implementation
  */
-export const portalInputNode: NodeFunction = async (contextIn, dataIn, _inputs, config) => {
+export const portalInputNode: NodeFunction = async (flow, context, dataIn, inputs, config) => {
+  // Get context - use pushed context, or pull if edge connected
+  const executionContext = context ?? (inputs.has('context') ? await inputs.pull('context') : null)
+
   const portalId = config.id as string | undefined
 
   if (!portalId) {
+    flow.log.error('Portal Input node requires an ID configuration')
     return {
-      context: contextIn,
+      context: executionContext,
       data: dataIn,
       status: 'error',
       error: 'Portal Input node requires an ID configuration'
@@ -43,29 +52,37 @@ export const portalInputNode: NodeFunction = async (contextIn, dataIn, _inputs, 
 
   // Store data in portal registry (via store action)
   // Only store values that are actually present
-  const hasContext = contextIn !== undefined && contextIn !== null
+  const hasContext = executionContext !== undefined && executionContext !== null
   const hasData = dataIn !== undefined && dataIn !== null
 
   if (!hasContext && !hasData) {
+    flow.log.error('Portal Input node requires at least one input')
     return {
-      context: contextIn,
+      context: executionContext,
       data: dataIn,
       status: 'error',
       error: 'Portal Input node requires at least one input (context or data)'
     }
   }
 
-  const { useMainStore } = await import('../../../store/index.js')
-  useMainStore.getState().feSetPortalData(
+  flow.log.debug('Storing portal data', { portalId, hasContext, hasData })
+
+  // Store data in portal registry
+  flow.store.feSetPortalData(
     portalId,
-    hasContext ? contextIn : undefined,
+    hasContext ? executionContext : undefined,
     hasData ? dataIn : undefined
   )
 
-  // Pass through inputs unchanged (transparent)
+  // Trigger all Portal Output nodes with matching ID
+  // This executes all Portal Output nodes that have the same portal ID
+  await flow.triggerPortalOutputs(portalId)
+
+  flow.log.debug('Portal outputs triggered', { portalId })
+
+  // Portal Input has no outputs - it triggers Portal Outputs directly
+  // Return success to indicate completion
   return {
-    context: contextIn,
-    data: dataIn,
     status: 'success'
   }
 }

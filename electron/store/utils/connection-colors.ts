@@ -23,18 +23,18 @@ export function getConnectionColor(type: 'context' | 'contextIsolated' | 'data' 
 }
 
 /**
- * Determine connection color based on handle names and source node kind
+ * Determine connection color based on handle names and source node type
  * This implements the logic for auto-detecting connection type from handles
  */
 export function getConnectionColorFromHandles(
   sourceHandle?: string,
   targetHandle?: string,
-  sourceNodeKind?: string
+  sourceNodeType?: string
 ): string {
   // Context connections - color depends on source node type
   if (sourceHandle === 'context' || targetHandle === 'context' || targetHandle === 'input') {
     // Isolated context (teal) for newContext nodes
-    if (sourceNodeKind === 'newContext') {
+    if (sourceNodeType === 'newContext') {
       return CONNECTION_COLORS.contextIsolated
     }
     // Main context (purple) for all other nodes

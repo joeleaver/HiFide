@@ -23,26 +23,53 @@ export const metadata = {
 /**
  * Node implementation
  */
-export const defaultContextStartNode: NodeFunction = async (contextIn, _dataIn, _inputs, config) => {
-  // This is an entry node that establishes the initial context
-  // Read system instructions from node config and set them on the context
+export const defaultContextStartNode: NodeFunction = async (flow, context, _dataIn, inputs, config) => {
+  // This is an entry node that creates the main context
+  // It uses the global provider/model from the store
+
+  // Get context - use pushed context from scheduler (which includes session message history),
+  // or pull if edge connected, or create new from store
+  let executionContext = context ?? (inputs.has('context') ? await inputs.pull('context') : null)
+
+  if (!executionContext) {
+    // No context provided - create from store's current provider/model
+    // This should rarely happen since scheduler now passes mainContext
+    const provider = flow.store.selectedProvider || 'openai'
+    const model = flow.store.selectedModel || 'gpt-4o'
+
+    executionContext = flow.context.create({
+      provider,
+      model,
+      systemInstructions: ''
+    })
+
+    flow.log.debug('Created new main context', {
+      provider: executionContext.provider,
+      model: executionContext.model
+    })
+  } else {
+    flow.log.debug('Using context from scheduler', {
+      provider: executionContext.provider,
+      model: executionContext.model,
+      messageHistoryLength: executionContext.messageHistory.length
+    })
+  }
 
   const systemInstructions = (config as any)?.systemInstructions
 
-  console.log('[defaultContextStart] Input context:', {
-    provider: contextIn.provider,
-    model: contextIn.model,
-    systemInstructions: contextIn.systemInstructions?.substring(0, 50),
-    messageHistoryLength: contextIn.messageHistory.length
+  flow.log.debug('Input context', {
+    provider: executionContext.provider,
+    model: executionContext.model,
+    systemInstructions: executionContext.systemInstructions?.substring(0, 50),
+    messageHistoryLength: executionContext.messageHistory.length
   })
-  console.log('[defaultContextStart] Config systemInstructions:', systemInstructions?.substring(0, 50))
 
-  const outputContext = {
-    ...contextIn,
-    systemInstructions: systemInstructions || contextIn.systemInstructions
-  }
+  // Use ContextAPI to update system instructions (immutable)
+  const outputContext = systemInstructions
+    ? flow.context.update(executionContext, { systemInstructions })
+    : executionContext
 
-  console.log('[defaultContextStart] Output context:', {
+  flow.log.debug('Output context', {
     provider: outputContext.provider,
     model: outputContext.model,
     systemInstructions: outputContext.systemInstructions?.substring(0, 50),

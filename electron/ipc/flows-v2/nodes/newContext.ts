@@ -17,40 +17,39 @@ import type { NodeFunction, NodeExecutionPolicy, MainFlowContext } from '../type
  * Node metadata
  */
 export const metadata = {
-  executionPolicy: 'any' as NodeExecutionPolicy, // Entry node, no inputs needed
+  executionPolicy: 'any' as NodeExecutionPolicy,
+  pullOnly: true, // Don't auto-execute at flow start, only execute when pulled
   description: 'Creates an isolated execution context for parallel flows. Use for bootstrap flows or separate conversations that should not share message history with the main context.'
 }
 
 /**
  * Node implementation
  */
-export const newContextNode: NodeFunction = async (_contextIn, dataIn, _inputs, config) => {
-  const nodeId = (config as any)?._nodeId || 'newContext'
+export const newContextNode: NodeFunction = async (flow, _context, dataIn, _inputs, config) => {
   const provider = (config.provider as string) || 'openai'
   const model = (config.model as string) || 'gpt-4o'
   const systemInstructions = (config.systemInstructions as string) || ''
 
-  console.log('[newContext] Creating isolated context:', {
-    nodeId,
+  flow.log.info('Creating isolated context', {
     provider,
     model,
     systemInstructions: systemInstructions?.substring(0, 50)
   })
 
-  // Create isolated context with stable ID based on nodeId
-  // This ensures the same context is reused across flow executions
-  const newContext: MainFlowContext = {
-    contextId: `context-${nodeId}`,
-    contextType: 'isolated', // Mark as isolated for teal color
+  // Create isolated context using ContextAPI
+  const newContext = flow.context.create({
     provider,
     model,
-    systemInstructions,
-    messageHistory: []
-  }
+    systemInstructions
+  })
 
-  console.log('[newContext] Created context:', {
-    contextId: newContext.contextId,
-    contextType: newContext.contextType
+  // Mark as isolated for teal color
+  ;(newContext as any).contextType = 'isolated'
+  ;(newContext as any).contextId = `context-${flow.nodeId}`
+
+  flow.log.debug('Created context', {
+    contextId: (newContext as any).contextId,
+    contextType: (newContext as any).contextType
   })
 
   return {

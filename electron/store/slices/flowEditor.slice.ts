@@ -4,6 +4,7 @@ import type { PricingConfig } from '../types'
 import { initializeFlowProfiles, listFlowTemplates, loadFlowTemplate, saveFlowProfile, deleteFlowProfile, isSystemTemplate, loadSystemTemplates, type FlowTemplate, type FlowProfile } from '../../services/flowProfiles'
 import type { MainFlowContext } from '../../ipc/flows-v2/types'
 import { loadWorkspaceSettings, saveWorkspaceSettings } from '../../ipc/workspace'
+import { reactFlowToFlowDefinition } from '../../services/flowConversion'
 
 // Flow runtime event type (mirrors renderer usage)
 export type FlowEvent = {
@@ -155,10 +156,10 @@ export interface FlowEditorSlice {
   feHandleNodeEnd: (nodeId: string, durationMs?: number) => void
   feUpdateMainFlowContext: (context: MainFlowContext) => void
   feHandleIO: (nodeId: string, data: string) => void
-  feHandleChunk: (text: string) => void
-  feHandleToolStart: (toolName: string, nodeId?: string, toolArgs?: any, callId?: string) => void
-  feHandleToolEnd: (toolName: string, callId?: string) => void
-  feHandleToolError: (toolName: string, error: string, callId?: string) => void
+  feHandleChunk: (text: string, nodeId?: string, provider?: string, model?: string) => void
+  feHandleToolStart: (toolName: string, nodeId?: string, toolArgs?: any, callId?: string, provider?: string, model?: string) => void
+  feHandleToolEnd: (toolName: string, callId?: string, nodeId?: string) => void
+  feHandleToolError: (toolName: string, error: string, callId?: string, nodeId?: string) => void
   feHandleIntentDetected: (nodeId: string, intent: string, provider?: string, model?: string) => void
   feHandleTokenUsage: (provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }) => void
   feHandleWaitingForInput: (nodeId: string, requestId: string) => void
@@ -425,7 +426,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       if (change.type === 'remove' && change.id) {
         // Prevent deletion of defaultContextStart node
         const node = map.get(change.id)
-        if (node && (node.data as any)?.kind === 'defaultContextStart') {
+        if (node && (node.data as any)?.nodeType === 'defaultContextStart') {
           continue
         }
         map.delete(change.id)
@@ -455,21 +456,30 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       feNodes: get().feNodes.map((n) => (n.id === id ? { ...n, position: pos } : n)),
     })
   },
-  feAddNode: ({ kind, pos, label }: { kind: string; pos: XYPosition; label?: string }) => {
+  feAddNode: ({ nodeType, pos, label }: { nodeType: string; pos: XYPosition; label?: string }) => {
     // Prevent adding multiple defaultContextStart nodes
-    if (kind === 'defaultContextStart') {
-      const hasDefaultContextStart = get().feNodes.some(n => (n.data as any)?.kind === 'defaultContextStart')
+    if (nodeType === 'defaultContextStart') {
+      const hasDefaultContextStart = get().feNodes.some(n => (n.data as any)?.nodeType === 'defaultContextStart')
       if (hasDefaultContextStart) {
         return
       }
     }
 
-    const id = `${kind}-${Date.now()}`
-    const lbl = label || kind
+    const id = `${nodeType}-${Date.now()}`
+    const lbl = label || nodeType
+
+    // Set default config for certain node types
+    let defaultConfig: Record<string, any> = {}
+    if (nodeType === 'newContext') {
+      defaultConfig = { provider: 'openai', model: 'gpt-4o' }
+    } else if (nodeType === 'llmRequest') {
+      defaultConfig = { provider: 'openai', model: 'gpt-4o' }
+    }
+
     set({
       feNodes: [
         ...get().feNodes,
-        { id, type: 'hifiNode', data: { kind, label: lbl, labelBase: lbl }, position: pos },
+        { id, type: 'hifiNode', data: { nodeType: nodeType, label: lbl, labelBase: lbl, config: defaultConfig }, position: pos },
       ],
     })
   },
@@ -551,10 +561,25 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     })
 
     const storeState: any = (store as any).getState()
-    const selectedProvider: string | null = storeState.selectedProvider
-    const selectedModel: string | null = storeState.selectedModel
     const pricingConfig: PricingConfig | undefined = storeState.pricingConfig
-    const modelPricing = (pricingConfig as any)?.[selectedProvider || '']?.[selectedModel || ''] || null
+
+    // Get session context (single source of truth for provider/model/messageHistory)
+    const currentSession = storeState.sessions?.find((s: any) => s.id === storeState.currentId)
+    const sessionContext = currentSession?.currentContext
+
+    if (!sessionContext) {
+      console.error('[flowInit] No session context found - cannot initialize flow')
+      return
+    }
+
+    const modelPricing = (pricingConfig as any)?.[sessionContext.provider || '']?.[sessionContext.model || ''] || null
+
+    console.log('[flowInit] Initializing flow from session context:', {
+      sessionId: currentSession?.id,
+      provider: sessionContext.provider,
+      model: sessionContext.model,
+      messageCount: sessionContext.messageHistory?.length || 0
+    })
 
     const rules: string[] = []
     if (get().feRuleEmails) rules.push('emails')
@@ -563,27 +588,17 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     if (get().feRuleNumbers16) rules.push('numbers16')
     const maxUSD = (() => { const v = parseFloat(get().feBudgetUSD); return isNaN(v) ? undefined : v })()
 
-    const flowDef = {
-      id: 'editor-current',
-      // Don't include config here - it will be fetched on-demand during execution
-      nodes: get().feNodes.map((n) => ({ id: n.id, type: (n.data as any)?.kind })),
-      edges: get().feEdges.map((e) => ({
-        id: (e.id || `${e.source}-${e.target}`),
-        source: e.source,
-        target: e.target,
-        sourceHandle: (e as any)?.sourceHandle,
-        targetHandle: (e as any)?.targetHandle,
-        label: (e as any)?.label
-      })),
-    }
+    // Convert ReactFlow nodes/edges (UI format) to FlowDefinition (execution format)
+    // This handles the conversion from data.nodeType to type field for the scheduler
+    const { reactFlowToFlowDefinition } = await import('../../services/flowConversion.js')
+    const flowDef = reactFlowToFlowDefinition(get().feNodes, get().feEdges, 'editor-current')
 
 
     const initArgs: any = {
       requestId,
       flowId: 'simple-chat',
-      provider: selectedProvider,
-      model: selectedModel || undefined,
       flowDef,
+      initialContext: sessionContext,  // Pass entire session context (single source of truth)
       policy: {
         autoApproveEnabled: storeState.autoApproveEnabled,
         autoApproveThreshold: storeState.autoApproveThreshold,
@@ -632,64 +647,6 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     set({ feLog: '', feEvents: [], feStreamingText: '' })
   },
 
-  feRun: async () => {
-    set({ feLog: '', feEvents: [], feStreamingText: '' })
-    const requestId = `flow-${Date.now()}`
-    set({ feRequestId: requestId, feStatus: 'running' })
-
-    const storeState: any = (store as any).getState()
-    const selectedProvider: string | null = storeState.selectedProvider
-    const selectedModel: string | null = storeState.selectedModel
-    const pricingConfig: PricingConfig | undefined = storeState.pricingConfig
-    const modelPricing = (pricingConfig as any)?.[selectedProvider || '']?.[selectedModel || ''] || null
-
-    const rules: string[] = []
-    if (get().feRuleEmails) rules.push('emails')
-    if (get().feRuleApiKeys) rules.push('apiKeys')
-    if (get().feRuleAwsKeys) rules.push('awsKeys')
-    if (get().feRuleNumbers16) rules.push('numbers16')
-    const maxUSD = (() => { const v = parseFloat(get().feBudgetUSD); return isNaN(v) ? undefined : v })()
-
-    const flowDef = {
-      id: 'editor-current',
-      // Don't include config here - it will be fetched on-demand during execution via Zustand bridge
-      nodes: get().feNodes.map((n) => ({ id: n.id, kind: (n.data as any)?.kind })),
-      edges: get().feEdges.map((e) => ({
-        id: (e.id || `${e.source}-${e.target}`),
-        source: e.source,
-        target: e.target,
-        sourceHandle: (e as any)?.sourceHandle,
-        targetHandle: (e as any)?.targetHandle,
-        label: (e as any)?.label
-      })),
-    }
-
-    const runArgs: any = {
-      requestId,
-      flowId: 'simple-chat',
-      input: get().feInput,
-      provider: selectedProvider,
-      model: selectedModel || undefined,
-      flowDef,
-      _retryPolicy: { maxAttempts: Math.max(1, Number(get().feRetryAttempts || 1)), backoffMs: Math.max(0, Number(get().feRetryBackoffMs || 0)) },
-      _cachePolicy: { enabled: !!get().feCacheEnabled },
-      policy: {
-        autoApproveEnabled: storeState.autoApproveEnabled,
-        autoApproveThreshold: storeState.autoApproveThreshold,
-        redactor: { enabled: get().feRedactorEnabled, rules },
-        budgetGuard: { maxUSD, blockOnExceed: get().feBudgetBlock },
-        errorDetection: { enabled: get().feErrorDetectEnabled, blockOnFlag: get().feErrorDetectBlock, patterns: (get().feErrorDetectPatterns || '').split(/[\n,]/g).map((s) => s.trim()).filter(Boolean) },
-        pricing: modelPricing ? { inputCostPer1M: modelPricing.inputCostPer1M, outputCostPer1M: modelPricing.outputCostPer1M } : undefined,
-      },
-    }
-
-    // Store actions run in main process - call flow execution directly
-    const { executeFlow } = await import('../../ipc/flows-v2/index.js')
-    const { getWindow } = await import('../../core/window.js')
-    const wc = getWindow()?.webContents
-    await executeFlow(wc, runArgs)
-  },
-
   feStop: async () => {
     const id = get().feRequestId
     if (!id) return
@@ -728,12 +685,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     // Note: Don't clear feStreamingText here - it should already be cleared by the chat node handler
     set({ feStatus: 'running' })
 
-    // Get current provider/model from store (supports mid-flow switching)
-    const storeState: any = (store as any).getState()
-    const selectedProvider: string | null = storeState.selectedProvider
-    const selectedModel: string | null = storeState.selectedModel
-
     // Store actions run in main process - call flow execution directly
+    // Provider/model will be read from session context before next node execution
     const { resumeFlow } = await import('../../ipc/flows-v2/index.js')
     const { getWindow } = await import('../../core/window.js')
     const wc = getWindow()?.webContents
@@ -748,9 +701,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     await resumeFlow(
       wc,
       id,
-      userInput || '',
-      selectedProvider || undefined,
-      selectedModel || undefined
+      userInput || ''
     )
   },
 
@@ -803,7 +754,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             const label = data?.labelBase || data?.label
             return {
               id: n.id,
-              kind: data?.kind || n.id.split('-')[0],
+              nodeType: data?.nodeType || n.id.split('-')[0],
               label: label !== n.id ? label : undefined, // Only save if different from id
               config: data?.config || {},
               position: n.position,
@@ -952,7 +903,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         const loadedState = JSON.stringify({
           nodes: profile.nodes.map((n: Node) => ({
             id: n.id,
-            kind: (n.data as any)?.kind,
+            nodeType: (n.data as any)?.nodeType,
             config: (n.data as any)?.config,
             position: n.position,
             expanded: (n.data as any)?.expanded
@@ -1075,7 +1026,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             const data = n.data as any
             return {
               id: n.id,
-              kind: data?.kind,
+              kind: data?.nodeType,
               label: data?.labelBase || data?.label,
               config: data?.config,
               position: n.position,
@@ -1209,24 +1160,6 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       },
     })
 
-    // For LLM nodes, create an empty assistant message in the session so chunks can append to it
-    const node = get().feNodes.find(n => n.id === nodeId)
-    const isLlmNode = node?.data?.kind === 'llmRequest' || node?.data?.kind === 'intentRouter'
-
-    if (isLlmNode) {
-      const state = store.getState() as any
-      if (state.addSessionItem) {
-        state.addSessionItem({
-          type: 'message',
-          role: 'assistant',
-          content: '',  // Empty initially, will be appended to as chunks arrive
-          nodeId,
-          nodeLabel: node?.data?.label || 'LLM Request',
-          nodeKind: node?.data?.kind || 'llmRequest',
-        })
-      }
-    }
-
     // Add to session flow debug logs
     const state = store.getState() as any
     if (state.addFlowDebugLog) {
@@ -1240,87 +1173,46 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
   feHandleNodeEnd: (nodeId: string, durationMs?: number) => {
     // Compute cost for LLM Request node
-    let costUSD: number | undefined
     const node = get().feNodes.find(n => n.id === nodeId)
-    const isLlmRequest = node?.data?.kind === 'llmRequest'
+    const nodeType = node?.data?.nodeType
+    const isLlmRequest = nodeType === 'llmRequest'
 
+    let tokenCost = null
     if (isLlmRequest) {
       const state = store.getState() as any
-      const provider = state.selectedProvider as string | null
-      const model = state.selectedModel as string | null
 
       // Use actual token usage from lastRequestTokenUsage if available
-      let tokenCost = null
       if (state.lastRequestTokenUsage && state.lastRequestTokenUsage.cost) {
         tokenCost = state.lastRequestTokenUsage.cost
-        costUSD = tokenCost.totalCost
-      } else {
-        // Fallback: Calculate cost using rough estimate (character count / 4)
-        try {
-          const pricingAll = state.pricingConfig as PricingConfig | undefined
-          const p = provider && model ? (pricingAll as any)?.[provider]?.[model] : null
-          if (p) {
-            const inTok = Math.ceil((get().feInput || '').length / 4)
-            const outTok = Math.ceil((get().feLog || '').length / 4)
-            costUSD = (inTok / 1_000_000) * (p.inputCostPer1M || 0) + (outTok / 1_000_000) * (p.outputCostPer1M || 0)
-
-            // Create TokenCost object
-            if (state.calculateCost) {
-              tokenCost = state.calculateCost(provider, model, {
-                inputTokens: inTok,
-                outputTokens: outTok,
-                totalTokens: inTok + outTok,
-              })
-            }
-          }
-        } catch {}
       }
-
-      // Message was already added to session in feHandleNodeStart and chunks were appended in feHandleChunk
-      // Just clear the streaming text and update the message with cost if available
-      if (tokenCost) {
-        // Find the last message with this nodeId and update its cost
-        const state = store.getState() as any
-        const currentSession = state.sessions?.find((s: any) => s.id === state.currentId)
-        if (currentSession) {
-          const lastMessageId = currentSession.items
-            .reverse()
-            .find((item: any) => item.type === 'message' && item.nodeId === nodeId)?.id
-
-          if (lastMessageId && state.updateSessionItem) {
-            state.updateSessionItem({
-              id: lastMessageId,
-              updates: { cost: tokenCost }
-            })
-          }
-        }
-      }
-
-      // Clear streaming text
-      set({ feStreamingText: '' })
     }
 
-    const currentState = get().feNodeExecutionState[nodeId] || {}
+    // Finalize the node's execution box with cost
+    const state = store.getState() as any
+    if (state.finalizeNodeExecution) {
+      state.finalizeNodeExecution({
+        nodeId,
+        cost: tokenCost || undefined
+      })
+    }
 
+    // Update node execution state
     set({
       feNodeExecutionState: {
         ...get().feNodeExecutionState,
         [nodeId]: {
-          ...currentState,
-          status: 'completed',
-          durationMs,
-          costUSD: typeof costUSD === 'number' ? costUSD : currentState.costUSD,
+          ...get().feNodeExecutionState[nodeId],
+          status: 'success',
+          cacheHit: false,
           style: {
-            border: '2px solid #10b981',
-            boxShadow: 'none',
+            border: '2px solid #51cf66',
+            boxShadow: '0 0 15px rgba(81, 207, 102, 0.4)',
           },
         },
       },
-      fePausedNode: get().fePausedNode === nodeId ? null : get().fePausedNode,
     })
 
     // Add to session flow debug logs
-    const state = store.getState() as any
     if (state.addFlowDebugLog) {
       state.addFlowDebugLog({
         requestId: get().feRequestId || '',
@@ -1368,26 +1260,30 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feHandleChunk: (text: string) => {
-    if (text) {
-      // Find the currently executing LLM node
-      const executingNode = get().feNodes.find((n: any) => {
-        const state = get().feNodeExecutionState[n.id]
-        const isLlmNode = n.data?.kind === 'llmRequest' || n.data?.kind === 'intentRouter'
-        return isLlmNode && state?.status === 'executing'
-      })
+  feHandleChunk: (text: string, nodeId?: string, provider?: string, model?: string) => {
+    if (!text || !nodeId) return
 
-      if (executingNode) {
-        // Append chunk to the session message for this node
-        const state = store.getState() as any
-        if (state.appendToLastMessageWithNodeId) {
-          state.appendToLastMessageWithNodeId(text, executingNode.id)
-        }
-      }
+    // Append text chunk to the node's execution box
+    const node = get().feNodes.find(n => n.id === nodeId)
+    if (!node) return
+
+    const state = store.getState() as any
+    if (state.appendToNodeExecution) {
+      state.appendToNodeExecution({
+        nodeId,
+        nodeLabel: node.data?.label || node.data?.nodeType || 'Node',
+        nodeKind: node.data?.nodeType || 'unknown',
+        content: { type: 'text', text },
+        // Use provided provider/model from execution context, fallback to global if not provided
+        provider: provider || state.selectedProvider,
+        model: model || state.selectedModel
+      })
     }
   },
 
-  feHandleToolStart: (toolName: string, nodeId?: string, toolArgs?: any, callId?: string) => {
+  feHandleToolStart: (toolName: string, nodeId?: string, toolArgs?: any, callId?: string, provider?: string, model?: string) => {
+    if (!nodeId) return
+
     const activeTools = new Set(get().feActiveTools)
     activeTools.add(toolName)
     set({ feActiveTools: activeTools })
@@ -1402,85 +1298,56 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       })
     }
 
-    // IMPORTANT: Flush any accumulated streaming text to a message BEFORE adding the tool badge
-    // This ensures proper intermixing: chat → tool → chat → tool (not all tools grouped together)
-    const streamingText = get().feStreamingText
-    if (streamingText && nodeId) {
-      const nodes = get().feNodes
-      const node = nodes?.find((n: any) => n.id === nodeId)
-
-      if (state.addSessionItem) {
-        state.addSessionItem({
-          type: 'message',
-          role: 'assistant',
-          content: streamingText,
-          nodeId,
-          nodeLabel: node?.data?.label || 'LLM Request',
-          nodeKind: node?.data?.kind || 'llmRequest',
-        })
-      }
-      // Always clear streaming text after flushing, regardless of whether addSessionItem succeeded
-      set({ feStreamingText: '' })
-    }
-
-    // Get node label from flow definition if nodeId is provided
-    let nodeLabel = 'Tools'
-    let nodeKind = 'llmRequest'
-    if (nodeId) {
-      const nodes = get().feNodes
-      const node = nodes?.find((n: any) => n.id === nodeId)
-      if (node) {
-        nodeLabel = node.data?.label || 'LLM Request'
-        nodeKind = node.data?.kind || 'llmRequest'
-      }
-    }
-
     // Format badge label with contextual information
-    // Tool name in uppercase, file/folder name in original case
     let badgeLabel = toolName.toUpperCase()
     if (toolArgs) {
-      // Extract file/folder name for fs tools
-      // Handle both formats: 'fs.read_file' and 'fs_read_file'
       const normalizedToolName = toolName.replace(/\./g, '_')
 
       if (normalizedToolName === 'fs_read_file' || normalizedToolName === 'fs_write_file') {
         const path = toolArgs.path || toolArgs.file_path
         if (path) {
-          // Get just the filename from the path
           const filename = path.split(/[/\\]/).pop()
           badgeLabel = `${toolName.toUpperCase()}: ${filename}`
         }
       } else if (normalizedToolName === 'fs_read_dir' || normalizedToolName === 'fs_create_dir') {
         const path = toolArgs.path || toolArgs.dir_path
         if (path) {
-          // Get just the folder name from the path
           const foldername = path.split(/[/\\]/).pop() || path
           badgeLabel = `${toolName.toUpperCase()}: ${foldername}`
         }
       }
     }
 
-    // Add tool badge to session
-    // Use callId as badge ID so we can find and update it when tool completes
-    if (state.addBadge) {
-      state.addBadge({
-        badge: {
-          type: 'tool' as const,
-          label: badgeLabel,
-          icon: '🔧',
-          color: 'orange',
-          variant: 'filled' as const,
-          status: 'running' as const,
-        },
-        badgeId: callId,  // Use provider's callId as badge ID for tracking
+    // Append tool badge to the node's execution box
+    const node = get().feNodes.find(n => n.id === nodeId)
+    if (!node) return
+
+    if (state.appendToNodeExecution) {
+      state.appendToNodeExecution({
         nodeId,
-        nodeLabel,
-        nodeKind,
+        nodeLabel: node.data?.label || node.data?.nodeType || 'Node',
+        nodeKind: node.data?.nodeType || 'unknown',
+        content: {
+          type: 'badge',
+          badge: {
+            id: callId || `badge-${Date.now()}`,
+            type: 'tool' as const,
+            label: badgeLabel,
+            icon: '🔧',
+            color: 'orange',
+            variant: 'filled' as const,
+            status: 'running' as const,
+            timestamp: Date.now()
+          }
+        },
+        // Use provided provider/model from execution context, fallback to global if not provided
+        provider: provider || state.selectedProvider,
+        model: model || state.selectedModel
       })
     }
   },
 
-  feHandleToolEnd: (toolName: string, callId?: string) => {
+  feHandleToolEnd: (toolName: string, callId?: string, nodeId?: string) => {
     const activeTools = new Set(get().feActiveTools)
     activeTools.delete(toolName)
     set({ feActiveTools: activeTools })
@@ -1495,20 +1362,20 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       })
     }
 
-    // Update tool badge in session using callId
-    if (state.updateBadge && callId) {
-      state.updateBadge({
+    // Update badge status to success
+    if (callId && nodeId && state.updateBadgeInNodeExecution) {
+      state.updateBadgeInNodeExecution({
+        nodeId,
         badgeId: callId,
         updates: {
-          status: 'success' as const,
-          color: 'green',
-          variant: 'light' as const,
-        },
+          status: 'success',
+          color: 'green'
+        }
       })
     }
   },
 
-  feHandleToolError: (toolName: string, error: string, callId?: string) => {
+  feHandleToolError: (toolName: string, error: string, callId?: string, nodeId?: string) => {
     const activeTools = new Set(get().feActiveTools)
     activeTools.delete(toolName)
     set({ feActiveTools: activeTools })
@@ -1524,16 +1391,15 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       })
     }
 
-    // Update tool badge in session with error using callId
-    if (state.updateBadge && callId) {
-      state.updateBadge({
+    // Update badge status to error
+    if (callId && nodeId && state.updateBadgeInNodeExecution) {
+      state.updateBadgeInNodeExecution({
+        nodeId,
         badgeId: callId,
         updates: {
-          status: 'error' as const,
-          color: 'red',
-          variant: 'light' as const,
-          error,
-        },
+          status: 'error',
+          color: 'red'
+        }
       })
     }
   },
@@ -1552,33 +1418,30 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       })
     }
 
-    // Add intent badge to session
+    // Append intent badge to the node's execution box
     const node = get().feNodes.find(n => n.id === nodeId)
+    if (!node) return
 
-    // Calculate cost if we have token usage
-    let cost = null
-    if (provider && model && state.lastRequestTokenUsage) {
-      const lastUsage = state.lastRequestTokenUsage
-      if (lastUsage.provider === provider && lastUsage.model === model) {
-        cost = lastUsage.cost
-      }
-    }
-
-    if (state.addBadge) {
-      state.addBadge({
-        badge: {
-          type: 'intent' as const,
-          label: intent,
-          icon: '🎯',
-          color: 'orange',
-          variant: 'light' as const,
-        },
+    if (state.appendToNodeExecution) {
+      state.appendToNodeExecution({
         nodeId,
-        nodeLabel: node?.data?.label || 'Intent Router',
-        nodeKind: 'intentRouter',
+        nodeLabel: node.data?.label || node.data?.nodeType || 'Node',
+        nodeKind: node.data?.nodeType || 'unknown',
+        content: {
+          type: 'badge',
+          badge: {
+            id: `intent-${Date.now()}`,
+            type: 'intent' as const,
+            label: intent,
+            icon: '🎯',
+            color: 'orange',
+            variant: 'light' as const,
+            status: 'success' as const,
+            timestamp: Date.now()
+          }
+        },
         provider,
-        model,
-        cost: cost || undefined,
+        model
       })
     }
   },
@@ -1667,7 +1530,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           content: streamingText,
           nodeId,  // Include nodeId so message can be grouped with badges
           nodeLabel: node?.data?.label || 'LLM Request',
-          nodeKind: node?.data?.kind || 'llmRequest',
+          nodeKind: node?.data?.nodeType || 'llmRequest',
         })
       }
     }
@@ -1805,12 +1668,15 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         syncTimeout = setTimeout(() => {
           const state = store.getState() as any
           if (state.updateCurrentContext) {
-            console.log('[feUpdateMainFlowContext] Syncing to session.currentContext')
+            console.log('[feUpdateMainFlowContext] Syncing to session.currentContext', {
+              messageHistoryLength: context.messageHistory.length
+            })
             // Sync shallow copy to session (only fields that exist in both)
             state.updateCurrentContext({
               provider: context.provider,
               model: context.model,
               systemInstructions: context.systemInstructions,
+              messageHistory: context.messageHistory,
               // temperature is not in MainFlowContext, only in Session.currentContext
             })
           }

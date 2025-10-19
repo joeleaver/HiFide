@@ -1,23 +1,23 @@
 import { Text, Badge } from '@mantine/core'
 import { getNodeColor, getNodeCategory, CATEGORY_LABELS, type NodeCategory } from '../../electron/store/utils/node-colors'
 
-const NODE_PALETTE: Array<{ kind: string; label: string; icon: string; description: string }> = [
-  { kind: 'userInput', label: 'User Input', icon: '👤', description: 'Accept user input (entry point or pause mid-flow)' },
-  { kind: 'manualInput', label: 'Manual Input', icon: '✍️', description: 'Send pre-configured user message mid-flow' },
-  { kind: 'newContext', label: 'New Context', icon: '🔀', description: 'Create new execution context with different model/provider' },
-  { kind: 'llmRequest', label: 'LLM Request', icon: '💬', description: 'Send a request to the LLM' },
-  { kind: 'tools', label: 'Tools', icon: '🔧', description: 'Provide tools to LLM (auto or specific list)' },
-  { kind: 'injectMessages', label: 'Inject Messages', icon: '💉', description: 'Inject user/assistant message pair into conversation history' },
-  { kind: 'intentRouter', label: 'Intent Router', icon: '🔀', description: 'Route based on LLM-classified user intent' },
-  { kind: 'portalInput', label: 'Portal In', icon: '📥', description: 'Store data for portal output (reduces edge crossings)' },
-  { kind: 'portalOutput', label: 'Portal Out', icon: '📤', description: 'Retrieve data from portal input (reduces edge crossings)' },
-  { kind: 'parallelSplit', label: 'Split', icon: '⑂', description: 'Split flow into two parallel branches' },
-  { kind: 'parallelJoin', label: 'Merge', icon: '🔗', description: 'Merge multiple inputs into one output' },
-  { kind: 'cache', label: 'Cache', icon: '💾', description: 'Cache data to avoid re-executing expensive operations' },
-  { kind: 'redactor', label: 'Redactor', icon: '🧹', description: 'Redact sensitive data' },
-  { kind: 'budgetGuard', label: 'Budget Guard', icon: '💰', description: 'Monitor token budget' },
-  { kind: 'errorDetection', label: 'Error Detection', icon: '⚠️', description: 'Detect error patterns' },
-  { kind: 'approvalGate', label: 'Approval Gate', icon: '✅', description: 'Require manual approval' },
+const NODE_PALETTE: Array<{ nodeType: string; label: string; icon: string; description: string }> = [
+  { nodeType: 'userInput', label: 'User Input', icon: '👤', description: 'Accept user input (entry point or pause mid-flow)' },
+  { nodeType: 'manualInput', label: 'Manual Input', icon: '✍️', description: 'Send pre-configured user message mid-flow' },
+  { nodeType: 'newContext', label: 'New Context', icon: '🔀', description: 'Create new execution context with different model/provider' },
+  { nodeType: 'llmRequest', label: 'LLM Request', icon: '💬', description: 'Send a request to the LLM' },
+  { nodeType: 'tools', label: 'Tools', icon: '🔧', description: 'Provide tools to LLM (auto or specific list)' },
+  { nodeType: 'injectMessages', label: 'Inject Messages', icon: '💉', description: 'Inject user/assistant message pair into conversation history' },
+  { nodeType: 'intentRouter', label: 'Intent Router', icon: '🔀', description: 'Route based on LLM-classified user intent' },
+  { nodeType: 'portalInput', label: 'Portal In', icon: '📥', description: 'Store data for portal output (reduces edge crossings)' },
+  { nodeType: 'portalOutput', label: 'Portal Out', icon: '📤', description: 'Retrieve data from portal input (reduces edge crossings)' },
+  { nodeType: 'parallelSplit', label: 'Split', icon: '⑂', description: 'Split flow into two parallel branches' },
+  { nodeType: 'parallelJoin', label: 'Merge', icon: '🔗', description: 'Merge multiple inputs into one output' },
+  { nodeType: 'cache', label: 'Cache', icon: '💾', description: 'Cache data to avoid re-executing expensive operations' },
+  { nodeType: 'redactor', label: 'Redactor', icon: '🧹', description: 'Redact sensitive data' },
+  { nodeType: 'budgetGuard', label: 'Budget Guard', icon: '💰', description: 'Monitor token budget' },
+  { nodeType: 'errorDetection', label: 'Error Detection', icon: '⚠️', description: 'Detect error patterns' },
+  { nodeType: 'approvalGate', label: 'Approval Gate', icon: '✅', description: 'Require manual approval' },
 ]
 
 export default function NodePalettePanel() {
@@ -28,7 +28,7 @@ export default function NodePalettePanel() {
 
   // Group nodes by category
   const nodesByCategory = NODE_PALETTE.reduce((acc, node) => {
-    const category = getNodeCategory(node.kind) || 'flow-control'
+    const category = getNodeCategory(node.nodeType) || 'flow-control'
     if (!acc[category]) acc[category] = []
     acc[category].push(node)
     return acc
@@ -92,12 +92,12 @@ export default function NodePalettePanel() {
                 }}
               >
                 {nodes.map((node) => {
-                  const color = getNodeColor(node.kind)
+                  const color = getNodeColor(node.nodeType)
                   return (
                     <Badge
-                      key={node.kind}
+                      key={node.nodeType}
                       draggable
-                      onDragStart={(e) => onDragStart(e, node.kind)}
+                      onDragStart={(e) => onDragStart(e, node.nodeType)}
                       title={node.description}
                       style={{
                         backgroundColor: color,

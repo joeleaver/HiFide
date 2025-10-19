@@ -73,6 +73,12 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
   // Actions
   setSelectedModel: (model: string) => {
     set({ selectedModel: model })
+
+    // Update current session context immediately
+    const state = get() as any
+    if (state.updateCurrentContext) {
+      state.updateCurrentContext({ model })
+    }
   },
 
   setSelectedProvider: (provider: string) => {
@@ -86,13 +92,25 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
     const preferred = state.defaultModels?.[provider]
     const hasPreferred = preferred && models.some((m) => m.value === preferred)
 
+    let newModel: string | undefined
     if (hasPreferred) {
       // Use preferred model if it's available
+      newModel = preferred
       set({ selectedModel: preferred })
     } else if (models.length > 0) {
       // Otherwise use first available model
       const first = models[0]
+      newModel = first.value
       set({ selectedModel: first.value })
+    }
+
+    // Update current session context immediately
+    const stateAny = state as any
+    if (stateAny.updateCurrentContext) {
+      stateAny.updateCurrentContext({
+        provider,
+        ...(newModel && { model: newModel })
+      })
     }
   },
 

@@ -3,29 +3,30 @@
  */
 
 import { toolsNode } from '../tools'
-import { createTestContext, createTestConfig, createTestTool } from '../../../../__tests__/utils/testHelpers'
+import {
+  createMainFlowContext,
+  createTestConfig,
+  createTestTool,
+  createMockFlowAPI,
+  createMockNodeInputs
+} from '../../../../__tests__/utils/testHelpers'
 
 describe('Tools Node', () => {
-  beforeAll(() => {
-    // Set up global tools
-    (globalThis as any).__agentTools = [
-      createTestTool('tool1'),
-      createTestTool('tool2'),
-      createTestTool('tool3'),
-    ]
-  })
-
-  afterAll(() => {
-    // Clean up
-    delete (globalThis as any).__agentTools
-  })
+  const mockTools = [
+    createTestTool('tool1'),
+    createTestTool('tool2'),
+    createTestTool('tool3'),
+  ]
 
   describe('Auto Mode', () => {
     it('should return all tools when config is "auto"', async () => {
-      const context = createTestContext()
+      const flow = createMockFlowAPI()
+      flow.tools.list = jest.fn(() => mockTools)
+      const context = createMainFlowContext()
       const config = createTestConfig({ tools: 'auto' })
+      const inputs = createMockNodeInputs()
 
-      const result = await toolsNode(context, null, {}, config)
+      const result = await toolsNode(flow, context, null, inputs, config)
 
       expect(result.status).toBe('success')
       expect(result.tools).toHaveLength(3)
@@ -33,10 +34,13 @@ describe('Tools Node', () => {
     })
 
     it('should return all tools when config is not specified', async () => {
-      const context = createTestContext()
+      const flow = createMockFlowAPI()
+      flow.tools.list = jest.fn(() => mockTools)
+      const context = createMainFlowContext()
       const config = createTestConfig()
+      const inputs = createMockNodeInputs()
 
-      const result = await toolsNode(context, null, {}, config)
+      const result = await toolsNode(flow, context, null, inputs, config)
 
       expect(result.status).toBe('success')
       expect(result.tools).toHaveLength(3)
@@ -45,10 +49,13 @@ describe('Tools Node', () => {
 
   describe('Specific Tools Mode', () => {
     it('should return only specified tools', async () => {
-      const context = createTestContext()
+      const flow = createMockFlowAPI()
+      flow.tools.list = jest.fn(() => mockTools)
+      const context = createMainFlowContext()
       const config = createTestConfig({ tools: ['tool1', 'tool3'] })
+      const inputs = createMockNodeInputs()
 
-      const result = await toolsNode(context, null, {}, config)
+      const result = await toolsNode(flow, context, null, inputs, config)
 
       expect(result.status).toBe('success')
       expect(result.tools).toHaveLength(2)
@@ -56,10 +63,13 @@ describe('Tools Node', () => {
     })
 
     it('should return empty array when no tools match', async () => {
-      const context = createTestContext()
+      const flow = createMockFlowAPI()
+      flow.tools.list = jest.fn(() => mockTools)
+      const context = createMainFlowContext()
       const config = createTestConfig({ tools: ['nonexistent'] })
+      const inputs = createMockNodeInputs()
 
-      const result = await toolsNode(context, null, {}, config)
+      const result = await toolsNode(flow, context, null, inputs, config)
 
       expect(result.status).toBe('success')
       expect(result.tools).toHaveLength(0)
@@ -68,11 +78,14 @@ describe('Tools Node', () => {
 
   describe('Dynamic Override', () => {
     it('should override config with dataIn', async () => {
-      const context = createTestContext()
+      const flow = createMockFlowAPI()
+      flow.tools.list = jest.fn(() => mockTools)
+      const context = createMainFlowContext()
       const config = createTestConfig({ tools: 'auto' })
       const dataIn = JSON.stringify(['tool2'])
+      const inputs = createMockNodeInputs()
 
-      const result = await toolsNode(context, dataIn, {}, config)
+      const result = await toolsNode(flow, context, dataIn, inputs, config)
 
       expect(result.status).toBe('success')
       expect(result.tools).toHaveLength(1)
@@ -80,11 +93,14 @@ describe('Tools Node', () => {
     })
 
     it('should ignore invalid JSON in dataIn', async () => {
-      const context = createTestContext()
+      const flow = createMockFlowAPI()
+      flow.tools.list = jest.fn(() => mockTools)
+      const context = createMainFlowContext()
       const config = createTestConfig({ tools: ['tool1'] })
       const dataIn = 'not valid json'
+      const inputs = createMockNodeInputs()
 
-      const result = await toolsNode(context, dataIn, {}, config)
+      const result = await toolsNode(flow, context, dataIn, inputs, config)
 
       expect(result.status).toBe('success')
       expect(result.tools).toHaveLength(1)
@@ -94,15 +110,18 @@ describe('Tools Node', () => {
 
   describe('Context Pass-through', () => {
     it('should pass through context unchanged', async () => {
-      const context = createTestContext({
+      const flow = createMockFlowAPI()
+      flow.tools.list = jest.fn(() => mockTools)
+      const context = createMainFlowContext({
         messageHistory: [
           { role: 'user', content: 'test' },
           { role: 'assistant', content: 'response' }
         ]
       })
       const config = createTestConfig()
+      const inputs = createMockNodeInputs()
 
-      const result = await toolsNode(context, null, {}, config)
+      const result = await toolsNode(flow, context, null, inputs, config)
 
       expect(result.context).toEqual(context)
       expect(result.context.messageHistory).toHaveLength(2)

@@ -10,7 +10,7 @@ import { formatSummary } from '../agent/types'
 export const AnthropicProvider: ProviderAdapter = {
   id: 'anthropic',
 
-  async chatStream({ apiKey, model, system, messages, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async chatStream({ apiKey, model, system, messages, emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
     const client = new Anthropic({ apiKey, defaultHeaders: { 'anthropic-beta': 'prompt-caching-2024-07-31' } as any })
 
     // Messages are already formatted by llm-service
@@ -26,7 +26,7 @@ export const AnthropicProvider: ProviderAdapter = {
           system: system || undefined,
           messages: messages as any,
           stream: true,
-          max_tokens: 2048
+          max_tokens: 8192 // Increased from 2048 to allow longer responses
         }) as any)
         holder.abort = () => { try { stream?.controller?.abort?.() } catch {} }
 
@@ -36,7 +36,10 @@ export const AnthropicProvider: ProviderAdapter = {
           try {
             if (evt?.type === 'content_block_delta') {
               const t = evt?.delta?.text
-              if (t) onChunk(String(t))
+              if (t) {
+                const text = String(t)
+                onChunk(text)
+              }
             } else if (evt?.type === 'message_start') {
               // Capture usage from message_start event
               usage = evt?.message?.usage
@@ -47,30 +50,33 @@ export const AnthropicProvider: ProviderAdapter = {
               // end of stream
             }
           } catch (e: any) {
-            onError(e?.message || String(e))
+            const error = e?.message || String(e)
+            onError(error)
           }
         }
 
         // Report token usage if available
-        if (usage && onTokenUsage) {
-          onTokenUsage({
+        if (usage) {
+          const tokenUsage = {
             inputTokens: usage.input_tokens || 0,
             outputTokens: usage.output_tokens || 0,
             totalTokens: (usage.input_tokens || 0) + (usage.output_tokens || 0),
-          })
+          }
+          if (onTokenUsage) onTokenUsage(tokenUsage)
         }
 
+        // Done
         onDone()
       } catch (e: any) {
         if (e?.name === 'AbortError') return
-        onError(e?.message || String(e))
+        const error = e?.message || String(e)
+        onError(error)
       }
     })().catch((e: any) => {
-      // Handle any errors that occur after chatStream returns
-      // This prevents unhandled promise rejections
       console.error('[AnthropicProvider] Unhandled error in chatStream:', e)
       try {
-        onError(e?.message || String(e))
+        const error = e?.message || String(e)
+        onError(error)
       } catch {}
     })
 
@@ -80,7 +86,7 @@ export const AnthropicProvider: ProviderAdapter = {
   },
 
   // Agent streaming with tool-calling using Anthropic Messages API
-  async agentStream({ apiKey, model, system, messages, tools, responseSchema: _responseSchema, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, system, messages, tools, responseSchema: _responseSchema, emit, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const client = new Anthropic({ apiKey, defaultHeaders: { 'anthropic-beta': 'prompt-caching-2024-07-31' } as any })
 
     // Map tools to Anthropic format (sanitize names to match pattern ^[a-zA-Z0-9_-]{1,128}$)
@@ -154,7 +160,7 @@ export const AnthropicProvider: ProviderAdapter = {
             messages: conv as any,
             tools: anthTools.length ? anthTools : undefined,
             stream: true,
-            max_tokens: 2048,
+            max_tokens: 8192, // Increased from 2048 to allow longer responses and tool calls
           }) as any)
 
           // Accumulate tool_use inputs incrementally and track usage
@@ -170,7 +176,10 @@ export const AnthropicProvider: ProviderAdapter = {
                 // Handle text deltas
                 if (evt?.delta?.type === 'text_delta') {
                   const t = evt?.delta?.text
-                  if (t) onChunk(String(t))
+                  if (t) {
+                    const text = String(t)
+                    onChunk(text)
+                  }
                 }
                 // Handle tool input JSON deltas
                 else if (evt?.delta?.type === 'input_json_delta') {
@@ -184,6 +193,8 @@ export const AnthropicProvider: ProviderAdapter = {
                       chunkLength: chunk.length,
                       totalLength: active[id].inputText.length
                     })
+                  } else if (index !== undefined && !id) {
+                    console.warn(`[Anthropic] Received input_json_delta for unknown index:`, { index, chunk })
                   }
                 }
               } else if (evt?.type === 'content_block_start' && evt?.content_block?.type === 'tool_use') {
@@ -201,6 +212,7 @@ export const AnthropicProvider: ProviderAdapter = {
                 const index = evt?.index
                 const id = index !== undefined ? indexToId[index] : undefined
                 const item = id ? active[id] : undefined
+                console.log(`[Anthropic] Content block stop:`, { index, id, hasItem: !!item })
                 if (item) {
                   let parsed: any = {}
                   try {
@@ -228,8 +240,63 @@ export const AnthropicProvider: ProviderAdapter = {
               } else if (evt?.type === 'message_delta') {
                 // Update usage from message_delta event
                 if (evt?.usage) usage = evt.usage
+              } else if (evt?.type === 'message_stop') {
+                console.log(`[Anthropic] Message stop event received`)
               }
-            } catch (e: any) { onError(e?.message || String(e)) }
+            } catch (e: any) {
+              console.error(`[Anthropic] Error processing stream event:`, {
+                eventType: evt?.type,
+                error: e?.message || String(e),
+                stack: e?.stack
+              })
+              const error = e?.message || String(e)
+              onError(error)
+            }
+          }
+
+          console.log(`[Anthropic] Stream ended:`, {
+            completedTools: completed.length,
+            activeTools: Object.keys(active).length,
+            iteration
+          })
+
+          // Check for incomplete tool calls that never received content_block_stop
+          const activeToolIds = Object.keys(active)
+          if (activeToolIds.length > 0) {
+            console.error(`[Anthropic] Stream ended with incomplete tool calls:`, {
+              activeTools: activeToolIds.map(id => ({
+                id,
+                name: active[id].name,
+                inputLength: active[id].inputText.length,
+                inputPreview: active[id].inputText.substring(0, 100)
+              }))
+            })
+            // Try to parse and complete any incomplete tool calls
+            for (const id of activeToolIds) {
+              const item = active[id]
+              let parsed: any = {}
+              try {
+                parsed = item.inputText ? JSON.parse(item.inputText) : {}
+                console.log(`[Anthropic] Recovered incomplete tool call:`, {
+                  toolName: item.name,
+                  inputText: item.inputText,
+                  parsed
+                })
+                completed.push({ id: item.id, name: item.name, input: parsed })
+              } catch (e) {
+                console.error(`[Anthropic] Failed to parse incomplete tool input:`, {
+                  toolName: item.name,
+                  inputText: item.inputText,
+                  error: e
+                })
+                // Add error result for this incomplete tool call
+                completed.push({
+                  id: item.id,
+                  name: item.name,
+                  input: { _error: 'Incomplete tool call - stream ended before completion' }
+                })
+              }
+            }
           }
 
           // Accumulate usage across multiple turns
@@ -289,6 +356,9 @@ export const AnthropicProvider: ProviderAdapter = {
                   continue
                 }
 
+                // Generate tool execution ID
+                const toolExecutionId = crypto.randomUUID()
+
                 // Notify tool start (use original name for UI display)
                 try { onToolStart?.({ callId: tu.id, name: originalToolName, arguments: tu.input }) } catch {}
 
@@ -344,29 +414,31 @@ export const AnthropicProvider: ProviderAdapter = {
           })
 
           // Report accumulated token usage
-          if (totalUsage && onTokenUsage) {
-            onTokenUsage({
+          if (totalUsage) {
+            const tokenUsage = {
               inputTokens: totalUsage.input_tokens || 0,
               outputTokens: totalUsage.output_tokens || 0,
               totalTokens: (totalUsage.input_tokens || 0) + (totalUsage.output_tokens || 0),
-            })
+            }
+            if (onTokenUsage) onTokenUsage(tokenUsage)
           }
 
+          // Done
           onDone()
           return
         }
       } catch (e: any) {
         if (e?.name === 'AbortError') return
-        onError(e?.message || String(e))
+        const error = e?.message || String(e)
+        onError(error)
       }
     }
 
     run().catch((e: any) => {
-      // Handle any errors that occur after agentStream returns
-      // This prevents unhandled promise rejections
       console.error('[AnthropicProvider] Unhandled error in agentStream run():', e)
       try {
-        onError(e?.message || String(e))
+        const error = e?.message || String(e)
+        onError(error)
       } catch {}
     })
 

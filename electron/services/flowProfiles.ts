@@ -18,7 +18,7 @@ import * as fs from 'fs/promises'
  */
 export interface SerializedNode {
   id: string
-  kind: string
+  nodeType: string    // The actual node type (e.g., 'llmRequest', 'userInput')
   label?: string      // Custom node label (if different from id)
   config?: Record<string, any>
   position: { x: number; y: number }
@@ -67,7 +67,7 @@ function serializeNode(node: Node): SerializedNode {
 
   return {
     id: node.id,
-    kind: data?.kind || node.id.split('-')[0],
+    nodeType: data?.nodeType || node.id.split('-')[0],
     label: label !== node.id ? label : undefined, // Only save if different from id
     config: data?.config || {},
     position: node.position,
@@ -99,7 +99,7 @@ function deserializeNode(serialized: SerializedNode): Node {
     type: 'hifiNode',
     position: serialized.position,
     data: {
-      kind: serialized.kind,
+      nodeType: serialized.nodeType,
       label: label,
       labelBase: label,
       config: serialized.config || {},

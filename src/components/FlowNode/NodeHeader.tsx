@@ -1,7 +1,7 @@
-import { NODE_KIND_LABELS } from '../../../electron/store/utils/node-colors'
+import { NODE_TYPE_LABELS } from '../../../electron/store/utils/node-colors'
 
 interface NodeHeaderProps {
-  kind: string
+  nodeType: string
   color: string
   label: string
   expanded: boolean
@@ -10,7 +10,7 @@ interface NodeHeaderProps {
 }
 
 export default function NodeHeader({
-  kind,
+  nodeType,
   color,
   label,
   expanded,
@@ -56,7 +56,7 @@ export default function NodeHeader({
             whiteSpace: 'nowrap',
           }}
         >
-          {NODE_KIND_LABELS[kind] || kind}
+          {NODE_TYPE_LABELS[nodeType] || nodeType}
         </span>
         <input
           className="nodrag"

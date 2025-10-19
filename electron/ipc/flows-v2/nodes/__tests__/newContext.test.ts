@@ -4,9 +4,15 @@
 
 import { newContextNode } from '../newContext'
 import type { MainFlowContext } from '../../types'
+import {
+  createMainFlowContext,
+  createTestConfig,
+  createMockFlowAPI,
+  createMockNodeInputs
+} from '../../../../__tests__/utils/testHelpers'
 
 describe('New Context Node', () => {
-  const createTestConfig = (overrides?: any) => ({
+  const createNodeConfig = (overrides?: any) => ({
     provider: 'openai',
     model: 'gpt-4o',
     systemInstructions: 'You are a helpful assistant.',
@@ -14,9 +20,8 @@ describe('New Context Node', () => {
     ...overrides
   })
 
-  const createTestContext = (): MainFlowContext => ({
+  const createTestMainContext = (): MainFlowContext => ({
     contextId: 'main',
-    contextType: 'main',
     provider: 'anthropic',
     model: 'claude-3-5-sonnet-20241022',
     systemInstructions: 'Main context instructions',
@@ -28,36 +33,45 @@ describe('New Context Node', () => {
 
   describe('Basic Functionality', () => {
     it('should create a new isolated context', async () => {
-      const config = createTestConfig()
-      const result = await newContextNode(undefined as any, undefined, {}, config)
+      const flow = createMockFlowAPI({ nodeId: 'test-newContext' })
+      const context = createMainFlowContext()
+      const config = createNodeConfig()
+      const inputs = createMockNodeInputs()
+
+      const result = await newContextNode(flow, context, undefined, inputs, config)
 
       expect(result.status).toBe('success')
       expect(result.context).toBeDefined()
-      expect(result.context.contextType).toBe('isolated')
       expect(result.context.provider).toBe('openai')
       expect(result.context.model).toBe('gpt-4o')
       expect(result.context.systemInstructions).toBe('You are a helpful assistant.')
       expect(result.context.messageHistory).toEqual([])
     })
 
-    it('should generate unique context ID', async () => {
-      const config = createTestConfig()
-      const result1 = await newContextNode(undefined as any, undefined, {}, config)
-      
-      // Wait a bit to ensure different timestamp
-      await new Promise(resolve => setTimeout(resolve, 10))
-      
-      const result2 = await newContextNode(undefined as any, undefined, {}, config)
+    it('should generate context ID based on node ID', async () => {
+      const flow1 = createMockFlowAPI({ nodeId: 'test-newContext-1' })
+      const flow2 = createMockFlowAPI({ nodeId: 'test-newContext-2' })
+      const context = createMainFlowContext()
+      const config = createNodeConfig()
+      const inputs = createMockNodeInputs()
 
+      const result1 = await newContextNode(flow1, context, undefined, inputs, config)
+      const result2 = await newContextNode(flow2, context, undefined, inputs, config)
+
+      // Different node IDs should produce different context IDs
+      expect(result1.context.contextId).toBe('context-test-newContext-1')
+      expect(result2.context.contextId).toBe('context-test-newContext-2')
       expect(result1.context.contextId).not.toBe(result2.context.contextId)
-      expect(result1.context.contextId).toMatch(/^context-test-newContext-\d+$/)
-      expect(result2.context.contextId).toMatch(/^context-test-newContext-\d+$/)
     })
 
     it('should pass through data input', async () => {
-      const config = createTestConfig()
+      const flow = createMockFlowAPI({ nodeId: 'test-newContext' })
+      const context = createMainFlowContext()
+      const config = createNodeConfig()
       const dataIn = 'Some data to pass through'
-      const result = await newContextNode(undefined as any, dataIn, {}, config)
+      const inputs = createMockNodeInputs()
+
+      const result = await newContextNode(flow, context, dataIn, inputs, config)
 
       expect(result.status).toBe('success')
       expect(result.data).toBe(dataIn)
@@ -66,10 +80,12 @@ describe('New Context Node', () => {
 
   describe('Context Isolation', () => {
     it('should not inherit message history from input context', async () => {
-      const mainContext = createTestContext()
-      const config = createTestConfig()
-      
-      const result = await newContextNode(mainContext, undefined, {}, config)
+      const flow = createMockFlowAPI({ nodeId: 'test-newContext' })
+      const mainContext = createTestMainContext()
+      const config = createNodeConfig()
+      const inputs = createMockNodeInputs()
+
+      const result = await newContextNode(flow, mainContext, undefined, inputs, config)
 
       expect(result.status).toBe('success')
       expect(result.context.messageHistory).toEqual([])
@@ -77,13 +93,15 @@ describe('New Context Node', () => {
     })
 
     it('should not inherit provider/model from input context', async () => {
-      const mainContext = createTestContext()
-      const config = createTestConfig({
+      const flow = createMockFlowAPI({ nodeId: 'test-newContext' })
+      const mainContext = createTestMainContext()
+      const config = createNodeConfig({
         provider: 'gemini',
         model: 'gemini-2.0-flash-exp'
       })
-      
-      const result = await newContextNode(mainContext, undefined, {}, config)
+      const inputs = createMockNodeInputs()
+
+      const result = await newContextNode(flow, mainContext, undefined, inputs, config)
 
       expect(result.status).toBe('success')
       expect(result.context.provider).toBe('gemini')
@@ -94,12 +112,14 @@ describe('New Context Node', () => {
     })
 
     it('should not inherit system instructions from input context', async () => {
-      const mainContext = createTestContext()
-      const config = createTestConfig({
+      const flow = createMockFlowAPI({ nodeId: 'test-newContext' })
+      const mainContext = createTestMainContext()
+      const config = createNodeConfig({
         systemInstructions: 'Bootstrap context instructions'
       })
-      
-      const result = await newContextNode(mainContext, undefined, {}, config)
+      const inputs = createMockNodeInputs()
+
+      const result = await newContextNode(flow, mainContext, undefined, inputs, config)
 
       expect(result.status).toBe('success')
       expect(result.context.systemInstructions).toBe('Bootstrap context instructions')
@@ -109,24 +129,36 @@ describe('New Context Node', () => {
 
   describe('Configuration', () => {
     it('should use default provider when not specified', async () => {
-      const config = createTestConfig({ provider: undefined })
-      const result = await newContextNode(undefined as any, undefined, {}, config)
+      const flow = createMockFlowAPI({ nodeId: 'test-newContext' })
+      const context = createMainFlowContext()
+      const config = createNodeConfig({ provider: undefined })
+      const inputs = createMockNodeInputs()
+
+      const result = await newContextNode(flow, context, undefined, inputs, config)
 
       expect(result.status).toBe('success')
       expect(result.context.provider).toBe('openai')
     })
 
     it('should use default model when not specified', async () => {
-      const config = createTestConfig({ model: undefined })
-      const result = await newContextNode(undefined as any, undefined, {}, config)
+      const flow = createMockFlowAPI({ nodeId: 'test-newContext' })
+      const context = createMainFlowContext()
+      const config = createNodeConfig({ model: undefined })
+      const inputs = createMockNodeInputs()
+
+      const result = await newContextNode(flow, context, undefined, inputs, config)
 
       expect(result.status).toBe('success')
       expect(result.context.model).toBe('gpt-4o')
     })
 
     it('should use empty system instructions when not specified', async () => {
-      const config = createTestConfig({ systemInstructions: undefined })
-      const result = await newContextNode(undefined as any, undefined, {}, config)
+      const flow = createMockFlowAPI({ nodeId: 'test-newContext' })
+      const context = createMainFlowContext()
+      const config = createNodeConfig({ systemInstructions: undefined })
+      const inputs = createMockNodeInputs()
+
+      const result = await newContextNode(flow, context, undefined, inputs, config)
 
       expect(result.status).toBe('success')
       expect(result.context.systemInstructions).toBe('')
@@ -140,34 +172,17 @@ describe('New Context Node', () => {
       ]
 
       for (const { provider, model } of providers) {
-        const config = createTestConfig({ provider, model })
-        const result = await newContextNode(undefined as any, undefined, {}, config)
+        const flow = createMockFlowAPI({ nodeId: 'test-newContext' })
+        const context = createMainFlowContext()
+        const config = createNodeConfig({ provider, model })
+        const inputs = createMockNodeInputs()
+
+        const result = await newContextNode(flow, context, undefined, inputs, config)
 
         expect(result.status).toBe('success')
         expect(result.context.provider).toBe(provider)
         expect(result.context.model).toBe(model)
       }
-    })
-  })
-
-  describe('Context Type', () => {
-    it('should always mark context as isolated', async () => {
-      const config = createTestConfig()
-      const result = await newContextNode(undefined as any, undefined, {}, config)
-
-      expect(result.status).toBe('success')
-      expect(result.context.contextType).toBe('isolated')
-    })
-
-    it('should mark as isolated even when input context is main', async () => {
-      const mainContext = createTestContext()
-      expect(mainContext.contextType).toBe('main')
-
-      const config = createTestConfig()
-      const result = await newContextNode(mainContext, undefined, {}, config)
-
-      expect(result.status).toBe('success')
-      expect(result.context.contextType).toBe('isolated')
     })
   })
 })

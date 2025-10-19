@@ -1,14 +1,14 @@
 /**
  * manualInput node
  *
- * Sends a pre-configured user message to the LLM in the current context.
+ * Outputs a pre-configured message. If context is provided, adds the message to history.
  *
  * Inputs:
- * - context: Execution context from predecessor
+ * - context: Optional execution context from predecessor
  * - data: Not used
  *
  * Outputs:
- * - context: Updated context with message added to history
+ * - context: Updated context with message added to history (if context provided)
  * - data: The configured message
  */
 
@@ -19,26 +19,28 @@ import type { NodeFunction, NodeExecutionPolicy } from '../types'
  */
 export const metadata = {
   executionPolicy: 'any' as NodeExecutionPolicy, // No inputs needed
-  description: 'Sends a pre-configured user message to the LLM in the current context.'
+  description: 'Outputs a pre-configured message. If context is provided, adds the message to history.'
 }
 
 /**
  * Node implementation
  */
-export const manualInputNode: NodeFunction = async (contextIn, _dataIn, _inputs, config) => {
+export const manualInputNode: NodeFunction = async (flow, context, _dataIn, inputs, config) => {
+  // Get context - use pushed context, or pull if edge connected (optional)
+  const executionContext = context ?? (inputs.has('context') ? await inputs.pull('context') : null)
+
   const message = config.message || ''
 
-  // Clone context to avoid mutating input
-  const context = { ...contextIn, messageHistory: [...contextIn.messageHistory] }
+  flow.log.debug('Manual input', { message })
 
-  if (message) {
-    // Add the message to the context's message history
-    context.messageHistory.push({ role: 'user', content: message })
-  }
+  // If context provided, add message to history
+  const newContext = executionContext && message
+    ? flow.context.addMessage(executionContext, 'user', message)
+    : executionContext
 
   return {
-    context: context,
-    data: message, // currentOutput is now just the data field
+    context: newContext,
+    data: message,
     status: 'success'
   }
 }

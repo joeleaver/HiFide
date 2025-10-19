@@ -53,38 +53,34 @@ export type Badge = {
 // This allows badges to appear inline with messages
 export type SessionItem =
   | SessionMessage
-  | SessionBadgeGroup
+  | NodeExecutionBox
 
 export type SessionMessage = {
   type: 'message'
-  id: string                    // Unique ID for this message
+  id: string
   role: 'user' | 'assistant'
   content: string
   timestamp: number
-  nodeId?: string               // Which node created this message (for grouping with badges)
-  nodeLabel?: string            // Display name of the node that generated this
-  nodeKind?: string             // Kind of node (for color matching)
-
-  // Metadata about this message
-  provider?: string             // Which provider generated this
-  model?: string                // Which model generated this
-  tokenUsage?: TokenUsage       // Token usage for this message
-  cost?: TokenCost              // Cost for this message
 }
 
-export type SessionBadgeGroup = {
-  type: 'badge-group'
-  id: string                    // Unique ID for this badge group
-  nodeId?: string               // Which node created these badges
-  nodeLabel?: string            // Display name of the node
-  nodeKind?: string             // Kind of node (for color matching)
+export type NodeExecutionBox = {
+  type: 'node-execution'
+  id: string
+  nodeId: string
+  nodeLabel: string
+  nodeKind: string
   timestamp: number
-  badges: Badge[]               // Badges in this group
 
-  // Metadata (optional)
-  provider?: string             // Which provider was used
-  model?: string                // Which model was used
-  cost?: TokenCost              // Cost for this node execution
+  // Everything that happened during this execution, in sequential order
+  content: Array<
+    | { type: 'text'; text: string }
+    | { type: 'badge'; badge: Badge }
+  >
+
+  // Metadata
+  provider?: string
+  model?: string
+  cost?: TokenCost
 }
 
 export type TokenUsage = {
@@ -118,7 +114,19 @@ export type Session = {
     model: string
     systemInstructions?: string
     temperature?: number
+    messageHistory?: Array<{
+      role: 'system' | 'user' | 'assistant'
+      content: string
+      metadata?: {
+        id: string
+        pinned?: boolean
+        priority?: number
+      }
+    }>
   }
+
+  // Flow cache - persisted cache data from cache nodes
+  flowCache?: Record<string, { data: any; timestamp: number }>
 
   // Flow state - which flow is being used and its current state
   lastUsedFlow?: string  // Flow template ID (e.g., 'default', 'user/my-flow')

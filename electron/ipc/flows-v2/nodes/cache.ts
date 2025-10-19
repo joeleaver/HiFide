@@ -25,76 +25,55 @@ export const metadata = {
   description: 'Caches data from upstream nodes to avoid re-executing expensive operations.'
 }
 
-// In-memory cache storage (persists across flow executions)
-// Key: nodeId, Value: { data, timestamp }
-const cacheStorage = new Map<string, { data: any; timestamp: number }>()
-
-/**
- * Clear all cached data (for testing purposes)
- * @internal
- */
-export function clearCache() {
-  cacheStorage.clear()
-}
-
 /**
  * Node implementation
  */
-export const cacheNode: NodeFunction = async (contextIn, dataIn, inputs, config) => {
-  const nodeId = config._nodeId as string
+export const cacheNode: NodeFunction = async (flow, context, dataIn, inputs, config) => {
+  // Get context - use pushed context, or pull if edge connected (cache is context-agnostic, just passes through)
+  const executionContext = context ?? (inputs.has('context') ? await inputs.pull('context') : null)
+
   const ttl = (config.ttl ?? 300) as number // Default 5 minutes
   const invalidateTimestamp = config.invalidate as number | undefined
 
-  console.log(`[cache] ${nodeId} - Checking cache:`, {
-    nodeId,
-    ttl,
-    cacheStorageSize: cacheStorage.size,
-    cacheStorageKeys: Array.from(cacheStorage.keys()),
-    hasEntry: cacheStorage.has(nodeId)
-  })
+  flow.log.debug('Checking cache', { ttl })
+
+  // Get cached entry from session flowCache (ONLY source of truth)
+  let cachedEntry = flow.store.getNodeCache(flow.nodeId)
 
   // Check if cache should be invalidated
-  const cached = cacheStorage.get(nodeId)
-  if (cached && invalidateTimestamp && invalidateTimestamp > cached.timestamp) {
-    console.log(`[cache] ${nodeId} - Invalidating cache (invalidateTimestamp: ${invalidateTimestamp}, cached.timestamp: ${cached.timestamp})`)
-    cacheStorage.delete(nodeId)
+  if (cachedEntry && invalidateTimestamp && invalidateTimestamp > cachedEntry.timestamp) {
+    flow.log.debug('Invalidating cache', {
+      invalidateTimestamp,
+      cachedTimestamp: cachedEntry.timestamp
+    })
+    await flow.store.clearNodeCache(flow.nodeId)
+    cachedEntry = undefined
   }
 
   // Check if we have valid cached data
-  const now = Date.now()
-  const cachedEntry = cacheStorage.get(nodeId)
-
   if (cachedEntry && ttl > 0) {
+    const now = Date.now()
     const age = (now - cachedEntry.timestamp) / 1000 // Age in seconds
 
     if (age < ttl) {
-      // Cache hit - emit badge and return cached data
-      console.log(`[cache] ${nodeId} - Cache HIT (age: ${age.toFixed(1)}s, ttl: ${ttl}s)`)
+      // Cache HIT - return cached data WITHOUT pulling from input
+      flow.log.debug('Cache HIT', {
+        age: age.toFixed(1),
+        ttl
+      })
 
-      try {
-        const { useMainStore } = await import('../../../store/index.js')
-        const state = useMainStore.getState() as any
+      flow.conversation.addBadge({
+        type: 'info',
+        label: 'Using cached data',
+        icon: '💾',
+        color: 'blue',
+        variant: 'light',
+      })
 
-        if (state.addBadge) {
-          state.addBadge({
-            badge: {
-              type: 'info' as const,
-              label: 'Using cached data',
-              icon: '💾',
-              color: 'blue',
-              variant: 'light' as const,
-            },
-            nodeId,
-            nodeLabel: 'Cache',
-            nodeKind: 'cache',
-          })
-        }
-      } catch (e) {
-        // Badge emission is optional - continue if store is not available (e.g., in tests)
-      }
-
+      // IMPORTANT: Return cached data WITHOUT calling inputs.pull()
+      // This is the key to lazy evaluation - we avoid upstream execution
       return {
-        context: contextIn,
+        context: executionContext,
         data: cachedEntry.data,
         status: 'success',
         metadata: {
@@ -104,47 +83,39 @@ export const cacheNode: NodeFunction = async (contextIn, dataIn, inputs, config)
     }
   }
 
-  // Cache miss or expired - emit badge, get fresh data, and cache result
-  console.log(`[cache] ${nodeId} - Cache MISS (ttl: ${ttl}s)`)
+  // Cache MISS or expired - pull fresh data
+  flow.log.debug('Cache MISS', { ttl })
 
-  try {
-    const { useMainStore } = await import('../../../store/index.js')
-    const state = useMainStore.getState() as any
+  flow.conversation.addBadge({
+    type: 'info',
+    label: ttl === 0 ? 'Cache disabled, pulling new data...' : 'Cache expired, pulling new data...',
+    icon: '🔄',
+    color: 'orange',
+    variant: 'light',
+  })
 
-    if (state.addBadge) {
-      state.addBadge({
-        badge: {
-          type: 'info' as const,
-          label: ttl === 0 ? 'Cache disabled, pulling new data...' : 'Cache expired, pulling new data...',
-          icon: '🔄',
-          color: 'orange',
-          variant: 'light' as const,
-        },
-        nodeId,
-        nodeLabel: 'Cache',
-        nodeKind: 'cache',
-      })
-    }
-  } catch (e) {
-    // Badge emission is optional - continue if store is not available (e.g., in tests)
-  }
+  // Get fresh data - use dataIn if provided (push), otherwise pull from input
+  // NOTE: Calling inputs.pull() triggers upstream execution (lazy evaluation)
+  const freshData = dataIn ?? await inputs.pull('data')
 
-  // Get fresh data - use dataIn if provided (push), otherwise use inputs.data (pull)
-  const freshData = dataIn ?? inputs.data
-
-  console.log(`[cache] ${nodeId} - Fresh data type:`, typeof freshData)
+  flow.log.debug('Fresh data received', { type: typeof freshData })
 
   // Store in cache if TTL > 0
   if (ttl > 0) {
-    cacheStorage.set(nodeId, {
+    const now = Date.now()
+    const cacheEntry = {
       data: freshData,
       timestamp: now
-    })
-    console.log(`[cache] ${nodeId} - Stored in cache`)
+    }
+
+    // Persist to session flowCache (ONLY storage location)
+    await flow.store.setNodeCache(flow.nodeId, cacheEntry)
+
+    flow.log.debug('Stored in cache')
   }
 
   return {
-    context: contextIn,
+    context: executionContext,
     data: freshData,
     status: 'success',
     metadata: {

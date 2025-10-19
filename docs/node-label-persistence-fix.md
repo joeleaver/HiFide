@@ -21,7 +21,7 @@ Added `label` field to the interface:
 ```typescript
 export interface SerializedNode {
   id: string
-  kind: string
+  nodeType: string
   label?: string      // Custom node label (if different from id)
   config?: Record<string, any>
   position: { x: number; y: number }
@@ -36,10 +36,10 @@ Updated to extract and save the label:
 function serializeNode(node: Node): SerializedNode {
   const data = node.data as any
   const label = data?.labelBase || data?.label
-  
+
   return {
     id: node.id,
-    kind: data?.kind || node.id.split('-')[0],
+    nodeType: data?.nodeType || node.id.split('-')[0],
     label: label !== node.id ? label : undefined, // Only save if different from id
     config: data?.config || {},
     position: node.position,
@@ -59,13 +59,13 @@ Updated to restore the saved label:
 ```typescript
 function deserializeNode(serialized: SerializedNode): Node {
   const label = serialized.label || serialized.id
-  
+
   return {
     id: serialized.id,
     type: 'hifiNode',
     position: serialized.position,
     data: {
-      kind: serialized.kind,
+      nodeType: serialized.nodeType,
       label: label,
       labelBase: label,
       config: serialized.config || {},
@@ -92,7 +92,7 @@ nodes: feNodes.map((n) => {
   const label = data?.labelBase || data?.label
   return {
     id: n.id,
-    kind: data?.kind || n.id.split('-')[0],
+    nodeType: data?.nodeType || n.id.split('-')[0],
     label: label !== n.id ? label : undefined, // Only save if different from id
     config: data?.config || {},
     position: n.position,
@@ -109,7 +109,7 @@ nodes: feNodes.map(n => {
   const data = n.data as any
   return {
     id: n.id,
-    kind: data?.kind,
+    nodeType: data?.nodeType,
     label: data?.labelBase || data?.label,
     config: data?.config,
     position: n.position,

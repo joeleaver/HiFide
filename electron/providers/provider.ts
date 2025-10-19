@@ -1,3 +1,5 @@
+import type { EmitExecutionEvent } from '../ipc/flows-v2/execution-events'
+
 export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string }
 
 export interface StreamHandle {
@@ -40,6 +42,9 @@ export interface ProviderAdapter {
     system?: any  // For Anthropic
     contents?: any[]  // For Gemini
     systemInstruction?: string  // For Gemini
+    // NEW: Event emitter (optional for backward compatibility)
+    emit?: EmitExecutionEvent
+    // Legacy callbacks (deprecated, use emit instead)
     onChunk: (text: string) => void
     onDone: () => void
     onError: (error: string) => void
@@ -59,6 +64,9 @@ export interface ProviderAdapter {
     tools: AgentTool[]
     // Optional JSON Schema to enforce structured outputs (e.g., edits schema)
     responseSchema?: any
+    // NEW: Event emitter (optional for backward compatibility)
+    emit?: EmitExecutionEvent
+    // Legacy callbacks (deprecated, use emit instead)
     onChunk: (text: string) => void
     onDone: () => void
     onError: (error: string) => void

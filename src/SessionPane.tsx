@@ -2,10 +2,9 @@ import { Stack, Textarea, Card, ScrollArea, Text, Group, Badge as MantineBadge }
 import { useAppStore, useDispatch, selectSessions, selectCurrentId } from './store'
 import Markdown from './components/Markdown'
 
-import { BadgeGroup } from './components/BadgeGroup'
 import { NodeOutputBox } from './components/NodeOutputBox'
 import { FlowStatusIndicator } from './components/FlowStatusIndicator'
-import type { SessionItem } from './store'
+import type { SessionItem, NodeExecutionBox } from '../electron/store/types'
 import { useRef, useEffect, useState } from 'react'
 
 export default function SessionPane() {
@@ -88,153 +87,96 @@ export default function SessionPane() {
         viewportRef={viewportRef}
       >
         <Stack gap="sm" pr="md">
-          {/* Session timeline rendering - group consecutive items with same nodeId */}
-          {(() => {
-            const grouped: Array<{ key: string; items: typeof sessionItems; nodeId?: string }> = []
-            let currentGroup: typeof sessionItems = []
-            let currentNodeId: string | undefined = undefined
+          {/* Simplified session timeline rendering */}
+          {sessionItems.map((item) => {
+            // User message
+            if (item.type === 'message' && item.role === 'user') {
+              return (
+                <Card
+                  key={item.id}
+                  withBorder
+                  p="xs"
+                  style={{
+                    backgroundColor: '#1e3a5f',
+                    marginLeft: '40px',
+                    borderColor: '#2b5a8e',
+                  }}
+                >
+                  <Text size="sm" c="#e0e0e0">{item.content}</Text>
+                </Card>
+              )
+            }
 
-            for (const item of sessionItems) {
-              const itemNodeId = item.type === 'badge-group' ? item.nodeId : item.type === 'message' ? item.nodeId : undefined
+            // Node execution box
+            if (item.type === 'node-execution') {
+              const box = item as NodeExecutionBox
 
-              // Start new group if:
-              // 1. User message (always separate)
-              // 2. No nodeId (can't group)
-              // 3. Different nodeId from current group
-              if (
-                (item.type === 'message' && item.role === 'user') ||
-                !itemNodeId ||
-                (currentNodeId && itemNodeId !== currentNodeId)
-              ) {
-                // Flush current group
-                if (currentGroup.length > 0) {
-                  grouped.push({ key: currentGroup[0].id, items: currentGroup, nodeId: currentNodeId })
-                  currentGroup = []
-                  currentNodeId = undefined
-                }
+              // Merge consecutive text items to fix markdown rendering
+              // (debounced flushing can split markdown syntax across multiple text items)
+              const mergedContent: Array<{ type: 'text'; text: string } | { type: 'badge'; badge: any }> = []
+              let textBuffer = ''
 
-                // User messages and items without nodeId go in their own group
-                if (item.type === 'message' && item.role === 'user') {
-                  grouped.push({ key: item.id, items: [item], nodeId: undefined })
-                } else if (!itemNodeId) {
-                  grouped.push({ key: item.id, items: [item], nodeId: undefined })
+              for (const contentItem of box.content) {
+                if (contentItem.type === 'text') {
+                  textBuffer += contentItem.text
                 } else {
-                  // Start new group with this item
-                  currentGroup = [item]
-                  currentNodeId = itemNodeId
+                  // Non-text item (badge) - flush accumulated text first
+                  if (textBuffer) {
+                    mergedContent.push({ type: 'text', text: textBuffer })
+                    textBuffer = ''
+                  }
+                  mergedContent.push(contentItem)
                 }
-              } else {
-                // Add to current group
-                if (currentGroup.length === 0) {
-                  currentNodeId = itemNodeId
-                }
-                currentGroup.push(item)
-              }
-            }
-
-            // Flush final group
-            if (currentGroup.length > 0) {
-              grouped.push({ key: currentGroup[0].id, items: currentGroup, nodeId: currentNodeId })
-            }
-
-            // Render grouped items
-            return grouped.map((group) => {
-              // Single user message
-              if (group.items.length === 1 && group.items[0].type === 'message' && group.items[0].role === 'user') {
-                const item = group.items[0]
-                return (
-                  <Card
-                    key={item.id}
-                    withBorder
-                    p="xs"
-                    style={{
-                      backgroundColor: '#1e3a5f',
-                      marginLeft: '40px',
-                      borderColor: '#2b5a8e',
-                    }}
-                  >
-                    <Text size="sm" c="#e0e0e0">{item.content}</Text>
-                  </Card>
-                )
               }
 
-              // Single item without nodeId (shouldn't happen, but handle it)
-              if (group.items.length === 1 && !group.nodeId) {
-                const item = group.items[0]
-                if (item.type === 'badge-group') {
-                  return <BadgeGroup key={item.id} badgeGroup={item} />
-                }
-                if (item.type === 'message') {
-                  return (
-                    <NodeOutputBox
-                      key={item.id}
-                      nodeLabel={item.nodeLabel || 'ASSISTANT'}
-                      nodeKind={item.nodeKind || 'llmRequest'}
-                      provider={item.provider}
-                      model={item.model}
-                      cost={item.cost}
-                    >
-                      <Markdown content={item.content} />
-                    </NodeOutputBox>
-                  )
-                }
-                return null
+              // Flush any remaining text
+              if (textBuffer) {
+                mergedContent.push({ type: 'text', text: textBuffer })
               }
-
-              // Grouped items with same nodeId - combine into single NodeOutputBox
-              const firstItem = group.items[0]
-              const nodeLabel = firstItem.type === 'badge-group' ? firstItem.nodeLabel : firstItem.type === 'message' ? firstItem.nodeLabel : undefined
-              const nodeKind = firstItem.type === 'badge-group' ? firstItem.nodeKind : firstItem.type === 'message' ? firstItem.nodeKind : undefined
-              const provider = firstItem.type === 'badge-group' ? firstItem.provider : firstItem.type === 'message' ? firstItem.provider : undefined
-              const model = firstItem.type === 'badge-group' ? firstItem.model : firstItem.type === 'message' ? firstItem.model : undefined
-              const cost = firstItem.type === 'badge-group' ? firstItem.cost : firstItem.type === 'message' ? firstItem.cost : undefined
 
               return (
                 <NodeOutputBox
-                  key={group.key}
-                  nodeLabel={nodeLabel}
-                  nodeKind={nodeKind}
-                  provider={provider}
-                  model={model}
-                  cost={cost}
+                  key={box.id}
+                  nodeLabel={box.nodeLabel}
+                  nodeType={box.nodeKind}
+                  provider={box.provider}
+                  model={box.model}
+                  cost={box.cost}
                 >
                   <Stack gap="xs">
-                    {group.items.map((item) => {
-                      if (item.type === 'badge-group') {
-                        // Render badges inline
-                        return (
-                          <Group key={item.id} gap="xs" wrap="wrap">
-                            {item.badges.map((badge: any) => (
-                              <MantineBadge
-                                key={badge.id}
-                                color={badge.color || 'gray'}
-                                variant={badge.variant || 'light'}
-                                size="sm"
-                                leftSection={badge.icon}
-                                tt="none"
-                                style={{
-                                  opacity: badge.status === 'running' ? 0.7 : 1,
-                                }}
-                              >
-                                {badge.label}
-                                {badge.status === 'running' && ' ...'}
-                                {badge.status === 'error' && ' ✗'}
-                              </MantineBadge>
-                            ))}
-                          </Group>
-                        )
+                    {mergedContent.map((contentItem, idx) => {
+                      if (contentItem.type === 'text') {
+                        return <Markdown key={idx} content={contentItem.text} />
                       }
-                      if (item.type === 'message') {
-                        // Render message content inline
-                        return <Markdown key={item.id} content={item.content} />
+                      if (contentItem.type === 'badge') {
+                        const badge = contentItem.badge
+                        return (
+                          <MantineBadge
+                            key={idx}
+                            color={badge.color || 'gray'}
+                            variant={badge.variant || 'light'}
+                            size="sm"
+                            leftSection={badge.icon}
+                            tt="none"
+                            style={{
+                              opacity: badge.status === 'running' ? 0.7 : 1,
+                            }}
+                          >
+                            {badge.label}
+                            {badge.status === 'running' && ' ...'}
+                            {badge.status === 'error' && ' ✗'}
+                          </MantineBadge>
+                        )
                       }
                       return null
                     })}
                   </Stack>
                 </NodeOutputBox>
               )
-            })
-          })()}
+            }
+
+            return null
+          })}
 
           {/* Flow status indicator - shows running/waiting/stopped states */}
           <FlowStatusIndicator status={feStatus} />

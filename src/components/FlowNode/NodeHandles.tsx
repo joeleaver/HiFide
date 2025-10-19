@@ -3,61 +3,61 @@ import { useAppStore } from '../../store'
 import { CONNECTION_COLORS } from '../../../electron/store/utils/connection-colors'
 
 interface NodeHandlesProps {
-  kind: string
+  nodeType: string
   config?: any
   onHeightCalculated?: (height: number) => void
   nodeId?: string
 }
 
-export default function NodeHandles({ kind, config }: NodeHandlesProps) {
+export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
   // Entry nodes don't need input - they define the root context
-  const isEntryNode = kind === 'defaultContextStart' || kind === 'newContext'
+  const isEntryNode = nodeType === 'defaultContextStart' || nodeType === 'newContext'
 
   // Determine context color based on node type
-  const contextColor = kind === 'newContext' ? CONNECTION_COLORS.contextIsolated : CONNECTION_COLORS.context
+  const contextColor = nodeType === 'newContext' ? CONNECTION_COLORS.contextIsolated : CONNECTION_COLORS.context
 
   // intentRouter has dynamic outputs based on configured routes
-  const isIntentRouter = kind === 'intentRouter'
+  const isIntentRouter = nodeType === 'intentRouter'
   const intentRoutes = isIntentRouter ? Object.keys(config?.routes || {}) : []
 
   // Get flow graph for portal output dynamic handles
   const feNodes = useAppStore((s) => s.feNodes)
   const feEdges = useAppStore((s) => s.feEdges)
 
-  // Define inputs and outputs based on node kind
+  // Define inputs and outputs based on node type
   const inputs: Array<{ id: string; label: string; color?: string }> = []
   const outputs: Array<{ id: string; label: string; color?: string }> = []
 
   // Input handles - V2 architecture with explicit Context In / Data In
-  if (kind === 'portalInput') {
+  if (nodeType === 'portalInput') {
     // Portal Input has Context In and Data In (both optional)
     inputs.push({ id: 'context', label: 'Context In', color: contextColor })
     inputs.push({ id: 'data', label: 'Data In', color: CONNECTION_COLORS.data })
-  } else if (kind === 'portalOutput') {
+  } else if (nodeType === 'portalOutput') {
     // Portal Output has no inputs - it pulls from the portal registry
     // No input handles
-  } else if (kind === 'parallelJoin') {
+  } else if (nodeType === 'parallelJoin') {
     // Join node has multiple data inputs
     inputs.push({ id: 'data-1', label: 'Data In 1', color: CONNECTION_COLORS.data })
     inputs.push({ id: 'data-2', label: 'Data In 2', color: CONNECTION_COLORS.data })
     inputs.push({ id: 'data-3', label: 'Data In 3', color: CONNECTION_COLORS.data })
-  } else if (kind === 'llmRequest') {
+  } else if (nodeType === 'llmRequest') {
     // LLM Request node has Context In, Data In, and Tools inputs
     if (!isEntryNode) {
       inputs.push({ id: 'context', label: 'Context In', color: contextColor })
       inputs.push({ id: 'data', label: 'Data In', color: CONNECTION_COLORS.data })
       inputs.push({ id: 'tools', label: 'Tools', color: CONNECTION_COLORS.tools })
     }
-  } else if (kind === 'userInput') {
+  } else if (nodeType === 'userInput') {
     // UserInput node has Context In only (Data In comes from UI pause/resume)
     if (!isEntryNode) {
       inputs.push({ id: 'context', label: 'Context In', color: contextColor })
     }
-  } else if (kind === 'tools') {
+  } else if (nodeType === 'tools') {
     // Tools node has optional Context In and Data In
     inputs.push({ id: 'context', label: 'Context In', color: contextColor })
     inputs.push({ id: 'data', label: 'Data In', color: CONNECTION_COLORS.data })
-  } else if (kind === 'injectMessages') {
+  } else if (nodeType === 'injectMessages') {
     // InjectMessages node has Context In and optional dynamic message inputs
     inputs.push({ id: 'context', label: 'Context In', color: contextColor })
     inputs.push({ id: 'userMessage', label: 'User Message', color: CONNECTION_COLORS.data })
@@ -69,16 +69,16 @@ export default function NodeHandles({ kind, config }: NodeHandlesProps) {
   }
 
   // Output handles - V2 architecture with explicit Context Out / Data Out
-  if (kind === 'portalInput') {
+  if (nodeType === 'portalInput') {
     // Portal Input has no outputs - it stores data in the portal registry
     // No output handles
-  } else if (kind === 'portalOutput') {
+  } else if (nodeType === 'portalOutput') {
     // Portal Output dynamically shows outputs based on what's connected to matching Portal Input
     const portalId = config?.id
     if (portalId) {
       // Find the matching Portal Input node
       const matchingInputNode = feNodes.find(
-        (n: any) => (n.data as any)?.kind === 'portalInput' && (n.data as any)?.config?.id === portalId
+        (n: any) => (n.data as any)?.nodeType === 'portalInput' && (n.data as any)?.config?.id === portalId
       )
 
       if (matchingInputNode) {
@@ -105,20 +105,20 @@ export default function NodeHandles({ kind, config }: NodeHandlesProps) {
       outputs.push({ id: `${intent}-context`, label: `${intent} Context`, color: contextColor })
       outputs.push({ id: `${intent}-data`, label: `${intent} Data`, color: CONNECTION_COLORS.data })
     })
-  } else if (kind === 'conditional' || kind === 'parallelSplit') {
+  } else if (nodeType === 'conditional' || nodeType === 'parallelSplit') {
     outputs.push({ id: 'out-1', label: 'Data Out 1', color: CONNECTION_COLORS.data })
     outputs.push({ id: 'out-2', label: 'Data Out 2', color: CONNECTION_COLORS.data })
-  } else if (kind === 'llmRequest' || kind === 'userInput') {
+  } else if (nodeType === 'llmRequest' || nodeType === 'userInput') {
     // LLM Request and userInput nodes have Context Out and Data Out
     // - Context Out: passes conversation context (for continuing conversation)
     // - Data Out: passes only the message text (for using output elsewhere)
     outputs.push({ id: 'context', label: 'Context Out', color: contextColor })
     outputs.push({ id: 'data', label: 'Data Out', color: CONNECTION_COLORS.data })
-  } else if (kind === 'tools') {
+  } else if (nodeType === 'tools') {
     // Tools node has Context Out and Tools output
     outputs.push({ id: 'context', label: 'Context Out', color: contextColor })
     outputs.push({ id: 'tools', label: 'Tools', color: CONNECTION_COLORS.tools })
-  } else if (kind === 'defaultContextStart' || kind === 'newContext') {
+  } else if (nodeType === 'defaultContextStart' || nodeType === 'newContext') {
     // Entry nodes only have Context Out (no data)
     outputs.push({ id: 'context', label: 'Context Out', color: contextColor })
   } else {
@@ -133,7 +133,7 @@ export default function NodeHandles({ kind, config }: NodeHandlesProps) {
   const minHeight = Math.max(30, maxHandles * 20) // At least 30px, or 20px per handle
 
   // Debug: log handles for LLM Request nodes
-  if (kind === 'llmRequest') {
+  if (nodeType === 'llmRequest') {
   }
 
   return (

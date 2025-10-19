@@ -24,9 +24,9 @@ export const NODE_COLORS: Record<string, string> = {
 }
 
 /**
- * Human-readable labels for node kinds
+ * Human-readable labels for node types
  */
-export const NODE_KIND_LABELS: Record<string, string> = {
+export const NODE_TYPE_LABELS: Record<string, string> = {
   defaultContextStart: 'Context Start',
   userInput: 'User Input',
   manualInput: 'Manual Input',
@@ -47,11 +47,11 @@ export const NODE_KIND_LABELS: Record<string, string> = {
 }
 
 /**
- * Get color for a node kind with fallback
+ * Get color for a node type with fallback
  */
-export function getNodeColor(kind: string | undefined): string {
-  if (!kind) return '#4a4a4a'
-  return NODE_COLORS[kind] || '#4a4a4a'
+export function getNodeColor(nodeType: string | undefined): string {
+  if (!nodeType) return '#4a4a4a'
+  return NODE_COLORS[nodeType] || '#4a4a4a'
 }
 
 /**
@@ -86,19 +86,19 @@ export const CATEGORY_LABELS: Record<NodeCategory, string> = {
 }
 
 /**
- * Get category for a node kind
+ * Get category for a node type
  */
-export function getNodeCategory(kind: string | undefined): NodeCategory | undefined {
-  if (!kind) return undefined
-  return NODE_CATEGORIES[kind]
+export function getNodeCategory(nodeType: string | undefined): NodeCategory | undefined {
+  if (!nodeType) return undefined
+  return NODE_CATEGORIES[nodeType]
 }
 
 /**
- * Get human-readable label for a node kind
+ * Get human-readable label for a node type
  */
-export function getNodeKindLabel(kind: string | undefined): string {
-  if (!kind) return 'Unknown'
-  return NODE_KIND_LABELS[kind] || kind
+export function getNodeTypeLabel(nodeType: string | undefined): string {
+  if (!nodeType) return 'Unknown'
+  return NODE_TYPE_LABELS[nodeType] || nodeType
 }
 
 /**
@@ -106,16 +106,16 @@ export function getNodeKindLabel(kind: string | undefined): string {
  * Format: "NODE TYPE: Node Title"
  * Example: "LLM REQUEST: My Custom Node"
  */
-export function formatNodeTitle(nodeKind: string | undefined, nodeLabel: string | undefined): string {
-  const kindLabel = getNodeKindLabel(nodeKind)
-  const title = nodeLabel || kindLabel
+export function formatNodeTitle(nodeType: string | undefined, nodeLabel: string | undefined): string {
+  const typeLabel = getNodeTypeLabel(nodeType)
+  const title = nodeLabel || typeLabel
 
-  // If the title is the same as the kind label, just return the uppercase kind label
-  if (title === kindLabel) {
-    return kindLabel.toUpperCase()
+  // If the title is the same as the type label, just return the uppercase type label
+  if (title === typeLabel) {
+    return typeLabel.toUpperCase()
   }
 
-  // Otherwise, format as "KIND: Title"
-  return `${kindLabel.toUpperCase()}: ${title}`
+  // Otherwise, format as "TYPE: Title"
+  return `${typeLabel.toUpperCase()}: ${title}`
 }
 

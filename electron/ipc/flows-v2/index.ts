@@ -82,35 +82,33 @@ export async function executeFlow(
 
 /**
  * Resume a paused flow with user input
+ * Provider/model switching is handled by refreshMainContextFromStore() before each node execution
  */
 export async function resumeFlow(
   _wc: WebContents | undefined,
   requestId: string,
-  userInput: string,
-  provider?: string,
-  model?: string
+  userInput: string
 ): Promise<{ ok: boolean; error?: string }> {
+  console.log('[resumeFlow] Called with:', { requestId, userInputLength: userInput.length })
+
   const scheduler = activeFlows.get(requestId)
 
   if (!scheduler) {
+    console.error('[resumeFlow] Scheduler not found for requestId:', requestId)
     return { ok: false, error: 'Flow not found or not active' }
   }
 
   try {
-    // Update provider/model if specified (for mid-flow provider switching)
-    if (provider || model) {
-      scheduler.updateProviderModel(provider, model)
-    }
-
     // Resolve the promise that the userInput node is awaiting
-    // The flow never stopped - it's just waiting for this data
-    // The nodeId is 'user-input' by convention (could be made configurable)
-    const { useMainStore } = await import('../../store/index.js')
-    useMainStore.getState().feResolveUserInput('user-input', userInput)
+    // The scheduler knows which node is waiting - just resolve any waiting input
+    // Provider/model will be refreshed from session context before next node execution
+    console.log('[resumeFlow] Calling scheduler.resolveAnyWaitingUserInput')
+    scheduler.resolveAnyWaitingUserInput(userInput)
 
     return { ok: true }
   } catch (e: any) {
     const error = e?.message || String(e)
+    console.error('[resumeFlow] Error:', error)
     emitFlowEvent(requestId, { type: 'error', error })
     return { ok: false, error }
   }
@@ -160,9 +158,9 @@ export function registerFlowHandlersV2(ipcMain: IpcMain): void {
   /**
    * Resume a paused flow
    */
-  ipcMain.handle('flow:resume:v2', async (_event, args: { requestId: string; userInput: string; provider?: string; model?: string }) => {
+  ipcMain.handle('flow:resume:v2', async (_event, args: { requestId: string; userInput: string }) => {
     const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-    return resumeFlow(wc, args.requestId, args.userInput, args.provider, args.model)
+    return resumeFlow(wc, args.requestId, args.userInput)
   })
 
   /**
