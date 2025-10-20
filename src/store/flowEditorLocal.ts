@@ -9,15 +9,6 @@
 import { create } from 'zustand'
 import { useDispatch } from './index'
 
-// Lightweight debounce to avoid pulling in lodash
-function debounce<T extends (...args: any[]) => void>(fn: T, wait: number) {
-  let t: any
-  return (...args: Parameters<T>) => {
-    if (t) clearTimeout(t)
-    t = setTimeout(() => fn(...args), wait)
-  }
-}
-
 export type LocalFlowNode = any
 export type LocalFlowEdge = any
 
@@ -33,18 +24,37 @@ interface FlowEditorLocalState {
   setEdges: (edges: LocalFlowEdge[]) => void
   reset: () => void
   saveDebounced: () => void
+  suspendSaving: (ms?: number) => void
+  resumeSaving: () => void
 }
 
 
 export const useFlowEditorLocal = create<FlowEditorLocalState>((set, get) => {
-  // Debounced saver uses closure over get(); dispatch grabbed at call time
-  const doSave = debounce(() => {
-    const { nodes, edges } = get()
-    const dispatch = useDispatch()
-    // Sync latest UI graph to main store (main will handle persistence/normalization)
-    dispatch('feSetNodes', { nodes })
-    dispatch('feSetEdges', { edges })
-  }, 500)
+  // Internal debounce + suppression controls
+  let saveTimeout: any = null
+  let savesEnabled = true
+  const cancelPendingSave = () => {
+    if (saveTimeout) {
+      clearTimeout(saveTimeout)
+      saveTimeout = null
+    }
+  }
+
+  const scheduleSave = () => {
+    if (!savesEnabled) {
+      cancelPendingSave()
+      return
+    }
+    cancelPendingSave()
+    saveTimeout = setTimeout(() => {
+      if (!savesEnabled) return
+      const { nodes, edges } = get()
+      const dispatch = useDispatch()
+      // Sync latest UI graph to main store (main will handle persistence/normalization)
+      dispatch('feSetNodes', { nodes })
+      dispatch('feSetEdges', { edges })
+    }, 500)
+  }
 
   return {
     nodes: [],
@@ -53,15 +63,33 @@ export const useFlowEditorLocal = create<FlowEditorLocalState>((set, get) => {
     layout: {},
 
     hydrateFromMain: (graph) => {
+      // Suppress outgoing saves during hydration to avoid overwriting freshly loaded graphs
+      savesEnabled = false
+      cancelPendingSave()
       set({ nodes: graph.nodes || [], edges: graph.edges || [] })
+      // Re-enable saves shortly after hydration
+      setTimeout(() => { savesEnabled = true }, 750)
     },
 
     setNodes: (nodes) => set({ nodes }),
     setEdges: (edges) => set({ edges }),
 
-    reset: () => set({ nodes: [], edges: [], selection: {}, layout: {} }),
+    reset: () => {
+      cancelPendingSave()
+      set({ nodes: [], edges: [], selection: {}, layout: {} })
+    },
 
-    saveDebounced: () => { doSave() },
+    saveDebounced: () => { scheduleSave() },
+
+    suspendSaving: (ms?: number) => {
+      savesEnabled = false
+      cancelPendingSave()
+      if (ms && ms > 0) {
+        setTimeout(() => { savesEnabled = true }, ms)
+      }
+    },
+
+    resumeSaving: () => { savesEnabled = true },
   }
 })
 

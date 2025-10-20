@@ -200,17 +200,27 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   useEffect(() => {
     if (!Array.isArray(storeNodes) || !Array.isArray(storeEdges)) return
 
+    // If confirmation modal is open, do not hydrate yet (user hasn't confirmed switch)
+    if (loadTemplateModalOpen) return
+
     // Load from store when:
     // 1. First initialization (lastLoadedTemplateRef is null)
     // 2. Template changed (selectedTemplate is different from last loaded)
+    // 3. Store graph changed for the current template (e.g., async load finished)
     const isFirstLoad = lastLoadedTemplateRef.current === null
     const templateChanged = selectedTemplate !== lastLoadedTemplateRef.current
 
-    if (isFirstLoad || templateChanged) {
+    // Shallow graph difference check (ids + counts)
+    const ids = (arr: any[]) => (Array.isArray(arr) ? arr.map((n: any) => n?.id).join('|') : '')
+    const localSig = `${localNodes?.length || 0}:${ids(localNodes)}|${localEdges?.length || 0}:${ids(localEdges)}`
+    const storeSig = `${storeNodes?.length || 0}:${ids(storeNodes)}|${storeEdges?.length || 0}:${ids(storeEdges)}`
+    const graphChanged = localSig !== storeSig
+
+    if (isFirstLoad || templateChanged || graphChanged) {
       hydrateFromMain({ nodes: storeNodes, edges: storeEdges })
       lastLoadedTemplateRef.current = selectedTemplate
     }
-  }, [storeNodes, storeEdges, selectedTemplate])
+  }, [storeNodes, storeEdges, selectedTemplate, loadTemplateModalOpen, localNodes, localEdges])
 
   // Debounced sync of local graph to main store on changes
   useEffect(() => {
