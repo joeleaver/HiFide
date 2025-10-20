@@ -276,24 +276,7 @@ export type PricingConfig = {
   customRates?: boolean
 }
 
-// ============================================================================
-// Rate Limit Types
-// ============================================================================
 
-export type RateLimitKind = {
-  rpm?: number
-  tpmTotal?: number
-  tpmInput?: number
-  tpmOutput?: number
-  maxConcurrent?: number
-}
-
-export type RateLimitConfig = {
-  enabled: boolean
-  openai?: Record<string, RateLimitKind>
-  anthropic?: Record<string, RateLimitKind>
-  gemini?: Record<string, RateLimitKind>
-}
 
 // ============================================================================
 // Activity/Badge Types

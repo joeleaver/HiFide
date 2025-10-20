@@ -1,9 +1,9 @@
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { Project, SyntaxKind } from 'ts-morph'
+import { useMainStore } from '../store/index.js'
 
 function getTsconfigPath(tsconfigPath?: string) {
-  const { useMainStore } = require('../store/index.js')
   const root = useMainStore.getState().workspaceRoot || process.cwd()
   return tsconfigPath || path.join(root, 'tsconfig.json')
 }

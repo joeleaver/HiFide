@@ -5,6 +5,24 @@ import type { ProviderAdapter, StreamHandle } from './provider'
 import { validateJson } from './jsonschema'
 import { withRetries } from './retry'
 
+import { rateLimitTracker } from './rate-limit-tracker'
+
+// Normalize various header shapes into a simple lower-cased map
+const toHeaderMap = (h: any): Record<string, string> => {
+  const map: Record<string, string> = {}
+  try {
+    if (!h) return map
+    if (typeof h.forEach === 'function') {
+      h.forEach((v: any, k: string) => { map[String(k).toLowerCase()] = String(v) })
+    } else if (Array.isArray(h)) {
+      for (const [k, v] of h as any) { map[String(k).toLowerCase()] = String(v) }
+    } else if (typeof h === 'object') {
+      for (const k of Object.keys(h)) { map[String(k).toLowerCase()] = String((h as any)[k]) }
+    }
+  } catch {}
+  return map
+}
+
 // Gemini doesn't support additionalProperties, const, default, or complex oneOf/anyOf/allOf in schemas
 // Strip them out recursively and simplify the schema
 function stripAdditionalProperties(schema: any): any {
@@ -52,7 +70,7 @@ function stripAdditionalProperties(schema: any): any {
 
 export const GeminiProvider: ProviderAdapter = {
   id: 'gemini',
-  async chatStream({ apiKey, model, systemInstruction, contents, emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async chatStream({ apiKey, model, systemInstruction, contents, emit: _emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
 
     const ai = new GoogleGenAI({ apiKey })
 
@@ -137,6 +155,14 @@ export const GeminiProvider: ProviderAdapter = {
 
           // Extract token usage from non-streaming response
           try {
+          // Update rate limit tracker from headers if available (non-stream fallback)
+          try {
+            const hdrs = (res as any)?.response?.headers || (res as any)?.raw?.response?.headers
+            if (hdrs) {
+              rateLimitTracker.updateFromHeaders('gemini', model as any, toHeaderMap(hdrs))
+            }
+          } catch {}
+
             const usage = res?.usageMetadata
             if (usage) {
               const cachedTokens = usage.cachedContentTokenCount || 0
@@ -179,8 +205,10 @@ export const GeminiProvider: ProviderAdapter = {
   },
 
   // Agent streaming with Gemini function calling
-  async agentStream({ apiKey, model, systemInstruction, contents, tools, responseSchema: _responseSchema, toolMeta, emit, onChunk, onDone, onError, onTokenUsage, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, systemInstruction, contents, tools, responseSchema: _responseSchema, toolMeta, emit: _emit, onChunk, onDone, onError, onTokenUsage, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const ai = new GoogleGenAI({ apiKey })
+
+    const holder: { abort?: () => void } = {}
 
     // Messages are already formatted by llm-service
     // systemInstruction: string
@@ -203,6 +231,7 @@ export const GeminiProvider: ProviderAdapter = {
 
     // We'll iteratively stream until no functionCalls appear in a streamed turn
     let shouldPrune = false
+
     let pruneData: any = null
 
     let cancelled = false
@@ -228,6 +257,7 @@ export const GeminiProvider: ProviderAdapter = {
             contents: contentsArray,
             config,
           }) as any)
+          holder.abort = () => { try { streamRes?.controller?.abort?.() } catch {} }
 
           // Accumulate function calls incrementally
           const callAcc: Record<string, { name: string; args: any }> = {}
@@ -288,6 +318,14 @@ export const GeminiProvider: ProviderAdapter = {
             contentsArray.push({ role: 'model', parts: modelParts })
 
             const toolResponses: any[] = []
+          // Update rate limit tracker from headers if available for this streamed turn
+          try {
+            const hdrs = (streamRes as any)?.response?.headers || (streamRes as any)?.raw?.response?.headers
+            if (hdrs) {
+              rateLimitTracker.updateFromHeaders('gemini', model as any, toHeaderMap(hdrs))
+            }
+          } catch {}
+
             for (const fc of functionCalls) {
               const name = fc.name
               const args = fc.args || {}
@@ -304,7 +342,7 @@ export const GeminiProvider: ProviderAdapter = {
                 }
 
                 // Generate tool execution ID
-                const toolExecutionId = crypto.randomUUID()
+
 
                 // Notify tool start
                 try { onToolStart?.({ callId, name, arguments: args }) } catch {}
@@ -352,6 +390,14 @@ export const GeminiProvider: ProviderAdapter = {
             // Log cache hits
             if (cachedTokens > 0) {
             }
+          // Update rate limit tracker from headers if available for final streamed answer
+          try {
+            const hdrs = (streamRes as any)?.response?.headers || (streamRes as any)?.raw?.response?.headers
+            if (hdrs) {
+              rateLimitTracker.updateFromHeaders('gemini', model as any, toHeaderMap(hdrs))
+            }
+          } catch {}
+
           }
 
           // Done
@@ -372,7 +418,7 @@ export const GeminiProvider: ProviderAdapter = {
       } catch {}
     })
 
-    return { cancel: () => { cancelled = true } }
+    return { cancel: () => { cancelled = true; try { holder.abort?.() } catch {} } }
   },
 
 }

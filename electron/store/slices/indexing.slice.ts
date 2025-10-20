@@ -65,11 +65,11 @@ export const createIndexingSlice: StateCreator<IndexingSlice, [], [], IndexingSl
       if (subscribed) return
       subscribed = true
       
-      // Subscribe to index progress updates from main process
-      if (typeof window !== 'undefined' && window.ipcRenderer?.on) {
-        const handler = (_: any, prog: IndexProgress) => {
+      // Subscribe to index progress updates via typed preload API
+      if (typeof window !== 'undefined' && window.indexing?.onProgress) {
+        window.indexing.onProgress((prog: IndexProgress) => {
           set({ idxProg: prog })
-          
+
           // If indexing is complete, refresh status
           if (prog && !prog.inProgress) {
             const state = get() as any
@@ -79,13 +79,8 @@ export const createIndexingSlice: StateCreator<IndexingSlice, [], [], IndexingSl
               })
             }
           }
-        }
-        
-        try {
-          window.ipcRenderer.on('index:progress', handler)
-        } catch (e) {
-          console.error('[indexing] Failed to subscribe to index progress:', e)
-        }
+        })
+        // Note: we intentionally do not retain the unsubscribe; subscription is idempotent per app lifecycle
       }
     }
   })(),

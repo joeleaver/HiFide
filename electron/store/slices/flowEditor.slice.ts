@@ -4,7 +4,6 @@ import type { PricingConfig } from '../types'
 import { initializeFlowProfiles, listFlowTemplates, loadFlowTemplate, saveFlowProfile, deleteFlowProfile, isSystemTemplate, loadSystemTemplates, type FlowTemplate, type FlowProfile } from '../../services/flowProfiles'
 import type { MainFlowContext } from '../../ipc/flows-v2/types'
 import { loadWorkspaceSettings, saveWorkspaceSettings } from '../../ipc/workspace'
-import { reactFlowToFlowDefinition } from '../../services/flowConversion'
 
 // Flow runtime event type (mirrors renderer usage)
 export type FlowEvent = {
@@ -42,11 +41,15 @@ export interface NodeExecutionState {
 
 // Slice interface
 export interface FlowEditorSlice {
-  // Graph state
+  // Graph state - Mirror of renderer's local state
+  // Synced renderer → store when user saves/executes (used by scheduler to read configs)
+  // NEVER synced store → renderer (except at initial session load)
   feNodes: Node[]
   feEdges: Edge[]
-  feNodePositions: Record<string, XYPosition>
-  feNodeExecutionState: Record<string, NodeExecutionState>  // Execution state separate from layout (plain object for IPC serialization)
+
+  // Execution state - Simple metadata keyed by node ID
+  // Updated by scheduler during execution, synced store → renderer for visual styling
+  feFlowState: Record<string, NodeExecutionState>  // Plain object for IPC serialization
 
   // Main flow context (ephemeral, only exists during flow execution)
   feMainFlowContext: MainFlowContext | null
@@ -103,44 +106,46 @@ export interface FlowEditorSlice {
   // Actions
   initFlowEditor: () => Promise<void>
   feLoadTemplates: () => Promise<void>
-  feLoadTemplate: (templateId: string) => Promise<void>
+  feLoadTemplate: (params: { templateId: string }) => Promise<void>
   feSaveCurrentProfile: () => Promise<void>
   feStartPeriodicSave: () => void
   feStopPeriodicSave: () => void
-  feSaveAsProfile: (name: string) => Promise<void>
-  feDeleteProfile: (name: string) => Promise<void>
+  feSaveAsProfile: (params: { name: string }) => Promise<void>
+  feDeleteProfile: (params: { name: string }) => Promise<void>
   feExportFlow: () => Promise<void>
   feClearExportResult: () => void
   feImportFlow: () => Promise<void>
   feClearImportResult: () => void
-  feSetSelectedTemplate: (id: string) => void
-  feSetSaveAsModalOpen: (open: boolean) => void
-  feSetNewProfileName: (name: string) => void
-  feSetLoadTemplateModalOpen: (open: boolean) => void
-  feSetNodes: (nodesOrUpdater: Node[] | ((current: Node[]) => Node[])) => void
-  feSetEdges: (edgesOrUpdater: Edge[] | ((current: Edge[]) => Edge[])) => void
+  feSetSelectedTemplate: (params: { id: string }) => void
+  feSetSaveAsModalOpen: (params: { open: boolean }) => void
+  feSetNewProfileName: (params: { name: string }) => void
+  feSetLoadTemplateModalOpen: (params: { open: boolean }) => void
+
+  // Graph state setters - used by renderer to sync local state when needed (execute, save)
+  feSetNodes: (params: { nodes: Node[] }) => void
+  feSetEdges: (params: { edges: Edge[] }) => void
   feApplyNodeChanges: (changes: NodeChange[]) => void
   feUpdateNodePosition: (params: { id: string; pos: XYPosition }) => void
-  feAddNode: (params: { kind: string; pos: XYPosition; label?: string }) => void
-  feSetSelectedNodeId: (id: string | null) => void
+  feAddNode: (params: { nodeType: string; pos: XYPosition; label?: string }) => void
+  feSetSelectedNodeId: (params: { id: string | null }) => void
   feSetNodeLabel: (params: { id: string; label: string }) => void
   fePatchNodeConfig: (params: { id: string; patch: Record<string, any> }) => void
 
-  feSetInput: (text: string) => void
-  feSetPatterns: (text: string) => void
-  feSetRetryAttempts: (n: number) => void
-  feSetRetryBackoffMs: (ms: number) => void
-  feSetCacheEnabled: (v: boolean) => void
+  feSetInput: (params: { text: string }) => void
+  feSetPatterns: (params: { text: string }) => void
+  feSetRetryAttempts: (params: { n: number }) => void
+  feSetRetryBackoffMs: (params: { ms: number }) => void
+  feSetCacheEnabled: (params: { v: boolean }) => void
 
-  feSetRedactorEnabled: (v: boolean) => void
-  feSetRuleEmails: (v: boolean) => void
-  feSetRuleApiKeys: (v: boolean) => void
-  feSetRuleAwsKeys: (v: boolean) => void
-  feSetRuleNumbers16: (v: boolean) => void
-  feSetBudgetUSD: (usd: string) => void
-  feSetBudgetBlock: (v: boolean) => void
-  feSetErrorDetectEnabled: (v: boolean) => void
-  feSetErrorDetectBlock: (v: boolean) => void
+  feSetRedactorEnabled: (params: { v: boolean }) => void
+  feSetRuleEmails: (params: { v: boolean }) => void
+  feSetRuleApiKeys: (params: { v: boolean }) => void
+  feSetRuleAwsKeys: (params: { v: boolean }) => void
+  feSetRuleNumbers16: (params: { v: boolean }) => void
+  feSetBudgetUSD: (params: { usd: string }) => void
+  feSetBudgetBlock: (params: { v: boolean }) => void
+  feSetErrorDetectEnabled: (params: { v: boolean }) => void
+  feSetErrorDetectBlock: (params: { v: boolean }) => void
 
   feComputeResolvedModel: () => void
 
@@ -148,7 +153,7 @@ export interface FlowEditorSlice {
   flowInit: () => Promise<void>
   feResumeFromState: (requestId: string) => Promise<void>
   feStop: () => Promise<void>
-  feResume: (userInput?: string) => Promise<void>
+  feResume: (params: { userInput?: string }) => Promise<void>
   feExportTrace: () => Promise<void>
 
   // Flow event handlers - called by scheduler to update UI state
@@ -162,6 +167,7 @@ export interface FlowEditorSlice {
   feHandleToolError: (toolName: string, error: string, callId?: string, nodeId?: string) => void
   feHandleIntentDetected: (nodeId: string, intent: string, provider?: string, model?: string) => void
   feHandleTokenUsage: (provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }) => void
+  feHandleRateLimitWait: (nodeId: string, attempt: number, waitMs: number, reason?: string, provider?: string, model?: string) => void
   feHandleWaitingForInput: (nodeId: string, requestId: string) => void
   feHandleDone: () => void
   feHandleError: (error: string) => void
@@ -192,8 +198,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   // Initial state - will be populated by initializeFlowProfiles()
   feNodes: [],
   feEdges: [],
-  feNodePositions: {},
-  feNodeExecutionState: {},
+  feFlowState: {},
   feMainFlowContext: null,
   feIsolatedContexts: {},
 
@@ -321,8 +326,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       if (typeof st.cacheEnabled === 'boolean') patch.feCacheEnabled = st.cacheEnabled
       if (typeof st.errorDetectPatterns === 'string') patch.feErrorDetectPatterns = st.errorDetectPatterns
       if (st.nodePositions && typeof st.nodePositions === 'object') {
-        patch.feNodePositions = st.nodePositions
-        // re-position defaults accordingly
+        // Apply positions from saved profile to nodes
         set({ feNodes: get().feNodes.map((n: Node) => st.nodePositions[n.id] ? { ...n, position: st.nodePositions[n.id] } : n) })
       }
       if (st.nodeLabels && typeof st.nodeLabels === 'object') {
@@ -363,7 +367,6 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         st.feBudgetBlock !== prev.feBudgetBlock ||
         st.feErrorDetectEnabled !== prev.feErrorDetectEnabled ||
         st.feErrorDetectBlock !== prev.feErrorDetectBlock ||
-        st.feNodePositions !== prev.feNodePositions ||
         st.feErrorDetectPatterns !== prev.feErrorDetectPatterns ||
         st.feRetryAttempts !== prev.feRetryAttempts ||
         st.feRetryBackoffMs !== prev.feRetryBackoffMs ||
@@ -392,28 +395,18 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     // Note: Periodic save is started in initFlowEditor(), not here
   },
 
-  feSetNodes: (nodesOrUpdater) => {
+  // ----- Graph Synchronization -----
+
+
+
+  feSetNodes: ({ nodes }: { nodes: Node[] }) => {
     const current = get().feNodes
-    // Support functional updates like React's setState
-    const nodes = typeof nodesOrUpdater === 'function'
-      ? nodesOrUpdater(current)
-      : nodesOrUpdater
-
-    // Avoid unnecessary updates if nodes array is the same reference
     if (current === nodes) return
-
     set({ feNodes: nodes })
   },
-  feSetEdges: (edgesOrUpdater) => {
+  feSetEdges: ({ edges }: { edges: Edge[] }) => {
     const current = get().feEdges
-    // Support functional updates like React's setState
-    const edges = typeof edgesOrUpdater === 'function'
-      ? edgesOrUpdater(current)
-      : edgesOrUpdater
-
-    // Avoid unnecessary updates if edges array is the same reference
     if (current === edges) return
-
     set({ feEdges: edges })
   },
   feApplyNodeChanges: (changes) => {
@@ -452,15 +445,17 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   },
   feUpdateNodePosition: ({ id, pos }: { id: string; pos: XYPosition }) => {
     set({
-      feNodePositions: { ...get().feNodePositions, [id]: pos },
       feNodes: get().feNodes.map((n) => (n.id === id ? { ...n, position: pos } : n)),
     })
   },
   feAddNode: ({ nodeType, pos, label }: { nodeType: string; pos: XYPosition; label?: string }) => {
+    console.log('[feAddNode] Called with:', { nodeType, pos, label })
+
     // Prevent adding multiple defaultContextStart nodes
     if (nodeType === 'defaultContextStart') {
       const hasDefaultContextStart = get().feNodes.some(n => (n.data as any)?.nodeType === 'defaultContextStart')
       if (hasDefaultContextStart) {
+        console.log('[feAddNode] Prevented adding duplicate defaultContextStart')
         return
       }
     }
@@ -476,14 +471,19 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       defaultConfig = { provider: 'openai', model: 'gpt-4o' }
     }
 
+    const newNode = { id, type: 'hifiNode', data: { nodeType: nodeType, label: lbl, labelBase: lbl, config: defaultConfig }, position: pos }
+    console.log('[feAddNode] Adding node:', newNode)
+
     set({
       feNodes: [
         ...get().feNodes,
-        { id, type: 'hifiNode', data: { nodeType: nodeType, label: lbl, labelBase: lbl, config: defaultConfig }, position: pos },
+        newNode,
       ],
     })
+
+    console.log('[feAddNode] Node added, new count:', get().feNodes.length)
   },
-  feSetSelectedNodeId: (id) => set({ feSelectedNodeId: id }),
+  feSetSelectedNodeId: ({ id }: { id: string | null }) => set({ feSelectedNodeId: id }),
   feSetNodeLabel: ({ id, label }: { id: string; label: string }) => {
     const updatedNodes = get().feNodes.map((n) => (n.id === id ? { ...n, data: { ...(n.data as any), labelBase: label, label } } : n))
     set({ feNodes: updatedNodes })
@@ -493,21 +493,21 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     set({ feNodes: updatedNodes })
   },
 
-  feSetInput: (text) => set({ feInput: text }),
-  feSetPatterns: (text) => set({ feErrorDetectPatterns: text }),
-  feSetRetryAttempts: (n) => set({ feRetryAttempts: Math.max(1, Number(n || 1)) }),
-  feSetRetryBackoffMs: (ms) => set({ feRetryBackoffMs: Math.max(0, Number(ms || 0)) }),
-  feSetCacheEnabled: (v) => set({ feCacheEnabled: !!v }),
+  feSetInput: ({ text }: { text: string }) => set({ feInput: text }),
+  feSetPatterns: ({ text }: { text: string }) => set({ feErrorDetectPatterns: text }),
+  feSetRetryAttempts: ({ n }: { n: number }) => set({ feRetryAttempts: Math.max(1, Number(n || 1)) }),
+  feSetRetryBackoffMs: ({ ms }: { ms: number }) => set({ feRetryBackoffMs: Math.max(0, Number(ms || 0)) }),
+  feSetCacheEnabled: ({ v }: { v: boolean }) => set({ feCacheEnabled: !!v }),
 
-  feSetRedactorEnabled: (v) => set({ feRedactorEnabled: !!v }),
-  feSetRuleEmails: (v) => set({ feRuleEmails: !!v }),
-  feSetRuleApiKeys: (v) => set({ feRuleApiKeys: !!v }),
-  feSetRuleAwsKeys: (v) => set({ feRuleAwsKeys: !!v }),
-  feSetRuleNumbers16: (v) => set({ feRuleNumbers16: !!v }),
-  feSetBudgetUSD: (usd) => set({ feBudgetUSD: usd }),
-  feSetBudgetBlock: (v) => set({ feBudgetBlock: !!v }),
-  feSetErrorDetectEnabled: (v) => set({ feErrorDetectEnabled: !!v }),
-  feSetErrorDetectBlock: (v) => set({ feErrorDetectBlock: !!v }),
+  feSetRedactorEnabled: ({ v }: { v: boolean }) => set({ feRedactorEnabled: !!v }),
+  feSetRuleEmails: ({ v }: { v: boolean }) => set({ feRuleEmails: !!v }),
+  feSetRuleApiKeys: ({ v }: { v: boolean }) => set({ feRuleApiKeys: !!v }),
+  feSetRuleAwsKeys: ({ v }: { v: boolean }) => set({ feRuleAwsKeys: !!v }),
+  feSetRuleNumbers16: ({ v }: { v: boolean }) => set({ feRuleNumbers16: !!v }),
+  feSetBudgetUSD: ({ usd }: { usd: string }) => set({ feBudgetUSD: usd }),
+  feSetBudgetBlock: ({ v }: { v: boolean }) => set({ feBudgetBlock: !!v }),
+  feSetErrorDetectEnabled: ({ v }: { v: boolean }) => set({ feErrorDetectEnabled: !!v }),
+  feSetErrorDetectBlock: ({ v }: { v: boolean }) => set({ feErrorDetectBlock: !!v }),
 
   feComputeResolvedModel: () => {
     try {
@@ -543,7 +543,10 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       return
     }
 
-    const requestId = `flow-init-${Date.now()}`
+    // Use session ID as requestId so terminal tools bind to the session's PTY
+    const state = get() as any
+    const currentSessionId = state.currentId
+    const requestId = currentSessionId || `flow-init-${Date.now()}`
 
     // Reset all node styles and status
     const resetNodes = get().feNodes.map((n) => ({
@@ -657,7 +660,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     set({ feStatus: 'stopped' })
   },
 
-  feResume: async (userInput?: string) => {
+  feResume: async ({ userInput }: { userInput?: string }) => {
     const id = get().feRequestId
     if (!id) {
       console.error('[feResume] No requestId found!')
@@ -895,7 +898,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feLoadTemplate: async (templateId: string) => {
+  feLoadTemplate: async ({ templateId }: { templateId: string }) => {
     try {
       const profile = await loadFlowTemplate(templateId)
       if (profile && profile.nodes && profile.edges) {
@@ -1001,12 +1004,15 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       }
 
 
-      const { feCurrentProfile, feSelectedTemplate } = currentState
-      const profileToSave = feCurrentProfile || feSelectedTemplate
+      const { feCurrentProfile } = currentState
+      const profileToSave = feCurrentProfile // Only save to the active user profile; ignore selectedTemplate to avoid overwriting during pending selection/modal
 
-      // Don't save system templates
+      // Don't save system templates or when no active user profile
+      if (!profileToSave) {
+        return
+      }
       const isSystem = await isSystemTemplate(profileToSave)
-      if (!profileToSave || isSystem) {
+      if (isSystem) {
         return
       }
 
@@ -1077,7 +1083,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feSaveAsProfile: async (name: string) => {
+  feSaveAsProfile: async ({ name }: { name: string }) => {
     const { feNodes, feEdges } = get()
     const isSystem = await isSystemTemplate(name)
     if (!name || isSystem) {
@@ -1109,7 +1115,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feDeleteProfile: async (name: string) => {
+  feDeleteProfile: async ({ name }: { name: string }) => {
     const isSystem = await isSystemTemplate(name)
     if (!name || isSystem) {
       return
@@ -1136,10 +1142,10 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feSetSelectedTemplate: (id: string) => set({ feSelectedTemplate: id }),
-  feSetSaveAsModalOpen: (open: boolean) => set({ feSaveAsModalOpen: open }),
-  feSetNewProfileName: (name: string) => set({ feNewProfileName: name }),
-  feSetLoadTemplateModalOpen: (open: boolean) => set({ feLoadTemplateModalOpen: open }),
+  feSetSelectedTemplate: ({ id }: { id: string }) => set({ feSelectedTemplate: id }),
+  feSetSaveAsModalOpen: ({ open }: { open: boolean }) => set({ feSaveAsModalOpen: open }),
+  feSetNewProfileName: ({ name }: { name: string }) => set({ feNewProfileName: name }),
+  feSetLoadTemplateModalOpen: ({ open }: { open: boolean }) => set({ feLoadTemplateModalOpen: open }),
 
   // ----- Flow Event Handlers -----
   // These are called by the flow scheduler in the main process
@@ -1147,8 +1153,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
   feHandleNodeStart: (nodeId: string) => {
     set({
-      feNodeExecutionState: {
-        ...get().feNodeExecutionState,
+      feFlowState: {
+        ...get().feFlowState,
         [nodeId]: {
           status: 'executing',
           cacheHit: false,
@@ -1198,11 +1204,11 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
     // Update node execution state
     set({
-      feNodeExecutionState: {
-        ...get().feNodeExecutionState,
+      feFlowState: {
+        ...get().feFlowState,
         [nodeId]: {
-          ...get().feNodeExecutionState[nodeId],
-          status: 'success',
+          ...get().feFlowState[nodeId],
+          status: 'completed',
           cacheHit: false,
           style: {
             border: '2px solid #51cf66',
@@ -1236,10 +1242,10 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     else if (/\bmasked\b/i.test(d)) st = 'masked'
     const isCacheHit = /\bcache-hit\b/i.test(d)
 
-    const currentState = get().feNodeExecutionState[nodeId] || {}
+    const currentState = get().feFlowState[nodeId] || {}
     set({
-      feNodeExecutionState: {
-        ...get().feNodeExecutionState,
+      feFlowState: {
+        ...get().feFlowState,
         [nodeId]: {
           ...currentState,
           status: st,
@@ -1516,6 +1522,68 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
+  feHandleRateLimitWait: (nodeId: string, attempt: number, waitMs: number, reason?: string, provider?: string, model?: string) => {
+    if (!nodeId) return
+
+    const state = store.getState() as any
+
+    // Add to session flow debug logs
+    if (state.addFlowDebugLog) {
+      state.addFlowDebugLog({
+        requestId: get().feRequestId || '',
+        type: 'rateLimitWait',
+        nodeId,
+        attempt,
+        waitMs,
+        reason,
+        provider,
+        model,
+      })
+    }
+
+    // Add a badge to the node execution box
+    const badgeId = `rate-limit-${nodeId}-${attempt}-${Date.now()}`
+    const isProactive = attempt === 0
+    const label = isProactive
+      ? `⏳ Rate limit: waiting ${(waitMs / 1000).toFixed(1)}s...`
+      : `⏳ Rate limited, retry ${attempt} in ${(waitMs / 1000).toFixed(1)}s...`
+
+    if (state.appendToNodeExecution) {
+      state.appendToNodeExecution({
+        nodeId,
+        nodeLabel: get().feNodes.find(n => n.id === nodeId)?.data?.label || 'Node',
+        nodeKind: get().feNodes.find(n => n.id === nodeId)?.data?.nodeType || 'unknown',
+        content: {
+          type: 'badge',
+          badge: {
+            id: badgeId,
+            label,
+            color: 'yellow',
+            variant: 'light',
+            status: 'running',
+          }
+        },
+        provider,
+        model
+      })
+    }
+
+    // Update badge after wait completes (optimistic - assumes wait will succeed)
+    setTimeout(() => {
+      if (state.updateBadgeInNodeExecution) {
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId,
+          updates: {
+            label: isProactive ? '✓ Rate limit wait complete' : `✓ Retry ${attempt} complete`,
+            status: 'success',
+            color: 'green'
+          }
+        })
+      }
+    }, waitMs)
+  },
+
   feHandleWaitingForInput: (nodeId: string, requestId: string) => {
     // Flush streaming text to assistant message before pausing
     const streamingText = get().feStreamingText
@@ -1540,8 +1608,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       feStatus: 'waitingForInput',
       fePausedNode: nodeId,
       feStreamingText: '',
-      feNodeExecutionState: {
-        ...get().feNodeExecutionState,
+      feFlowState: {
+        ...get().feFlowState,
         [nodeId]: {
           status: 'executing',  // Keep as executing since it's paused mid-execution
           style: {

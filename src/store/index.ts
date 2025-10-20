@@ -16,7 +16,7 @@ import type { AppStore } from '../../electron/store'
 
 // Re-export types that are used by components
 export type { ViewType, ModelPricing } from '../../electron/store/types'
-export type { RateLimitKind } from '../../electron/store/types'
+
 
 /**
  * Create the renderer-side store hook
@@ -116,9 +116,6 @@ export const selectExplorerChildrenByDir = (state: AppStore) => state.explorerCh
 export const selectExplorerTerminalPanelOpen = (state: AppStore) => state.windowState.explorerTerminalPanelOpen
 export const selectExplorerTerminalPanelHeight = (state: AppStore) => state.windowState.explorerTerminalPanelHeight
 
-// Rate limit selectors
-export const selectRateLimitConfig = (state: AppStore) => state.rateLimitConfig
-
 // Settings selectors
 export const selectAutoRetry = (state: AppStore) => state.autoRetry
 export const selectSettingsApiKeys = (state: AppStore) => state.settingsApiKeys
@@ -156,7 +153,6 @@ export type {
 // Re-export all other types
 export type {
   SessionMessage,
-  SessionBadgeGroup,
   SessionItem,
   Session,
   TokenUsage,
@@ -169,7 +165,6 @@ export type {
   IndexProgress,
   RouteRecord,
   ApiKeys,
-  RateLimitConfig,
   DebugLogEntry,
   RecentFolder,
   ExplorerEntry,

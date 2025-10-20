@@ -83,7 +83,8 @@ export const portalInputNode: NodeFunction = async (flow, context, dataIn, input
   // Portal Input has no outputs - it triggers Portal Outputs directly
   // Return success to indicate completion
   return {
-    status: 'success'
+    context: executionContext!,
+    status: 'success' as const
   }
 }
 

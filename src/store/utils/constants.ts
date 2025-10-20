@@ -41,8 +41,7 @@ export const LS_KEYS = {
   AUTO_APPROVE_ENABLED: 'hifide:autoApproveEnabled',
   AUTO_APPROVE_THRESHOLD: 'hifide:autoApproveThreshold',
   PRICING_CONFIG: 'hifide:pricingConfig',
-  RATE_LIMIT_CONFIG: 'hifide:rateLimitConfig',
-  
+
   // Session
   CURRENT_SESSION_ID: 'hifide:currentSessionId',
   

@@ -1,6 +1,6 @@
 import { Text, UnstyledButton, Select, Button } from '@mantine/core'
 import { IconChevronLeft, IconChevronRight, IconPlus } from '@tabler/icons-react'
-import { useRef, useState, useEffect, useCallback } from 'react'
+import { useEffect } from 'react'
 import {
   useAppStore,
   useDispatch,
@@ -8,6 +8,7 @@ import {
   selectSessions,
   selectCurrentId,
 } from '../store'
+import { useUiStore } from '../store/ui'
 import SessionPane from '../SessionPane'
 import TerminalPanel from './TerminalPanel'
 import AgentDebugPanel from './AgentDebugPanel'
@@ -27,99 +28,82 @@ export default function AgentView() {
   const metaPanelOpen = useAppStore(selectMetaPanelOpen)
   const sessions = useAppStore(selectSessions)
   const currentId = useAppStore(selectCurrentId)
+  const flowCanvasCollapsed = useAppStore((s) => s.windowState.flowCanvasCollapsed)
 
-  // Session panel state - subscribe to windowState reactively
-  const sessionPanelWidth = useAppStore((s) => s.windowState.sessionPanelWidth)
+  // Read persisted widths from main store
+  const persistedSessionPanelWidth = useAppStore((s) => s.windowState.sessionPanelWidth)
+  const persistedMetaPanelWidth = useAppStore((s) => s.windowState.metaPanelWidth)
 
-  // Local state for smooth resizing - use ref to avoid stale closure
-  const [localSessionPanelWidth, setLocalSessionPanelWidth] = useState(sessionPanelWidth)
-  const localSessionPanelWidthRef = useRef(sessionPanelWidth)
-  const isDraggingSessionPanelRef = useRef(false)
+  // Use UI store for local resize state
+  const sessionPanelWidth = useUiStore((s) => s.sessionPanelWidth)
+  const metaPanelWidth = useUiStore((s) => s.metaPanelWidth)
+  const setSessionPanelWidth = useUiStore((s) => s.setSessionPanelWidth)
+  const setMetaPanelWidth = useUiStore((s) => s.setMetaPanelWidth)
+  const setIsDraggingSessionPanel = useUiStore((s) => s.setIsDraggingSessionPanel)
+  const setIsDraggingMetaPanel = useUiStore((s) => s.setIsDraggingMetaPanel)
 
-  // Update local width when store value changes
+  // Sync UI store with persisted widths ONLY on mount
+  // Don't sync during runtime to avoid race conditions with drag updates
   useEffect(() => {
-    setLocalSessionPanelWidth(sessionPanelWidth)
-    localSessionPanelWidthRef.current = sessionPanelWidth
-  }, [sessionPanelWidth])
-
-  // Update ref when local state changes
-  useEffect(() => {
-    localSessionPanelWidthRef.current = localSessionPanelWidth
-  }, [localSessionPanelWidth])
-
-  // Meta panel (Tools) state - subscribe to windowState reactively
-  const metaPanelWidth = useAppStore((s) => s.windowState.metaPanelWidth)
-
-  // Local state for smooth resizing - use ref to avoid stale closure
-  const [localMetaPanelWidth, setLocalMetaPanelWidth] = useState(metaPanelWidth)
-  const localMetaPanelWidthRef = useRef(metaPanelWidth)
-  const isDraggingMetaPanelRef = useRef(false)
-
-  // Update local width when store value changes
-  useEffect(() => {
-    setLocalMetaPanelWidth(metaPanelWidth)
-    localMetaPanelWidthRef.current = metaPanelWidth
-  }, [metaPanelWidth])
-
-  // Update ref when local state changes
-  useEffect(() => {
-    localMetaPanelWidthRef.current = localMetaPanelWidth
-  }, [localMetaPanelWidth])
+    setSessionPanelWidth(persistedSessionPanelWidth)
+    setMetaPanelWidth(persistedMetaPanelWidth)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Only run on mount
 
   // Session panel resize handler
-  const handleSessionPanelMouseDown = useCallback((e: React.MouseEvent) => {
-    isDraggingSessionPanelRef.current = true
+  const handleSessionPanelMouseDown = (e: React.MouseEvent) => {
+    setIsDraggingSessionPanel(true)
     e.preventDefault()
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isDraggingSessionPanelRef.current) return
       const newWidth = e.clientX
       // Min 200px, max = ensure meta panel stays >= 200px
-      const metaPanelActualWidth = metaPanelOpen ? localMetaPanelWidth : 0
+      const currentMetaPanelWidth = useUiStore.getState().metaPanelWidth
+      const metaPanelActualWidth = metaPanelOpen ? currentMetaPanelWidth : 0
       const maxWidth = window.innerWidth - metaPanelActualWidth - 200
       if (newWidth >= 200 && newWidth <= maxWidth) {
-        setLocalSessionPanelWidth(newWidth)
+        setSessionPanelWidth(newWidth)
       }
     }
 
     const handleMouseUp = () => {
-      isDraggingSessionPanelRef.current = false
+      setIsDraggingSessionPanel(false)
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
-      // Persist to store when drag ends - use ref to get current value
-      dispatch('updateWindowState', { sessionPanelWidth: localSessionPanelWidthRef.current })
+      // Persist to main store when drag ends
+      dispatch('updateWindowState', { sessionPanelWidth: useUiStore.getState().sessionPanelWidth })
     }
 
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
-  }, [dispatch, localSessionPanelWidth, metaPanelOpen, localMetaPanelWidth])
+  }
 
   // Meta panel resize handler
-  const handleMetaPanelMouseDown = useCallback((e: React.MouseEvent) => {
-    isDraggingMetaPanelRef.current = true
+  const handleMetaPanelMouseDown = (e: React.MouseEvent) => {
+    setIsDraggingMetaPanel(true)
     e.preventDefault()
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isDraggingMetaPanelRef.current) return
       const newWidth = window.innerWidth - e.clientX
       // Min 200px, max = ensure session panel stays >= 200px
-      const maxWidth = window.innerWidth - localSessionPanelWidth - 200
+      const currentSessionPanelWidth = useUiStore.getState().sessionPanelWidth
+      const maxWidth = window.innerWidth - currentSessionPanelWidth - 200
       if (newWidth >= 200 && newWidth <= maxWidth) {
-        setLocalMetaPanelWidth(newWidth)
+        setMetaPanelWidth(newWidth)
       }
     }
 
     const handleMouseUp = () => {
-      isDraggingMetaPanelRef.current = false
+      setIsDraggingMetaPanel(false)
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
-      // Persist to store when drag ends - use ref to get current value
-      dispatch('updateWindowState', { metaPanelWidth: localMetaPanelWidthRef.current })
+      // Persist to main store when drag ends
+      dispatch('updateWindowState', { metaPanelWidth: useUiStore.getState().metaPanelWidth })
     }
 
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
-  }, [dispatch, localMetaPanelWidth, localSessionPanelWidth])
+  }
 
   return (
     <div
@@ -131,10 +115,11 @@ export default function AgentView() {
         flexDirection: 'row',
       }}
     >
-      {/* Session Panel - Fixed width with resize handle */}
+      {/* Session Panel - Flexible width (grows when flow canvas collapses) */}
       <div
         style={{
-          width: localSessionPanelWidth,
+          width: flowCanvasCollapsed ? undefined : sessionPanelWidth,
+          flex: flowCanvasCollapsed ? 1 : undefined,
           minWidth: 200,
           display: 'flex',
           flexDirection: 'column',
@@ -222,18 +207,48 @@ export default function AgentView() {
         />
       </div>
 
-      {/* Flow Canvas Panel - Takes remaining space */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
-        <ReactFlowProvider>
-          <FlowCanvasPanel />
-        </ReactFlowProvider>
-      </div>
+      {/* Middle section - only takes space when flow canvas is expanded */}
+      {!flowCanvasCollapsed && (
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <ReactFlowProvider>
+            <FlowCanvasPanel />
+          </ReactFlowProvider>
+        </div>
+      )}
+
+      {/* Toggle button when flow canvas is collapsed */}
+      {flowCanvasCollapsed && (
+        <UnstyledButton
+          onClick={() => dispatch('updateWindowState', { flowCanvasCollapsed: false })}
+          style={{
+            width: 24,
+            height: '100%',
+            backgroundColor: '#252526',
+            borderLeft: '1px solid #3e3e42',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#cccccc',
+            cursor: 'pointer',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = '#2d2d30'
+            e.currentTarget.style.color = '#ffffff'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = '#252526'
+            e.currentTarget.style.color = '#cccccc'
+          }}
+        >
+          <IconChevronLeft size={16} />
+        </UnstyledButton>
+      )}
 
       {/* Meta Panel */}
       {metaPanelOpen && (
         <div
           style={{
-            width: localMetaPanelWidth,
+            width: metaPanelWidth,
             height: '100%',
             backgroundColor: '#252526',
             borderLeft: '1px solid #3e3e42',
@@ -260,9 +275,7 @@ export default function AgentView() {
               e.currentTarget.style.background = '#007acc'
             }}
             onMouseLeave={(e) => {
-              if (!isDraggingMetaPanelRef.current) {
-                e.currentTarget.style.background = 'transparent'
-              }
+              e.currentTarget.style.background = 'transparent'
             }}
           />
           {/* Meta Panel Header */}

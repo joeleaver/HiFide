@@ -101,9 +101,9 @@ async function beginCommand(st: AgentTerminalState, cmd: string): Promise<void> 
 /**
  * Create an agent-managed PTY session
  */
-async function createAgentPtySession(opts: { shell?: string; cwd?: string; cols?: number; rows?: number }): Promise<string> {
+async function createAgentPtySession(opts: { shell?: string; cwd?: string; cols?: number; rows?: number; sessionId?: string }): Promise<string> {
   const isWin = process.platform === 'win32'
-  
+
   // Normalize requested shell: on Windows, force PowerShell if a POSIX shell was requested
   const normalizeShell = (s?: string) => {
     if (!s || !s.trim()) return s
@@ -113,7 +113,7 @@ async function createAgentPtySession(opts: { shell?: string; cwd?: string; cols?
     }
     return s
   }
-  
+
   let shell = normalizeShell(opts.shell) || (isWin ? 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe' : (process.env.SHELL || '/bin/bash'))
   const cols = opts.cols || 80
   const rows = opts.rows || 24
@@ -130,7 +130,7 @@ async function createAgentPtySession(opts: { shell?: string; cwd?: string; cols?
     p = (ptyModule as any).spawn(shell, [], { name: 'xterm-color', cols, rows, cwd, env: process.env })
   }
 
-  const sessionId = randomUUID()
+  const sessionId = opts.sessionId || randomUUID()
   const state: AgentTerminalState = { ring: '', ringLimit: 1_000_000, commands: [], maxCommands: 50, activeIndex: null }
   agentPtySessions.set(sessionId, { p, shell, cwd, cols, rows, state, attachedWcIds: new Set<number>() })
   await logEvent(sessionId, 'agent_pty_create', { shell, cwd, cols, rows })
@@ -181,11 +181,14 @@ async function createAgentPtySession(opts: { shell?: string; cwd?: string; cols?
 
 /**
  * Get or create agent PTY for a request ID
+ * The PTY session ID will be the same as the request ID for easy tracking
  */
 async function getOrCreateAgentPtyFor(requestId: string, opts?: { shell?: string; cwd?: string; cols?: number; rows?: number }): Promise<string> {
   let sid = agentPtyAssignments.get(requestId)
   if (sid && agentPtySessions.has(sid)) return sid
-  sid = await createAgentPtySession(opts || {})
+
+  // Use the requestId as the session ID so they're the same
+  sid = await createAgentPtySession({ ...opts, sessionId: requestId })
   agentPtyAssignments.set(requestId, sid)
   return sid
 }
@@ -338,21 +341,40 @@ export function registerPtyHandlers(ipcMain: IpcMain): void {
    */
   ipcMain.handle('agent-pty:attach', async (event, args: { requestId?: string; sessionId?: string; tailBytes?: number } = {}) => {
     const wc = event.sender
+    console.log('[agent-pty:attach] Called with:', args, 'wcId:', wc.id)
     let sid = args.sessionId
     if (!sid) {
-      const req = args.requestId || 'terminal'
-      sid = await getOrCreateAgentPtyFor(req)
+      const req = args.requestId
+      if (!req) {
+        console.error('[agent-pty:attach] No requestId or sessionId provided')
+        return { ok: false, error: 'no-request-id' }
+      }
+
+      // Get workspace root for cwd
+      const { useMainStore } = await import('../store/index.js')
+      const workspaceRoot = useMainStore.getState().workspaceRoot
+
+      console.log('[agent-pty:attach] Getting or creating PTY for requestId:', req)
+      sid = await getOrCreateAgentPtyFor(req, { cwd: workspaceRoot || undefined })
+      console.log('[agent-pty:attach] Got sessionId:', sid)
     }
     const rec = sid ? agentPtySessions.get(sid) : undefined
-    if (!sid || !rec) return { ok: false, error: 'no-session' }
-    
+    if (!sid || !rec) {
+      console.error('[agent-pty:attach] No session found:', { sid, hasRec: !!rec })
+      return { ok: false, error: 'no-session' }
+    }
+
+    console.log('[agent-pty:attach] Attaching wcId', wc.id, 'to session', sid)
     rec.attachedWcIds.add(wc.id)
-    
+    console.log('[agent-pty:attach] Attached wcIds:', Array.from(rec.attachedWcIds))
+
     // Optionally seed terminal with current tail (already redacted in state)
     const n = Math.max(0, Math.min(10000, args.tailBytes || 0))
     if (n > 0) {
       try {
-        wc.send('pty:data', { sessionId: sid, data: rec.state.ring.slice(-n) })
+        const tail = rec.state.ring.slice(-n)
+        console.log('[agent-pty:attach] Sending tail:', tail.length, 'bytes')
+        wc.send('pty:data', { sessionId: sid, data: tail })
       } catch {}
     }
     return { ok: true, sessionId: sid }
@@ -368,5 +390,6 @@ export function registerPtyHandlers(ipcMain: IpcMain): void {
     rec.attachedWcIds.delete(wc.id)
     return { ok: true }
   })
+
 }
 

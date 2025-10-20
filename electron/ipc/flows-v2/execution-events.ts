@@ -1,9 +1,9 @@
 /**
  * Unified execution event system for flow nodes
- * 
+ *
  * This module defines a single event type that captures ALL execution events
  * from providers (chunks, tool calls, usage, etc.) with complete metadata.
- * 
+ *
  * Benefits:
  * - Decouples providers from presentation logic
  * - Single source of truth for execution metadata
@@ -40,6 +40,15 @@ export interface UsageEventData {
 }
 
 /**
+ * Rate limit wait event data
+ */
+export interface RateLimitWaitEventData {
+  attempt: number      // 0 = proactive wait, >0 = retry attempt
+  waitMs: number       // How long we're waiting
+  reason?: string      // Human-readable reason
+}
+
+/**
  * Unified execution event
  * Emitted by providers and handled by FlowAPI
  */
@@ -48,19 +57,20 @@ export interface ExecutionEvent {
   executionId: ExecutionId  // UUID for this specific node execution
   nodeId: string            // Which node is executing
   timestamp: number         // When this event occurred
-  
+
   // Provider metadata
   provider: string          // 'anthropic' | 'openai' | 'gemini'
   model: string            // 'claude-haiku-4-5-20251001', etc.
-  
+
   // Event type and data
-  type: 'chunk' | 'tool_start' | 'tool_end' | 'tool_error' | 'usage' | 'done' | 'error'
-  
+  type: 'chunk' | 'tool_start' | 'tool_end' | 'tool_error' | 'usage' | 'done' | 'error' | 'rate_limit_wait'
+
   // Event-specific data (only one will be populated based on type)
   chunk?: string
   tool?: ToolEventData
   usage?: UsageEventData
   error?: string
+  rateLimitWait?: RateLimitWaitEventData
 }
 
 /**
@@ -71,7 +81,7 @@ export type EmitExecutionEvent = (event: Omit<ExecutionEvent, 'executionId' | 'n
 
 /**
  * Create an event emitter for a specific node execution
- * 
+ *
  * @param executionId - UUID for this execution
  * @param nodeId - Node being executed
  * @param handler - Function to handle emitted events
@@ -105,7 +115,7 @@ export function createCallbackEventEmitters(
     onChunk: (text: string) => {
       emit({ type: 'chunk', provider, model, chunk: text })
     },
-    
+
     onToolStart: (ev: { callId?: string; name: string; arguments?: any }) => {
       emit({
         type: 'tool_start',
@@ -119,7 +129,7 @@ export function createCallbackEventEmitters(
         }
       })
     },
-    
+
     onToolEnd: (ev: { callId?: string; name: string; result?: any }) => {
       emit({
         type: 'tool_end',
@@ -133,7 +143,7 @@ export function createCallbackEventEmitters(
         }
       })
     },
-    
+
     onToolError: (ev: { callId?: string; name: string; error: string }) => {
       emit({
         type: 'tool_error',
@@ -147,7 +157,7 @@ export function createCallbackEventEmitters(
         }
       })
     },
-    
+
     onTokenUsage: (usage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number }) => {
       emit({
         type: 'usage',
@@ -156,14 +166,24 @@ export function createCallbackEventEmitters(
         usage
       })
     },
-    
+
     onDone: () => {
       emit({ type: 'done', provider, model })
     },
-    
+
     onError: (error: string) => {
       emit({ type: 'error', provider, model, error })
     }
   }
 }
+
+// Back-compat alias used by existing tests and adapters
+export function executionEventToLegacyCallbacks(
+  emit: EmitExecutionEvent,
+  provider: string,
+  model: string
+) {
+  return createCallbackEventEmitters(emit, provider, model)
+}
+
 

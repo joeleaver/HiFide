@@ -7,7 +7,7 @@
  */
 
 import type { ContextAPI } from './context-api'
-import type { ExecutionEvent, EmitExecutionEvent } from './execution-events'
+import type { EmitExecutionEvent } from './execution-events'
 
 /**
  * Badge for conversation UI

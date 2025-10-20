@@ -16,7 +16,7 @@
  */
 
 import type { StateCreator } from 'zustand'
-import type { ApiKeys, ModelPricing, PricingConfig, RateLimitConfig, RateLimitKind, TokenUsage, TokenCost } from '../types'
+import type { ApiKeys, ModelPricing, PricingConfig, TokenUsage, TokenCost } from '../types'
 import { DEFAULT_PRICING } from '../../data/defaultPricing'
 
 // ============================================================================
@@ -39,9 +39,6 @@ export interface SettingsSlice {
   pricingConfig: PricingConfig
   defaultPricingConfig: PricingConfig  // Immutable reference to DEFAULT_PRICING for UI comparison
 
-  // Rate Limit State
-  rateLimitConfig: RateLimitConfig
-
   // API Keys Actions
   setOpenAiApiKey: (value: string) => void
   setAnthropicApiKey: (value: string) => void
@@ -61,12 +58,6 @@ export interface SettingsSlice {
   resetPricingToDefaults: () => void
   resetProviderPricing: (provider: 'openai' | 'anthropic' | 'gemini') => void
   calculateCost: (provider: string, model: string, usage: TokenUsage) => TokenCost | null
-
-  // Rate Limit Actions
-  setRateLimitForModel: (params: { provider: 'openai' | 'anthropic' | 'gemini'; model: string; limits: RateLimitKind }) => Promise<void>
-  toggleRateLimiting: (enabled: boolean) => Promise<void>
-  loadRateLimitConfig: () => Promise<void>
-  saveRateLimitConfig: () => Promise<void>
 }
 
 // ============================================================================
@@ -91,8 +82,6 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
   pricingConfig: DEFAULT_PRICING,
   defaultPricingConfig: DEFAULT_PRICING,  // Immutable reference for UI comparison
 
-  rateLimitConfig: { enabled: false },
-  
   // API Keys Actions - separate action for each provider (zubridge dispatch only supports single payload)
   setOpenAiApiKey: (value: string) => {
     set((state) => ({
@@ -354,48 +343,6 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
       savings: savings > 0 ? savings : undefined,
       savingsPercent: savingsPercent > 0 ? savingsPercent : undefined,
     }
-  },
-  
-  // Rate Limit Actions
-  loadRateLimitConfig: async () => {
-    // In the new architecture, rate limit config is loaded at app startup into the store
-    // This function is kept for compatibility but is a no-op
-    // The actual loading happens in the store initialization
-  },
-
-  saveRateLimitConfig: async () => {
-    // In the new architecture, rate limit config is automatically persisted via Zustand persist middleware
-    // and synced to the rateLimiter via a store subscriber
-    // This function is kept for compatibility but is a no-op
-  },
-
-  toggleRateLimiting: async (enabled: boolean) => {
-    set((state) => ({
-      rateLimitConfig: {
-        ...(state.rateLimitConfig || { enabled }),
-        enabled,
-      },
-    }))
-  },
-
-  setRateLimitForModel: async ({
-    provider,
-    model,
-    limits
-  }: {
-    provider: 'openai' | 'anthropic' | 'gemini';
-    model: string;
-    limits: RateLimitKind;
-  }) => {
-    set((state) => ({
-      rateLimitConfig: {
-        ...(state.rateLimitConfig || { enabled: false }),
-        [provider]: {
-          ...((state.rateLimitConfig as any)?.[provider] || {}),
-          [model]: limits,
-        },
-      },
-    }))
   },
 })
 

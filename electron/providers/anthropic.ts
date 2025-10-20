@@ -4,13 +4,31 @@ import { validateJson } from './jsonschema'
 import { withRetries } from './retry'
 import { formatSummary } from '../agent/types'
 
+// Normalize various header shapes into a simple lower-cased map
+const toHeaderMap = (h: any): Record<string, string> => {
+  const map: Record<string, string> = {}
+  try {
+    if (!h) return map
+    if (typeof h.forEach === 'function') {
+      h.forEach((v: any, k: string) => { map[String(k).toLowerCase()] = String(v) })
+    } else if (Array.isArray(h)) {
+      for (const [k, v] of h as any) { map[String(k).toLowerCase()] = String(v) }
+    } else if (typeof h === 'object') {
+      for (const k of Object.keys(h)) { map[String(k).toLowerCase()] = String((h as any)[k]) }
+    }
+  } catch {}
+  return map
+}
+
+import { rateLimitTracker } from './rate-limit-tracker'
+
 // Note: Anthropic has always been stateless - it requires full message history every time.
 // This is now consistent with our architecture where the scheduler manages all conversation state.
 
 export const AnthropicProvider: ProviderAdapter = {
   id: 'anthropic',
 
-  async chatStream({ apiKey, model, system, messages, emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async chatStream({ apiKey, model, system, messages, emit: _emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
     const client = new Anthropic({ apiKey, defaultHeaders: { 'anthropic-beta': 'prompt-caching-2024-07-31' } as any })
 
     // Messages are already formatted by llm-service
@@ -46,6 +64,7 @@ export const AnthropicProvider: ProviderAdapter = {
             } else if (evt?.type === 'message_delta') {
               // Update usage from message_delta event
               if (evt?.usage) usage = evt.usage
+
             } else if (evt?.type === 'message_stop') {
               // end of stream
             }
@@ -64,6 +83,14 @@ export const AnthropicProvider: ProviderAdapter = {
           }
           if (onTokenUsage) onTokenUsage(tokenUsage)
         }
+        // Update rate limit tracker from headers if available (success path)
+        try {
+          const hdrs = (stream as any)?.response?.headers || (stream as any)?.raw?.response?.headers || (stream as any)?.controller?.response?.headers
+          if (hdrs) {
+            rateLimitTracker.updateFromHeaders('anthropic', model as any, toHeaderMap(hdrs))
+          }
+        } catch {}
+
 
         // Done
         onDone()
@@ -71,6 +98,7 @@ export const AnthropicProvider: ProviderAdapter = {
         if (e?.name === 'AbortError') return
         const error = e?.message || String(e)
         onError(error)
+
       }
     })().catch((e: any) => {
       console.error('[AnthropicProvider] Unhandled error in chatStream:', e)
@@ -86,8 +114,10 @@ export const AnthropicProvider: ProviderAdapter = {
   },
 
   // Agent streaming with tool-calling using Anthropic Messages API
-  async agentStream({ apiKey, model, system, messages, tools, responseSchema: _responseSchema, emit, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, system, messages, tools, responseSchema: _responseSchema, emit: _emit, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const client = new Anthropic({ apiKey, defaultHeaders: { 'anthropic-beta': 'prompt-caching-2024-07-31' } as any })
+
+    const holder: { abort?: () => void } = {}
 
     // Map tools to Anthropic format (sanitize names to match pattern ^[a-zA-Z0-9_-]{1,128}$)
     const toolMap = new Map<string, AgentTool>()
@@ -136,6 +166,7 @@ export const AnthropicProvider: ProviderAdapter = {
 
       // Rebuild conversation: system + summary + recent
       conv = [summaryMsg, ...recent]
+
     }
 
     const run = async () => {
@@ -162,6 +193,7 @@ export const AnthropicProvider: ProviderAdapter = {
             stream: true,
             max_tokens: 8192, // Increased from 2048 to allow longer responses and tool calls
           }) as any)
+          holder.abort = () => { try { stream?.controller?.abort?.() } catch {} }
 
           // Accumulate tool_use inputs incrementally and track usage
           const active: Record<string, { id: string; name: string; inputText: string }> = {}
@@ -259,6 +291,14 @@ export const AnthropicProvider: ProviderAdapter = {
             activeTools: Object.keys(active).length,
             iteration
           })
+          // Update rate limit tracker from headers if available for this streamed turn
+          try {
+            const hdrs = (stream as any)?.response?.headers || (stream as any)?.raw?.response?.headers || (stream as any)?.controller?.response?.headers
+            if (hdrs) {
+              rateLimitTracker.updateFromHeaders('anthropic', model as any, toHeaderMap(hdrs))
+            }
+          } catch {}
+
 
           // Check for incomplete tool calls that never received content_block_stop
           const activeToolIds = Object.keys(active)
@@ -356,9 +396,6 @@ export const AnthropicProvider: ProviderAdapter = {
                   continue
                 }
 
-                // Generate tool execution ID
-                const toolExecutionId = crypto.randomUUID()
-
                 // Notify tool start (use original name for UI display)
                 try { onToolStart?.({ callId: tu.id, name: originalToolName, arguments: tu.input }) } catch {}
 
@@ -442,7 +479,7 @@ export const AnthropicProvider: ProviderAdapter = {
       } catch {}
     })
 
-    return { cancel: () => { cancelled = true } }
+    return { cancel: () => { cancelled = true; try { holder.abort?.() } catch {} } }
   },
 
 }

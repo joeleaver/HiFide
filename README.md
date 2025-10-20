@@ -20,7 +20,7 @@ Status: core chat + streaming via OpenAI is stable. Terminal, structured edits, 
 ## Architecture (brief)
 - Renderer (React + Vite): chat UI, editor panes, notifications, settings
 - Main (Electron): provider streaming, IPC orchestration, secure key storage, tool execution
-- Preload bridge: curated APIs exposing fs, llm, secrets, and terminal to the renderer
+- Preload bridge: curated APIs exposing fs, terminal, and other OS-bound features to the renderer
 - Orchestrator: provider-agnostic agent loop with tool-calling policies and planning
 
 More details: docs/architecture.md and docs/retrieval.md.

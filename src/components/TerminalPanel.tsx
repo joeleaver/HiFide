@@ -1,8 +1,8 @@
 import { Group, Text, UnstyledButton, Badge } from '@mantine/core'
 import { IconPlus, IconX, IconChevronUp, IconChevronDown } from '@tabler/icons-react'
 import { useAppStore, useDispatch, selectAgentTerminalTabs, selectAgentActiveTerminal, selectExplorerTerminalTabs, selectExplorerActiveTerminal } from '../store'
+import { useTerminalStore } from '../store/terminal'
 import { usePanelResize } from '../hooks/usePanelResize'
-import { useState } from 'react'
 import TerminalView from './TerminalView'
 
 export default function TerminalPanel({ context }: { context: 'agent' | 'explorer' }) {
@@ -10,36 +10,38 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
   const tabs = useAppStore(context === 'agent' ? selectAgentTerminalTabs : selectExplorerTerminalTabs)
   const activeTab = useAppStore(context === 'agent' ? selectAgentActiveTerminal : selectExplorerActiveTerminal)
 
-  // Read from windowState
-  const initialOpen = useAppStore((s) => context === 'agent' ? s.windowState.agentTerminalPanelOpen : s.windowState.explorerTerminalPanelOpen)
-  const initialHeight = useAppStore((s) => context === 'agent' ? s.windowState.agentTerminalPanelHeight : s.windowState.explorerTerminalPanelHeight)
+  // Read from windowState (main store)
+  const height = useAppStore((s) => context === 'agent' ? s.windowState.agentTerminalPanelHeight : s.windowState.explorerTerminalPanelHeight)
 
-  const [open, setOpen] = useState(initialOpen)
-  const [height, setHeight] = useState(initialHeight)
-
-  // Use dispatch for actions
+  // Use dispatch for main store actions (tab management)
   const dispatch = useDispatch()
+
+  // Use renderer-local terminal store for xterm operations and UI state
+  const fitTerminal = useTerminalStore((s) => s.fitTerminal)
+  const open = useTerminalStore((s) => context === 'agent' ? s.agentTerminalPanelOpen : s.explorerTerminalPanelOpen)
+  const setTerminalPanelOpen = useTerminalStore((s) => s.setTerminalPanelOpen)
 
   const addTab = () => {
     dispatch('addTerminalTab', context)
   }
 
   const closeTab = (id: string) => {
-    dispatch('removeTerminalTab', { context, tabId: id })
+    if (context === 'agent') {
+      // For agent terminals, dispatch to main store to restart PTY
+      dispatch('restartAgentTerminal', { tabId: id })
+    } else {
+      // For explorer terminals, just remove the tab
+      dispatch('removeTerminalTab', { context, tabId: id })
+    }
   }
 
   const onToggleClick = () => {
-    const newOpen = !open
-    setOpen(newOpen)
-    dispatch('updateWindowState', {
-      [context === 'agent' ? 'agentTerminalPanelOpen' : 'explorerTerminalPanelOpen']: newOpen
-    })
+    setTerminalPanelOpen(context, !open)
   }
 
   const { onMouseDown, isResizingRef } = usePanelResize({
     initialHeight: height,
     setHeight: (newHeight) => {
-      setHeight(newHeight)
       dispatch('updateWindowState', {
         [context === 'agent' ? 'agentTerminalPanelHeight' : 'explorerTerminalPanelHeight']: newHeight
       })
@@ -47,7 +49,10 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
     min: 160,
     max: 800,
     handlePosition: 'top',
-    onEnd: () => dispatch('fitAllTerminals', context),
+    onEnd: () => {
+      // Fit all terminals after resize
+      tabs.forEach((tabId) => fitTerminal(tabId))
+    },
   })
 
   return (

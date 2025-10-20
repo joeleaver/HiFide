@@ -21,16 +21,66 @@ export async function getSessionsDir(): Promise<string> {
 
 /**
  * Save a session to disk with atomic write
+ * Uses a unique temp file to prevent race conditions
+ * Handles Windows file locking issues with retry logic
  */
 export async function saveSessionToDisk(session: Session): Promise<void> {
   const sessionsDir = await getSessionsDir()
   const filePath = path.join(sessionsDir, `${session.id}.json`)
-  
-  // Atomic write: write to temp file, then rename
-  const tempPath = `${filePath}.tmp`
-  await fs.writeFile(tempPath, JSON.stringify(session, null, 2), 'utf-8')
-  await fs.rename(tempPath, filePath)
-  
+
+  // Atomic write: write to temp file with unique suffix, then rename
+  // Use timestamp + random to ensure uniqueness and prevent race conditions
+  const tempPath = `${filePath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 9)}`
+
+  try {
+    await fs.writeFile(tempPath, JSON.stringify(session, null, 2), 'utf-8')
+
+    // On Windows, rename can fail with EPERM if destination is locked
+    // Retry a few times with exponential backoff
+    let lastError: any
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        // On Windows, we need to delete the destination first if it exists
+        // This is safe because we've already written the new data to tempPath
+        if (process.platform === 'win32') {
+          try {
+            await fs.unlink(filePath)
+          } catch (e: any) {
+            // Ignore ENOENT (file doesn't exist yet)
+            if (e.code !== 'ENOENT') {
+              throw e
+            }
+          }
+        }
+
+        await fs.rename(tempPath, filePath)
+        return // Success!
+      } catch (error: any) {
+        lastError = error
+
+        // Only retry on EPERM/EBUSY (file locked)
+        if (error.code !== 'EPERM' && error.code !== 'EBUSY') {
+          throw error
+        }
+
+        // Wait before retry (exponential backoff: 10ms, 50ms, 250ms)
+        if (attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, 10 * Math.pow(5, attempt)))
+        }
+      }
+    }
+
+    // All retries failed
+    throw lastError
+  } catch (error) {
+    // Clean up temp file if write/rename failed
+    try {
+      await fs.unlink(tempPath)
+    } catch {
+      // Ignore cleanup errors
+    }
+    throw error
+  }
 }
 
 /**
@@ -132,12 +182,14 @@ export async function deleteSessionFromDisk(sessionId: string): Promise<void> {
 
 /**
  * Debounced session saver
- * 
+ *
  * Provides debounced saving to avoid excessive disk writes.
+ * Also prevents concurrent saves to the same session.
  * Immediate saves bypass the debounce.
  */
 class DebouncedSessionSaver {
   private saveTimeouts = new Map<string, NodeJS.Timeout>()
+  private activeSaves = new Map<string, Promise<void>>()
   private readonly debounceMs: number
 
   constructor(debounceMs = 500) {
@@ -156,21 +208,45 @@ class DebouncedSessionSaver {
     }
 
     if (immediate) {
-      // Immediate save
-      saveSessionToDisk(session).catch(e => {
-        console.error('[session-persistence] Immediate save failed:', e)
-      })
+      // Immediate save - but wait for any active save to complete first
+      this.performSave(session)
     } else {
       // Debounced save
       const timeout = setTimeout(() => {
-        saveSessionToDisk(session).catch(e => {
-          console.error('[session-persistence] Debounced save failed:', e)
-        })
+        this.performSave(session)
         this.saveTimeouts.delete(session.id)
       }, this.debounceMs)
-      
+
       this.saveTimeouts.set(session.id, timeout)
     }
+  }
+
+  /**
+   * Perform the actual save, preventing concurrent saves to the same session
+   */
+  private async performSave(session: Session): Promise<void> {
+    // Wait for any active save to complete
+    const activeSave = this.activeSaves.get(session.id)
+    if (activeSave) {
+      await activeSave.catch(() => {
+        // Ignore errors from previous save
+      })
+    }
+
+    // Start new save
+    const savePromise = saveSessionToDisk(session)
+      .catch(e => {
+        console.error('[session-persistence] Save failed:', e)
+      })
+      .finally(() => {
+        // Clean up active save tracking
+        if (this.activeSaves.get(session.id) === savePromise) {
+          this.activeSaves.delete(session.id)
+        }
+      })
+
+    this.activeSaves.set(session.id, savePromise)
+    await savePromise
   }
 
   /**

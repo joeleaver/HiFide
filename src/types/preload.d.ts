@@ -2,53 +2,11 @@ export {};
 
 declare global {
   interface Window {
-    secrets?: {
-      setApiKey: (k: string) => Promise<boolean>;
-      getApiKey: () => Promise<string | null>;
-      setApiKeyFor: (provider: string, key: string) => Promise<boolean>;
-      getApiKeyFor: (provider: string) => Promise<string | null>;
-      validateApiKeyFor: (provider: string, key: string, model?: string) => Promise<{ ok: boolean; error?: string }>;
-      presence: () => Promise<{ openai: boolean; anthropic: boolean; gemini: boolean }>;
-      onPresenceChanged: (listener: (p: { openai: boolean; anthropic: boolean; gemini: boolean }) => void) => () => void;
-      saveAndValidate: (keys: { openai?: string; anthropic?: string; gemini?: string }) => Promise<{ ok: boolean; failures: string[] }>;
-    };
+
     models?: {
       list: (provider: string) => Promise<{ ok: boolean; models?: Array<{ id: string; label?: string; supported?: string[] }>; error?: string }>;
     };
-    llm?: {
-      start: (
-        requestId: string,
-        messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
-        model?: string,
-        provider?: string,
-        sessionId?: string,
-      ) => Promise<{ ok: boolean }>;
-      agentStart: (
-        requestId: string,
-        messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
-        model?: string,
-        provider?: string,
-        tools?: string[],
-        responseSchema?: any,
-        sessionId?: string,
-      ) => Promise<{ ok: boolean }>;
-      auto: (
-        requestId: string,
-        messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
-        model?: string,
-        provider?: string,
-        tools?: string[],
-        responseSchema?: any,
-        sessionId?: string,
-      ) => Promise<{ ok: boolean; mode?: 'chat'|'tools'|'plan' }>;
-      cancel: (requestId: string) => Promise<{ ok: boolean }>;
-    };
-    ipcRenderer: {
-      on: (channel: string, listener: (event: any, ...args: any[]) => void) => void;
-      off: (channel: string, listener: (event: any, ...args: any[]) => void) => void;
-      send: (channel: string, ...args: any[]) => void;
-      invoke: (channel: string, ...args: any[]) => Promise<any>;
-    };
+
     fs?: {
       getCwd: () => Promise<string>;
       readFile: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
@@ -57,6 +15,7 @@ declare global {
         entries?: Array<{ name: string; isDirectory: boolean; path: string }>;
         error?: string
       }>;
+
       watchDir: (dirPath: string) => Promise<{ success: boolean; id?: number; error?: string }>;
       unwatch: (id: number) => Promise<{ success: boolean; error?: string }>;
       onWatch: (listener: (payload: { id: number; type: 'rename' | 'change'; path: string; dir: string }) => void) => () => void;
@@ -73,6 +32,7 @@ declare global {
       resize: (sessionId: string, cols: number, rows: number) => Promise<{ ok: boolean }>;
       dispose: (sessionId: string) => Promise<{ ok: boolean }>;
       execAgent: (sessionId: string, command: string, opts?: { confidence?: number; autoApproveEnabled?: boolean; autoApproveThreshold?: number }) => Promise<{ ok: boolean; blocked?: boolean; error?: string }>;
+
       onData: (listener: (payload: { sessionId: string; data: string }) => void) => () => void;
       onExit: (listener: (payload: { sessionId: string; exitCode: number }) => void) => () => void;
         attachAgent: (opts?: { requestId?: string; sessionId?: string; tailBytes?: number }) => Promise<{ ok: boolean; sessionId?: string; error?: string }>;
@@ -91,6 +51,7 @@ declare global {
       tsExportUtils?: {
         ensureDefaultExport: (filePath: string, name?: string, code?: string, opts?: { apply?: boolean; verify?: boolean; tsconfigPath?: string }) => Promise<{ ok: boolean; edits?: Array<{ type: 'modify'|'move'; path: string; newPath?: string; oldText?: string; newText?: string }>; verification?: { ok: boolean; exitCode: number; stdout: string; stderr: string }; error?: string }>;
         addExportFrom: (indexFilePath: string, exportName: string, fromFilePath: string, opts?: { apply?: boolean; verify?: boolean; tsconfigPath?: string }) => Promise<{ ok: boolean; edits?: Array<{ type: 'modify'|'move'; path: string; newPath?: string; oldText?: string; newText?: string }>; verification?: { ok: boolean; exitCode: number; stdout: string; stderr: string }; error?: string }>;
+
       };
       tsTransform?: {
         suggestParams: (filePath: string, start: number, end: number, opts?: { tsconfigPath?: string }) => Promise<{ ok: boolean; params?: string[]; error?: string }>;
@@ -155,6 +116,7 @@ declare global {
         status: () => Promise<{ ok: boolean; status?: { ready: boolean; chunks: number; modelId?: string; dim?: number; indexPath: string; exists?: boolean; inProgress?: boolean; phase?: string; processedFiles?: number; totalFiles?: number; processedChunks?: number; totalChunks?: number; elapsedMs?: number }; error?: string }>;
         clear: () => Promise<{ ok: boolean; error?: string }>;
         search: (query: string, k?: number) => Promise<{ ok: boolean; chunks?: Array<{ path: string; startLine: number; endLine: number; text: string }>; error?: string }>;
+        onProgress: (listener: (prog: any) => void) => () => void;
       };
       workspace?: {
         getRoot: () => Promise<string>;
@@ -181,6 +143,9 @@ declare global {
         load: () => Promise<{ ok: boolean; state?: any; error?: string }>;
         save: (state: any) => Promise<{ ok: boolean; error?: string }>;
       };
+      agent?: {
+        onMetrics: (listener: (payload: any) => void) => () => void;
+      };
 
       capabilities?: {
         get: () => Promise<{ ok: boolean; capabilities?: Record<string, Record<string, boolean>>; error?: string }>;
@@ -188,6 +153,25 @@ declare global {
 
     }
   }
+
+// Additional typed window APIs exposed via preload
+declare global {
+  interface Window {
+    menu?: {
+      popup: (args: { menu: string; x: number; y: number }) => Promise<any>;
+      on: (name: string, listener: (payload?: any) => void) => () => void;
+    };
+    windowControls?: {
+      minimize: () => Promise<any>;
+      maximize: () => Promise<any>;
+      close: () => Promise<any>;
+    };
+    app?: {
+      setView: (view: string) => Promise<any>;
+    };
+  }
+}
+
 
 
 

@@ -17,7 +17,7 @@
  */
 
 import type { StateCreator } from 'zustand'
-import type { Session, TokenUsage, TokenCost, AgentMetrics, ActivityEvent, SessionItem, SessionMessage, Badge } from '../types'
+import type { Session, TokenUsage, TokenCost, AgentMetrics, ActivityEvent, SessionItem, SessionMessage, NodeExecutionBox, Badge } from '../types'
 import { LS_KEYS, MAX_SESSIONS } from '../utils/constants'
 import { deriveTitle } from '../utils/sessions'
 import { loadAllSessions, sessionSaver, deleteSessionFromDisk } from '../utils/session-persistence'
@@ -123,9 +123,8 @@ export interface SessionSlice {
   // LLM Request Actions (legacy - kept for stopCurrentRequest only)
   stopCurrentRequest: () => Promise<void>
 
-  // LLM IPC Actions
+  // LLM IPC Actions (no-op in main; events are handled directly by scheduler -> store)
   ensureLlmIpcSubscription: () => void
-  ensureAgentMetricsSubscription: () => void
 }
 
 // ============================================================================
@@ -184,6 +183,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
    * - Loads the flow template (lastUsedFlow or default)
    * - Sets feSelectedTemplate to match the session's flow
    * - feLoadTemplate handles initialization or resumption based on flowState
+   * - Ensures a terminal exists for the session
    */
   initializeSession: async () => {
     const state = get() as any
@@ -193,6 +193,18 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       return
     }
 
+    // Create the PTY session for this session (using session ID as PTY session ID)
+    const workspaceRoot = state.workspaceRoot
+    const getOrCreate = (globalThis as any).__getOrCreateAgentPtyFor
+    if (getOrCreate) {
+      console.log('[session] Creating PTY for session:', currentSession.id)
+      await getOrCreate(currentSession.id, { cwd: workspaceRoot || undefined, sessionId: currentSession.id })
+    }
+
+    // Ensure terminal tab exists
+    if (state.ensureSessionTerminal) {
+      await state.ensureSessionTerminal()
+    }
 
     // Load the flow template (it will handle init/resume based on flowState)
     const flowTemplateId = currentSession.lastUsedFlow || 'default'
@@ -301,6 +313,9 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     const provider = state.selectedProvider || 'openai'
     const model = state.selectedModel || 'gpt-4o'
 
+    // Get the currently selected flow template to use for this new session
+    const lastUsedFlow = state.feSelectedTemplate || 'default'
+
     const session: Session = {
       id: crypto.randomUUID(),
       title,
@@ -308,6 +323,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       createdAt: now,
       updatedAt: now,
       lastActivityAt: now,
+      lastUsedFlow,  // Set to currently selected flow
       currentContext: {
         provider,
         model,
@@ -396,26 +412,24 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       sessionCount: get().sessions.length,
     })
 
-    // For messages, automatically populate provider/model from current context
+    // Add id and timestamp to the item
     let fullItem: SessionItem
     if (item.type === 'message') {
-      const state = get()
-      const currentSession = state.sessions.find(s => s.id === state.currentId)
-      const context = currentSession?.currentContext
-
+      // TypeScript needs help understanding that item has 'role' and 'content' when type === 'message'
+      const messageItem = item as Omit<SessionMessage, 'id' | 'timestamp'>
       fullItem = {
-        ...item,
+        ...messageItem,
         id,
         timestamp: now,
-        provider: context?.provider,
-        model: context?.model,
-      } as SessionMessage
+      }
     } else {
+      // TypeScript needs help understanding that item has all NodeExecutionBox fields when type === 'node-execution'
+      const nodeItem = item as Omit<NodeExecutionBox, 'id' | 'timestamp'>
       fullItem = {
-        ...item,
+        ...nodeItem,
         id,
         timestamp: now,
-      } as SessionItem
+      }
     }
 
     set((s) => {
@@ -735,183 +749,27 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     const rid = get().currentRequestId
     if (!rid) return
     try {
-      await window.ipcRenderer?.invoke('llm:cancel', { requestId: rid })
+      // Route cancellation through Flow V2
+      const stateAny = get() as any
+      if (typeof stateAny.feStop === 'function') {
+        await stateAny.feStop()
+      }
     } catch {}
     set({ currentRequestId: null })
   },
 
   // LLM IPC Actions
   ensureLlmIpcSubscription: () => {
+    // No-op in main process. Event subscriptions are renderer-managed and forwarded via dispatch.
     const state = get()
-    if (state.llmIpcSubscribed) return
-
-    const ipc = window.ipcRenderer
-    if (!ipc) return
-
-    // Chunk handler
-    const onChunk = (_: any, payload: any) => {
-      const { requestId, content } = payload || {}
-      if (!requestId || requestId !== get().currentRequestId) return
-
-      set((st) => ({
-        streamingText: st.streamingText + (content || ''),
-        chunkStats: {
-          count: st.chunkStats.count + 1,
-          totalChars: st.chunkStats.totalChars + (content?.length || 0),
-        },
-      }))
+    if (!state.llmIpcSubscribed) {
+      set({ llmIpcSubscribed: true })
+      const anyState = get() as any
+      anyState.addDebugLog?.('info', 'LLM', 'LLM event subscription handled in renderer')
     }
-
-    // Done handler
-    const onDone = () => {
-      const rid = get().currentRequestId
-      if (!rid) return
-
-      // Idempotency guard to avoid duplicate completion handling
-      if (get().doneByRequestId?.[rid]) return
-      set({ doneByRequestId: { ...get().doneByRequestId, [rid]: true } })
-
-      const text = get().streamingText
-      try {
-        get().addSessionItem({
-          type: 'message',
-          role: 'assistant',
-          content: text,
-          nodeKind: 'llmRequest',  // Legacy LLM IPC path (should not be used with flows)
-        } as any)
-      } catch {}
-
-      // Log chunk stats
-      const cs = get().chunkStats
-      const state = get() as any
-      if (cs.count > 0 && state.addDebugLog) {
-        state.addDebugLog('info', 'LLM', `Received ${cs.count} chunks (${cs.totalChars} chars total)`)
-      }
-
-      set({
-        currentRequestId: null,
-        streamingText: '',
-        chunkStats: { count: 0, totalChars: 0 },
-        retryCount: 0,
-      })
-
-      if (state.addDebugLog) {
-        state.addDebugLog('info', 'LLM', 'Stream completed')
-      }
-    }
-
-    // Error handler
-    const onErr = async (_: any, payload: any) => {
-      const rid = get().currentRequestId
-      if (!rid) return
-
-      // Get current session messages for retry
-      const currentSession = get().sessions.find(s => s.id === get().currentId)
-      const prev = currentSession?.items.filter(i => i.type === 'message').map((i: any) => ({
-        role: i.role,
-        content: i.content
-      })) || []
-      const cs = get().chunkStats
-
-      set({
-        currentRequestId: null,
-        streamingText: '',
-        chunkStats: { count: 0, totalChars: 0 },
-      })
-
-      const state = get() as any
-      if (cs.count > 0 && state.addDebugLog) {
-        state.addDebugLog('info', 'LLM', `Received ${cs.count} chunks (${cs.totalChars} chars total) before error`)
-      }
-
-      if (state.addDebugLog) {
-        state.addDebugLog('error', 'LLM', `Error: ${payload?.error}`, { error: payload?.error })
-      }
-
-      // Auto-retry logic
-      if (state.autoRetry && get().retryCount < 1) {
-        const rid2 = crypto.randomUUID()
-
-        set({ retryCount: get().retryCount + 1, currentRequestId: rid2 })
-
-        if (state.addDebugLog) {
-          state.addDebugLog('info', 'LLM', 'Auto-retrying request')
-        }
-
-        const res = await window.llm?.auto?.(rid2, prev, state.selectedModel, state.selectedProvider)
-
-        try {
-          if (state.pushRouteRecord) {
-            state.pushRouteRecord({
-              requestId: rid2,
-              mode: (res as any)?.mode || 'chat',
-              provider: state.selectedProvider,
-              model: state.selectedModel,
-              timestamp: Date.now(),
-            })
-          }
-        } catch {}
-
-        return
-      }
-    }
-
-    // Token usage handler
-    const onToken = (_: any, payload: any) => {
-      const rid = get().currentRequestId
-      if (!rid || payload?.requestId !== rid) return
-
-      try {
-        get().recordTokenUsage({ provider: payload.provider, model: payload.model, usage: payload.usage })
-      } catch {}
-
-      const state = get() as any
-      if (state.addDebugLog) {
-        state.addDebugLog(
-          'info',
-          'Tokens',
-          `Usage: ${payload.usage?.totalTokens} tokens (${payload.provider}/${payload.model})`,
-          payload.usage
-        )
-      }
-    }
-
-    // Savings handler
-    const onSavings = (_: any, payload: any) => {
-      const rid = get().currentRequestId
-      if (!rid || payload?.requestId !== rid) return
-
-      set({
-        lastRequestSavings: {
-          provider: payload.provider,
-          model: payload.model,
-          approxTokensAvoided: Math.max(0, Number(payload?.approxTokensAvoided || 0)),
-        },
-      })
-    }
-
-    // Subscribe to all events
-    ipc.on('llm:chunk', onChunk)
-    ipc.on('llm:done', onDone)
-    ipc.on('llm:error', onErr)
-    ipc.on('llm:token-usage', onToken)
-    ipc.on('llm:savings', onSavings)
-    set({ llmIpcSubscribed: true })
   },
 
-  ensureAgentMetricsSubscription: (() => {
-    let subscribed = false
-    return () => {
-      if (subscribed) return
-      subscribed = true
 
-      try {
-        window.ipcRenderer?.on('agent:metrics', (_: any, payload: any) => {
-          set({ agentMetrics: payload })
-        })
-      } catch {}
-    }
-  })(),
 
   // ============================================================================
   // Node Execution Box Actions (Simplified Model)

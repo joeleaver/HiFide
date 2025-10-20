@@ -11,7 +11,7 @@
  * - data: None
  */
 
-import type { NodeFunction, NodeExecutionPolicy, MainFlowContext } from '../types'
+import type { NodeFunction, NodeExecutionPolicy } from '../types'
 
 /**
  * Node metadata
@@ -43,14 +43,9 @@ export const newContextNode: NodeFunction = async (flow, _context, dataIn, _inpu
     systemInstructions
   })
 
-  // Mark as isolated for teal color
-  ;(newContext as any).contextType = 'isolated'
+  // Assign deterministic contextId for testability and routing; no extra UI fields
   ;(newContext as any).contextId = `context-${flow.nodeId}`
-
-  flow.log.debug('Created context', {
-    contextId: (newContext as any).contextId,
-    contextType: (newContext as any).contextType
-  })
+  flow.log.debug('Created context', { provider, model, contextId: (newContext as any).contextId })
 
   return {
     context: newContext,

@@ -93,7 +93,7 @@ async function statIsLarge(filePath: string, maxBytes: number): Promise<boolean>
 
 export async function astGrepSearch(opts: AstGrepSearchOptions): Promise<AstGrepSearchResult> {
   const t0 = performance.now()
-  const { useMainStore } = require('../store/index.js')
+  const { useMainStore } = await import('../store/index.js')
   const cwd = path.resolve(opts.cwd || useMainStore.getState().workspaceRoot || process.cwd())
   const include = (opts.includeGlobs && opts.includeGlobs.length ? opts.includeGlobs : ['**/*'])
   const exclude = [
@@ -207,7 +207,7 @@ function lcToOffset(lineIdx: number[], line1: number, col1: number): number {
 
 export async function astGrepRewrite(opts: AstGrepRewriteOptions): Promise<AstGrepRewriteResult> {
   const t0 = performance.now()
-  const { useMainStore } = require('../store/index.js')
+  const { useMainStore } = await import('../store/index.js')
   const cwd = path.resolve(opts.cwd || useMainStore.getState().workspaceRoot || process.cwd())
   const include = (opts.includeGlobs && opts.includeGlobs.length ? opts.includeGlobs : ['**/*'])
   const exclude = [ 'node_modules/**', 'dist/**', 'dist-electron/**', 'release/**', '.git/**', ...(opts.excludeGlobs || []) ]

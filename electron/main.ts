@@ -24,7 +24,6 @@ import { buildMenu } from './ipc/menu'
 import { OpenAIProvider } from './providers/openai'
 import { AnthropicProvider } from './providers/anthropic'
 import { GeminiProvider } from './providers/gemini'
-import { registerRateLimitIpc } from './providers/ratelimit'
 
 // State management
 import { providers, providerCapabilities } from './core/state'
@@ -74,9 +73,6 @@ async function initialize(): Promise<void> {
 
   // Register all IPC handlers
   registerAllHandlers(ipcMain)
-
-  // Register rate limit IPC handlers
-  registerRateLimitIpc(ipcMain)
 
   // Initialize agent session cleanup
   initAgentSessionsCleanup()

@@ -7,7 +7,6 @@
 import type { IpcMain } from 'electron'
 import { registerCapabilitiesHandlers } from './capabilities'
 import { registerSessionsHandlers } from './sessions'
-import { registerPlanningHandlers } from './planning'
 import { registerFilesystemHandlers } from './filesystem'
 import { registerWorkspaceHandlers } from './workspace'
 import { registerIndexingHandlers } from './indexing'
@@ -15,7 +14,7 @@ import { registerEditsHandlers } from './edits'
 import { registerRefactoringHandlers } from './refactoring'
 import { registerMenuHandlers } from './menu'
 import { registerPtyHandlers } from './pty'
-import { registerLlmCoreHandlers } from './llm-core'
+
 import { registerFlowHandlersV2 } from './flows-v2'
 import { registerFlowProfilesHandlers } from './flowProfiles'
 // Note: flowState handlers removed - state is now accessible via zubridge
@@ -31,7 +30,6 @@ export function registerAllHandlers(ipcMain: IpcMain): void {
   // Simple modules
   registerCapabilitiesHandlers(ipcMain)
   registerSessionsHandlers(ipcMain)
-  registerPlanningHandlers(ipcMain)
 
   // Medium complexity modules
   registerFilesystemHandlers(ipcMain)
@@ -43,7 +41,7 @@ export function registerAllHandlers(ipcMain: IpcMain): void {
 
   // Complex modules
   registerPtyHandlers(ipcMain)
-  registerLlmCoreHandlers(ipcMain)
+
   registerFlowHandlersV2(ipcMain) // V2: Clean function-based execution
   registerFlowProfilesHandlers(ipcMain)
   // Note: flowState handlers removed - state is now accessible via zubridge

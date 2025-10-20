@@ -128,6 +128,13 @@ export function getActiveFlow(requestId: string) {
 export async function cancelFlow(requestId: string): Promise<{ ok: boolean; error?: string }> {
   const scheduler = activeFlows.get(requestId)
   if (scheduler) {
+    try {
+      // Cooperatively cancel the running flow
+      scheduler.cancel()
+    } catch (e) {
+      // Best-effort cancel
+      console.warn('[cancelFlow] Error cancelling scheduler:', e)
+    }
     activeFlows.delete(requestId)
     flowEvents.cleanup(requestId)
     emitFlowEvent(requestId, { type: 'done' })

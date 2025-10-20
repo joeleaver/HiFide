@@ -18,10 +18,21 @@ export const sessionSearchOutputTool: AgentTool = {
     args: { query: string; caseSensitive?: boolean; in?: 'commands'|'live'|'all'; maxResults?: number },
     meta?: { requestId?: string }
   ) => {
-    const req = meta?.requestId || 'terminal'
+    const req = meta?.requestId
+    if (!req) {
+      console.error('[terminal.session_search_output] No requestId provided in meta')
+      return { ok: false, error: 'no-request-id' }
+    }
+    console.log('[terminal.session_search_output] Called with:', { requestId: req, query: args.query, meta })
+
     const sid = (globalThis as any).__agentPtyAssignments.get(req)
+    console.log('[terminal.session_search_output] Session ID from assignment:', sid)
+
     const rec = sid ? (globalThis as any).__agentPtySessions.get(sid) : undefined
-    if (!sid || !rec) return { ok: false, error: 'no-session' }
+    if (!sid || !rec) {
+      console.error('[terminal.session_search_output] No session found:', { requestId: req, sessionId: sid, hasRecord: !!rec })
+      return { ok: false, error: 'no-session' }
+    }
     const st = rec.state
     const q = args.caseSensitive ? args.query : args.query.toLowerCase()
     const max = Math.min(200, Math.max(1, args.maxResults || 30))
@@ -49,6 +60,7 @@ export const sessionSearchOutputTool: AgentTool = {
     if (where === 'all' || where === 'live') {
       findIn(st.ring, { type: 'live' })
     }
+    console.log('[terminal.session_search_output] Returning results:', { sessionId: sid, hitCount: results.length })
     return { ok: true, sessionId: sid, hits: results }
   }
 }

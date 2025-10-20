@@ -1,14 +1,14 @@
 /**
  * Planning Slice
- * 
+ *
  * Manages approved plans and plan execution.
- * 
+ *
  * Responsibilities:
  * - Approved plan state
  * - Plan persistence (save/load)
  * - Plan execution (first step, autonomous)
  * - Plan step tracking
- * 
+ *
  * Dependencies:
  * - Session slice (for getCurrentMessages, currentId)
  * - Provider slice (for selectedModel, selectedProvider)
@@ -19,6 +19,9 @@
 import type { StateCreator } from 'zustand'
 import type { ApprovedPlan } from '../types'
 
+import path from 'node:path'
+import fs from 'node:fs/promises'
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -26,7 +29,7 @@ import type { ApprovedPlan } from '../types'
 export interface PlanningSlice {
   // State
   approvedPlan: ApprovedPlan | null
-  
+
   // Actions
   setApprovedPlan: (plan: ApprovedPlan | null) => void
   saveApprovedPlan: () => Promise<{ ok: boolean } | undefined>
@@ -42,64 +45,66 @@ export interface PlanningSlice {
 export const createPlanningSlice: StateCreator<PlanningSlice, [], [], PlanningSlice> = (set, get) => ({
   // State
   approvedPlan: null,
-  
+
   // Actions
   setApprovedPlan: (plan: ApprovedPlan | null) => {
     set({ approvedPlan: plan })
   },
-  
+
   saveApprovedPlan: async () => {
     try {
       const plan = get().approvedPlan
-      const res = await window.planning?.saveApproved?.(plan)
-      
       const state = get() as any
-      if (!res?.ok) {
-        if (state.addDebugLog) {
-          state.addDebugLog('error', 'Planning', 'Failed to save ApprovedPlan', res)
-        }
-      } else {
-        if (state.addDebugLog) {
-          state.addDebugLog('info', 'Planning', 'ApprovedPlan saved')
-        }
+      const baseDir = path.resolve(String(state.workspaceRoot || process.cwd()))
+      const privateDir = path.join(baseDir, '.hifide-private')
+      await fs.mkdir(privateDir, { recursive: true })
+      const file = path.join(privateDir, 'approved-plan.json')
+      await fs.writeFile(file, JSON.stringify(plan ?? {}, null, 2), 'utf-8')
+      if (state.addDebugLog) {
+        state.addDebugLog('info', 'Planning', 'ApprovedPlan saved')
       }
-      
-      return res
+      return { ok: true }
     } catch (e) {
       const state = get() as any
       if (state.addDebugLog) {
         state.addDebugLog('error', 'Planning', 'Error saving ApprovedPlan', { error: String(e) })
       }
       console.error('[planning] Save error:', e)
+      return { ok: false, error: String(e) }
     }
   },
-  
+
   loadApprovedPlan: async () => {
     try {
-      const res = await window.planning?.loadApproved?.()
-      
-      if (res?.ok) {
-        set({ approvedPlan: (res as any)?.plan ?? null })
-      } else {
-        const state = get() as any
-        if (state.addDebugLog) {
-          state.addDebugLog('error', 'Planning', 'Failed to load ApprovedPlan', res)
-        }
+      const state = get() as any
+      const baseDir = path.resolve(String(state.workspaceRoot || process.cwd()))
+      const file = path.join(baseDir, '.hifide-private', 'approved-plan.json')
+      const text = await fs.readFile(file, 'utf-8').catch(() => '')
+      if (!text) {
+        set({ approvedPlan: null })
+        return { ok: true, plan: null }
       }
-      
-      return res
+      try {
+        const plan = JSON.parse(text)
+        set({ approvedPlan: plan })
+        return { ok: true, plan }
+      } catch {
+        set({ approvedPlan: null })
+        return { ok: true, plan: null }
+      }
     } catch (e) {
       const state = get() as any
       if (state.addDebugLog) {
         state.addDebugLog('error', 'Planning', 'Error loading ApprovedPlan', { error: String(e) })
       }
       console.error('[planning] Load error:', e)
+      return { ok: false, error: String(e) }
     }
   },
-  
+
   executeApprovedPlanFirstStep: async () => {
     const plan = get().approvedPlan
-    
+
     if (!plan || !Array.isArray(plan.steps) || plan.steps.length === 0) {
       const state = get() as any
       if (state.addDebugLog) {
@@ -107,24 +112,24 @@ export const createPlanningSlice: StateCreator<PlanningSlice, [], [], PlanningSl
       }
       return
     }
-    
+
     const first = plan.steps[0]
     const rid = crypto.randomUUID()
-    
+
     // Get state from other slices
     const state = get() as any
     const selectedModel = state.selectedModel || 'gpt-4'
     const selectedProvider = state.selectedProvider || 'openai'
     const autoApproveEnabled = state.autoApproveEnabled ?? false
     const autoApproveThreshold = state.autoApproveThreshold ?? 0.5
-    
+
     const autoEnabled = plan.autoApproveEnabled ?? autoApproveEnabled
     const autoThresh = typeof plan.autoApproveThreshold === 'number' ? plan.autoApproveThreshold : autoApproveThreshold
-    
+
     const sys1 = 'EXECUTION MODE. Execute exactly the indicated step then stop and report. Verify per plan. Respect auto-approve policy.'
     const sys2 = `ApprovedPlan:\n\`\`\`json\n${JSON.stringify(plan)}\n\`\`\``
     const user = `Execute exactly step ${first.id} only. Stop after verification with a brief report.`
-    
+
     // Set current request ID (from session slice)
     if (state.currentRequestId !== undefined) {
       const sessionState = state as any
@@ -133,7 +138,7 @@ export const createPlanningSlice: StateCreator<PlanningSlice, [], [], PlanningSl
       sessionState.chunkStats = { count: 0, totalChars: 0 }
       sessionState.retryCount = 0
     }
-    
+
     if (state.addDebugLog) {
       state.addDebugLog('info', 'LLM', `Executing ApprovedPlan first step (${first.id}) via tools`, {
         requestId: rid,
@@ -141,30 +146,40 @@ export const createPlanningSlice: StateCreator<PlanningSlice, [], [], PlanningSl
         model: selectedModel,
       })
     }
-    
-    
-    const msgs = [
-      { role: 'system' as const, content: sys1 + ` AutoApprove: enabled=${autoEnabled} threshold=${autoThresh}.` },
-      { role: 'system' as const, content: sys2 },
-      ...(state.getCurrentMessages ? state.getCurrentMessages() : []),
-      { role: 'user' as const, content: user },
-    ]
-    
+
+    // Execute via Flow V2: ensure a running flow, then resume with a planning prompt
     try {
-      const res = await window.llm?.agentStart?.(
-        rid,
-        msgs,
-        selectedModel,
-        selectedProvider,
-        undefined,
-        undefined,
-        state.currentId || undefined
-      )
-      
+      const storeAny = get() as any
+
+      // If no flow execution is active, initialize it (requires nodes loaded)
+      if (!storeAny.feRequestId) {
+        if (Array.isArray(storeAny.feNodes) && storeAny.feNodes.length > 0 && typeof storeAny.flowInit === 'function') {
+          await storeAny.flowInit()
+        } else {
+          if (state.addDebugLog) {
+            state.addDebugLog('warning', 'Planning', 'No flow loaded; cannot execute ApprovedPlan step')
+          }
+          return
+        }
+      }
+
+      // Build a single user instruction that embeds plan + policy
+      const planningPrompt = [
+        sys1 + ` AutoApprove: enabled=${autoEnabled} threshold=${autoThresh}.`,
+        sys2,
+        user,
+      ].join('\n\n')
+
+      if (typeof storeAny.feResume === 'function') {
+        await storeAny.feResume({ userInput: planningPrompt })
+      } else if (state.addDebugLog) {
+        state.addDebugLog('error', 'Planning', 'feResume not available in store')
+      }
+
       try {
         if (state.pushRouteRecord) {
           state.pushRouteRecord({
-            requestId: rid,
+            requestId: storeAny.feRequestId || rid,
             mode: 'tools',
             provider: selectedProvider,
             model: selectedModel,
@@ -172,27 +187,17 @@ export const createPlanningSlice: StateCreator<PlanningSlice, [], [], PlanningSl
           })
         }
       } catch {}
-      
-      if (!res?.ok && state.addDebugLog) {
-        state.addDebugLog('error', 'LLM', 'agentStart failed for ApprovedPlan execution', res)
-      }
     } catch (e) {
       if (state.addDebugLog) {
-        state.addDebugLog('error', 'LLM', 'agentStart threw for ApprovedPlan execution', { error: String(e) })
+        state.addDebugLog('error', 'Planning', 'Flow execution threw for ApprovedPlan first step', { error: String(e) })
       }
-      
-      if (state.currentRequestId !== undefined) {
-        const sessionState = state as any
-        sessionState.currentRequestId = null
-      }
-      
       console.error('[planning] Execute first step error:', e)
     }
   },
-  
+
   executeApprovedPlanAutonomous: async () => {
     const plan = get().approvedPlan
-    
+
     if (!plan || !Array.isArray(plan.steps) || plan.steps.length === 0) {
       const state = get() as any
       if (state.addDebugLog) {
@@ -200,19 +205,19 @@ export const createPlanningSlice: StateCreator<PlanningSlice, [], [], PlanningSl
       }
       return
     }
-    
+
     const rid = crypto.randomUUID()
-    
+
     // Get state from other slices
     const state = get() as any
     const selectedModel = state.selectedModel || 'gpt-4'
     const selectedProvider = state.selectedProvider || 'openai'
     const autoApproveEnabled = state.autoApproveEnabled ?? false
     const autoApproveThreshold = state.autoApproveThreshold ?? 0.5
-    
+
     const autoEnabled = plan.autoApproveEnabled ?? autoApproveEnabled
     const autoThresh = typeof plan.autoApproveThreshold === 'number' ? plan.autoApproveThreshold : autoApproveThreshold
-    
+
     const sys1 = [
       'EXECUTION MODE. Execute the ApprovedPlan steps in order, autonomously.',
       'After each step: run Verify, summarize the result briefly.',
@@ -220,10 +225,10 @@ export const createPlanningSlice: StateCreator<PlanningSlice, [], [], PlanningSl
       'If verification fails or you detect risk beyond auto-approve policy, STOP and report.',
       'Respect auto-approve policy for risky operations; ask only when required.',
     ].join(' ')
-    
+
     const sys2 = `ApprovedPlan:\n\`\`\`json\n${JSON.stringify(plan)}\n\`\`\``
     const user = 'Begin executing the plan from the first step and continue through all steps unless verification fails. Keep outputs concise.'
-    
+
     // Set current request ID (from session slice)
     if (state.currentRequestId !== undefined) {
       const sessionState = state as any
@@ -232,7 +237,7 @@ export const createPlanningSlice: StateCreator<PlanningSlice, [], [], PlanningSl
       sessionState.chunkStats = { count: 0, totalChars: 0 }
       sessionState.retryCount = 0
     }
-    
+
     if (state.addDebugLog) {
       state.addDebugLog('info', 'LLM', 'Executing ApprovedPlan autonomously via tools', {
         requestId: rid,
@@ -240,30 +245,39 @@ export const createPlanningSlice: StateCreator<PlanningSlice, [], [], PlanningSl
         model: selectedModel,
       })
     }
-    
-    
-    const msgs = [
-      { role: 'system' as const, content: sys1 + ` AutoApprove: enabled=${autoEnabled} threshold=${autoThresh}.` },
-      { role: 'system' as const, content: sys2 },
-      ...(state.getCurrentMessages ? state.getCurrentMessages() : []),
-      { role: 'user' as const, content: user },
-    ]
-    
+
+    // Execute via Flow V2: ensure a running flow, then resume with a planning prompt
     try {
-      const res = await window.llm?.agentStart?.(
-        rid,
-        msgs,
-        selectedModel,
-        selectedProvider,
-        undefined,
-        undefined,
-        state.currentId || undefined
-      )
-      
+      const storeAny = get() as any
+
+      // If no flow execution is active, initialize it (requires nodes loaded)
+      if (!storeAny.feRequestId) {
+        if (Array.isArray(storeAny.feNodes) && storeAny.feNodes.length > 0 && typeof storeAny.flowInit === 'function') {
+          await storeAny.flowInit()
+        } else {
+          if (state.addDebugLog) {
+            state.addDebugLog('warning', 'Planning', 'No flow loaded; cannot execute ApprovedPlan autonomously')
+          }
+          return
+        }
+      }
+
+      const planningPrompt = [
+        sys1 + ` AutoApprove: enabled=${autoEnabled} threshold=${autoThresh}.`,
+        sys2,
+        user,
+      ].join('\n\n')
+
+      if (typeof storeAny.feResume === 'function') {
+        await storeAny.feResume({ userInput: planningPrompt })
+      } else if (state.addDebugLog) {
+        state.addDebugLog('error', 'Planning', 'feResume not available in store')
+      }
+
       try {
         if (state.pushRouteRecord) {
           state.pushRouteRecord({
-            requestId: rid,
+            requestId: storeAny.feRequestId || rid,
             mode: 'tools',
             provider: selectedProvider,
             model: selectedModel,
@@ -271,20 +285,10 @@ export const createPlanningSlice: StateCreator<PlanningSlice, [], [], PlanningSl
           })
         }
       } catch {}
-      
-      if (!res?.ok && state.addDebugLog) {
-        state.addDebugLog('error', 'LLM', 'agentStart failed for autonomous ApprovedPlan execution', res)
-      }
     } catch (e) {
       if (state.addDebugLog) {
-        state.addDebugLog('error', 'LLM', 'agentStart threw for autonomous ApprovedPlan execution', { error: String(e) })
+        state.addDebugLog('error', 'Planning', 'Flow execution threw for autonomous ApprovedPlan', { error: String(e) })
       }
-      
-      if (state.currentRequestId !== undefined) {
-        const sessionState = state as any
-        sessionState.currentRequestId = null
-      }
-      
       console.error('[planning] Execute autonomous error:', e)
     }
   },

@@ -4,16 +4,20 @@ import ReactFlow, {
   Controls,
   MiniMap,
   applyNodeChanges,
+  applyEdgeChanges,
   useReactFlow,
   type Connection,
   type NodeChange,
   type EdgeChange,
   type Node as FlowNode,
+  type Edge,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { useAppStore, useDispatch } from '../store'
-import { Button, Group, Badge, TextInput, Modal, Text, Menu, Divider } from '@mantine/core'
-import { IconPlayerStop, IconLayoutDistributeVertical, IconChevronDown, IconPlus, IconCopy, IconTrash, IconRefresh } from '@tabler/icons-react'
+import { useFlowEditorLocal } from '../store/flowEditorLocal'
+
+import { Button, Group, Badge, TextInput, Modal, Text, Menu, Divider, UnstyledButton } from '@mantine/core'
+import { IconPlayerStop, IconLayoutDistributeVertical, IconChevronDown, IconPlus, IconCopy, IconTrash, IconRefresh, IconChevronRight } from '@tabler/icons-react'
 import FlowNodeComponent from './FlowNode'
 import { getLayoutedElements } from '../utils/autoLayout'
 import { getNodeColor } from '../../electron/store/utils/node-colors'
@@ -53,11 +57,21 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   // Use dispatch for actions
   const dispatch = useDispatch()
 
-  // Get state values - use individual selectors to avoid re-render issues
-  // For nodes, we use local state for smooth dragging, so we only get the initial value
+  // ===== LOCAL STATE (Instant UI Updates - Renderer-only store) =====
+  // Nodes and edges are kept in a renderer-local zustand store for responsiveness
+  // They are debounced-synced to the main store
+  const localNodes = useFlowEditorLocal((s) => s.nodes) as FlowNode[]
+  const setLocalNodes = useFlowEditorLocal((s) => s.setNodes)
+  const localEdges = useFlowEditorLocal((s) => s.edges) as Edge[]
+  const setLocalEdges = useFlowEditorLocal((s) => s.setEdges)
+  const hydrateFromMain = useFlowEditorLocal((s) => s.hydrateFromMain)
+  const saveDebounced = useFlowEditorLocal((s) => s.saveDebounced)
+
+  // ===== REMOTE STATE (Execution & Persistence) =====
+  // These come from the main store and are read-only in the renderer
   const storeNodes = useAppStore((s) => s.feNodes)
-  const executionState = useAppStore((s) => s.feNodeExecutionState)
-  const edges = useAppStore((s) => s.feEdges)
+  const storeEdges = useAppStore((s) => s.feEdges)
+  const flowState = useAppStore((s) => s.feFlowState)  // Execution state (metadata only)
   const status = useAppStore((s) => s.feStatus)
   const pausedNode = useAppStore((s) => s.fePausedNode)
   const currentProfile = useAppStore((s) => s.feCurrentProfile)
@@ -72,8 +86,10 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
     return template?.library === 'system'
   }, [availableTemplates])
   const saveAsModalOpen = useAppStore((s) => s.feSaveAsModalOpen)
-  const newProfileName = useAppStore((s) => s.feNewProfileName)
   const loadTemplateModalOpen = useAppStore((s) => s.feLoadTemplateModalOpen)
+
+  // Use local state for profile name input to avoid lag on every keystroke
+  const [localProfileName, setLocalProfileName] = useState('')
 
   // Memoize template options for Select component
   const templateOptions = useMemo(() => {
@@ -137,68 +153,115 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
     // Check for unsaved changes before loading
     if (hasUnsavedChanges) {
       // Store the pending selection and show confirmation modal
-      dispatch('feSetSelectedTemplate', value)
-      dispatch('feSetLoadTemplateModalOpen', true)
+      dispatch('feSetSelectedTemplate', { id: value })
+      dispatch('feSetLoadTemplateModalOpen', { open: true })
       return
     }
 
     // Load directly if no unsaved changes
-    dispatch('feSetSelectedTemplate', value)
-    dispatch('feLoadTemplate', value)
+    dispatch('feSetSelectedTemplate', { id: value })
+    dispatch('feLoadTemplate', { templateId: value })
   }, [hasUnsavedChanges, dispatch])
 
   // Handle save as (create new profile)
   const handleSaveAs = useCallback(async () => {
-    if (!newProfileName.trim()) return
-    await dispatch('feSaveAsProfile', newProfileName)
-  }, [newProfileName, dispatch])
+    if (!localProfileName.trim()) return
+
+    // Sync local state to store before saving
+    dispatch('feSetNodes', { nodes: localNodes })
+    dispatch('feSetEdges', { edges: localEdges })
+
+    // Then save
+    await dispatch('feSaveAsProfile', { name: localProfileName })
+
+    // Clear local input after save
+    setLocalProfileName('')
+  }, [localProfileName, localNodes, localEdges, dispatch])
 
   // Actually load the template/profile (called from modal)
   const loadSelectedTemplate = useCallback(async () => {
     if (!selectedTemplate) return
-    await dispatch('feLoadTemplate', selectedTemplate)
-    dispatch('feSetLoadTemplateModalOpen', false)
+    await dispatch('feLoadTemplate', { templateId: selectedTemplate })
+    dispatch('feSetLoadTemplateModalOpen', { open: false })
   }, [selectedTemplate, dispatch])
 
   // Handle modal cancel - revert selection to currently loaded flow
   const handleCancelLoad = useCallback(() => {
     // Revert selection to the currently loaded flow
     const currentlyLoaded = currentProfile || 'default'
-    dispatch('feSetSelectedTemplate', currentlyLoaded)
-    dispatch('feSetLoadTemplateModalOpen', false)
+    dispatch('feSetSelectedTemplate', { id: currentlyLoaded })
+    dispatch('feSetLoadTemplateModalOpen', { open: false })
   }, [currentProfile, dispatch])
 
-  // Auto-layout handler
-  const handleAutoLayout = useCallback(() => {
-    // Get current nodes and edges from store to avoid stale closure
-    const currentNodes = storeNodes
-    const currentEdges = edges
-    const layoutedNodes = getLayoutedElements(currentNodes, currentEdges, 'LR')
-    dispatch('feSetNodes', layoutedNodes)
+  // ===== INITIALIZATION: Load nodes/edges from store when template changes =====
+  // Track the last loaded template to detect when a new template is loaded
+  const lastLoadedTemplateRef = useRef<string | null>(null)
 
-    // Fit view after layout
-    setTimeout(() => {
-      rfRef.current?.fitView({ padding: 0.2, duration: 300 })
-    }, 50)
-  }, [storeNodes, edges, dispatch])
+  useEffect(() => {
+    if (!Array.isArray(storeNodes) || !Array.isArray(storeEdges)) return
 
-  // Local nodes state for ReactFlow - starts from store, updates during drag
-  const [localNodes, setLocalNodes] = useState<FlowNode[]>([])
+    // Load from store when:
+    // 1. First initialization (lastLoadedTemplateRef is null)
+    // 2. Template changed (selectedTemplate is different from last loaded)
+    const isFirstLoad = lastLoadedTemplateRef.current === null
+    const templateChanged = selectedTemplate !== lastLoadedTemplateRef.current
+
+    if (isFirstLoad || templateChanged) {
+      hydrateFromMain({ nodes: storeNodes, edges: storeEdges })
+      lastLoadedTemplateRef.current = selectedTemplate
+    }
+  }, [storeNodes, storeEdges, selectedTemplate])
+
+  // Debounced sync of local graph to main store on changes
+  useEffect(() => {
+    saveDebounced()
+  }, [localNodes, localEdges, saveDebounced])
+
+
+  // ===== NO CONTINUOUS SYNC OF GRAPH STRUCTURE =====
+  // We only sync nodes/edges to the store when explicitly needed (execute, save, etc.)
+  // This eliminates unnecessary IPC overhead and prevents local changes from being overwritten
+  // Execution state (flowState) is synced store → renderer for visual styling
 
   // Track measured dimensions in a ref (doesn't trigger re-renders)
   const nodeDimensionsRef = useRef<Record<string, { width?: number; height?: number }>>({})
 
-  // Sync from store when store changes
-  useEffect(() => {
-    if (!Array.isArray(storeNodes)) return
+  // Handlers for node updates (passed to FlowNode components)
+  const handleNodeLabelChange = useCallback((nodeId: string, newLabel: string) => {
+    const updated = localNodes.map(n =>
+      n.id === nodeId
+        ? { ...n, data: { ...n.data, labelBase: newLabel, label: newLabel } }
+        : n
+    )
+    setLocalNodes(updated as any)
+  }, [localNodes, setLocalNodes])
 
-    // Merge execution state AND preserve ReactFlow's measured dimensions
-    const merged = storeNodes.map(node => {
-      const execState = executionState?.[node.id]
+  const handleNodeConfigChange = useCallback((nodeId: string, patch: any) => {
+    const updated = localNodes.map(n =>
+      n.id === nodeId
+        ? { ...n, data: { ...n.data, config: { ...(n.data?.config || {}), ...patch } } }
+        : n
+    )
+    setLocalNodes(updated as any)
+  }, [localNodes, setLocalNodes])
+
+  const handleNodeExpandToggle = useCallback((nodeId: string) => {
+    const updated = localNodes.map(n =>
+      n.id === nodeId
+        ? { ...n, data: { ...n.data, expanded: !n.data?.expanded } }
+        : n
+    )
+    setLocalNodes(updated as any)
+  }, [localNodes, setLocalNodes])
+
+  // ===== MERGE: Execution state with local nodes for display =====
+  const displayNodes = useMemo(() => {
+    return localNodes.map(node => {
+      const execState = flowState?.[node.id]
       const dims = nodeDimensionsRef.current[node.id]
 
+      // CRITICAL: Always attach handlers to all nodes so editing works
       // CRITICAL: Preserve width/height from ref (ReactFlow sets these after measuring)
-      // Without these, ReactFlow sets visibility:hidden
       return {
         ...node,
         width: dims?.width || node.width,
@@ -211,14 +274,37 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
           durationMs: execState?.durationMs,
           costUSD: execState?.costUSD,
           detectedIntent: execState?.detectedIntent,
+          // Pass handlers to node components via data
+          onLabelChange: handleNodeLabelChange,
+          onConfigChange: handleNodeConfigChange,
+          onExpandToggle: handleNodeExpandToggle,
         },
       }
     })
+  }, [localNodes, flowState, handleNodeLabelChange, handleNodeConfigChange, handleNodeExpandToggle])
 
-    setLocalNodes(merged)
-  }, [storeNodes, executionState])
+  // Auto-layout handler - operates on local state
+  const handleAutoLayout = useCallback(() => {
+    const layoutedNodes = getLayoutedElements(localNodes, localEdges, 'LR')
+    setLocalNodes(layoutedNodes)
 
-  const uiNodes = localNodes
+    // Fit view after layout
+    setTimeout(() => {
+      rfRef.current?.fitView({ padding: 0.2, duration: 300 })
+    }, 50)
+  }, [localNodes, localEdges])
+
+  // Sync local graph to store and start flow execution
+  const handleFlowInit = useCallback(() => {
+    // Sync current local state to store
+    dispatch('feSetNodes', { nodes: localNodes })
+    dispatch('feSetEdges', { edges: localEdges })
+
+    // Then start flow execution
+    setTimeout(() => {
+      dispatch('flowInit')
+    }, 0)
+  }, [localNodes, localEdges, dispatch])
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     // Handle dimension changes by storing them in ref
@@ -239,64 +325,40 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
 
     if (relevantChanges.length === 0) return
 
-    // Apply ALL changes to local state immediately for smooth dragging
-    setLocalNodes((nodes: FlowNode[]) => {
-      const updated = applyNodeChanges(relevantChanges, nodes) as FlowNode[]
-      // Also update dimensions ref from the updated nodes
-      for (const node of updated) {
-        if (node.width !== undefined && node.width !== null && node.height !== undefined && node.height !== null) {
-          nodeDimensionsRef.current[node.id] = {
-            width: node.width,
-            height: node.height,
-          }
+    // Apply ALL changes to local state immediately for smooth interaction
+    // Filter out deletion of defaultContextStart node
+    const filteredChanges = relevantChanges.filter(change => {
+      if (change.type === 'remove') {
+        const node = localNodes.find(n => n.id === (change as any).id)
+        if (node && (node.data as any)?.nodeType === 'defaultContextStart') {
+          return false // Don't allow deletion of defaultContextStart
         }
       }
-      return updated
+      return true
     })
 
-    // Separate position changes from others
-    const positionChanges = relevantChanges.filter(ch => ch.type === 'position') as any[]
-    const otherChanges = relevantChanges.filter(ch => ch.type !== 'position')
-
-    // Only dispatch position changes when drag ends
-    const endedDrags = positionChanges.filter(ch => !ch.dragging)
-    if (endedDrags.length > 0) {
-      // Get final positions from local state
-      setLocalNodes((nodes: FlowNode[]) => {
-        const finalChanges = endedDrags.map(ch => {
-          const node = nodes.find((n: FlowNode) => n.id === ch.id)
-          return node ? { ...ch, position: node.position } : null
-        }).filter(ch => ch && ch.position)
-
-        if (finalChanges.length > 0) {
-          dispatch('feApplyNodeChanges', finalChanges)
+    const updated = applyNodeChanges(filteredChanges, localNodes as FlowNode[]) as FlowNode[]
+    // Also update dimensions ref from the updated nodes
+    for (const node of updated) {
+      if (node.width !== undefined && node.width !== null && node.height !== undefined && node.height !== null) {
+        nodeDimensionsRef.current[node.id] = {
+          width: node.width,
+          height: node.height,
         }
-        return nodes
-      })
+      }
     }
+    setLocalNodes(updated as any)
 
-    // Dispatch non-position changes immediately
-    if (otherChanges.length > 0) {
-      dispatch('feApplyNodeChanges', otherChanges)
-    }
-  }, [dispatch])
+    // Local state changes will trigger debounced sync to store automatically
+  }, [localNodes])
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
-    // Compute new edges from current edges + changes
-    const newEdges = changes.reduce((acc: any, change) => {
-      if (change.type === 'remove') {
-        return acc.filter((e: any) => e.id !== change.id)
-      } else if (change.type === 'select') {
-        return acc.map((e: any) => e.id === change.id ? { ...e, selected: change.selected } : e)
-      }
-      return acc
-    }, edges)
+    // Apply changes to local state immediately
+    const updated = applyEdgeChanges(changes, localEdges as Edge[]) as Edge[]
+    setLocalEdges(updated as any)
 
-    // Only dispatch if edges actually changed
-    if (newEdges !== edges) {
-      dispatch('feSetEdges', newEdges)
-    }
-  }, [edges, dispatch])
+    // Local state changes will trigger debounced sync to store automatically
+  }, [localEdges])
 
   const onConnect = useCallback((connection: Connection) => {
     const sourceHandle = connection.sourceHandle
@@ -323,16 +385,20 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
       style: { stroke: color, strokeWidth: 2 },
       markerEnd: { type: 'arrowclosed' as any, color },
     }
-    dispatch('feSetEdges', [...edges, newEdge])
-  }, [edges, localNodes, dispatch])
+
+    // Add to local state immediately
+    setLocalEdges([...(localEdges as Edge[]), newEdge] as any)
+
+    // Local state changes will trigger debounced sync to store automatically
+  }, [localNodes, localEdges])
 
   // Enhance edges with selection styling and handle-based colors
   const styledEdges = useMemo(() => {
     // Safety check: ensure edges is an array
-    if (!Array.isArray(edges)) {
+    if (!Array.isArray(localEdges)) {
       return []
     }
-    return edges.map(edge => {
+    return localEdges.map(edge => {
       const sourceHandle = (edge as any).sourceHandle
       const targetHandle = (edge as any).targetHandle
 
@@ -356,7 +422,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
         },
       }
     })
-  }, [edges, localNodes])
+  }, [localEdges, localNodes])
 
   return (
     <div style={{
@@ -434,7 +500,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
 
               <Menu.Item
                 leftSection={<IconPlus size={14} />}
-                onClick={() => dispatch('feSetSaveAsModalOpen', true)}
+                onClick={() => dispatch('feSetSaveAsModalOpen', { open: true })}
                 style={{ fontSize: 12 }}
               >
                 Save As New...
@@ -447,8 +513,8 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
                     onClick={() => {
                       // Duplicate: open save as with current name + " Copy"
                       const currentName = availableTemplates?.find((t: any) => t.id === selectedTemplate)?.name || selectedTemplate
-                      dispatch('feSetNewProfileName', `${currentName} Copy`)
-                      dispatch('feSetSaveAsModalOpen', true)
+                      dispatch('feSetNewProfileName', { name: `${currentName} Copy` })
+                      dispatch('feSetSaveAsModalOpen', { open: true })
                     }}
                     style={{ fontSize: 12 }}
                   >
@@ -460,7 +526,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
                     color="red"
                     onClick={async () => {
                       if (confirm(`Delete profile "${selectedTemplate}"?`)) {
-                        await dispatch('feDeleteProfile', selectedTemplate)
+                        await dispatch('feDeleteProfile', { name: selectedTemplate })
                       }
                     }}
                     style={{ fontSize: 12 }}
@@ -535,13 +601,34 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
             <Button
               size="xs"
               leftSection={<IconRefresh size={14} />}
-              onClick={() => dispatch('flowInit')}
+              onClick={handleFlowInit}
               variant="filled"
               color="blue"
             >
               Restart
             </Button>
           )}
+          {/* Collapse button */}
+          <UnstyledButton
+            onClick={() => dispatch('updateWindowState', { flowCanvasCollapsed: true })}
+            style={{
+              color: '#cccccc',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 20,
+              height: 20,
+              cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = '#ffffff'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = '#cccccc'
+            }}
+          >
+            <IconChevronRight size={16} />
+          </UnstyledButton>
         </Group>
       </div>
 
@@ -549,8 +636,8 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
       <Modal
         opened={saveAsModalOpen}
         onClose={() => {
-          dispatch('feSetSaveAsModalOpen', false)
-          dispatch('feSetNewProfileName', '')
+          dispatch('feSetSaveAsModalOpen', { open: false })
+          setLocalProfileName('')
         }}
         title="Save Flow Profile As"
         size="sm"
@@ -558,8 +645,8 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
         <TextInput
           label="Profile Name"
           placeholder="Enter profile name"
-          value={newProfileName}
-          onChange={(e) => dispatch('feSetNewProfileName', e.currentTarget.value)}
+          value={localProfileName}
+          onChange={(e) => setLocalProfileName(e.currentTarget.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               handleSaveAs()
@@ -571,15 +658,15 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
           <Button
             variant="subtle"
             onClick={() => {
-              dispatch('feSetSaveAsModalOpen', false)
-              dispatch('feSetNewProfileName', '')
+              dispatch('feSetSaveAsModalOpen', { open: false })
+              setLocalProfileName('')
             }}
           >
             Cancel
           </Button>
           <Button
             onClick={handleSaveAs}
-            disabled={!newProfileName.trim()}
+            disabled={!localProfileName.trim()}
           >
             Save
           </Button>
@@ -616,7 +703,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
       <div style={{ flex: 1, background: '#1e1e1e', position: 'relative' }}>
         <ReactFlow
           ref={rfRef}
-          nodes={uiNodes as FlowNode[]}
+          nodes={displayNodes as FlowNode[]}
           edges={styledEdges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
@@ -626,7 +713,13 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
             const nodeType = event.dataTransfer.getData('application/reactflow')
             if (!nodeType) return
 
-            // Get the ReactFlow wrapper bounds
+            // Prevent adding multiple defaultContextStart nodes
+            if (nodeType === 'defaultContextStart') {
+              const hasDefaultContextStart = localNodes.some(n => (n.data as any)?.nodeType === 'defaultContextStart')
+              if (hasDefaultContextStart) {
+                return
+              }
+            }
 
             // Calculate position in flow coordinates using screenToFlowPosition
             const position = reactFlowInstance.screenToFlowPosition({
@@ -634,10 +727,29 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
               y: event.clientY,
             })
 
-
             const match = NODE_PALETTE.find((p) => p.nodeType === nodeType)
             const label = match?.label || nodeType
-            dispatch('feAddNode', { nodeType: nodeType, pos: position, label })
+
+            // Create new node
+            const id = `${nodeType}-${Date.now()}`
+
+            // Set default config for certain node types
+            let defaultConfig: Record<string, any> = {}
+            if (nodeType === 'newContext') {
+              defaultConfig = { provider: 'openai', model: 'gpt-4o' }
+            } else if (nodeType === 'llmRequest') {
+              defaultConfig = { provider: 'openai', model: 'gpt-4o' }
+            }
+
+            const newNode: FlowNode = {
+              id,
+              type: 'hifiNode',
+              data: { nodeType, label, labelBase: label, config: defaultConfig },
+              position,
+            }
+
+            // Add to local state (will be synced to store when user executes/saves)
+            setLocalNodes([...(localNodes as FlowNode[]), newNode] as any)
           }}
           onDragOver={(event) => {
             event.preventDefault()

@@ -20,6 +20,7 @@ export interface TerminalInstance {
   container: HTMLElement | null
   resizeObserver: ResizeObserver | null
   resizeTimeout: NodeJS.Timeout | null
+  isOpen: boolean  // Track if open() has been called
 }
 
 /**
@@ -79,8 +80,9 @@ export function createTerminalInstance(tabId: string): TerminalInstance {
     container: null,
     resizeObserver: null,
     resizeTimeout: null,
+    isOpen: false,  // Not opened yet
   }
-  
+
   terminalInstances.set(tabId, instance)
   return instance
 }
@@ -96,28 +98,46 @@ export function mountTerminalInstance(
   if (!instance) {
     return undefined
   }
-  
-  // Open terminal in container
-  instance.terminal.open(container)
+
+  // Check if open() has been called on this terminal
+  if (instance.isOpen) {
+    // Terminal has been opened before - move the element to new container
+    const terminalElement = instance.terminal.element
+    if (terminalElement) {
+      console.log('[terminalInstances] Moving terminal element to new container:', tabId)
+      if (terminalElement.parentElement) {
+        terminalElement.parentElement.removeChild(terminalElement)
+      }
+      container.appendChild(terminalElement)
+    } else {
+      console.error('[terminalInstances] Terminal marked as open but has no element:', tabId)
+    }
+  } else {
+    // First time opening this terminal
+    console.log('[terminalInstances] Opening terminal for first time:', tabId)
+    instance.terminal.open(container)
+    instance.isOpen = true
+  }
+
   instance.container = container
-  
+
   // Fit terminal to container
   try {
     instance.fitAddon.fit()
   } catch (e) {
     console.error('[terminalInstances] Failed to fit terminal:', e)
   }
-  
+
   // Set up resize observer
   if (instance.resizeObserver) {
     instance.resizeObserver.disconnect()
   }
-  
+
   instance.resizeObserver = new ResizeObserver(() => {
     if (instance.resizeTimeout) {
       clearTimeout(instance.resizeTimeout)
     }
-    
+
     instance.resizeTimeout = setTimeout(() => {
       try {
         instance.fitAddon.fit()
@@ -126,7 +146,7 @@ export function mountTerminalInstance(
       }
     }, 100)
   })
-  
+
   instance.resizeObserver.observe(container)
   
   return instance
@@ -138,20 +158,22 @@ export function mountTerminalInstance(
 export function unmountTerminalInstance(tabId: string): void {
   const instance = terminalInstances.get(tabId)
   if (!instance) return
-  
+
   // Disconnect resize observer
   if (instance.resizeObserver) {
     instance.resizeObserver.disconnect()
     instance.resizeObserver = null
   }
-  
+
   // Clear resize timeout
   if (instance.resizeTimeout) {
     clearTimeout(instance.resizeTimeout)
     instance.resizeTimeout = null
   }
-  
-  instance.container = null
+
+  // Note: We don't clear instance.container here because we use it to detect
+  // if the terminal is already open when remounting
+  // The terminal element stays in the DOM until the component is destroyed
 }
 
 /**

@@ -23,14 +23,27 @@ export const terminalExecTool: AgentTool = {
     args: { command: string; cwd?: string; autoApproveEnabled?: boolean; autoApproveThreshold?: number; confidence?: number },
     meta?: { requestId?: string }
   ) => {
-    const req = meta?.requestId || 'terminal'
+    const req = meta?.requestId
+    if (!req) {
+      console.error('[terminal.exec] No requestId provided in meta')
+      return { ok: false, error: 'no-request-id' }
+    }
+    console.log('[terminal.exec] Called with:', { command: args.command, requestId: req, meta })
 
     // Get or create session with optional cwd
     const root = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
     const desiredCwd = args.cwd ? (path.isAbsolute(args.cwd) ? args.cwd : path.join(root, args.cwd)) : undefined
+    console.log('[terminal.exec] Getting or creating PTY session:', { requestId: req, desiredCwd })
+
     const sid = await (globalThis as any).__getOrCreateAgentPtyFor(req, desiredCwd ? { cwd: desiredCwd } : undefined)
+    console.log('[terminal.exec] Got session ID:', sid)
+
     const rec = (globalThis as any).__agentPtySessions.get(sid)
-    if (!rec) return { ok: false, error: 'no-session' }
+    if (!rec) {
+      console.error('[terminal.exec] No session record found for sessionId:', sid)
+      return { ok: false, error: 'no-session' }
+    }
+    console.log('[terminal.exec] Got session record:', { sessionId: sid, shell: rec.shell, cwd: rec.cwd })
 
     // Ensure the calling window is attached so output streams to the visible terminal
     try {
@@ -52,9 +65,11 @@ export const terminalExecTool: AgentTool = {
     }
 
     // Execute command
+    console.log('[terminal.exec] Executing command:', args.command)
     await (globalThis as any).__beginAgentCommand(rec.state, args.command)
     try {
       rec.p.write(args.command + (process.platform === 'win32' ? '\r\n' : '\n'))
+      console.log('[terminal.exec] Command written to PTY')
 
       // Return session info along with execution confirmation
       const state = rec.state
@@ -67,7 +82,7 @@ export const terminalExecTool: AgentTool = {
         tail: c.data.slice(-200)
       }))
 
-      return {
+      const result = {
         ok: true,
         sessionId: sid,
         shell: rec.shell,
@@ -76,7 +91,10 @@ export const terminalExecTool: AgentTool = {
         lastCommands: lastCmds,
         liveTail: state.ring.slice(-400)
       }
+      console.log('[terminal.exec] Returning result:', { ok: result.ok, sessionId: result.sessionId, commandCount: result.commandCount })
+      return result
     } catch (e: any) {
+      console.error('[terminal.exec] Error executing command:', e)
       return { ok: false, error: e?.message || String(e) }
     }
   }

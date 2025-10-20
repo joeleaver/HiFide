@@ -117,15 +117,16 @@ export function createContextAPI(): ContextAPI {
     },
 
     addMessage: (context, role, content, options = {}) => {
-      const { id, pinned = false, priority = 50 } = options
+      const { id = crypto.randomUUID(), pinned = false, priority = 50 } = options
 
       const message = {
         role,
         content,
-        ...(id || pinned ? {
+        ...(pinned ? {
           metadata: {
-            ...(id ? { id } : {}),
-            ...(pinned ? { pinned, priority } : {})
+            id,
+            pinned,
+            priority
           }
         } : {})
       }
@@ -140,10 +141,11 @@ export function createContextAPI(): ContextAPI {
       const newMessages = messages.map(msg => ({
         role: msg.role,
         content: msg.content,
-        ...(msg.id || msg.pinned ? {
+        ...(msg.pinned ? {
           metadata: {
-            ...(msg.id ? { id: msg.id } : {}),
-            ...(msg.pinned ? { pinned: msg.pinned, priority: msg.priority ?? 50 } : {})
+            id: msg.id ?? crypto.randomUUID(),
+            pinned: msg.pinned,
+            priority: msg.priority ?? 50
           }
         } : {})
       }))

@@ -1,30 +1,38 @@
-import { useEffect, useRef } from 'react'
+import { useRef, useLayoutEffect } from 'react'
 import '@xterm/xterm/css/xterm.css'
-import { useDispatch } from '../store'
-import { getTerminalInstance } from '../services/terminalInstances'
+import { useTerminalStore } from '../store/terminal'
+import { useAppStore } from '../store'
 
 export default function TerminalView({ tabId, context = 'explorer' }: { tabId: string; context?: 'agent' | 'explorer' }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
-  const mountedRef = useRef(false)
-  const dispatch = useDispatch()
 
-  useEffect(() => {
-    if (!containerRef.current || mountedRef.current) return
+  // For agent terminals, get the session ID from the main store
+  const currentId = useAppStore((s) => s.currentId)
 
-    const existingTerminal = getTerminalInstance(tabId)
+  // Get mount action and session tracking from terminal store
+  const mountTerminal = useTerminalStore((s) => s.mountTerminal)
+  const trackedSessionId = useTerminalStore((s) => s.sessionIds[tabId])
 
-    if (existingTerminal) {
-      // Terminal already exists, just remount it to the new container
-      dispatch('remountTerminal', { tabId, container: containerRef.current })
-    } else {
-      // Create new terminal
-      dispatch('mountTerminal', { tabId, container: containerRef.current, context })
+  useLayoutEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    // For agent terminals, wait for a session to be loaded
+    if (context === 'agent' && !currentId) {
+      console.log('[TerminalView] Agent terminal but no currentId yet, skipping mount for:', tabId)
+      return
     }
 
-    mountedRef.current = true
-
-    // Don't unmount on cleanup - terminals persist until tab is closed
-  }, [tabId, context])
+    // For agent terminals, use currentId as the session ID
+    // For explorer terminals, we'd need a different approach (not implemented yet)
+    if (context === 'agent' && currentId) {
+      // Only mount if we're not already tracking this session
+      if (trackedSessionId !== currentId) {
+        console.log('[TerminalView] Mounting agent terminal:', { tabId, sessionId: currentId, trackedSessionId })
+        void mountTerminal({ tabId, container, sessionId: currentId })
+      }
+    }
+  }, [tabId, context, currentId, mountTerminal, trackedSessionId])
 
   return (
     <div

@@ -33,7 +33,7 @@ const menuHandlers = {
       globalDispatch?.('openFolder', result.path)
     }
   },
-  openRecentFolder: async (_e: any, folderPath: string) => {
+  openRecentFolder: async (folderPath: string) => {
     globalDispatch?.('openFolder', folderPath)
   },
   clearRecentFolders: () => {
@@ -63,6 +63,7 @@ const menuHandlers = {
 
 // Track if handlers are registered to prevent duplicates
 let handlersRegistered = false
+
 
 function App() {
   // Get dispatch for menu handlers
@@ -129,19 +130,20 @@ function App() {
     dispatch('feClearImportResult')
   }, [importResult, dispatch])
 
-  // Register menu handlers once
+  // Register menu handlers once (via typed preload API)
   useEffect(() => {
-    if (handlersRegistered || !window.ipcRenderer) return
+    if (handlersRegistered || !window.menu?.on) return
 
     handlersRegistered = true
-    window.ipcRenderer.on('menu:open-settings', menuHandlers.openSettings)
-    window.ipcRenderer.on('menu:open-session', menuHandlers.openSession)
-    window.ipcRenderer.on('menu:toggle-terminal-panel', menuHandlers.toggleTerminalPanel)
-    window.ipcRenderer.on('menu:open-folder', menuHandlers.openFolder)
-    window.ipcRenderer.on('menu:open-recent-folder', menuHandlers.openRecentFolder)
-    window.ipcRenderer.on('menu:clear-recent-folders', menuHandlers.clearRecentFolders)
-    window.ipcRenderer.on('menu:export-flow', menuHandlers.exportFlow)
-    window.ipcRenderer.on('menu:import-flow', menuHandlers.importFlow)
+    window.menu.on('open-settings', menuHandlers.openSettings)
+    window.menu.on('open-session', menuHandlers.openSession)
+    window.menu.on('toggle-terminal-panel', menuHandlers.toggleTerminalPanel)
+    window.menu.on('open-folder', menuHandlers.openFolder)
+    window.menu.on('open-recent-folder', menuHandlers.openRecentFolder)
+
+    window.menu.on('clear-recent-folders', menuHandlers.clearRecentFolders)
+    window.menu.on('export-flow', menuHandlers.exportFlow)
+    window.menu.on('import-flow', menuHandlers.importFlow)
   }, [])
 
   // Note: Store initialization is now handled by the main process via zubridge
@@ -150,27 +152,8 @@ function App() {
 
   // Keep main-process menu state in sync with current view (for enabling/disabling items)
   useEffect(() => {
-    window.ipcRenderer?.invoke('app:set-view', currentView)
+    window.app?.setView?.(currentView)
   }, [currentView])
-  // Single source of truth: presence comes from main via IPC; subscribe and seed once
-  useEffect(() => {
-    // Subscribe
-    const off = window.secrets?.onPresenceChanged?.((p) => {
-      useAppStore.getState().setProvidersValid({ openai: !!p.openai, anthropic: !!p.anthropic, gemini: !!p.gemini })
-      // Refresh models whenever provider presence changes
-      try { void useAppStore.getState().refreshAllModels() } catch {}
-    })
-    // Seed
-    ;(async () => {
-      try {
-        const p = await window.secrets?.presence?.()
-        if (p) {
-          useAppStore.getState().setProvidersValid({ openai: !!p.openai, anthropic: !!p.anthropic, gemini: !!p.gemini })
-        }
-      } catch {}
-    })()
-    return () => { try { off && off() } catch {} }
-  }, [])
 
 
 
@@ -195,9 +178,11 @@ function App() {
     }
   }
 
+
   // Gate UI until boot completes
   if (appBootstrapping) {
     return <LoadingScreen message={startupMessage} />
+
   }
 
   return (
@@ -263,7 +248,7 @@ function App() {
                 onClick={(e) => {
                   const el = e.currentTarget as HTMLElement
                   const rect = el.getBoundingClientRect()
-                  window.ipcRenderer?.invoke('menu:popup', { menu: name, x: rect.left, y: rect.bottom })
+                  window.menu?.popup?.({ menu: name, x: rect.left, y: rect.bottom })
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'
@@ -283,7 +268,7 @@ function App() {
           <Button
             size="compact-xs"
             variant="subtle"
-            onClick={() => window.ipcRenderer.invoke('window:minimize')}
+            onClick={() => window.windowControls?.minimize?.()}
             title="Minimize"
             styles={{
               root: {
@@ -304,7 +289,7 @@ function App() {
           <Button
             size="compact-xs"
             variant="subtle"
-            onClick={() => window.ipcRenderer.invoke('window:maximize')}
+            onClick={() => window.windowControls?.maximize?.()}
             title="Maximize"
             styles={{
               root: {
@@ -325,7 +310,7 @@ function App() {
           <Button
             size="compact-xs"
             variant="subtle"
-            onClick={() => window.ipcRenderer.invoke('window:close')}
+            onClick={() => window.windowControls?.close?.()}
             title="Close"
             styles={{
               root: {

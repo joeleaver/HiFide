@@ -1,17 +1,29 @@
 import { ScrollArea, Text, Stack, Group } from '@mantine/core'
 import { useAppStore, useDispatch, selectSessions, selectCurrentId, selectLastRequestTokenUsage } from '../store'
-import { useState } from 'react'
+import { useUiStore } from '../store/ui'
+import { useEffect } from 'react'
 import CollapsiblePanel from './CollapsiblePanel'
 
 export default function TokensCostsPanel() {
   const dispatch = useDispatch()
 
-  // Read from windowState
-  const initialCollapsed = useAppStore((s) => s.windowState.tokensCostsCollapsed)
-  const initialHeight = useAppStore((s) => s.windowState.tokensCostsHeight)
+  // Read persisted state from main store
+  const persistedCollapsed = useAppStore((s) => s.windowState.tokensCostsCollapsed)
+  const persistedHeight = useAppStore((s) => s.windowState.tokensCostsHeight)
 
-  const [collapsed, setCollapsed] = useState(initialCollapsed)
-  const [height, setHeight] = useState(initialHeight)
+  // Use UI store for local state
+  const collapsed = useUiStore((s) => s.tokensCostsCollapsed)
+  const height = useUiStore((s) => s.tokensCostsHeight)
+  const setCollapsed = useUiStore((s) => s.setTokensCostsCollapsed)
+  const setHeight = useUiStore((s) => s.setTokensCostsHeight)
+
+  // Sync UI store with persisted state ONLY on mount
+  // Don't sync during runtime to avoid race conditions
+  useEffect(() => {
+    setCollapsed(persistedCollapsed)
+    setHeight(persistedHeight)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Only run on mount
 
   const sessions = useAppStore(selectSessions)
   const currentId = useAppStore(selectCurrentId)

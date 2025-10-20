@@ -1,5 +1,4 @@
 import type { NodeProps } from 'reactflow'
-import { useAppStore, useDispatch } from '../../store'
 import NodeHandles from './NodeHandles'
 import NodeHeader from './NodeHeader'
 import NodeStatusBadges from './NodeStatusBadges'
@@ -23,25 +22,29 @@ export default function FlowNode(props: NodeProps<any>) {
   const costUSD = data?.costUSD as number | undefined
   const config = data?.config || {}
 
-  // Use dispatch for actions
-  const dispatch = useDispatch()
-  const feNodes = useAppStore((s) => s.feNodes)
+  // Get handlers from data (passed from FlowCanvasPanel)
+  const onLabelChange = data?.onLabelChange
+  const onConfigChange = data?.onConfigChange
+  const onExpandToggle = data?.onExpandToggle
 
   // Expandable state from node data
   const expanded = data?.expanded || false
   const toggleExpanded = () => {
-    const updatedNodes = feNodes.map((n: any) =>
-      n.id === id ? { ...n, data: { ...n.data, expanded: !expanded } } : n
-    )
-    dispatch('feSetNodes', updatedNodes)
+    if (onExpandToggle) {
+      onExpandToggle(id)
+    }
   }
 
   const handleLabelChange = (newLabel: string) => {
-    dispatch('feSetNodeLabel', { id, label: newLabel })
+    if (onLabelChange) {
+      onLabelChange(id, newLabel)
+    }
   }
 
   const handleConfigChange = (patch: any) => {
-    dispatch('fePatchNodeConfig', { id, patch })
+    if (onConfigChange) {
+      onConfigChange(id, patch)
+    }
   }
 
   // Determine border and shadow based on status and selection

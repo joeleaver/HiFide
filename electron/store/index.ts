@@ -72,7 +72,7 @@ export const useMainStore = create<AppStore>()(
         // Complex Slices
         ...createProviderSlice(set, get, store),
         ...createSettingsSlice(set, get, store),
-        // NOTE: Terminal slice is renderer-only - stub out all methods for main process
+        // NOTE: Terminal slice - state management works in main, xterm operations are renderer-only
         agentTerminalTabs: [],
         agentActiveTerminal: null,
         explorerTerminalTabs: [],
@@ -82,11 +82,135 @@ export const useMainStore = create<AppStore>()(
         ptySessions: {},
         ptyBySessionId: {},
         ptySubscribers: {},
-        addTerminalTab: () => '',
-        removeTerminalTab: () => {},
-        setActiveTerminal: () => {},
-        clearAgentTerminals: async () => {},
-        clearExplorerTerminals: async () => {},
+        // State management actions - work in main process
+        addTerminalTab: (context: 'agent' | 'explorer') => {
+          const prefix = context === 'agent' ? 'a' : 'e'
+          const tabId = `${prefix}${crypto.randomUUID().slice(0, 7)}`
+
+          if (context === 'agent') {
+            const state = get()
+            set({
+              agentTerminalTabs: [...state.agentTerminalTabs, tabId],
+              agentActiveTerminal: tabId,
+            })
+          } else {
+            const state = get()
+            set({
+              explorerTerminalTabs: [...state.explorerTerminalTabs, tabId],
+              explorerActiveTerminal: tabId,
+            })
+          }
+
+          return tabId
+        },
+        removeTerminalTab: ({ context, tabId }: { context: 'agent' | 'explorer'; tabId: string }) => {
+          const state = get()
+
+          if (context === 'agent') {
+            const tabs = state.agentTerminalTabs.filter((id) => id !== tabId)
+            const active = state.agentActiveTerminal === tabId ? (tabs[0] || null) : state.agentActiveTerminal
+            set({ agentTerminalTabs: tabs, agentActiveTerminal: active })
+          } else {
+            const tabs = state.explorerTerminalTabs.filter((id) => id !== tabId)
+            const active = state.explorerActiveTerminal === tabId ? (tabs[0] || null) : state.explorerActiveTerminal
+            set({ explorerTerminalTabs: tabs, explorerActiveTerminal: active })
+          }
+        },
+        setActiveTerminal: ({ context, tabId }: { context: 'agent' | 'explorer'; tabId: string | null }) => {
+          if (context === 'agent') {
+            set({ agentActiveTerminal: tabId })
+          } else {
+            set({ explorerActiveTerminal: tabId })
+          }
+        },
+        restartAgentTerminal: async (_params: { tabId: string }) => {
+          // Get the current session ID to find the PTY
+          const state = get() as any
+          const currentSessionId = state.currentId
+
+          if (!currentSessionId) {
+            console.error('[terminal] Cannot restart - no current session')
+            return
+          }
+
+          // Get the agent PTY globals (exposed by electron/ipc/pty.ts)
+          const agentPtyAssignments = (globalThis as any).__agentPtyAssignments as Map<string, string> | undefined
+          const agentPtySessions = (globalThis as any).__agentPtySessions as Map<string, any> | undefined
+
+          if (!agentPtyAssignments || !agentPtySessions) {
+            console.error('[terminal] Cannot restart - agent PTY globals not available')
+            return
+          }
+
+          console.log('[terminal] Restarting agent PTY for session:', currentSessionId)
+          console.log('[terminal] Current assignments:', Array.from(agentPtyAssignments.entries()))
+          console.log('[terminal] Current PTY sessions:', Array.from(agentPtySessions.keys()))
+
+          // Get the PTY session ID for this request
+          const sessionId = agentPtyAssignments.get(currentSessionId)
+
+          if (sessionId) {
+            console.log('[terminal] Found PTY session:', sessionId)
+
+            // Kill the existing PTY
+            const session = agentPtySessions.get(sessionId)
+            if (session?.p) {
+              try {
+                // Remove the assignment BEFORE killing so a new PTY will be created on reconnect
+                agentPtyAssignments.delete(currentSessionId)
+
+                // Kill the PTY - this will trigger onExit which will notify the renderer
+                // and clean up the session
+                session.p.kill()
+
+                console.log('[terminal] Agent PTY killed, renderer will reconnect automatically')
+              } catch (e) {
+                console.error('[terminal] Failed to kill PTY:', e)
+              }
+            }
+          } else {
+            console.warn('[terminal] No PTY session found for session:', currentSessionId)
+            console.warn('[terminal] Available assignments:', Array.from(agentPtyAssignments.keys()))
+          }
+        },
+        clearAgentTerminals: async () => {
+          // Just clear state - renderer will handle cleanup
+          set({ agentTerminalTabs: [], agentActiveTerminal: null })
+
+          // Enforce at least one agent terminal after clearing
+          const newId = `a${crypto.randomUUID().slice(0, 7)}`
+          set({ agentTerminalTabs: [newId], agentActiveTerminal: newId })
+        },
+        clearExplorerTerminals: async () => {
+          // Just clear state - renderer will handle cleanup
+          set({ explorerTerminalTabs: [], explorerActiveTerminal: null })
+        },
+        ensureSessionTerminal: async () => {
+          const state = get() as any
+          const currentSessionId = state.currentId
+
+          if (!currentSessionId) {
+            console.warn('[terminal] ensureSessionTerminal: no current session')
+            return
+          }
+
+          const existingTabs = state.agentTerminalTabs || []
+
+          if (existingTabs.length === 0) {
+            const tabId = `a${crypto.randomUUID().slice(0, 7)}`
+            set({
+              agentTerminalTabs: [tabId],
+              agentActiveTerminal: tabId,
+            })
+            console.log('[terminal] Created session terminal:', tabId, 'for session:', currentSessionId)
+          } else {
+            if (!state.agentActiveTerminal) {
+              set({ agentActiveTerminal: existingTabs[0] })
+            }
+            console.log('[terminal] Session terminal already exists:', existingTabs[0])
+          }
+        },
+        // xterm-specific actions - stubs for main process
         mountTerminal: async () => {},
         remountTerminal: () => {},
         unmountTerminal: () => {},
@@ -133,10 +257,12 @@ export const useMainStore = create<AppStore>()(
         sessions: state.sessions,
         currentId: state.currentId,
 
+        // Planning
+        approvedPlan: state.approvedPlan,
+
         // Flow editor (graph state, but not execution state)
         feNodes: state.feNodes,
         feEdges: state.feEdges,
-        feNodePositions: state.feNodePositions,
         feInput: state.feInput,
         // NOTE: feSelectedTemplate is NOT persisted globally - it comes from session.lastUsedFlow
         feErrorDetectPatterns: state.feErrorDetectPatterns,
@@ -226,8 +352,6 @@ export type {
   RouteRecord,
   ApiKeys,
   PricingConfig,
-  RateLimitConfig,
-  RateLimitKind,
   DebugLogEntry,
   RecentFolder,
   ExplorerEntry,

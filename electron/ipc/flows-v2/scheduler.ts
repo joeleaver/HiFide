@@ -24,7 +24,7 @@ import type {
   FlowExecutionArgs,
   NodeInputs,
 } from './types'
-import type { FlowAPI, Badge, Tool, UsageReport } from './flow-api'
+import type { FlowAPI, Badge, UsageReport } from './flow-api'
 import type { ExecutionEvent } from './execution-events'
 import { getNodeFunction } from './nodes'
 import { createContextAPI } from './context-api'
@@ -68,7 +68,7 @@ export class FlowScheduler {
   private isolatedContexts = new Map<string, MainFlowContext>()
 
   // Output memoization - cache node outputs to prevent duplicate execution
-  private nodeOutputCache = new Map<string, NodeOutput>()
+  // private nodeOutputCache = new Map<string, NodeOutput>()
 
   constructor(
     wc: WebContents | undefined,
@@ -81,10 +81,11 @@ export class FlowScheduler {
     this.flowDef = flowDef
 
     // Initialize main context from session context (single source of truth)
+    // Use requestId as contextId so terminal tools bind to the session's PTY
     // If no session context provided, create default
     if (args.initialContext) {
       this.mainContext = {
-        contextId: 'main',
+        contextId: requestId,  // Use requestId (session ID) as contextId for terminal binding
         contextType: 'main',
         provider: args.initialContext.provider,
         model: args.initialContext.model,
@@ -92,6 +93,7 @@ export class FlowScheduler {
         messageHistory: args.initialContext.messageHistory || []
       }
       console.log('[Scheduler] Initialized from session context:', {
+        contextId: this.mainContext.contextId,
         provider: this.mainContext.provider,
         model: this.mainContext.model,
         messageCount: this.mainContext.messageHistory.length
@@ -99,7 +101,7 @@ export class FlowScheduler {
     } else {
       // Fallback: create default context (should rarely happen)
       this.mainContext = {
-        contextId: 'main',
+        contextId: requestId,  // Use requestId as contextId for terminal binding
         contextType: 'main',
         provider: 'openai',
         model: 'gpt-4o',
@@ -111,7 +113,27 @@ export class FlowScheduler {
 
     this.buildGraphStructure()
   }
-  
+
+  /**
+   * Cancel the flow execution cooperatively
+   * Aborts the shared signal; nodes and providers should listen and stop promptly
+   */
+  public cancel(): void {
+    try {
+      if (!this.abortController.signal.aborted) {
+        this.abortController.abort()
+      }
+    } catch {}
+
+    // Resolve any pending user input promises to unblock waiters
+    try {
+      for (const resolve of this.userInputResolvers.values()) {
+        try { resolve('') } catch {}
+      }
+      this.userInputResolvers.clear()
+    } catch {}
+  }
+
   /**
    * Build graph structure for efficient edge lookups
    */
@@ -174,7 +196,7 @@ export class FlowScheduler {
       return { ok: false, error }
     }
   }
-  
+
   /**
    * Execute a node with push/pull model
    *
@@ -199,7 +221,7 @@ export class FlowScheduler {
 
     return this.doExecuteNode(nodeId, pushedInputs, callerId, isPull)
   }
-  
+
   /**
    * Actually execute the node
    * In the new architecture, nodes control their own pulling via the inputs.pull() function
@@ -211,6 +233,11 @@ export class FlowScheduler {
     isPull: boolean = false
   ): Promise<NodeOutput> {
     const startTime = Date.now()
+    // Cooperative cancellation: bail out early if already aborted
+    if (this.abortController.signal.aborted) {
+      throw new Error('Flow execution cancelled')
+    }
+
 
     // Generate unique execution ID for this node execution
     const executionId = crypto.randomUUID()
@@ -354,7 +381,7 @@ export class FlowScheduler {
       } else {
         console.log(`[Scheduler] ${nodeId} - SKIP push phase (executed via pull)`)
       }
-      
+
       return result
     } catch (e: any) {
       const error = e?.message || String(e)
@@ -522,6 +549,19 @@ export class FlowScheduler {
       case 'error':
         if (event.error) {
           store.feHandleError(event.error)
+        }
+        break
+
+      case 'rate_limit_wait':
+        if (event.rateLimitWait) {
+          store.feHandleRateLimitWait(
+            event.nodeId,
+            event.rateLimitWait.attempt,
+            event.rateLimitWait.waitMs,
+            event.rateLimitWait.reason,
+            event.provider,
+            event.model
+          )
         }
         break
 

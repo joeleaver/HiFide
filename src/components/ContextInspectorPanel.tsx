@@ -1,6 +1,7 @@
 import { ScrollArea, Text, Tabs } from '@mantine/core'
 import { useAppStore, useDispatch } from '../store'
-import { useState } from 'react'
+import { useUiStore } from '../store/ui'
+import { useEffect } from 'react'
 import CollapsiblePanel from './CollapsiblePanel'
 import JsonView from '@uiw/react-json-view'
 import { darkTheme } from '@uiw/react-json-view/dark'
@@ -14,12 +15,23 @@ const CONTEXT_COLORS = {
 export default function ContextInspectorPanel() {
   const dispatch = useDispatch()
 
-  // Read from windowState
-  const initialCollapsed = useAppStore((s) => s.windowState.contextInspectorCollapsed)
-  const initialHeight = useAppStore((s) => s.windowState.contextInspectorHeight)
+  // Read persisted state from main store
+  const persistedCollapsed = useAppStore((s) => s.windowState.contextInspectorCollapsed)
+  const persistedHeight = useAppStore((s) => s.windowState.contextInspectorHeight)
 
-  const [collapsed, setCollapsed] = useState(initialCollapsed)
-  const [height, setHeight] = useState(initialHeight)
+  // Use UI store for local state
+  const collapsed = useUiStore((s) => s.contextInspectorCollapsed)
+  const height = useUiStore((s) => s.contextInspectorHeight)
+  const setCollapsed = useUiStore((s) => s.setContextInspectorCollapsed)
+  const setHeight = useUiStore((s) => s.setContextInspectorHeight)
+
+  // Sync UI store with persisted state ONLY on mount
+  // Don't sync during runtime to avoid race conditions
+  useEffect(() => {
+    setCollapsed(persistedCollapsed)
+    setHeight(persistedHeight)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Only run on mount
 
   // Get main flow context from flow editor state (ephemeral, only exists during flow execution)
   const mainFlowContext = useAppStore((s) => s.feMainFlowContext)

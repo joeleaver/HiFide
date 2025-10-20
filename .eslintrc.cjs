@@ -14,5 +14,14 @@ module.exports = {
       'warn',
       { allowConstantExport: true },
     ],
+    // Guardrails: forbid deprecated window.llm namespace in renderer
+    'no-restricted-properties': [
+      'error',
+      {
+        object: 'window',
+        property: 'llm',
+        message: 'window.llm is removed. Use zubridge store actions and flowExec events instead.'
+      }
+    ]
   },
 }

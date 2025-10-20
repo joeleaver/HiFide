@@ -5,30 +5,19 @@
   "nodes": [
     {
       "id": "defaultContextStart",
-      "kind": "defaultContextStart",
+      "nodeType": "defaultContextStart",
       "config": {
         "systemInstructions": "You are a master of agentic coding. There's nothing you can't do. Soar. Build incredible code, amazing products."
       },
       "position": {
-        "x": -272.2144042657595,
-        "y": -192.9277857852667
+        "x": -450.9392196802464,
+        "y": -149.2251824952608
       },
       "expanded": true
     },
     {
-      "id": "user-input",
-      "kind": "userInput",
-      "label": "main",
-      "config": {},
-      "position": {
-        "x": 217.82249398921056,
-        "y": -193.6773244841484
-      },
-      "expanded": false
-    },
-    {
       "id": "tools-1760478079316",
-      "kind": "tools",
+      "nodeType": "tools",
       "label": "plan/chat",
       "config": {
         "tools": [
@@ -36,18 +25,19 @@
           "fs.read_dir",
           "index.search",
           "code.search_ast",
-          "code.apply_edits_targeted"
+          "code.apply_edits_targeted",
+          "edits.apply"
         ]
       },
       "position": {
-        "x": 1040.6639245435654,
-        "y": 229.5122458662027
+        "x": 1268.2772518182537,
+        "y": 243.25573764118786
       },
-      "expanded": false
+      "expanded": true
     },
     {
       "id": "intentRouter-1760503463693",
-      "kind": "intentRouter",
+      "nodeType": "intentRouter",
       "label": "plan/execute/info",
       "config": {
         "provider": "openai",
@@ -59,14 +49,14 @@
         }
       },
       "position": {
-        "x": 627.9368354545059,
-        "y": -192.7177171043814
+        "x": 704.8134860928681,
+        "y": -108.4162864256626
       },
       "expanded": true
     },
     {
       "id": "tools-1760504451346",
-      "kind": "tools",
+      "nodeType": "tools",
       "label": "execute",
       "config": {
         "tools": [
@@ -98,82 +88,163 @@
         ]
       },
       "position": {
-        "x": 1067.0253193757467,
-        "y": -358.692483725236
+        "x": 1279.534515050198,
+        "y": -396.59952944013816
       },
       "expanded": false
     },
     {
       "id": "llmRequest-1760643452620",
-      "kind": "llmRequest",
+      "nodeType": "llmRequest",
       "label": "execute",
       "config": {},
       "position": {
-        "x": 1201.657738677159,
+        "x": 1265.9848465569928,
         "y": -154.81335514111584
       },
       "expanded": false
     },
     {
       "id": "llmRequest-1760643455771",
-      "kind": "llmRequest",
+      "nodeType": "llmRequest",
       "label": "plan/chat",
       "config": {},
       "position": {
-        "x": 1193.123376345389,
-        "y": 8.945374394064629
+        "x": 1265.491372710202,
+        "y": -5.987704220896802
       },
       "expanded": false
     },
     {
       "id": "portalOutput-1760644097622",
-      "kind": "portalOutput",
+      "nodeType": "portalOutput",
       "label": "main out",
       "config": {
         "id": "main"
       },
       "position": {
-        "x": -194.80535044628374,
-        "y": -373.648303480003
+        "x": -381.78116101268154,
+        "y": -493.4346598236705
       },
       "expanded": false
     },
     {
       "id": "portalInput-1760644103829",
-      "kind": "portalInput",
+      "nodeType": "portalInput",
       "label": "main in",
       "config": {
         "id": "main"
       },
       "position": {
-        "x": 1643.87787924293,
-        "y": -73.45982473468648
+        "x": 1786.5320950025982,
+        "y": -69.16242802469242
+      },
+      "expanded": false
+    },
+    {
+      "id": "injectMessages-1760719050283",
+      "nodeType": "injectMessages",
+      "label": "Inject Messages",
+      "config": {
+        "staticUserMessage": "Gather context about this project.",
+        "staticAssistantMessage": "Project Snapshot – “Startrader (React + Pixi)”\n\nStack & Tooling\n\nVite + React 18 + TypeScript; Zustand for state; PixiJS for starmap rendering.\nBuild scripts: npm run dev, npm run build, npm run preview.\nTypeScript config at tsconfig.json; Vite setup in vite.config.ts.\nTop-Level Entry Points\n\nsrc/main.tsx: mounts React app.\nsrc/App.tsx: pulls game state via useGame (Zustand), kicks off useTicker, lazily loads astro data, and lays out UI panels + Pixi canvas.\nState Management (src/store.ts)\n\nCentral Zustand store with Immer.\nHolds GameState (day/time, planets, ship, travel, cargo, credits, etc.) plus UI/log helpers.\nCore actions: time tick, buy/sell, travel, build office, save/load/reset, async init() for astro data.\nTravel ETA computed via astro/nav.ts; daily sim handled by advanceTime, dailyRollover, stepPlanet (see engine_sim.ts).\nUses localStorage key startrader-save.\nGame Engine Modules\n\nengine_types.ts: domain types (Planets, Ship, Cargo, GameState).\nengine_data.ts: procedural planet/resource generation (fallback default set).\nengine_economy.ts: pricing, demand, volumes.\nengine_sim.ts: time advancement, production/consumption (daily tick).\nengine_travel.ts: currently unused legacy travel logic.\nengine_save.ts: serialize/deserialize store state.\nengine_rng.ts: RNG helpers.\nAstro Integration (src/astro/*)\n\nloader.ts: fetches /assets/systems.json, validates with Zod, builds orbit maps + habitable zones.\ntransform.ts: converts astro bodies into Planet objects (data seeding).\nnav.ts: travel time estimates (intra-system AU vs inter-system LY).\norbits.ts: orbital positions per body over time.\ntypes.ts: astro JSON schema.\nUI & Components\n\nLayout is sectioned: Header (HeaderBar), Travel, Planet overview, Market, Cargo, Actions, Log, Pixi starmap.\nPixi canvas (components_Pixi_StarmapCanvas.tsx): renders galaxy/system map, wheel zoom, drag pan, labels; clicking bodies triggers startTravel.\nTables/panels display economy, inventory, logs; depend on selectors & store actions.\nHooks\n\nhooks_useTicker.ts: drives periodic tick dispatch via requestAnimationFrame with configurable pacing (200ms real-time ≈ 1 in-game minute at 1×).\nAssets / Public\n\nExpects /assets/systems.json (astro data). public directory likely holds this and static files.\nThis should give you the necessary context to navigate gameplay mechanics, state flow, and rendering architecture before diving into specific tasks.",
+        "pinned": true
+      },
+      "position": {
+        "x": 70.31811973447225,
+        "y": -126.78088398364764
+      },
+      "expanded": true
+    },
+    {
+      "id": "cache-1760719078674",
+      "nodeType": "cache",
+      "label": "Context Bootstrap",
+      "config": {
+        "ttl": 12000,
+        "invalidate": 1760919704898
+      },
+      "position": {
+        "x": 81.79667555714991,
+        "y": -1058.2161322851684
+      },
+      "expanded": true
+    },
+    {
+      "id": "llmRequest-1760719205056",
+      "nodeType": "llmRequest",
+      "label": "Context Bootstrap",
+      "config": {
+        "model": "gpt-5-mini",
+        "overrideEnabled": false,
+        "overrideModel": "gpt-5-mini"
+      },
+      "position": {
+        "x": -259.14871373264845,
+        "y": -1029.6687943522634
+      },
+      "expanded": true
+    },
+    {
+      "id": "tools-1760719213981",
+      "nodeType": "tools",
+      "label": "Context Bootstrap",
+      "config": {
+        "tools": [
+          "fs.read_dir",
+          "fs.read_file",
+          "index.search",
+          "code.search_ast",
+          "code.apply_edits_targeted"
+        ]
+      },
+      "position": {
+        "x": -584.4319243004976,
+        "y": -711.3142349534954
+      },
+      "expanded": false
+    },
+    {
+      "id": "manualInput-1760719272740",
+      "nodeType": "manualInput",
+      "label": "Manual Input",
+      "config": {
+        "message": "Use tools to gather a concise but detailed context bootstrap for this project. It should include language, entry points, a listing of important source files, their paths, and a summary of their contents. It should be concise, but comprehensive enough to avoid spending a bunch of tokens on future folder and file scanning. "
+      },
+      "position": {
+        "x": -688.6255844133226,
+        "y": -995.2524799945777
+      },
+      "expanded": true
+    },
+    {
+      "id": "newContext-1760722425172",
+      "nodeType": "newContext",
+      "label": "Context Bootstrap Context",
+      "config": {
+        "model": "gpt-5-mini",
+        "systemInstructions": "You ae an agentic coder. ",
+        "provider": "openai"
+      },
+      "position": {
+        "x": -686.8750109566671,
+        "y": -1393.2022773994356
+      },
+      "expanded": true
+    },
+    {
+      "id": "userInput-1760756690239",
+      "nodeType": "userInput",
+      "label": "User Input",
+      "config": {},
+      "position": {
+        "x": 552.6021559441729,
+        "y": -462.25081998210555
       },
       "expanded": false
     }
   ],
   "edges": [
-    {
-      "id": "user-input-intentRouter-1760503463693-context-context",
-      "source": "user-input",
-      "target": "intentRouter-1760503463693",
-      "sourceHandle": "context",
-      "targetHandle": "context"
-    },
-    {
-      "id": "user-input-intentRouter-1760503463693-data-data",
-      "source": "user-input",
-      "target": "intentRouter-1760503463693",
-      "sourceHandle": "data",
-      "targetHandle": "data"
-    },
-    {
-      "id": "defaultContextStart-user-input-context-context",
-      "source": "defaultContextStart",
-      "target": "user-input",
-      "sourceHandle": "context",
-      "targetHandle": "context"
-    },
     {
       "id": "tools-1760504451346-llmRequest-1760643452620-tools-tools",
       "source": "tools-1760504451346",
@@ -259,11 +330,74 @@
       "targetHandle": "data"
     },
     {
-      "id": "portalOutput-1760644097622-user-input-context-context",
-      "source": "portalOutput-1760644097622",
-      "target": "user-input",
+      "id": "llmRequest-1760719205056-cache-1760719078674-data-data",
+      "source": "llmRequest-1760719205056",
+      "target": "cache-1760719078674",
+      "sourceHandle": "data",
+      "targetHandle": "data"
+    },
+    {
+      "id": "tools-1760719213981-llmRequest-1760719205056-tools-tools",
+      "source": "tools-1760719213981",
+      "target": "llmRequest-1760719205056",
+      "sourceHandle": "tools",
+      "targetHandle": "tools"
+    },
+    {
+      "id": "manualInput-1760719272740-llmRequest-1760719205056-data-data",
+      "source": "manualInput-1760719272740",
+      "target": "llmRequest-1760719205056",
+      "sourceHandle": "data",
+      "targetHandle": "data"
+    },
+    {
+      "id": "defaultContextStart-injectMessages-1760719050283-context-context",
+      "source": "defaultContextStart",
+      "target": "injectMessages-1760719050283",
       "sourceHandle": "context",
       "targetHandle": "context"
+    },
+    {
+      "id": "portalOutput-1760644097622-injectMessages-1760719050283-context-context",
+      "source": "portalOutput-1760644097622",
+      "target": "injectMessages-1760719050283",
+      "sourceHandle": "context",
+      "targetHandle": "context"
+    },
+    {
+      "id": "newContext-1760722425172-llmRequest-1760719205056-context-context",
+      "source": "newContext-1760722425172",
+      "target": "llmRequest-1760719205056",
+      "sourceHandle": "context",
+      "targetHandle": "context"
+    },
+    {
+      "id": "cache-1760719078674-injectMessages-1760719050283-data-assistantMessage",
+      "source": "cache-1760719078674",
+      "target": "injectMessages-1760719050283",
+      "sourceHandle": "data",
+      "targetHandle": "assistantMessage"
+    },
+    {
+      "id": "injectMessages-1760719050283-userInput-1760756690239-context-context",
+      "source": "injectMessages-1760719050283",
+      "target": "userInput-1760756690239",
+      "sourceHandle": "context",
+      "targetHandle": "context"
+    },
+    {
+      "id": "userInput-1760756690239-intentRouter-1760503463693-context-context",
+      "source": "userInput-1760756690239",
+      "target": "intentRouter-1760503463693",
+      "sourceHandle": "context",
+      "targetHandle": "context"
+    },
+    {
+      "id": "userInput-1760756690239-intentRouter-1760503463693-data-data",
+      "source": "userInput-1760756690239",
+      "target": "intentRouter-1760503463693",
+      "sourceHandle": "data",
+      "targetHandle": "data"
     }
   ]
 }

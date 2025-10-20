@@ -10,13 +10,26 @@ export const sessionTailTool: AgentTool = {
     additionalProperties: false,
   },
   run: async (args: { maxBytes?: number }, meta?: { requestId?: string }) => {
-    const req = meta?.requestId || 'terminal'
+    const req = meta?.requestId
+    if (!req) {
+      console.error('[terminal.session_tail] No requestId provided in meta')
+      return { ok: false, error: 'no-request-id' }
+    }
+    console.log('[terminal.session_tail] Called with:', { requestId: req, maxBytes: args.maxBytes, meta })
+
     const sid = (globalThis as any).__agentPtyAssignments.get(req)
+    console.log('[terminal.session_tail] Session ID from assignment:', sid)
+
     const rec = sid ? (globalThis as any).__agentPtySessions.get(sid) : undefined
-    if (!sid || !rec) return { ok: false, error: 'no-session' }
+    if (!sid || !rec) {
+      console.error('[terminal.session_tail] No session found:', { requestId: req, sessionId: sid, hasRecord: !!rec })
+      return { ok: false, error: 'no-session' }
+    }
+
     const n = Math.max(100, Math.min(10000, args.maxBytes || 2000))
     const tail = rec.state.ring.slice(-n)
     const { redacted } = redactOutput(tail)
+    console.log('[terminal.session_tail] Returning tail:', { sessionId: sid, tailLength: redacted.length })
     return { ok: true, sessionId: sid, tail: redacted }
   }
 }

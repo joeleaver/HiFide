@@ -1,41 +1,78 @@
-import { Stack, Textarea, Card, ScrollArea, Text, Group, Badge as MantineBadge } from '@mantine/core'
-import { useAppStore, useDispatch, selectSessions, selectCurrentId } from './store'
+import { Stack, Textarea, Card, ScrollArea, Text, Badge as MantineBadge } from '@mantine/core'
+import { useAppStore, useDispatch, selectCurrentId } from './store'
+import { useUiStore } from './store/ui'
 import Markdown from './components/Markdown'
 
 import { NodeOutputBox } from './components/NodeOutputBox'
 import { FlowStatusIndicator } from './components/FlowStatusIndicator'
-import type { SessionItem, NodeExecutionBox } from '../electron/store/types'
-import { useRef, useEffect, useState } from 'react'
+import type { NodeExecutionBox } from '../electron/store/types'
+import { useRef, useEffect, useMemo, memo } from 'react'
+
+// Separate input component to prevent re-renders when parent updates
+const SessionInput = memo(function SessionInput() {
+  const dispatch = useDispatch()
+  const inputValue = useUiStore((s) => s.sessionInputValue || '')
+  const setInputValue = useUiStore((s) => s.setSessionInputValue)
+
+  const send = async () => {
+    const text = inputValue.trim()
+    if (!text) return
+
+    // Clear input and resume flow
+    setInputValue('')
+    await dispatch('feResume', { userInput: text })
+  }
+
+  return (
+    <Textarea
+      placeholder="Ask your agent... (Ctrl+Enter to send)"
+      autosize
+      minRows={2}
+      maxRows={6}
+      value={inputValue}
+      onChange={(e) => setInputValue(e.currentTarget.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault()
+          send()
+        }
+      }}
+      styles={{
+        input: {
+          backgroundColor: '#252526',
+          border: '1px solid #3e3e42',
+        },
+      }}
+    />
+  )
+})
 
 export default function SessionPane() {
-  // Use dispatch for actions
-  const dispatch = useDispatch()
-
-  const sessions = useAppStore(selectSessions)
+  // PERFORMANCE FIX: Only subscribe to current session's items, not entire sessions array
+  // This prevents re-renders when other sessions are updated
   const currentId = useAppStore(selectCurrentId)
+  const sessionItems = useAppStore((s) => {
+    const currentSession = s.sessions.find((sess: any) => sess.id === currentId)
+    return currentSession?.items || []
+  })
 
   // Flow execution state - these DO cause re-renders when they change
   const feStatus = useAppStore((s) => s.feStatus)
 
-
-  // Use local state for input to avoid lag on every keystroke
-  const [localInput, setLocalInput] = useState('')
-
-  const currentSession = sessions.find((sess) => sess.id === currentId)
-  const sessionItems: SessionItem[] = currentSession?.items || []
-
   // Smart auto-scroll: only scroll to bottom if user is already near bottom
   const viewportRef = useRef<HTMLDivElement>(null)
-  const shouldAutoScrollRef = useRef(true)
+  const shouldAutoScroll = useUiStore((s) => s.shouldAutoScroll)
+  const setShouldAutoScroll = useUiStore((s) => s.setShouldAutoScroll)
 
-  // Check if user is near bottom (within 100px)
+  // Check if user is near bottom (within 150px threshold)
   const checkIfNearBottom = () => {
     const viewport = viewportRef.current
     if (!viewport) return true
 
     const { scrollTop, scrollHeight, clientHeight } = viewport
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-    return distanceFromBottom < 100
+    // Consider "near bottom" if within 150px or already at bottom (accounting for rounding)
+    return distanceFromBottom < 150
   }
 
   // Update shouldAutoScroll when user manually scrolls
@@ -44,51 +81,37 @@ export default function SessionPane() {
     if (!viewport) return
 
     const handleScroll = () => {
-      shouldAutoScrollRef.current = checkIfNearBottom()
+      const isNearBottom = checkIfNearBottom()
+      setShouldAutoScroll(isNearBottom)
     }
 
-    viewport.addEventListener('scroll', handleScroll)
+    // Set initial state
+    setShouldAutoScroll(checkIfNearBottom())
+
+    viewport.addEventListener('scroll', handleScroll, { passive: true })
     return () => viewport.removeEventListener('scroll', handleScroll)
-  }, [])
+  }, [setShouldAutoScroll])
 
   // Auto-scroll when session items/streaming changes, but only if user is near bottom
   useEffect(() => {
     const viewport = viewportRef.current
-    if (!viewport || !shouldAutoScrollRef.current) return
+    if (!viewport) return
 
-    // Scroll to bottom
-    viewport.scrollTop = viewport.scrollHeight
-  }, [sessionItems.length])
+    // Check if we should auto-scroll
+    if (!shouldAutoScroll) return
 
-  const send = async () => {
-    const text = localInput.trim()
-    if (!text) return
+    // Use requestAnimationFrame to ensure DOM has updated before scrolling
+    requestAnimationFrame(() => {
+      if (viewport && shouldAutoScroll) {
+        viewport.scrollTop = viewport.scrollHeight
+      }
+    })
+  }, [sessionItems, shouldAutoScroll]) // Trigger on ANY sessionItems change, not just length
 
-    // Clear local input and resume flow
-    setLocalInput('')
-    await dispatch('feResume', text)
-  }
-
-  return (
-    <Stack
-      gap="md"
-      style={{
-        height: '100%',
-        padding: '16px',
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
-      {/* Messages Area - takes remaining space */}
-      <ScrollArea
-        style={{ flex: 1 }}
-        scrollbars="y"
-        type="auto"
-        viewportRef={viewportRef}
-      >
-        <Stack gap="sm" pr="md">
-          {/* Simplified session timeline rendering */}
-          {sessionItems.map((item) => {
+  // Memoize the expensive rendering of session items
+  // Only re-render when sessionItems actually changes
+  const renderedItems = useMemo(() => {
+    return sessionItems.map((item: any) => {
             // User message
             if (item.type === 'message' && item.role === 'user') {
               return (
@@ -176,7 +199,29 @@ export default function SessionPane() {
             }
 
             return null
-          })}
+          })
+  }, [sessionItems]) // Only re-render when sessionItems changes
+
+  return (
+    <Stack
+      gap="md"
+      style={{
+        height: '100%',
+        padding: '16px',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      {/* Messages Area - takes remaining space */}
+      <ScrollArea
+        style={{ flex: 1 }}
+        scrollbars="y"
+        type="auto"
+        viewportRef={viewportRef}
+      >
+        <Stack gap="sm" pr="md">
+          {/* Simplified session timeline rendering */}
+          {renderedItems}
 
           {/* Flow status indicator - shows running/waiting/stopped states */}
           <FlowStatusIndicator status={feStatus} />
@@ -184,26 +229,7 @@ export default function SessionPane() {
       </ScrollArea>
 
       {/* Input Area - fixed at bottom */}
-      <Textarea
-        placeholder="Ask your agent... (Ctrl+Enter to send)"
-        autosize
-        minRows={2}
-        maxRows={6}
-        value={localInput}
-        onChange={(e) => setLocalInput(e.currentTarget.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault()
-            send()
-          }
-        }}
-        styles={{
-          input: {
-            backgroundColor: '#252526',
-            border: '1px solid #3e3e42',
-          },
-        }}
-      />
+      <SessionInput />
     </Stack>
   )
 }

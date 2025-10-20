@@ -20,10 +20,12 @@
 
 import type { MainFlowContext } from './types'
 import type { FlowAPI } from './flow-api'
-import type { AgentTool, TokenUsage, ChatMessage } from '../../providers/provider'
+import type { AgentTool, ChatMessage } from '../../providers/provider'
 import { providers } from '../../core/state'
 import { getProviderKey } from '../../core/state'
 import { createCallbackEventEmitters } from './execution-events'
+import { rateLimitTracker } from '../../providers/rate-limit-tracker'
+import { parseRateLimitError, sleep, withRetries } from '../../providers/retry'
 
 /**
  * Request to the LLM service
@@ -273,8 +275,43 @@ class LLMService {
     let response = ''
 
     try {
+      // PROACTIVE RATE LIMIT CHECK - Wait before making request if needed
+      const waitMs = await rateLimitTracker.checkAndWait(provider as any, model)
+      if (waitMs > 0) {
+        console.log(`[LLMService] Proactive rate limit wait: ${waitMs}ms for ${provider}/${model}`)
+
+        // Emit event to UI
+        flowAPI.emitExecutionEvent({
+          type: 'rate_limit_wait',
+          provider,
+          model,
+          rateLimitWait: {
+            attempt: 0, // 0 = proactive wait (not a retry)
+            waitMs,
+            reason: 'Proactive rate limit enforcement'
+          }
+        })
+
+        await sleep(waitMs)
+      }
+
+      // Record this request (optimistic tracking)
+      rateLimitTracker.recordRequest(provider as any, model)
+
       await new Promise<void>(async (resolve, reject) => {
+        let streamHandle: { cancel: () => void } | null = null
+        const onAbort = () => {
+          try { streamHandle?.cancel() } catch {}
+          reject(new Error('Flow cancelled'))
+        }
         try {
+          // If already aborted before starting, bail out
+          if (flowAPI.signal?.aborted) {
+            onAbort()
+            return
+          }
+          flowAPI.signal?.addEventListener('abort', onAbort, { once: true } as any)
+
           // Base stream options (common to all providers)
           const baseStreamOpts = {
             apiKey,
@@ -294,10 +331,12 @@ class LLMService {
                 model,
                 responseLength: response.length
               })
+              try { flowAPI.signal?.removeEventListener('abort', onAbort as any) } catch {}
               resolve()
             },
             onError: (error: string) => {
               console.error(`[LLMService] Stream error:`, error)
+              try { flowAPI.signal?.removeEventListener('abort', onAbort as any) } catch {}
               reject(new Error(error))
             },
             onTokenUsage: eventHandlers.onTokenUsage
@@ -331,22 +370,55 @@ class LLMService {
           // 3. Both
           const needsAgentStream = (tools && tools.length > 0) || responseSchema
 
-          if (needsAgentStream && providerAdapter.agentStream) {
-            // Use agentStream with tools and/or structured output
-            await providerAdapter.agentStream({
-              ...streamOpts,
-              tools: tools || [],
-              responseSchema,
-              toolMeta: { requestId: context.contextId }, // Use contextId as requestId
-              onToolStart: eventHandlers.onToolStart,
-              onToolEnd: eventHandlers.onToolEnd,
-              onToolError: eventHandlers.onToolError
-            })
-          } else {
-            // Use regular chatStream (no tools, no structured output)
-            await providerAdapter.chatStream(streamOpts)
-          }
+          // Wrap provider call with retry logic
+          await withRetries(
+            async () => {
+              if (needsAgentStream && providerAdapter.agentStream) {
+                // Use agentStream with tools and/or structured output
+                console.log('[LLMService] Calling agentStream with toolMeta:', { requestId: context.contextId, contextId: context.contextId })
+                streamHandle = await providerAdapter.agentStream({
+                  ...streamOpts,
+                  tools: tools || [],
+                  responseSchema,
+                  toolMeta: { requestId: context.contextId }, // Use contextId as requestId
+                  onToolStart: eventHandlers.onToolStart,
+                  onToolEnd: eventHandlers.onToolEnd,
+                  onToolError: eventHandlers.onToolError
+                })
+              } else {
+                // Use regular chatStream (no tools, no structured output)
+                streamHandle = await providerAdapter.chatStream(streamOpts)
+              }
+            },
+            {
+              max: 3,
+              maxWaitMs: 60000,
+              onRateLimitWait: ({ attempt, waitMs, reason }) => {
+                console.log(`[LLMService] Rate limit retry wait: ${waitMs}ms (attempt ${attempt})`)
+
+                // Emit event to UI
+                flowAPI.emitExecutionEvent({
+                  type: 'rate_limit_wait',
+                  provider,
+                  model,
+                  rateLimitWait: {
+                    attempt,
+                    waitMs,
+                    reason
+                  }
+                })
+              }
+            }
+          )
         } catch (e: any) {
+          // Check if this was a rate limit error and update tracker
+          const rateLimitInfo = parseRateLimitError(e)
+          if (rateLimitInfo.isRateLimit) {
+            console.log(`[LLMService] Learning from rate limit error:`, rateLimitInfo)
+            rateLimitTracker.updateFromError(provider as any, model, e, rateLimitInfo)
+          }
+
+          try { flowAPI.signal?.removeEventListener('abort', onAbort as any) } catch {}
           reject(e)
         }
       })

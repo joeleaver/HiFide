@@ -14,6 +14,59 @@ HiFide uses a **main-process-owned Zustand store** that is synchronized to rende
 - Type-safe state access and mutations
 - Persistence via electron-store (main process only)
 
+
+## Dual-Store Model (Performance-Oriented)
+
+While the main process owns the canonical Zustand store, the renderer also maintains small, renderer-only Zustand stores for high-frequency, ephemeral UI state to avoid IPC churn.
+
+- Main (electron/store): Business/domain state, sessions, flows (persisted), provider config, scheduling/execution, PTY lifecycle and mappings.
+- Renderer (src/store): Ephemeral UI state (drag/resize/scroll/hover), xterm.js instances and DOM mounting, local flow editing state during interaction.
+
+Naming conventions:
+- Main store access in renderer: `useAppStore` (read), `useDispatch` (mutate via single-object params)
+- Renderer UI stores: `useUiStore`, `useTerminalStore`, and future renderer-only stores (e.g., FlowEditorLocal)
+
+Rules:
+- Do not duplicate canonical persisted data. Renderer stores may mirror for responsiveness, but writes must go through `useDispatch` to main.
+- Renderer stores must not import Node/Electron APIs; main store must not import DOM/xterm.
+- Persist only in main via `persist` partialize; renderer stores are transient.
+
+## Flow Editor: Dual-Store Lifecycle
+
+To keep editing responsive and IPC minimal, the Flow Editor follows a dual-store pattern:
+
+1) Load
+- Renderer hydrates its local flow store from main (session-scoped flow graph).
+- Local store becomes the live editing model (nodes/edges/selection/layout).
+
+2) Edit (Renderer-only)
+- All graph interactions (drag, edit, selection) update the renderer local store only.
+- No per-drag IPC. UI-only fields (width/height/expanded/selection/styles) live only locally.
+
+3) Save (Debounced)
+- Renderer normalizes the graph (e.g., ensure `nodeType`, strip UI-only fields) and dispatches `setFlowGraph({ nodes, edges })` to main.
+- Main persists to user library and becomes the scheduler’s source of truth.
+
+4) Execute
+- Renderer triggers `executeFlow()` (or `flowInit`) in main.
+- Scheduler reads the graph from main (not from renderer memory).
+
+5) Session Change
+- Renderer tears down local flow store and hydrates from the new session’s graph in main.
+
+APIs (illustrative):
+- Renderer local: `hydrateFromMain(graph)`, `setNodes/Edges`, `saveDebounced()`, `reset()`
+- Main slice: `setFlowGraph({nodes,edges})`, `executeFlow()`, `loadFlowForSession({sessionId})`
+
+Normalization rules:
+- Replace all `kind` with `nodeType` everywhere (code and saved profiles).
+- Persist minimal fields; exclude UI-only props like styles, edge shapes/markers. Keep optional expanded state.
+- Tools node provides tool list; chat nodes perform tool execution.
+
+Guardrails:
+- Scheduler always reads from main; renderer local state is for editing only.
+- Avoid window.* or ad-hoc IPC—use zubridge dispatch for main mutations.
+
 ## Key Concepts
 
 ### Main Process (electron/store/)
@@ -71,7 +124,7 @@ import { useDispatch } from '@/store'
 
 function MyComponent() {
   const dispatch = useDispatch()
-  
+
   const handleChange = (model: string) => {
     dispatch('setSelectedModel', model)
   }
@@ -88,7 +141,7 @@ function MyComponent() {
   // Read individual values
   const model = useAppStore((s) => s.selectedModel)
   const provider = useAppStore((s) => s.selectedProvider)
-  
+
   // Or use pre-defined selectors
   const sessions = useAppStore(selectSessions)
 }
@@ -140,7 +193,7 @@ Actions called **within the main process** (slice-to-slice) can use any signatur
 // This is fine for internal calls
 refreshModels: async (provider: 'openai' | 'anthropic' | 'gemini') => {
   // ... fetch models ...
-  
+
   // Internal call - can use multiple params
   get().setModelsForProvider({ provider, models })
 }
@@ -261,7 +314,7 @@ useEffect(() => {
 export const createProviderSlice: StateCreator<ProviderSlice> = (set, get) => ({
   setSelectedProvider: (provider: string) => {
     set({ selectedProvider: provider })
-    
+
     // Call another slice's action
     const state = get() as any
     if (state.ensureProviderModelConsistency) {

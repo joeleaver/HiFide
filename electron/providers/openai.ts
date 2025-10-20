@@ -4,6 +4,24 @@ import { validateJson } from './jsonschema'
 import { withRetries } from './retry'
 import { formatSummary } from '../agent/types'
 
+import { rateLimitTracker } from './rate-limit-tracker'
+
+// Normalize various header shapes into a simple lower-cased map
+const toHeaderMap = (h: any): Record<string, string> => {
+  const map: Record<string, string> = {}
+  try {
+    if (!h) return map
+    if (typeof h.forEach === 'function') {
+      h.forEach((v: any, k: string) => { map[String(k).toLowerCase()] = String(v) })
+    } else if (Array.isArray(h)) {
+      for (const [k, v] of h as any) { map[String(k).toLowerCase()] = String(v) }
+    } else if (typeof h === 'object') {
+      for (const k of Object.keys(h)) { map[String(k).toLowerCase()] = String((h as any)[k]) }
+    }
+  } catch {}
+  return map
+}
+
 // Helper to map our ChatMessage[] to Responses API input format
 function toResponsesInput(messages: ChatMessage[]) {
   return messages.map((m) => ({ role: m.role as any, content: m.content }))
@@ -18,7 +36,7 @@ export const OpenAIProvider: ProviderAdapter = {
   id: 'openai',
 
   // Plain chat (Responses API). We use non-stream + chunked emit for reliability; can be upgraded to true streaming.
-  async chatStream({ apiKey, model, messages, emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async chatStream({ apiKey, model, messages, emit: _emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey })
 
     const holder: { stream?: any; cancelled?: boolean } = {}
@@ -51,6 +69,7 @@ export const OpenAIProvider: ProviderAdapter = {
               }
             } catch (e: any) {
               const error = e?.message || String(e)
+
               onError(error)
             }
           }
@@ -69,6 +88,14 @@ export const OpenAIProvider: ProviderAdapter = {
           } catch (e) {
             // Token usage extraction failed, continue anyway
           }
+          // Update rate limit tracker based on response headers, if available
+          try {
+            const hdrs = (stream as any)?.response?.headers
+            if (hdrs) {
+              rateLimitTracker.updateFromHeaders('openai', model as any, toHeaderMap(hdrs))
+            }
+          } catch {}
+
 
           // Done
           onDone()
@@ -76,6 +103,7 @@ export const OpenAIProvider: ProviderAdapter = {
           if (e?.name === 'AbortError') return
           const error = e?.message || String(e)
           onError(error)
+
         }
       } catch (e: any) {
         if (e?.name === 'AbortError') return
@@ -102,8 +130,10 @@ export const OpenAIProvider: ProviderAdapter = {
   },
 
   // Agent loop with tool-calling via Responses API
-  async agentStream({ apiKey, model, messages, tools, responseSchema, emit, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, messages, tools, responseSchema, emit: _emit, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey })
+
+    const holder: { abort?: () => void } = {}
 
     // Validate tools array
     if (!Array.isArray(tools)) {
@@ -200,6 +230,7 @@ export const OpenAIProvider: ProviderAdapter = {
             const opts = mkOpts(useResponseFormat)
             // Stateless: no session chaining
             stream = await withRetries(() => Promise.resolve(client.responses.stream(opts)))
+            holder.abort = () => { try { stream?.controller?.abort?.() } catch {} }
           } catch (err: any) {
             const msg = err?.message || ''
             if (useResponseFormat && (err?.status === 400 || /response_format|text\.format|json_schema|unsupported/i.test(msg))) {
@@ -223,6 +254,7 @@ export const OpenAIProvider: ProviderAdapter = {
                 let textToAdd = ''
 
                 // Check different fields in priority order, but only use ONE per event
+
                 // Use if-else to ensure we only take one field
                 if (typeof (evt as any)?.delta === 'string' && (evt as any).delta) {
                   textToAdd = (evt as any).delta
@@ -249,11 +281,20 @@ export const OpenAIProvider: ProviderAdapter = {
 
           // After stream completes, get the final response with complete output array
           const finalResponse = await stream.finalResponse()
+          // Update rate limit tracker from headers on streamed agent turn
+          try {
+            const hdrs = (stream as any)?.response?.headers || (finalResponse as any)?.response?.headers
+            if (hdrs) {
+              rateLimitTracker.updateFromHeaders('openai', model as any, toHeaderMap(hdrs))
+            }
+          } catch {}
+
 
           // Extract function calls from the output array and add them to conversation
           const toolCalls: Array<{ id: string; name: string; arguments: any }> = []
           if (Array.isArray(finalResponse?.output)) {
             for (const item of finalResponse.output) {
+
               if (item.type === 'function_call') {
                 // Add the function call to the conversation input
                 conv.push({
@@ -305,7 +346,7 @@ export const OpenAIProvider: ProviderAdapter = {
                 }
 
                 // Generate tool execution ID
-                const toolExecutionId = crypto.randomUUID()
+
 
                 // Notify start
                 try { onToolStart?.({ callId: tc.id, name: String(name), arguments: args }) } catch {}
@@ -400,6 +441,6 @@ export const OpenAIProvider: ProviderAdapter = {
       } catch {}
     })
 
-    return { cancel: () => { cancelled = true } }
+    return { cancel: () => { cancelled = true; try { holder.abort?.() } catch {} } }
   }
 }

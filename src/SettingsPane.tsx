@@ -2,9 +2,7 @@ import { useAppStore, useDispatch, selectModelsByProvider, selectProviderValid, 
 import { Button, Group, Stack, Text, TextInput, Title, Select, Switch, Slider, Progress, Divider, Card, Alert } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import PricingSettings from './components/PricingSettings'
-
-import RateLimitSettings from './components/RateLimitSettings'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
 export default function SettingsPane() {
   // Use selectors for better performance
@@ -24,6 +22,14 @@ export default function SettingsPane() {
   // Use dispatch to call actions
   const dispatch = useDispatch()
 
+  // Use local state for API keys to avoid IPC calls on every keystroke
+  const [localApiKeys, setLocalApiKeys] = useState(settingsApiKeys)
+
+  // Sync local state when store changes (e.g., on load)
+  useEffect(() => {
+    setLocalApiKeys(settingsApiKeys)
+  }, [settingsApiKeys])
+
   const openaiOptions = modelsByProvider.openai || []
   const anthropicOptions = modelsByProvider.anthropic || []
   const geminiOptions = modelsByProvider.gemini || []
@@ -37,6 +43,14 @@ export default function SettingsPane() {
   const idxQuery = useAppStore((s) => s.idxQuery ?? '')
   const idxResults = useAppStore((s) => s.idxResults ?? [])
   const idxProg = useAppStore((s) => s.idxProg)
+
+  // Use local state for index query to avoid IPC calls on every keystroke
+  const [localIdxQuery, setLocalIdxQuery] = useState(idxQuery)
+
+  // Sync local state when store changes
+  useEffect(() => {
+    setLocalIdxQuery(idxQuery)
+  }, [idxQuery])
 
   // Refresh index status on mount (subscription is initialized in store)
   useEffect(() => {
@@ -87,7 +101,13 @@ export default function SettingsPane() {
 
   const doClearIndex = async () => { try { await dispatch('clearIndex') } catch {} }
 
-  const doSearchIndex = async () => { try { await dispatch('searchIndex') } catch {} }
+  const doSearchIndex = async () => {
+    try {
+      // Update store with local query before searching
+      dispatch('setIdxQuery', localIdxQuery)
+      await dispatch('searchIndex')
+    } catch {}
+  }
 
 
 
@@ -95,6 +115,17 @@ export default function SettingsPane() {
     try {
       // Clear previous results
       dispatch('clearSettingsResults')
+
+      // Update store with local API keys
+      if (localApiKeys.openai !== settingsApiKeys.openai) {
+        dispatch('setOpenAiApiKey', localApiKeys.openai)
+      }
+      if (localApiKeys.anthropic !== settingsApiKeys.anthropic) {
+        dispatch('setAnthropicApiKey', localApiKeys.anthropic)
+      }
+      if (localApiKeys.gemini !== settingsApiKeys.gemini) {
+        dispatch('setGeminiApiKey', localApiKeys.gemini)
+      }
 
       // First save (marks as saved, auto-persisted via Zustand middleware)
       await dispatch('saveSettingsApiKeys')
@@ -132,24 +163,24 @@ export default function SettingsPane() {
             label="OpenAI API Key"
             placeholder="sk-..."
             type="password"
-            value={settingsApiKeys.openai || ''}
-            onChange={(e) => dispatch('setOpenAiApiKey', e.currentTarget.value)}
+            value={localApiKeys.openai || ''}
+            onChange={(e) => setLocalApiKeys({ ...localApiKeys, openai: e.currentTarget.value })}
             rightSection={providerValid.openai ? <Text size="xs" c="teal">✓</Text> : null}
           />
           <TextInput
             label="Anthropic API Key"
             placeholder="sk-ant-..."
             type="password"
-            value={settingsApiKeys.anthropic || ''}
-            onChange={(e) => dispatch('setAnthropicApiKey', e.currentTarget.value)}
+            value={localApiKeys.anthropic || ''}
+            onChange={(e) => setLocalApiKeys({ ...localApiKeys, anthropic: e.currentTarget.value })}
             rightSection={providerValid.anthropic ? <Text size="xs" c="teal">✓</Text> : null}
           />
           <TextInput
             label="Gemini API Key"
             placeholder="AIza..."
             type="password"
-            value={settingsApiKeys.gemini || ''}
-            onChange={(e) => dispatch('setGeminiApiKey', e.currentTarget.value)}
+            value={localApiKeys.gemini || ''}
+            onChange={(e) => setLocalApiKeys({ ...localApiKeys, gemini: e.currentTarget.value })}
             rightSection={providerValid.gemini ? <Text size="xs" c="teal">✓</Text> : null}
           />
         </Stack>
@@ -260,17 +291,6 @@ export default function SettingsPane() {
 
       <Divider />
 
-      {/* Rate Limits Section */}
-      <Stack gap="md">
-        <div>
-          <Title order={3}>Rate Limits</Title>
-          <Text size="sm" c="dimmed">Optionally throttle requests/tokens per model to avoid exceeding provider quotas</Text>
-        </div>
-        <RateLimitSettings />
-      </Stack>
-
-      <Divider />
-
       {/* Indexing Section */}
       <Stack gap="md">
         <div>
@@ -332,8 +352,13 @@ export default function SettingsPane() {
             <TextInput
               style={{ flex: 1 }}
               placeholder="e.g. where do we validate provider keys?"
-              value={idxQuery}
-              onChange={(e) => dispatch('setIdxQuery', e.currentTarget.value)}
+              value={localIdxQuery}
+              onChange={(e) => setLocalIdxQuery(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  doSearchIndex()
+                }
+              }}
             />
             <Button onClick={doSearchIndex} size="sm">Search</Button>
           </Group>

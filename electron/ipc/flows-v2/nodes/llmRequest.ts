@@ -149,7 +149,7 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
   const returnValue = {
     context: result.updatedContext,
     data: result.text,
-    status: 'success'
+    status: 'success' as const
   }
   console.log(`[llmRequestNode] Returning:`, {
     hasContext: !!returnValue.context,

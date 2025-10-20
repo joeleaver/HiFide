@@ -1,18 +1,32 @@
 import { Stack, Text, ScrollArea, Badge, Group, UnstyledButton } from '@mantine/core'
 import { IconTrash } from '@tabler/icons-react'
-import { useAppStore, useDispatch, selectDebugPanelCollapsed, selectSessions, selectCurrentId } from '../store'
-import { useRef, useEffect, useState } from 'react'
+import { useAppStore, useDispatch, selectSessions, selectCurrentId } from '../store'
+import { useUiStore } from '../store/ui'
+import { useRef, useEffect } from 'react'
 import CollapsiblePanel from './CollapsiblePanel'
 
 export default function AgentDebugPanel() {
   const dispatch = useDispatch()
 
-  // Read from windowState
-  const initialCollapsed = useAppStore(selectDebugPanelCollapsed)
-  const initialHeight = useAppStore((s) => s.windowState.debugPanelHeight)
+  // Read persisted state from main store
+  const persistedCollapsed = useAppStore((s) => s.windowState.debugPanelCollapsed)
+  const persistedHeight = useAppStore((s) => s.windowState.debugPanelHeight)
 
-  const [collapsed, setCollapsed] = useState(initialCollapsed)
-  const [height, setHeight] = useState(initialHeight)
+  // Use UI store for local state
+  const collapsed = useUiStore((s) => s.debugPanelCollapsed)
+  const height = useUiStore((s) => s.debugPanelHeight)
+  const userHasScrolledUp = useUiStore((s) => s.debugPanelUserScrolledUp)
+  const setCollapsed = useUiStore((s) => s.setDebugPanelCollapsed)
+  const setHeight = useUiStore((s) => s.setDebugPanelHeight)
+  const setUserHasScrolledUp = useUiStore((s) => s.setDebugPanelUserScrolledUp)
+
+  // Sync UI store with persisted state ONLY on mount
+  // Don't sync during runtime to avoid race conditions
+  useEffect(() => {
+    setCollapsed(persistedCollapsed)
+    setHeight(persistedHeight)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Only run on mount
 
   const sessions = useAppStore(selectSessions)
   const currentId = useAppStore(selectCurrentId)
@@ -23,7 +37,6 @@ export default function AgentDebugPanel() {
 
   // Smart auto-scroll: track if user has manually scrolled up
   const scrollAreaRef = useRef<HTMLDivElement>(null)
-  const [userHasScrolledUp, setUserHasScrolledUp] = useState(false)
   const prevEventsLengthRef = useRef(flowEvents.length)
 
   // Auto-scroll to bottom when new events arrive (unless user has scrolled up)

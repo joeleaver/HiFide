@@ -775,10 +775,12 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
 
             <button
               onClick={async () => {
-                // Set invalidate timestamp for next execution
+                // Set invalidate timestamp for next execution (local state only)
                 onConfigChange({ invalidate: Date.now() })
-                // Immediately clear the cache
-                await dispatch('clearNodeCache', nodeId)
+
+                // Immediately clear the cache in session (without triggering flow editor sync)
+                // Note: We don't await this to avoid blocking the UI
+                dispatch('clearNodeCache', nodeId)
               }}
               style={{
                 padding: '6px 10px',

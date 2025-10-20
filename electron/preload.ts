@@ -5,29 +5,6 @@ import { preloadBridge } from '@zubridge/electron/preload'
 const { handlers } = preloadBridge()
 contextBridge.exposeInMainWorld('zubridge', handlers)
 
-// --------- Expose some API to the Renderer process ---------
-contextBridge.exposeInMainWorld('ipcRenderer', {
-  on(...args: Parameters<typeof ipcRenderer.on>) {
-    const [channel, listener] = args
-    // Don't pass the event object - it contains non-cloneable properties
-    return ipcRenderer.on(channel, (_event, ...args) => listener(null as any, ...args))
-  },
-  off(...args: Parameters<typeof ipcRenderer.off>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.off(channel, ...omit)
-  },
-  send(...args: Parameters<typeof ipcRenderer.send>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.send(channel, ...omit)
-  },
-  invoke(...args: Parameters<typeof ipcRenderer.invoke>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.invoke(channel, ...omit)
-  },
-
-  // You can expose other APTs you need here.
-  // ...
-})
 
 
 // Legacy secrets and models APIs removed - now managed via Zustand store
@@ -35,8 +12,28 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 // - Model listing: use refreshModels() action in provider slice
 // - Validation: use validateApiKeys() action in settings slice
 
-contextBridge.exposeInMainWorld('llm', {
-  cancel: (requestId: string) => ipcRenderer.invoke('llm:cancel', { requestId }),
+
+// Typed Menu API
+contextBridge.exposeInMainWorld('menu', {
+  popup: (args: { menu: string; x: number; y: number }) => ipcRenderer.invoke('menu:popup', args),
+  on: (name: string, listener: (payload?: any) => void) => {
+    const channel = `menu:${name}`
+    const fn = (_: any, payload: any) => listener(payload)
+    ipcRenderer.on(channel, fn)
+    return () => ipcRenderer.off(channel, fn)
+  },
+})
+
+// Window controls API
+contextBridge.exposeInMainWorld('windowControls', {
+  minimize: () => ipcRenderer.invoke('window:minimize'),
+  maximize: () => ipcRenderer.invoke('window:maximize'),
+  close: () => ipcRenderer.invoke('window:close'),
+})
+
+// App API
+contextBridge.exposeInMainWorld('app', {
+  setView: (view: string) => ipcRenderer.invoke('app:set-view', view),
 })
 
 // File system API
@@ -48,9 +45,6 @@ contextBridge.exposeInMainWorld('fs', {
   unwatch: (id: number) => ipcRenderer.invoke('fs:watchStop', id),
   onWatch: (listener: (payload: { id: number; type: 'rename'|'change'; path: string; dir: string }) => void) => {
     const fn = (_: any, payload: any) => listener(payload)
-contextBridge.exposeInMainWorld('capabilities', {
-  get: () => ipcRenderer.invoke('capabilities:get'),
-})
 
     ipcRenderer.on('fs:watch:event', fn)
     return () => ipcRenderer.off('fs:watch:event', fn)
@@ -60,15 +54,33 @@ contextBridge.exposeInMainWorld('capabilities', {
 // Session management API
 contextBridge.exposeInMainWorld('sessions', {
   list: () => ipcRenderer.invoke('sessions:list'),
+
   load: (sessionId: string) => ipcRenderer.invoke('sessions:load', sessionId),
   save: (session: any) => ipcRenderer.invoke('sessions:save', session),
   delete: (sessionId: string) => ipcRenderer.invoke('sessions:delete', sessionId),
+})
+
+// App capabilities API
+contextBridge.exposeInMainWorld('capabilities', {
+  get: () => ipcRenderer.invoke('capabilities:get'),
+})
+
+
+// Agent metrics API
+contextBridge.exposeInMainWorld('agent', {
+  onMetrics: (listener: (payload: any) => void) => {
+    const fn = (_: any, payload: any) => listener(payload)
+    ipcRenderer.on('agent:metrics', fn)
+    return () => ipcRenderer.off('agent:metrics', fn)
+  },
 })
 
 // PTY (embedded terminal) API
 contextBridge.exposeInMainWorld('pty', {
   create: (opts?: { shell?: string; cwd?: string; cols?: number; rows?: number; env?: Record<string, string>; log?: boolean }) =>
     ipcRenderer.invoke('pty:create', opts || {}),
+
+
   write: (sessionId: string, data: string) =>
     ipcRenderer.invoke('pty:write', { sessionId, data }),
   resize: (sessionId: string, cols: number, rows: number) =>
@@ -82,6 +94,8 @@ contextBridge.exposeInMainWorld('pty', {
 	    ipcRenderer.invoke('agent-pty:attach', opts || {}),
 	  detachAgent: (sessionId: string) =>
 	    ipcRenderer.invoke('agent-pty:detach', { sessionId }),
+	  killAgent: (requestId: string) =>
+	    ipcRenderer.invoke('agent-pty:kill', { requestId }),
 
   onData: (listener: (payload: { sessionId: string; data: string }) => void) => {
     const fn = (_: any, payload: any) => listener(payload)
@@ -153,6 +167,11 @@ contextBridge.exposeInMainWorld('indexing', {
   status: () => ipcRenderer.invoke('index:status'),
   clear: () => ipcRenderer.invoke('index:clear'),
   search: (query: string, k?: number) => ipcRenderer.invoke('index:search', { query, k }),
+  onProgress: (listener: (prog: any) => void) => {
+    const fn = (_: any, payload: any) => listener(payload)
+    ipcRenderer.on('index:progress', fn)
+    return () => ipcRenderer.off('index:progress', fn)
+  },
 })
 
 

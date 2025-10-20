@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build && pnpm -s prepackage:kill && pnpm -s package:electron",
     "prepackage:kill": "powershell -NoProfile -Command \"try{Get-Process HiFide -ErrorAction SilentlyContinue|Stop-Process -Force}catch{}; try{Get-Process electron -ErrorAction SilentlyContinue|Stop-Process -Force}catch{}; Start-Sleep -Milliseconds 300\"",
-    "clean:release": "node -e \"try{require('fs').rmSync('release',{recursive:true,force:true})}catch(e){}\"",
+    "clean:release": "node --input-type=module -e \"import fs from 'fs'; try{fs.rmSync('release',{recursive:true,force:true})}catch(e){}\"",
     "package:electron": "powershell -NoProfile -Command \"$ts=(Get-Date -Format 'yyyyMMdd-HHmmss'); $ver=$env:npm_package_version; $out=\\\"release/$ver-$ts\\\"; electron-builder --config.directories.output=\\\"$out\\\"\"",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",

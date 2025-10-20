@@ -54,25 +54,23 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
       // Get the full state (will have access to other slices when combined)
       const state = get() as any
       
-      // 1. Initialize workspace
-      // Restore last workspace folder if available; otherwise fall back to main's root
+      // 1. Initialize workspace (main-process only)
+      // Use persisted workspaceRoot if available; otherwise default to process.cwd()
       try {
-        // Check if window is available (renderer process only)
-        if (typeof window === 'undefined') {
-        } else {
-          const saved = state.workspaceRoot || (typeof localStorage !== 'undefined' ? localStorage.getItem('hifide:folder') : null)
+        const savedRoot: string | null = state.workspaceRoot || null
+        const root = savedRoot || process.cwd()
 
-          if (saved) {
-            await window.workspace?.setRoot?.(saved)
-            state.setWorkspaceRoot?.(saved)
-            await window.workspace?.bootstrap?.(saved, true, false)
-          } else {
-            const root = await window.workspace?.getRoot?.()
-            if (root) {
-              state.setWorkspaceRoot?.(root)
-              await window.workspace?.bootstrap?.(root, true, false)
-            }
-          }
+        // Ensure workspace folders exist and minimal context is generated
+        try {
+          const { bootstrapWorkspace } = await import('../utils/workspace-helpers')
+          await bootstrapWorkspace({ baseDir: root, preferAgent: false, overwrite: false })
+        } catch (e) {
+          console.error('[app] bootstrapWorkspace failed:', e)
+        }
+
+        // Set the workspace root in state if it wasn't already set
+        if (!savedRoot && state.setWorkspaceRoot) {
+          state.setWorkspaceRoot(root)
         }
       } catch (e) {
         console.error('[app] Failed to initialize workspace:', e)
@@ -144,7 +142,7 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
             } else {
               // Clear models for invalid providers
               if (state.setModelsForProvider) {
-                state.setModelsForProvider(p, [])
+                state.setModelsForProvider({ provider: p, models: [] })
               }
             }
           })
@@ -204,9 +202,6 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
       try {
         if (state.ensureIndexProgressSubscription) {
           state.ensureIndexProgressSubscription()
-        }
-        if (state.ensureAgentMetricsSubscription) {
-          state.ensureAgentMetricsSubscription()
         }
       } catch (e) {
         console.error('[app] Failed to initialize subscriptions:', e)
