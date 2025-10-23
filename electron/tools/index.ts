@@ -1,6 +1,6 @@
 /**
  * Agent Tools Registry
- * 
+ *
  * Aggregates all agent tools from individual files.
  * Each tool is self-contained in its own file for better maintainability.
  */
@@ -14,6 +14,7 @@ import { summarizeProgressTool } from './agent/summarizeProgress'
 
 // Filesystem tools
 import { readFileTool } from './fs/readFile'
+import { readLinesTool } from './fs/readLines'
 import { readDirTool } from './fs/readDir'
 import { writeFileTool } from './fs/writeFile'
 import { createDirTool } from './fs/createDir'
@@ -34,6 +35,10 @@ import { applyEditsTool } from './edits/apply'
 // Index tools
 import { indexSearchTool } from './index/search'
 
+
+// Workspace tools
+import { searchWorkspaceTool } from './workspace/searchWorkspace'
+
 // Terminal tools
 import { terminalExecTool } from './terminal/exec'
 import { sessionSearchOutputTool } from './terminal/sessionSearchOutput'
@@ -43,6 +48,12 @@ import { sessionRestartTool } from './terminal/sessionRestart'
 // Code tools
 import { searchAstTool } from './code/searchAst'
 import { applyEditsTargetedTool } from './code/applyEditsTargeted'
+import { replaceCallTool } from './code/replaceCall'
+import { replaceConsoleLevelTool } from './code/replaceConsoleLevel'
+
+
+// Text tools
+import { grepTool } from './text/grep'
 
 /**
  * Complete registry of all agent tools
@@ -55,6 +66,7 @@ export const agentTools: AgentTool[] = [
 
   // File system tools
   readFileTool,
+  readLinesTool,
   readDirTool,
   writeFileTool,
   createDirTool,
@@ -72,6 +84,12 @@ export const agentTools: AgentTool[] = [
   // Edits tools
   applyEditsTool,
 
+  // Workspace (preferred discovery tool)
+  searchWorkspaceTool,
+
+  // Text tools (kept available but de-emphasized)
+  grepTool,
+
   // Index tools
   indexSearchTool,
 
@@ -84,5 +102,7 @@ export const agentTools: AgentTool[] = [
   // Code tools
   searchAstTool,
   applyEditsTargetedTool,
+  replaceCallTool,
+  replaceConsoleLevelTool,
 ]
 

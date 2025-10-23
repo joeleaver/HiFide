@@ -1,6 +1,8 @@
 import { Text, Badge } from '@mantine/core'
 import { getNodeColor, getNodeCategory, CATEGORY_LABELS, type NodeCategory } from '../../electron/store/utils/node-colors'
 
+const SHOW_SAFETY_CATEGORY = false
+
 const NODE_PALETTE: Array<{ nodeType: string; label: string; icon: string; description: string }> = [
   { nodeType: 'userInput', label: 'User Input', icon: '👤', description: 'Accept user input (entry point or pause mid-flow)' },
   { nodeType: 'manualInput', label: 'Manual Input', icon: '✍️', description: 'Send pre-configured user message mid-flow' },
@@ -26,16 +28,19 @@ export default function NodePalettePanel() {
     event.dataTransfer.effectAllowed = 'move'
   }
 
-  // Group nodes by category
+  // Group nodes by category (optionally hide safety)
   const nodesByCategory = NODE_PALETTE.reduce((acc, node) => {
     const category = getNodeCategory(node.nodeType) || 'flow-control'
+    if (!SHOW_SAFETY_CATEGORY && category === 'safety') return acc
     if (!acc[category]) acc[category] = []
     acc[category].push(node)
     return acc
   }, {} as Record<NodeCategory, typeof NODE_PALETTE>)
 
-  // Define category order
-  const categoryOrder: NodeCategory[] = ['input', 'llm', 'flow-control', 'safety']
+  // Define category order (optionally hide safety)
+  const categoryOrder: NodeCategory[] = (SHOW_SAFETY_CATEGORY
+    ? ['input', 'llm', 'flow-control', 'safety']
+    : ['input', 'llm', 'flow-control']) as NodeCategory[]
 
   return (
     <div

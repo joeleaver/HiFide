@@ -1,6 +1,6 @@
 /**
  * fs.read_dir tool
- * 
+ *
  * List directory entries (name, isDirectory, path).
  */
 
@@ -19,11 +19,15 @@ export const readDirTool: AgentTool = {
     additionalProperties: false,
   },
   run: async ({ path: rel }: { path: string }) => {
-    const abs = resolveWithinWorkspace(rel)
-    const entries = await fs.readdir(abs, { withFileTypes: true })
-    return {
-      ok: true,
-      entries: entries.map(e => ({ name: e.name, isDirectory: e.isDirectory(), path: path.join(rel, e.name) })),
+    try {
+      const abs = resolveWithinWorkspace(rel)
+      const entries = await fs.readdir(abs, { withFileTypes: true })
+      return {
+        ok: true,
+        entries: entries.map(e => ({ name: e.name, isDirectory: e.isDirectory(), path: path.join(rel, e.name) })),
+      }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
     }
   },
 }

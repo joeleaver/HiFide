@@ -1,8 +1,12 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import fg from 'fast-glob'
+import ignore from 'ignore'
+
 
 let cachedNapi: any | null = null
+let dynamicRegistered = false
+
 async function loadNapi(): Promise<any> {
   if (cachedNapi) return cachedNapi
   try {
@@ -10,9 +14,91 @@ async function loadNapi(): Promise<any> {
     cachedNapi = mod as any
     return cachedNapi
   } catch (e: any) {
-    const msg = 'The ast-grep engine (@ast-grep/napi) is required at runtime but was not found. Please install it as a production dependency.'
+    const msg = 'Missing native dependency: @ast-grep/napi. Please install it as a production dependency so ast-grep search/rewrites can run.'
     throw new Error(msg)
   }
+}
+
+export async function verifyAstGrepAvailable(): Promise<void> {
+  const napi = await loadNapi()
+  try {
+    if (napi?.ts?.parse) {
+      const root = napi.ts.parse('const __ok = 1')
+      if (!root) throw new Error('ast-grep ts parser returned null')
+    } else if (typeof napi.parse === 'function') {
+      const root = napi.parse('ts', 'const __ok = 1')
+      if (!root) throw new Error('ast-grep generic parse returned null')
+    } else {
+      throw new Error('ast-grep parse API not found')
+    }
+  } catch (err: any) {
+    throw new Error(`@ast-grep/napi failed to initialize: ${err?.message || String(err)}`)
+  }
+}
+
+// Register additional languages (Python/Go/Java/etc.) at runtime if packages are installed
+async function ensureDynamicLanguages(napi: any): Promise<void> {
+  if (dynamicRegistered) return
+  try {
+    const { registerDynamicLanguage } = napi
+    if (typeof registerDynamicLanguage !== 'function') { dynamicRegistered = true; return }
+
+    // Best-effort optional imports; any missing package is simply skipped
+    const regs: Record<string, any> = {}
+    const tryAdd = async (name: string, pkgName: string) => {
+      try {
+        const m: any = await import(/* @vite-ignore */ pkgName)
+        const lib = typeof m.libraryPath === 'function' ? m.libraryPath : m.libraryPath
+        const extensions: string[] = Array.isArray(m.extensions) ? m.extensions : []
+        if (lib && extensions.length) {
+          regs[name] = {
+            libraryPath: lib,
+            extensions,
+            languageSymbol: m.languageSymbol,
+            expandoChar: m.expandoChar,
+          }
+        }
+      } catch {}
+    }
+
+    await Promise.all([
+      tryAdd('python', '@ast-grep/lang-python'),
+      tryAdd('java', '@ast-grep/lang-java'),
+      tryAdd('go', '@ast-grep/lang-go'),
+      tryAdd('c', '@ast-grep/lang-c'),
+      tryAdd('cpp', '@ast-grep/lang-cpp'),
+      tryAdd('csharp', '@ast-grep/lang-csharp'),
+      tryAdd('php', '@ast-grep/lang-php'),
+      tryAdd('ruby', '@ast-grep/lang-ruby'),
+      tryAdd('kotlin', '@ast-grep/lang-kotlin'),
+      tryAdd('swift', '@ast-grep/lang-swift'),
+    ])
+
+    if (Object.keys(regs).length) {
+      registerDynamicLanguage(regs)
+    }
+  } finally {
+    dynamicRegistered = true
+  }
+}
+
+function buildAvailable(napi: any): Record<string, any> {
+  // Built-ins: js/ts/tsx/jsx/html/css expose .parse on napi.<name>
+  const available: Record<string, any> = Object.fromEntries(
+    Object.entries(napi as any).filter(([, v]) => v && typeof (v as any).parse === 'function')
+  ) as any
+
+  // Add dynamic languages registered via registerDynamicLanguage: expose a thin parse wrapper
+  const dynamicNames = [
+    'python','java','go','c','cpp','csharp','php','ruby','kotlin','swift'
+  ]
+  for (const name of dynamicNames) {
+    // For dynamic langs, napi.parse(name, code) should work once registered
+    available[name] = available[name] || {
+      parse: (code: string) => napi.parse(name, code)
+    }
+  }
+  return available
 }
 
 export type AstGrepSearchOptions = {
@@ -110,10 +196,21 @@ export async function astGrepSearch(opts: AstGrepSearchOptions): Promise<AstGrep
   // Discover candidate files
   const files = await fg(include, { cwd, ignore: exclude, absolute: true, onlyFiles: true, dot: false })
 
+
+  // .gitignore filtering (best-effort)
+  try {
+    const gi = await fs.readFile(path.join(cwd, '.gitignore'), 'utf-8').catch(() => '')
+    if (gi) {
+      const ig = ignore().add(gi)
+      // Note: files are absolute; convert to workspace-relative posix for ignore check
+      const filtered = files.filter(abs => !ig.ignores(path.relative(cwd, abs).replace(/\\/g, '/')))
+      files.splice(0, files.length, ...filtered)
+    }
+  } catch {}
+
   const napi = await loadNapi()
-  const Available: Record<string, any> = Object.fromEntries(
-    Object.entries(napi as any).filter(([, v]) => v && typeof (v as any).parse === 'function')
-  ) as any
+  await ensureDynamicLanguages(napi)
+  const Available: Record<string, any> = buildAvailable(napi)
   const requestedLangs = opts.languages && opts.languages !== 'auto' ? opts.languages : null
 
   const matches: AstGrepMatch[] = []
@@ -135,8 +232,8 @@ export async function astGrepSearch(opts: AstGrepSearchOptions): Promise<AstGrep
       if (!content) continue
       try {
         const root = (Available[lang] as any).parse(content)
-        const rule = { pattern }
-        const found: any[] = root.findAll(rule) || []
+        const node = typeof (root as any).root === 'function' ? (root as any).root() : root
+        const found: any[] = (node && typeof (node as any).findAll === 'function') ? (node as any).findAll(pattern) || [] : []
         for (const m of found) {
           if (matches.length >= maxMatches) break
           const r = m.range?.() || m.range || { start: { row: 0, column: 0 }, end: { row: 0, column: 0 } }
@@ -191,6 +288,7 @@ export type AstGrepRewriteResult = {
   changes: AstGrepRewriteChange[]
   truncated: boolean
   stats: { scannedFiles: number; matchedCount: number; changedFiles: number; durationMs: number }
+  fileEditsPreview?: Array<{ path: string; before?: string; after?: string; sizeBefore?: number; sizeAfter?: number; truncated?: boolean }>
 }
 
 function toOffsetIndex(lines: string[]): number[] {
@@ -209,6 +307,7 @@ export async function astGrepRewrite(opts: AstGrepRewriteOptions): Promise<AstGr
   const t0 = performance.now()
   const { useMainStore } = await import('../store/index.js')
   const cwd = path.resolve(opts.cwd || useMainStore.getState().workspaceRoot || process.cwd())
+
   const include = (opts.includeGlobs && opts.includeGlobs.length ? opts.includeGlobs : ['**/*'])
   const exclude = [ 'node_modules/**', 'dist/**', 'dist-electron/**', 'release/**', '.git/**', ...(opts.excludeGlobs || []) ]
   const maxFileBytes = Math.max(1, opts.maxFileBytes ?? 1_000_000)
@@ -220,13 +319,30 @@ export async function astGrepRewrite(opts: AstGrepRewriteOptions): Promise<AstGr
   if (!pattern) throw new Error('pattern is required')
 
   const files = await fg(include, { cwd, ignore: exclude, absolute: true, onlyFiles: true, dot: false })
+  // .gitignore filtering (best-effort)
+  try {
+    const gi = await fs.readFile(path.join(cwd, '.gitignore'), 'utf-8').catch(() => '')
+    if (gi) {
+      const ig = ignore().add(gi)
+      const filtered = files.filter(abs => !ig.ignores(path.relative(cwd, abs).replace(/\\/g, '/')))
+      files.splice(0, files.length, ...filtered)
+    }
+  } catch {}
+
   const napi = await loadNapi()
-  const Available: Record<string, any> = Object.fromEntries(
-    Object.entries(napi as any).filter(([, v]) => v && typeof (v as any).parse === 'function')
-  ) as any
+  await ensureDynamicLanguages(napi)
+  const Available: Record<string, any> = buildAvailable(napi)
   const requestedLangs = opts.languages && opts.languages !== 'auto' ? opts.languages : null
 
   const changes: AstGrepRewriteChange[] = []
+  const previews: Record<string, { before?: string; after?: string; sizeBefore?: number; sizeAfter?: number; truncated?: boolean }> = {}
+  const MAX_PREVIEW = 16 * 1024 // 16 KB per file preview to keep bridge payloads small
+  function clip(s?: string) {
+    if (typeof s !== 'string') return s
+    if (s.length > MAX_PREVIEW) return s.slice(0, MAX_PREVIEW)
+    return s
+  }
+
   let totalMatches = 0
   let changedFiles = 0
   let scanned = 0
@@ -247,8 +363,8 @@ export async function astGrepRewrite(opts: AstGrepRewriteOptions): Promise<AstGr
 
       try {
         const root = (Available[lang] as any).parse(content)
-        const rule = { pattern }
-        const found: any[] = root.findAll(rule) || []
+        const node = typeof (root as any).root === 'function' ? (root as any).root() : root
+        const found: any[] = (node && typeof (node as any).findAll === 'function') ? (node as any).findAll(pattern) || [] : []
         const ranges: { s: number; e: number; startLine: number; startCol: number; endLine: number; endCol: number }[] = []
         const lineIdx = toOffsetIndex(content.split(/\r?\n/))
         for (const m of found) {
@@ -264,7 +380,7 @@ export async function astGrepRewrite(opts: AstGrepRewriteOptions): Promise<AstGr
         }
 
         if (ranges.length) {
-          // Build capture-aware edits and optionally apply via commitEdits
+          // Build capture-aware edits and compute proposed next via commitEdits for preview
           const edits: any[] = []
           const resultRanges = ranges.map(r => ({ startLine: r.startLine, startCol: r.startCol, endLine: r.endLine, endCol: r.endCol }))
           for (const m of found.slice(0, ranges.length)) {
@@ -284,22 +400,37 @@ export async function astGrepRewrite(opts: AstGrepRewriteOptions): Promise<AstGr
               } catch {}
             }
             try {
-              if (!opts.dryRun && !opts.rangesOnly) {
-                const e = typeof m.replace === 'function' ? m.replace(resolved) : null
-                if (e) edits.push(e)
-              }
+              const e = typeof m.replace === 'function' ? m.replace(resolved) : null
+              if (e) edits.push(e)
             } catch {}
           }
 
+          let next: string | null = null
+          try {
+            // Compute proposed new content for preview; safe even in dryRun
+            const committed = (found[0] as any).commitEdits ? (found[0] as any).commitEdits(edits) : (node as any).commitEdits(edits)
+            if (typeof committed === 'string') next = committed
+          } catch {}
+
           let changed = false
-          if (!opts.dryRun && !opts.rangesOnly && edits.length) {
+          if (!opts.dryRun && !opts.rangesOnly && next && next !== content) {
             try {
-              const next = (found[0] as any).commitEdits ? (found[0] as any).commitEdits(edits) : (root as any).commitEdits(edits)
-              if (typeof next === 'string' && next !== content) {
-                await fs.writeFile(file, next, 'utf-8')
-                changed = true
-              }
+              await fs.writeFile(file, next, 'utf-8')
+              changed = true
             } catch {}
+          }
+
+          // Preview capture (even for dryRun); include truncated flags for large content
+          if (next && next !== content) {
+            const rel = path.relative(cwd, file)
+            const truncated = content.length > MAX_PREVIEW || next.length > MAX_PREVIEW
+            previews[rel] = {
+              before: clip(content),
+              after: clip(next),
+              sizeBefore: content.length,
+              sizeAfter: next.length,
+              truncated
+            }
           }
 
           totalMatches += ranges.length
@@ -318,5 +449,6 @@ export async function astGrepRewrite(opts: AstGrepRewriteOptions): Promise<AstGr
   await Promise.all(workers)
 
   const durationMs = performance.now() - t0
-  return { changes, truncated: totalMatches >= totalLimit, stats: { scannedFiles: scanned, matchedCount: totalMatches, changedFiles, durationMs } }
+  const fileEditsPreview = Object.entries(previews).map(([p, v]) => ({ path: p, ...v }))
+  return { changes, truncated: totalMatches >= totalLimit, stats: { scannedFiles: scanned, matchedCount: totalMatches, changedFiles, durationMs }, fileEditsPreview }
 }

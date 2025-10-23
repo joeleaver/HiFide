@@ -27,6 +27,55 @@ import { createCallbackEventEmitters } from './execution-events'
 import { rateLimitTracker } from '../../providers/rate-limit-tracker'
 import { parseRateLimitError, sleep, withRetries } from '../../providers/retry'
 
+// Lightweight token estimators used as a last-resort when a stream is cancelled
+// and the provider does not return final usage. This avoids adding heavyweight
+// tokenizer deps and keeps cancellation graceful with best-effort stats.
+function estimateTokensFromText(s: string | undefined | null): number {
+  if (!s) return 0
+  // Rough heuristic: ~4 chars per token for LLM English text
+  const asciiWeightedLen = String(s).replace(/[^\x00-\x7F]/g, 'xx').length
+  return Math.ceil(asciiWeightedLen / 4)
+}
+
+function estimateInputTokens(provider: string, formattedMessages: any): number {
+  try {
+    if (provider === 'anthropic') {
+      const systemBlocks = formattedMessages?.system as Array<{ type: string; text?: string }> | undefined
+      const msgArr = formattedMessages?.messages as Array<{ content: string }> | undefined
+      let total = 0
+      if (Array.isArray(systemBlocks)) {
+        for (const b of systemBlocks) total += estimateTokensFromText((b as any)?.text)
+      }
+      if (Array.isArray(msgArr)) {
+        for (const m of msgArr) total += estimateTokensFromText(m?.content)
+      }
+      return total
+    }
+    if (provider === 'gemini') {
+      const sys = formattedMessages?.systemInstruction as string | undefined
+      const contents = formattedMessages?.contents as Array<{ parts: Array<{ text: string }> }> | undefined
+      let total = estimateTokensFromText(sys)
+      if (Array.isArray(contents)) {
+        for (const c of contents) {
+          if (Array.isArray(c?.parts)) {
+            for (const p of c.parts) total += estimateTokensFromText(p?.text)
+          }
+        }
+      }
+      return total
+    }
+    // Default/OpenAI-style ChatMessage[]
+    const arr = formattedMessages as Array<{ content: string }> | undefined
+    let total = 0
+    if (Array.isArray(arr)) {
+      for (const m of arr) total += estimateTokensFromText(m?.content)
+    }
+    return total
+  } catch {
+    return 0
+  }
+}
+
 /**
  * Request to the LLM service
  */
@@ -262,6 +311,19 @@ class LLMService {
 
     const eventHandlers = createCallbackEventEmitters(emit, provider, model)
 
+    // Track latest usage (if provider reports it) and maintain a best-effort fallback
+    let lastReportedUsage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number } | null = null
+    let usageEmitted = false
+    const emitUsage = eventHandlers.onTokenUsage
+    const onTokenUsageWrapped = (u: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number }) => {
+      lastReportedUsage = u
+      usageEmitted = true
+      emitUsage(u)
+    }
+
+    // Pre-compute an approximate input token count as a fallback
+    const approxInputTokens = estimateInputTokens(provider, formattedMessages)
+
     // 6. Call provider with formatted messages
     console.log(`[LLMService] Starting stream:`, {
       provider,
@@ -302,6 +364,17 @@ class LLMService {
         let streamHandle: { cancel: () => void } | null = null
         const onAbort = () => {
           try { streamHandle?.cancel() } catch {}
+          try {
+            // Best-effort usage on cancel: prefer provider-reported usage; otherwise estimate
+            if (!usageEmitted && lastReportedUsage) {
+              usageEmitted = true
+              emitUsage(lastReportedUsage)
+            } else if (!usageEmitted) {
+              const approxOutput = estimateTokensFromText(response)
+              usageEmitted = true
+              emitUsage({ inputTokens: approxInputTokens, outputTokens: approxOutput, totalTokens: approxInputTokens + approxOutput })
+            }
+          } catch {}
           reject(new Error('Flow cancelled'))
         }
         try {
@@ -339,7 +412,7 @@ class LLMService {
               try { flowAPI.signal?.removeEventListener('abort', onAbort as any) } catch {}
               reject(new Error(error))
             },
-            onTokenUsage: eventHandlers.onTokenUsage
+            onTokenUsage: onTokenUsageWrapped
           }
 
           // Provider-specific options

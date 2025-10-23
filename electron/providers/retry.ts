@@ -154,7 +154,8 @@ export function defaultIsRetriable(err: any): boolean {
     if (status === 429) return true
     if (typeof status === 'number' && status >= 500) return true
     const msg = String(err?.message || err || '')
-    if (/timeout|econnreset|enotfound|temporar|unavailable|rate/i.test(msg)) return true
+    // Treat provider stream termination as transient
+    if (/timeout|terminated|econnreset|enotfound|temporar|unavailable|rate/i.test(msg)) return true
   } catch {}
   return false
 }

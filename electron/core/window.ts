@@ -178,6 +178,7 @@ function debouncedSaveWindowState(): void {
  * Create the main application window
  */
 export function createWindow(): BrowserWindow {
+  console.time('[window] createWindow')
   // Load saved window state
   const windowState = loadWindowState()
 
@@ -226,10 +227,14 @@ export function createWindow(): BrowserWindow {
 
   // Load URL
   if (VITE_DEV_SERVER_URL) {
+    console.time('[window] loadURL(dev)')
     win.loadURL(VITE_DEV_SERVER_URL)
+    console.timeEnd('[window] loadURL(dev)')
     win.webContents.openDevTools({ mode: 'detach' })
   } else {
+    console.time('[window] loadFile(prod)')
     win.loadFile(path.join(DIRNAME, '../dist/index.html'))
+    console.timeEnd('[window] loadFile(prod)')
     // Also open dev tools in production for debugging
     win.webContents.openDevTools({ mode: 'detach' })
   }
@@ -245,8 +250,11 @@ export function createWindow(): BrowserWindow {
   setWindow(win)
 
   // Register window with store bridge
+  console.time('[window] registerWindow')
   registerWindow(win)
+  console.timeEnd('[window] registerWindow')
 
+  console.timeEnd('[window] createWindow')
   return win
 }
 

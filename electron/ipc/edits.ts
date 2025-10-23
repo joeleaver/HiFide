@@ -9,6 +9,8 @@ import path from 'node:path'
 import fs from 'node:fs/promises'
 import { getIndexer, providers, getProviderKey } from '../core/state'
 import { verifyTypecheck as tsVerify } from '../refactors/ts'
+import { useMainStore } from '../store/index'
+
 
 // Local edit operation types (discriminated union)
  type ReplaceOnceEdit = { type: 'replaceOnce'; path: string; oldText: string; newText: string }
@@ -20,7 +22,6 @@ import { verifyTypecheck as tsVerify } from '../refactors/ts'
  * Resolve path within workspace (security check)
  */
 function resolveWithinWorkspace(p: string): string {
-  const { useMainStore } = require('../store/index.js')
   const root = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
   const abs = path.isAbsolute(p) ? p : path.join(root, p)
   const norm = path.resolve(abs)
@@ -73,6 +74,15 @@ export async function applyFileEditsInternal(
   edits: TextEdit[] = [],
   opts: { dryRun?: boolean; verify?: boolean; tsconfigPath?: string } = {}
 ) {
+  // Collect per-file before/after previews for diff badges
+  const previews = new Map<string, { before?: string; after?: string; sizeBefore?: number; sizeAfter?: number; truncated?: boolean }>()
+  const MAX_PREVIEW = 16 * 1024 // 16 KB of text preview (keep bridge payloads small)
+  const clip = (s?: string) => {
+    if (typeof s !== 'string') return s as any
+    return s.length > MAX_PREVIEW ? s.slice(0, MAX_PREVIEW) : s
+  }
+  const wsRoot: string = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
+
   const results: Array<{ path: string; changed: boolean; message?: string }> = []
   let applied = 0
 
@@ -89,6 +99,8 @@ export async function applyFileEditsInternal(
 
       let next = content
       if (ed.type === 'replaceOnce') {
+
+
         const pos = content.indexOf(ed.oldText)
         if (pos === -1) {
           results.push({ path: ed.path, changed: false, message: 'oldText-not-found' })
@@ -107,10 +119,27 @@ export async function applyFileEditsInternal(
       }
 
       if (opts.dryRun) {
+
+	      // Record preview even during dry-run
+	      if (!previews.has(abs)) {
+	        previews.set(abs, { before: content, sizeBefore: content.length })
+	      }
+	      if (next !== content) {
+	        const prev = previews.get(abs) || {}
+	        previews.set(abs, { ...prev, after: next, sizeAfter: next.length })
+	      }
+
         results.push({ path: ed.path, changed: next !== content, message: 'dry-run' })
         if (next !== content) applied += 1
       } else {
         if (next !== content) {
+          // Record preview before writing
+          if (!previews.has(abs)) {
+            previews.set(abs, { before: content, sizeBefore: content.length })
+          }
+          const prev = previews.get(abs) || {}
+          previews.set(abs, { ...prev, after: next, sizeAfter: next.length })
+
           await atomicWrite(abs, next)
           applied += 1
           results.push({ path: ed.path, changed: true })
@@ -123,8 +152,22 @@ export async function applyFileEditsInternal(
     }
   }
 
+
+	const fileEditsPreview = Array.from(previews.entries()).map(([absPath, v]) => {
+	  const rel = path.relative(wsRoot, absPath)
+	  const truncated = (v.before && v.before.length > MAX_PREVIEW) || (v.after && v.after.length > MAX_PREVIEW)
+	  return {
+	    path: rel,
+	    before: clip(v.before),
+	    after: clip(v.after),
+	    sizeBefore: v.sizeBefore,
+	    sizeAfter: v.sizeAfter,
+	    truncated: !!truncated,
+	  }
+	})
+
   const verification = opts.verify ? tsVerify(opts.tsconfigPath) : undefined
-  return { ok: true, applied, results, dryRun: !!opts.dryRun, verification }
+  return { ok: true, applied, results, dryRun: !!opts.dryRun, verification, fileEditsPreview }
 }
 
 /**

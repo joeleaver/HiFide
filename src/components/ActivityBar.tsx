@@ -1,6 +1,7 @@
 import { Stack, UnstyledButton, Tooltip } from '@mantine/core'
 import { IconMessageCircle, IconFolder, IconGitBranch, IconSettings } from '@tabler/icons-react'
 import { useAppStore, useDispatch, selectCurrentView, type ViewType } from '../store'
+import { useRerenderTrace } from '../utils/perf'
 
 const ACTIVITY_BAR_WIDTH = 48
 
@@ -48,6 +49,7 @@ function ActivityButton({ icon, label, view: _view, active, onClick }: ActivityB
 
 export default function ActivityBar() {
   const currentView = useAppStore(selectCurrentView)
+  useRerenderTrace('ActivityBar', { currentView })
   const dispatch = useDispatch()
 
   return (

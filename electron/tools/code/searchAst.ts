@@ -1,14 +1,52 @@
 import type { AgentTool } from '../../providers/provider'
 import { astGrepSearch } from '../astGrep'
+import path from 'node:path'
+import { useMainStore } from '../../store/index'
+
+// In-memory TTL cache to collapse repeated identical AST searches
+const __astSearchCache: Map<string, { ts: number; data: any }> = new Map()
+const AST_CACHE_TTL_MS = 20_000 // 20s
+const AST_CACHE_MAX = 64
+
+function astKey(args: { pattern: string; languages?: string[]; includeGlobs?: string[]; excludeGlobs?: string[]; maxMatches?: number; contextLines?: number; maxFileBytes?: number; concurrency?: number }) {
+  const root = path.resolve(useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd())
+  const keyObj = {
+    root,
+    pattern: args.pattern,
+    languages: Array.isArray(args.languages) ? [...args.languages].sort() : [],
+    includeGlobs: Array.isArray(args.includeGlobs) ? [...args.includeGlobs].sort() : [],
+    excludeGlobs: Array.isArray(args.excludeGlobs) ? [...args.excludeGlobs].sort() : [],
+    maxMatches: args.maxMatches ?? 500,
+    contextLines: args.contextLines ?? 2,
+    maxFileBytes: args.maxFileBytes ?? 1_000_000,
+    concurrency: args.concurrency ?? 6,
+  }
+  return JSON.stringify(keyObj)
+}
+
+function astCacheGet(key: string) {
+  const v = __astSearchCache.get(key)
+  if (!v) return null
+  if (Date.now() - v.ts > AST_CACHE_TTL_MS) { __astSearchCache.delete(key); return null }
+  return v.data
+}
+
+function astCacheSet(key: string, data: any) {
+  __astSearchCache.set(key, { ts: Date.now(), data })
+  if (__astSearchCache.size > AST_CACHE_MAX) {
+    const first = __astSearchCache.keys().next().value
+    if (first) __astSearchCache.delete(first)
+  }
+}
 
 export const searchAstTool: AgentTool = {
   name: 'code.search_ast',
-  description: 'Structural AST search using @ast-grep/napi (inline patterns only)',
+  description: 'AST-first structural search using ast-grep. Prefer this over reading whole files to discover code. Supports registered languages (JS/TS/TSX/JSX/HTML/CSS + Python/Go/Java/C/CPP/C#\u00a0/ PHP/Ruby/Kotlin/Swift when installed). Use inline patterns like console.log($A), myFn($ARGS), function $NAME($PARAMS) { $$BODY }.',
   parameters: {
     type: 'object',
     properties: {
-      pattern: { type: 'string', description: 'ast-grep inline pattern, e.g., console.log($VAL)' },
-      languages: { type: 'array', items: { type: 'string' }, description: "Optional languages. Use 'auto' by file extension if omitted" },
+      pattern: { type: 'string', description: 'ast-grep inline pattern, e.g., console.log($A), import { $SYM } from \u0027$PKG\u0027' },
+      languages: { type: 'array', items: { type: 'string' }, description: "Optional languages; default 'auto' (uses registered langs by file extension)" },
       includeGlobs: { type: 'array', items: { type: 'string' } },
       excludeGlobs: { type: 'array', items: { type: 'string' } },
       maxMatches: { type: 'integer', minimum: 1, maximum: 5000, default: 500 },
@@ -20,6 +58,12 @@ export const searchAstTool: AgentTool = {
     additionalProperties: false,
   },
   run: async (args: { pattern: string; languages?: string[]; includeGlobs?: string[]; excludeGlobs?: string[]; maxMatches?: number; contextLines?: number; maxFileBytes?: number; concurrency?: number }) => {
+    // Cache collapse for identical calls within short window
+    const key = astKey(args)
+    const cached = astCacheGet(key)
+    if (cached) {
+      return { ok: true, ...cached, cached: true }
+    }
     try {
       const res = await astGrepSearch({
         pattern: args.pattern,
@@ -31,6 +75,7 @@ export const searchAstTool: AgentTool = {
         maxFileBytes: args.maxFileBytes,
         concurrency: args.concurrency,
       })
+      try { astCacheSet(key, res) } catch {}
       return { ok: true, ...res }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }

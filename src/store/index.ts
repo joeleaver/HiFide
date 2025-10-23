@@ -13,6 +13,7 @@
 
 import { createUseStore, useDispatch as useZubridgeDispatch } from '@zubridge/electron'
 import type { AppStore } from '../../electron/store'
+import { useMemo } from 'react'
 
 // Re-export types that are used by components
 export type { ViewType, ModelPricing } from '../../electron/store/types'
@@ -33,7 +34,23 @@ export const useAppStore = createUseStore<AppStore>()
  *   dispatch('toggleRateLimiting', true)
  *   dispatch('setRateLimitForModel', 'openai', 'gpt-4', { rpm: 100 })
  */
-export const useDispatch = () => useZubridgeDispatch<AppStore>()
+export const useDispatch = () => {
+  const base = useZubridgeDispatch<AppStore>()
+  // Memoize to provide a stable identity across renders
+  const stable = useMemo(() => {
+    return (async (action: keyof AppStore & string, ...args: any[]) => {
+      const t0 = Date.now()
+      try {
+        const res = await (base as any)(action, ...args)
+        return res
+      } catch (err) {
+        console.error('[zubridge] dispatch error', { action, elapsedMs: Date.now() - t0, error: String(err) })
+        throw err
+      }
+    }) as any
+  }, [base])
+  return stable
+}
 
 /**
  * Re-export all selectors for convenience

@@ -18,7 +18,7 @@
 
 import type { StateCreator } from 'zustand'
 import type { Session, TokenUsage, TokenCost, AgentMetrics, ActivityEvent, SessionItem, SessionMessage, NodeExecutionBox, Badge } from '../types'
-import { LS_KEYS, MAX_SESSIONS } from '../utils/constants'
+import { MAX_SESSIONS } from '../utils/constants'
 import { deriveTitle } from '../utils/sessions'
 import { loadAllSessions, sessionSaver, deleteSessionFromDisk } from '../utils/session-persistence'
 
@@ -157,11 +157,8 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
   loadSessions: async () => {
     let sessions = await loadAllSessions()
 
-    // Get current session ID from localStorage (if in renderer) or use most recent
-    let currentId: string | null = null
-    if (typeof localStorage !== 'undefined') {
-      currentId = localStorage.getItem(LS_KEYS.CURRENT_SESSION_ID)
-    }
+    // Use persisted currentId if valid; otherwise choose most recent
+    let currentId: string | null = (get() as any).currentId || null
 
     // If no valid sessions found, create a new one automatically
     if (sessions.length === 0) {
@@ -182,7 +179,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
    * Initialize the current session
    * - Loads the flow template (lastUsedFlow or default)
    * - Sets feSelectedTemplate to match the session's flow
-   * - feLoadTemplate handles initialization or resumption based on flowState
+   * - Does NOT start or resume the flow; leaves it in a stopped state
    * - Ensures a terminal exists for the session
    */
   initializeSession: async () => {
@@ -206,14 +203,14 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       await state.ensureSessionTerminal()
     }
 
-    // Load the flow template (it will handle init/resume based on flowState)
+    // Load the flow template without starting execution
     const flowTemplateId = currentSession.lastUsedFlow || 'default'
 
     // Set the selected template to match the session's flow (via any cast since it's in FlowEditorSlice)
     ;(set as any)({ feSelectedTemplate: flowTemplateId })
 
     if (state.feLoadTemplate) {
-      await state.feLoadTemplate(flowTemplateId)
+      await state.feLoadTemplate({ templateId: flowTemplateId })
     }
 
     // Update session's lastUsedFlow if it wasn't set
@@ -242,9 +239,6 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     if (!state.currentId) {
       const id = state.sessions[0].id
       set({ currentId: id })
-      try {
-        localStorage.setItem(LS_KEYS.CURRENT_SESSION_ID, id)
-      } catch {}
       return false // Selected existing session, needs initialization
     }
 
@@ -263,10 +257,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     // Save to disk using debounced saver
     sessionSaver.save(current, immediate)
 
-    // Update localStorage with current session ID (if in renderer)
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(LS_KEYS.CURRENT_SESSION_ID, current.id)
-    }
+    // Persist handled by Zustand persist middleware in main process
   },
 
   updateCurrentSessionFlow: async (flowId: string) => {
@@ -291,11 +282,8 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     get().saveCurrentSession(true)
 
     set({ currentId: id })
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(LS_KEYS.CURRENT_SESSION_ID, id)
-    }
 
-    // Initialize the selected session (loads flow and resumes if paused)
+    // Initialize the selected session (loads flow; does not start execution)
     const state = get()
     const stateAny = state as any
     if (stateAny.initializeSession) {
@@ -353,7 +341,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       return { sessions, currentId: session.id }
     })
 
-    // Initialize the new session (loads flow and starts execution)
+    // Initialize the new session (loads flow; does not start execution)
     const initializeSession = state.initializeSession
     if (initializeSession) {
       setTimeout(() => {
@@ -364,9 +352,6 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     // Save the new session immediately (bypass debounce)
     get().saveCurrentSession(true)
 
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(LS_KEYS.CURRENT_SESSION_ID, session.id)
-    }
 
     return session.id
   },
@@ -970,7 +955,11 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
               ...item,
               badge: {
                 ...item.badge,
-                ...updates
+                ...updates,
+                // Deep merge metadata to preserve existing fields
+                metadata: updates.metadata
+                  ? { ...(item.badge.metadata || {}), ...updates.metadata }
+                  : item.badge.metadata
               }
             }
           }

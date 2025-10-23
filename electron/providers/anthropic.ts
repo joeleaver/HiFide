@@ -409,7 +409,7 @@ export const AnthropicProvider: ProviderAdapter = {
                   resultPreview: typeof result === 'string' ? result.substring(0, 100) : JSON.stringify(result).substring(0, 100)
                 })
 
-                // Notify tool end (use original name for UI display)
+                // Notify tool end (use original name for UI display) with full result (for UI badges/state)
                 try { onToolEnd?.({ callId: tu.id, name: originalToolName, result }) } catch {}
 
                 // Check if tool requested pruning
@@ -418,7 +418,10 @@ export const AnthropicProvider: ProviderAdapter = {
                   pruneSummary = result._meta.summary
                 }
 
-                results.push({ type: 'tool_result', tool_use_id: tu.id, content: typeof result === 'string' ? result : JSON.stringify(result) })
+                // IMPORTANT: Minify heavy tool results before adding to conversation to avoid memory blowups
+                const { minifyToolResult } = await import('./toolResultMinify')
+                const compact = minifyToolResult(originalToolName, result)
+                results.push({ type: 'tool_result', tool_use_id: tu.id, content: typeof compact === 'string' ? compact : JSON.stringify(compact) })
               } catch (e: any) {
                 // Get original tool name for error reporting
                 const tool = toolMap.get(tu.name)

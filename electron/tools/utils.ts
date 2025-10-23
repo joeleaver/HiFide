@@ -12,7 +12,7 @@ import { useMainStore } from '../store/index'
  * Resolve a path within the workspace, preventing directory traversal
  */
 export function resolveWithinWorkspace(p: string): string {
-  const root = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
+  const root = path.resolve(useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd())
   const abs = path.isAbsolute(p) ? p : path.join(root, p)
   const norm = path.resolve(abs)
   const guard = root.endsWith(path.sep) ? root : root + path.sep

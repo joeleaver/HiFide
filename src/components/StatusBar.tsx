@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
 import { Group, Text, UnstyledButton, Select } from '@mantine/core'
 import { IconFolder, IconChevronDown } from '@tabler/icons-react'
-import { useAppStore, useDispatch, selectWorkspaceRoot, selectSelectedModel, selectSelectedProvider, selectProviderValid, selectModelsByProvider, selectAgentMetrics, selectCurrentView } from '../store'
+import { useAppStore, useDispatch, selectWorkspaceRoot, selectSelectedModel, selectSelectedProvider, selectProviderValid, selectAgentMetrics, selectCurrentView } from '../store'
+import { useRerenderTrace } from '../utils/perf'
 
 const STATUS_BAR_HEIGHT = 24
 
@@ -14,14 +15,24 @@ export default function StatusBar() {
   const selectedModel = useAppStore(selectSelectedModel)
   const selectedProvider = useAppStore(selectSelectedProvider)
   const providerValid = useAppStore(selectProviderValid)
-  const modelsByProvider = useAppStore(selectModelsByProvider)
   const agentMetrics = useAppStore(selectAgentMetrics)
   const currentView = useAppStore(selectCurrentView)
 
-  // Flow Editor specific state
-  const feNodes = useAppStore((s) => s.feNodes)
-  const feEdges = useAppStore((s) => s.feEdges)
+  // Flow Editor specific state - subscribe to primitives only to avoid ref churn
+  const nodesCount = useAppStore((s) => s.feNodes.length)
+  const edgesCount = useAppStore((s) => s.feEdges.length)
   const feStatus = useAppStore((s) => s.feStatus)
+
+  // Perf: trace rerenders without passing large objects
+  useRerenderTrace('StatusBar', {
+    currentView,
+    provider: selectedProvider,
+    model: selectedModel,
+    feStatus,
+    nodes: nodesCount,
+    edges: edgesCount,
+  })
+
 
   const providerOptions = useMemo(() => {
     const all = [
@@ -33,7 +44,8 @@ export default function StatusBar() {
     return anyValidated ? all.filter((p) => providerValid[p.value]) : all
   }, [providerValid])
 
-  const modelOptions = useMemo(() => modelsByProvider[selectedProvider] || [], [modelsByProvider, selectedProvider])
+  // Subscribe to only the current provider's models, with shallow comparator to avoid ref churn
+  const modelOptions = useAppStore((s) => s.modelsByProvider[selectedProvider] || [])
 
   const handleFolderClick = async () => {
     const result = await window.workspace?.openFolderDialog?.()
@@ -93,7 +105,7 @@ export default function StatusBar() {
             <>
               {/* Flow stats */}
               <Text size="xs" style={{ color: '#fff', opacity: 0.9 }}>
-                {feNodes.length} nodes · {feEdges.length} edges
+                {nodesCount} nodes · {edgesCount} edges
               </Text>
               {feStatus !== 'stopped' && (
                 <>
@@ -138,7 +150,7 @@ export default function StatusBar() {
               <Select
                 value={selectedModel}
                 onChange={(v) => v && dispatch('setSelectedModel', v)}
-                data={modelOptions}
+                data={modelOptions as any}
                 size="xs"
                 variant="unstyled"
                 disabled={providerOptions.length === 0}
@@ -178,7 +190,7 @@ export default function StatusBar() {
               <Select
                 value={selectedModel}
                 onChange={(v) => v && dispatch('setSelectedModel', v)}
-                data={modelOptions}
+                data={modelOptions as any}
                 size="xs"
                 variant="unstyled"
                 disabled={providerOptions.length === 0}

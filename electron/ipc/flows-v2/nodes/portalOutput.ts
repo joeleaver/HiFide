@@ -14,7 +14,7 @@
  *
  * Outputs:
  * - context: Context retrieved from matching Portal Input (or input context if no portal data)
- * - data: Data retrieved from matching Portal Input (or input data if no portal data)
+ *   Note: This portal output intentionally does NOT emit data; it is context-only.
  *
  * Config:
  * - id: Portal identifier (string) - must match a Portal Input node's ID
@@ -57,12 +57,9 @@ export const portalOutputNode: NodeFunction = async (flow, context, _dataIn, inp
     // Pass through the input context/data to allow flow to continue
     flow.log.debug('No portal data yet, passing through inputs', { portalId })
 
-    // Pull data from input if edge is connected
-    const inputData = inputs.has('data') ? await inputs.pull('data') : undefined
-
+    // Context-only pass-through when no portal data is present
     return {
       context: executionContext,
-      data: inputData,
       status: 'success'
     }
   }
@@ -77,9 +74,9 @@ export const portalOutputNode: NodeFunction = async (flow, context, _dataIn, inp
   // Use portal's context if available, otherwise fall back to executionContext
   const outputContext = portalData.context || executionContext
 
+  // Context-only output
   return {
     context: outputContext,
-    data: portalData.data,
     status: 'success'
   }
 }

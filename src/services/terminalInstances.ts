@@ -121,9 +121,13 @@ export function mountTerminalInstance(
 
   instance.container = container
 
-  // Fit terminal to container
+  // Fit terminal to container only if visible/non-zero size
   try {
-    instance.fitAddon.fit()
+    const w = container?.clientWidth || 0
+    const h = container?.clientHeight || 0
+    if (w > 0 && h > 0) {
+      instance.fitAddon.fit()
+    }
   } catch (e) {
     console.error('[terminalInstances] Failed to fit terminal:', e)
   }
@@ -140,7 +144,11 @@ export function mountTerminalInstance(
 
     instance.resizeTimeout = setTimeout(() => {
       try {
-        instance.fitAddon.fit()
+        const w = container?.clientWidth || 0
+        const h = container?.clientHeight || 0
+        if (w > 0 && h > 0) {
+          instance.fitAddon.fit()
+        }
       } catch (e) {
         console.error('[terminalInstances] Failed to fit terminal on resize:', e)
       }
@@ -184,7 +192,12 @@ export function fitTerminalInstance(tabId: string): void {
   if (!instance) return
   
   try {
-    instance.fitAddon.fit()
+    const container = instance.container
+    const w = container?.clientWidth || 0
+    const h = container?.clientHeight || 0
+    if (w > 0 && h > 0) {
+      instance.fitAddon.fit()
+    }
   } catch (e) {
     console.error('[terminalInstances] Failed to fit terminal:', e)
   }

@@ -8,7 +8,7 @@ import { loadWorkspaceSettings, saveWorkspaceSettings } from '../../ipc/workspac
 // Flow runtime event type (mirrors renderer usage)
 export type FlowEvent = {
   requestId: string
-  type: 'nodeStart' | 'nodeEnd' | 'io' | 'done' | 'error' | 'waitingForInput' | 'chunk' | 'toolStart' | 'toolEnd' | 'toolError' | 'intentDetected' | 'tokenUsage'
+  type: 'nodeStart' | 'nodeEnd' | 'io' | 'done' | 'error' | 'waitingForInput' | 'chunk' | 'toolStart' | 'toolEnd' | 'toolError' | 'intentDetected' | 'tokenUsage' | 'rateLimitWait'
   nodeId?: string
   data?: any
   error?: string
@@ -25,6 +25,158 @@ export type FlowEvent = {
 
 // Flow execution status
 export type FlowStatus = 'stopped' | 'running' | 'waitingForInput'
+
+// Buffered/Throttled flush to reduce zubridge IPC during execution
+let __feFlushTimer: NodeJS.Timeout | null = null
+let __fePendingEvents: FlowEvent[] = []
+let __fePendingFlowState: Record<string, NodeExecutionState> = {}
+let __fePendingMainContext: MainFlowContext | null | undefined = undefined
+let __fePendingIsolatedContexts: Record<string, MainFlowContext> | null = null
+let __fePendingActiveTools: Set<string> | null = null
+
+function __scheduleFeFlush(set: any, get: any, interval = 100) {
+  if (__feFlushTimer) return
+  __feFlushTimer = setTimeout(() => {
+    __feFlushTimer = null
+    const events = __fePendingEvents
+    const statePatch = __fePendingFlowState
+    const mainCtx = __fePendingMainContext
+    const isoCtxs = __fePendingIsolatedContexts
+    const activeTools = __fePendingActiveTools
+    __fePendingEvents = []
+    __fePendingFlowState = {}
+    __fePendingMainContext = undefined
+    __fePendingIsolatedContexts = null
+    __fePendingActiveTools = null
+
+    const updates: any = {}
+    if (events.length) {
+      const merged = [...get().feEvents, ...events]
+      updates.feEvents = merged.slice(-500)
+    }
+    if (Object.keys(statePatch).length) {
+      updates.feFlowState = { ...get().feFlowState, ...statePatch }
+    }
+    // Guard: avoid feFlowState churn while idle; allow during 'running' and 'waitingForInput'
+    try {
+      const st = get().feStatus
+      if (updates.feFlowState && !(st === 'running' || st === 'waitingForInput')) {
+        const changedIds = Object.keys(statePatch)
+        if (process.env.NODE_ENV !== 'production') {
+          console.debug('[flowEditor] Dropping feFlowState patch while idle:', { status: st, changedIds })
+        }
+        delete (updates as any).feFlowState
+      }
+    } catch {}
+    if (mainCtx !== undefined) {
+      try {
+        const prev = get().feMainFlowContext
+        const same = (() => {
+          const a: any = prev || {}
+          const b: any = mainCtx || {}
+          if (!a && !b) return true
+          if (!a || !b) return false
+          if (a.provider !== b.provider) return false
+          if (a.model !== b.model) return false
+          if ((a.systemInstructions || '') !== (b.systemInstructions || '')) return false
+          const ah = Array.isArray(a.messageHistory) ? a.messageHistory.length : 0
+          const bh = Array.isArray(b.messageHistory) ? b.messageHistory.length : 0
+          return ah === bh
+        })()
+        if (!same) {
+          updates.feMainFlowContext = mainCtx
+        }
+      } catch {
+        updates.feMainFlowContext = mainCtx
+      }
+    }
+    if (isoCtxs) {
+      updates.feIsolatedContexts = { ...get().feIsolatedContexts, ...isoCtxs }
+    }
+    if (activeTools) {
+      try {
+        const prev = get().feActiveTools as Set<string>
+        let equal = !!prev && prev.size === activeTools.size
+        if (equal) {
+          for (const v of activeTools) { if (!prev.has(v)) { equal = false; break } }
+        }
+        if (!equal) {
+          updates.feActiveTools = new Set(activeTools)
+        }
+      } catch {
+        // Fallback: commit update if equality check fails
+        updates.feActiveTools = new Set(activeTools)
+      }
+    }
+    if (Object.keys(updates).length) {
+      try {
+        if (get().feStatus === 'stopped') {
+          // Debug: detect unexpected flushes while idle
+          console.debug('[flowEditor] fe* flush while stopped:', Object.keys(updates))
+        }
+      } catch {}
+      set(updates)
+    }
+  }, interval)
+}
+
+function __queueFeEvent(set: any, get: any, evt: FlowEvent) {
+  __fePendingEvents.push(evt)
+  __scheduleFeFlush(set, get)
+}
+function __queueFeFlowState(set: any, get: any, nodeId: string, patch: Partial<NodeExecutionState>) {
+  // Only accept execution-state patches while running or paused for input
+  try {
+    const status = get().feStatus
+    if (!(status === 'running' || status === 'waitingForInput')) {
+      // Ignore entirely when idle to prevent UI interactions (like dragging) from causing churn
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug('[flowEditor] __queueFeFlowState ignored (idle):', { status, nodeId, patchKeys: Object.keys(patch || {}) })
+      }
+      return
+    }
+  } catch {}
+  const base = __fePendingFlowState[nodeId] || get().feFlowState[nodeId] || {}
+  const next = { ...base, ...patch }
+  // Shallow equality guard to avoid churn when nothing actually changes
+  let same = true
+  for (const k of Object.keys(next)) {
+    const bv: any = (base as any)[k]
+    const nv: any = (next as any)[k]
+    if (k === 'style') {
+      const bstyle = bv || {}
+      const nstyle = nv || {}
+      if (bstyle.border !== nstyle.border || bstyle.boxShadow !== nstyle.boxShadow) { same = false; break }
+    } else if (bv !== nv) { same = false; break }
+  }
+  if (same) {
+    return
+  }
+  __fePendingFlowState[nodeId] = next
+  __scheduleFeFlush(set, get)
+}
+function __queueFeMainContext(set: any, get: any, ctx: MainFlowContext) {
+  try {
+    const status = get().feStatus
+    if (!(status === 'running' || status === 'waitingForInput')) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug('[flowEditor] __queueFeMainContext ignored (idle):', { status })
+      }
+      return
+    }
+  } catch {}
+  __fePendingMainContext = ctx
+  __scheduleFeFlush(set, get)
+}
+function __queueFeIsolatedContext(set: any, get: any, contextId: string, ctx: MainFlowContext) {
+  if (!__fePendingIsolatedContexts) __fePendingIsolatedContexts = {}
+  __fePendingIsolatedContexts[contextId] = ctx
+  __scheduleFeFlush(set, get)
+}
+function __queueFeActiveTools(set: any, get: any, tools: Set<string>) {
+  __fePendingActiveTools = new Set(tools)
+  __scheduleFeFlush(set, get)
+}
 
 // Node execution state (separate from layout)
 export interface NodeExecutionState {
@@ -92,6 +244,15 @@ export interface FlowEditorSlice {
   feErrorDetectEnabled: boolean
   feErrorDetectBlock: boolean
 
+  // Transient diff preview (loaded on demand; not persisted)
+  feLatestDiffPreview: Array<{ path: string; before?: string; after?: string; sizeBefore?: number; sizeAfter?: number; truncated?: boolean }> | null
+
+  // Loaded tool results (keyed by callId, loaded on demand; not persisted)
+  feLoadedToolResults: Record<string, any>
+
+  // Shallow params for tools keyed by callId (kept shallow to avoid deep snapshot truncation)
+  feToolParamsByKey: Record<string, any>
+
   // Template management state
   feCurrentProfile: string
   feAvailableTemplates: FlowTemplate[]
@@ -105,6 +266,15 @@ export interface FlowEditorSlice {
 
   // Actions
   initFlowEditor: () => Promise<void>
+
+  // Unified tool result cache actions (replaces separate diff/search caches)
+  registerToolResult: (params: { key: string; data: any }) => void
+  loadToolResult: (params: { key: string }) => void
+  clearToolResult: (params: { key: string }) => void
+
+  // Legacy diff preview actions (for backward compatibility with feLatestDiffPreview state)
+  loadDiffPreview: (params: { key: string }) => Promise<void>
+  clearLatestDiffPreview: () => void
   feLoadTemplates: () => Promise<void>
   feLoadTemplate: (params: { templateId: string }) => Promise<void>
   feSaveCurrentProfile: () => Promise<void>
@@ -116,6 +286,7 @@ export interface FlowEditorSlice {
   feClearExportResult: () => void
   feImportFlow: () => Promise<void>
   feClearImportResult: () => void
+  feCreateNewFlowNamed: (params: { name: string }) => Promise<void>
   feSetSelectedTemplate: (params: { id: string }) => void
   feSetSaveAsModalOpen: (params: { open: boolean }) => void
   feSetNewProfileName: (params: { name: string }) => void
@@ -163,7 +334,7 @@ export interface FlowEditorSlice {
   feHandleIO: (nodeId: string, data: string) => void
   feHandleChunk: (text: string, nodeId?: string, provider?: string, model?: string) => void
   feHandleToolStart: (toolName: string, nodeId?: string, toolArgs?: any, callId?: string, provider?: string, model?: string) => void
-  feHandleToolEnd: (toolName: string, callId?: string, nodeId?: string) => void
+  feHandleToolEnd: (toolName: string, callId?: string, nodeId?: string, result?: any) => void
   feHandleToolError: (toolName: string, error: string, callId?: string, nodeId?: string) => void
   feHandleIntentDetected: (nodeId: string, intent: string, provider?: string, model?: string) => void
   feHandleTokenUsage: (provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }) => void
@@ -193,6 +364,30 @@ function debounce<T extends (...args: any[]) => void>(fn: T, ms: number) {
     t = setTimeout(() => fn(...args), ms)
   }
 }
+
+// Wait for pending flow-editor event flushes and give the scheduler a moment
+// to propagate cancellation and final events (usage, errors). Best-effort only.
+async function __waitForFeSettle(maxWaitMs = 1000): Promise<void> {
+  const start = Date.now()
+  // Wait for the throttled flush (100ms window) to complete
+  while (__feFlushTimer) {
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => setTimeout(r, 50))
+    if (Date.now() - start > maxWaitMs) break
+  }
+  // Small grace to allow any final handlers to run
+  await new Promise((r) => setTimeout(r, 50))
+}
+
+// Unified in-memory cache for tool execution results (main process only, not persisted)
+// Keyed by callId (tool execution ID), stores any data that's too large to put in the store
+// This replaces the separate diff/search caches and works for any tool
+const __feToolResultCache = new Map<string, any>()
+
+// Module-scoped handles for periodic auto-save (do not put these in Zustand state)
+let __fePeriodicSaveTimeout: NodeJS.Timeout | null = null
+let __fePeriodicSaveUnsubscribe: (() => void) | null = null
+
 
 export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, store) => ({
   // Initial state - will be populated by initializeFlowProfiles()
@@ -232,6 +427,15 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   feErrorDetectEnabled: true,
   feErrorDetectBlock: false,
 
+  // Transient diff preview
+  feLatestDiffPreview: null,
+
+  // Loaded tool results
+  feLoadedToolResults: {},
+
+  // Shallow tool params by callId
+  feToolParamsByKey: {},
+
   // Template management initial state
   feCurrentProfile: '',
   feAvailableTemplates: [],
@@ -244,6 +448,51 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   feLastSavedState: null,
 
   // ----- Actions -----
+  // Unified tool result cache (works for any tool)
+  registerToolResult: ({ key, data }: { key: string; data: any }) => {
+    __feToolResultCache.set(key, data)
+  },
+  loadToolResult: ({ key }: { key: string }) => {
+    const data = __feToolResultCache.get(key)
+
+    // If undefined in cache, mark as loaded-empty with null to avoid repeated loads
+    if (data === undefined) {
+      const current = get().feLoadedToolResults?.[key]
+      if (current === null) return // already marked loaded-empty
+      set((state) => ({
+        feLoadedToolResults: {
+          ...state.feLoadedToolResults,
+          [key]: null,
+        },
+      }))
+      return
+    }
+
+    // Only update if changed to avoid unnecessary rerenders
+    const current = get().feLoadedToolResults?.[key]
+    if (current === data) return
+
+    set((state) => ({
+      feLoadedToolResults: {
+        ...state.feLoadedToolResults,
+        [key]: data,
+      },
+    }))
+  },
+  clearToolResult: ({ key }: { key: string }) => {
+    __feToolResultCache.delete(key)
+    set((state) => {
+      const { [key]: _, ...rest } = state.feLoadedToolResults
+      return { feLoadedToolResults: rest }
+    })
+  },
+
+  // Legacy diff preview actions (for backward compatibility)
+  loadDiffPreview: async ({ key }: { key: string }) => {
+    const data = __feToolResultCache.get(key) || []
+    set({ feLatestDiffPreview: data })
+  },
+  clearLatestDiffPreview: () => set({ feLatestDiffPreview: null }),
 
   initFlowEditor: async () => {
     // Load available templates
@@ -402,11 +651,76 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   feSetNodes: ({ nodes }: { nodes: Node[] }) => {
     const current = get().feNodes
     if (current === nodes) return
+
+    // Drop if structurally identical to avoid churn from ref-only updates
+    const nodesDeepEqual = (a: Node[] | undefined, b: Node[] | undefined): boolean => {
+      if (!Array.isArray(a) || !Array.isArray(b)) return false
+      if (a.length !== b.length) return false
+      // Compare by id with minimal important fields
+      for (let i = 0; i < a.length; i++) {
+        const an = a[i] as any
+        const bn = b[i] as any
+        if (an?.id !== bn?.id) return false
+        // Position
+        const ap = an?.position || {}
+        const bp = bn?.position || {}
+        if (ap.x !== bp.x || ap.y !== bp.y) return false
+        // Basic data fields
+        const ad = an?.data || {}
+        const bd = bn?.data || {}
+        if (ad?.labelBase !== bd?.labelBase) return false
+        if (ad?.label !== bd?.label) return false
+        if (ad?.nodeType !== bd?.nodeType) return false
+        // Config: stringify minimally; safe because configs are small
+        const ac = ad?.config ?? null
+        const bc = bd?.config ?? null
+        if (JSON.stringify(ac) !== JSON.stringify(bc)) return false
+      }
+      return true
+    }
+
+    try {
+      if (nodesDeepEqual(current, nodes)) {
+        if (process.env.NODE_ENV !== 'production') {
+          console.debug('[flowEditor] feSetNodes dropped (deep-equal)')
+        }
+        return
+      }
+    } catch {}
+
     set({ feNodes: nodes })
   },
   feSetEdges: ({ edges }: { edges: Edge[] }) => {
     const current = get().feEdges
     if (current === edges) return
+
+    const edgesDeepEqual = (a: Edge[] | undefined, b: Edge[] | undefined): boolean => {
+      if (!Array.isArray(a) || !Array.isArray(b)) return false
+      if (a.length !== b.length) return false
+      for (let i = 0; i < a.length; i++) {
+        const ae = a[i] as any
+        const be = b[i] as any
+        if (ae?.id !== be?.id) return false
+        if (ae?.source !== be?.source) return false
+        if (ae?.target !== be?.target) return false
+        const ash = ae?.sourceHandle ?? undefined
+        const bsh = be?.sourceHandle ?? undefined
+        const ath = ae?.targetHandle ?? undefined
+        const bth = be?.targetHandle ?? undefined
+        if (ash !== bsh || ath !== bth) return false
+      }
+      return true
+    }
+
+    try {
+      if (edgesDeepEqual(current, edges)) {
+        if (process.env.NODE_ENV !== 'production') {
+          console.debug('[flowEditor] feSetEdges dropped (deep-equal)')
+        }
+        return
+      }
+    } catch {}
+
     set({ feEdges: edges })
   },
   feApplyNodeChanges: (changes) => {
@@ -536,7 +850,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
   flowInit: async () => {
     // Execute the flow by finding the Context Start node and running it
-    // This kicks off the entire flow execution
+    // Kick-off should ACK to renderer immediately; heavy work runs async.
 
     // Check if flow is loaded
     if (get().feNodes.length === 0) {
@@ -548,7 +862,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     const currentSessionId = state.currentId
     const requestId = currentSessionId || `flow-init-${Date.now()}`
 
-    // Reset all node styles and status
+    // Reset all node styles and status (fast)
     const resetNodes = get().feNodes.map((n) => ({
       ...n,
       style: { border: '2px solid #333', boxShadow: 'none' },
@@ -563,65 +877,72 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       fePausedNode: null,   // Clear paused node
     })
 
-    const storeState: any = (store as any).getState()
-    const pricingConfig: PricingConfig | undefined = storeState.pricingConfig
+    // Defer heavy work to avoid zubridge ack timeout
+    setImmediate(async () => {
+      try {
+        const storeState: any = (store as any).getState()
 
-    // Get session context (single source of truth for provider/model/messageHistory)
-    const currentSession = storeState.sessions?.find((s: any) => s.id === storeState.currentId)
-    const sessionContext = currentSession?.currentContext
+        // Get session context (single source of truth for provider/model/messageHistory)
+        const currentSession = storeState.sessions?.find((s: any) => s.id === storeState.currentId)
+        const sessionContext = currentSession?.currentContext
+        if (!sessionContext) {
+          console.error('[flowInit] No session context found - cannot initialize flow')
+          __queueFeEvent(set, get, { requestId, type: 'error', timestamp: Date.now(), message: 'No session context' } as any)
+          set({ feStatus: 'stopped' })
+          return
+        }
 
-    if (!sessionContext) {
-      console.error('[flowInit] No session context found - cannot initialize flow')
-      return
-    }
+        const pricingConfig: PricingConfig | undefined = storeState.pricingConfig
+        const modelPricing = (pricingConfig as any)?.[sessionContext.provider || '']?.[sessionContext.model || ''] || null
 
-    const modelPricing = (pricingConfig as any)?.[sessionContext.provider || '']?.[sessionContext.model || ''] || null
+        console.log('[flowInit] Initializing flow from session context:', {
+          sessionId: currentSession?.id,
+          provider: sessionContext.provider,
+          model: sessionContext.model,
+          messageCount: sessionContext.messageHistory?.length || 0
+        })
 
-    console.log('[flowInit] Initializing flow from session context:', {
-      sessionId: currentSession?.id,
-      provider: sessionContext.provider,
-      model: sessionContext.model,
-      messageCount: sessionContext.messageHistory?.length || 0
+        const rules: string[] = []
+        if (get().feRuleEmails) rules.push('emails')
+        if (get().feRuleApiKeys) rules.push('apiKeys')
+        if (get().feRuleAwsKeys) rules.push('awsKeys')
+        if (get().feRuleNumbers16) rules.push('numbers16')
+        const maxUSD = (() => { const v = parseFloat(get().feBudgetUSD); return isNaN(v) ? undefined : v })()
+
+        // Convert ReactFlow nodes/edges (UI format) to FlowDefinition (execution format)
+        const { reactFlowToFlowDefinition } = await import('../../services/flowConversion.js')
+        const flowDef = reactFlowToFlowDefinition(get().feNodes, get().feEdges, 'editor-current')
+
+        const initArgs: any = {
+          requestId,
+          flowId: 'simple-chat',
+          flowDef,
+          initialContext: sessionContext,
+          policy: {
+            autoApproveEnabled: storeState.autoApproveEnabled,
+            autoApproveThreshold: storeState.autoApproveThreshold,
+            redactor: { enabled: get().feRedactorEnabled, rules },
+            budgetGuard: { maxUSD, blockOnExceed: get().feBudgetBlock },
+            errorDetection: { enabled: get().feErrorDetectEnabled, blockOnFlag: get().feErrorDetectBlock, patterns: (get().feErrorDetectPatterns || '').split(/[\n,]/g).map((s) => s.trim()).filter(Boolean) },
+            pricing: modelPricing ? { inputCostPer1M: modelPricing.inputCostPer1M, outputCostPer1M: modelPricing.outputCostPer1M } : undefined,
+          },
+        }
+
+        // Execute the flow - the scheduler will find the Context Start node and begin execution
+        const { executeFlow } = await import('../../ipc/flows-v2/index.js')
+        const { getWindow } = await import('../../core/window.js')
+        const wc = getWindow()?.webContents
+        await executeFlow(wc, initArgs)
+      } catch (e) {
+        console.error('[flowInit] executeFlow failed:', e)
+        try {
+          __queueFeEvent(set, get, { requestId, type: 'error', timestamp: Date.now(), message: String(e) } as any)
+          set({ feStatus: 'stopped' })
+        } catch {}
+      }
     })
 
-    const rules: string[] = []
-    if (get().feRuleEmails) rules.push('emails')
-    if (get().feRuleApiKeys) rules.push('apiKeys')
-    if (get().feRuleAwsKeys) rules.push('awsKeys')
-    if (get().feRuleNumbers16) rules.push('numbers16')
-    const maxUSD = (() => { const v = parseFloat(get().feBudgetUSD); return isNaN(v) ? undefined : v })()
-
-    // Convert ReactFlow nodes/edges (UI format) to FlowDefinition (execution format)
-    // This handles the conversion from data.nodeType to type field for the scheduler
-    const { reactFlowToFlowDefinition } = await import('../../services/flowConversion.js')
-    const flowDef = reactFlowToFlowDefinition(get().feNodes, get().feEdges, 'editor-current')
-
-
-    const initArgs: any = {
-      requestId,
-      flowId: 'simple-chat',
-      flowDef,
-      initialContext: sessionContext,  // Pass entire session context (single source of truth)
-      policy: {
-        autoApproveEnabled: storeState.autoApproveEnabled,
-        autoApproveThreshold: storeState.autoApproveThreshold,
-        redactor: { enabled: get().feRedactorEnabled, rules },
-        budgetGuard: { maxUSD, blockOnExceed: get().feBudgetBlock },
-        errorDetection: { enabled: get().feErrorDetectEnabled, blockOnFlag: get().feErrorDetectBlock, patterns: (get().feErrorDetectPatterns || '').split(/[\n,]/g).map((s) => s.trim()).filter(Boolean) },
-        pricing: modelPricing ? { inputCostPer1M: modelPricing.inputCostPer1M, outputCostPer1M: modelPricing.outputCostPer1M } : undefined,
-      },
-    }
-
-    // Execute the flow - the scheduler will find the Context Start node and begin execution
-
-    // Store actions run in main process - call flow execution directly
-    const { executeFlow } = await import('../../ipc/flows-v2/index.js')
-    const { getWindow } = await import('../../core/window.js')
-    const wc = getWindow()?.webContents
-    await executeFlow(wc, initArgs)
-
-    // Flow will pause at userInput automatically in V2
-    // The pause state will be set by flow:event handlers
+    // Return immediately so zubridge can ACK without waiting for execution
   },
 
   /**
@@ -900,6 +1221,27 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
   feLoadTemplate: async ({ templateId }: { templateId: string }) => {
     try {
+      // 0) Save current flow if dirty (best-effort; user profiles only)
+      try {
+        if (get().feHasUnsavedChanges) {
+          await get().feSaveCurrentProfile()
+        }
+      } catch (e) {
+        console.warn('[feLoadTemplate] Save-if-dirty failed (continuing):', e)
+      }
+
+      // 1) Stop current flow if running and wait for pending events to flush
+      try {
+        const curId = get().feRequestId
+        if (curId) {
+          await get().feStop()
+          await __waitForFeSettle(1000)
+        }
+      } catch (e) {
+        console.warn('[feLoadTemplate] Stop-and-settle failed (continuing):', e)
+      }
+
+      // 2) Load the requested template/profile
       const profile = await loadFlowTemplate(templateId)
       if (profile && profile.nodes && profile.edges) {
         // Create snapshot of loaded state
@@ -945,18 +1287,119 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           await storeState.updateCurrentSessionFlow(templateId)
         }
 
-        // Always start fresh on app load - don't try to resume paused flows
-        // (Flow state is cleared when app reloads, so resuming would have no events anyway)
+        // Clear previous run state, then auto-start the flow
+        set({
+          feStatus: 'stopped',
+          feRequestId: null,
+          feStreamingText: '',
+          fePausedNode: null,
+          feFlowState: {},
+          feEvents: [],
+          feLog: ''
+        })
 
-        // Fire and forget - don't block on flow initialization
-        setTimeout(() => {
-          void get().flowInit()
-        }, 100)
+        try {
+          const stateAny = get() as any
+          if (stateAny.flowInit) {
+            await stateAny.flowInit()
+          }
+        } catch (e) {
+          console.error('[flowEditor] Auto-start after load failed:', e)
+        }
       }
     } catch (error) {
       console.error('Error loading template:', error)
     }
   },
+
+
+  // Create and save a new named flow with only the default entry
+  feCreateNewFlowNamed: async ({ name }: { name: string }) => {
+    try {
+      const nameTrim = (name || '').trim()
+      if (!nameTrim) return
+      // Prevent duplicates across both user and system libraries
+      try {
+        const templates = await listFlowTemplates()
+        const target = nameTrim.toLowerCase()
+        const exists = (templates || []).some((t) => {
+          const n = (t as any).name ? String((t as any).name).toLowerCase() : ''
+          const id = (t as any).id ? String((t as any).id).toLowerCase() : ''
+          return n === target || id === target
+        })
+        if (exists) {
+          console.warn('[feCreateNewFlowNamed] Duplicate name refused:', nameTrim)
+          return
+        }
+      } catch (e) {
+        console.warn('[feCreateNewFlowNamed] Could not pre-check duplicates:', e)
+      }
+      const isSystem = await isSystemTemplate(nameTrim)
+      if (isSystem) return
+
+      const defaultNode = {
+        id: 'defaultContextStart',
+        type: 'hifiNode',
+        data: {
+          nodeType: 'defaultContextStart',
+          label: 'Context Start',
+          labelBase: 'Context Start',
+          config: { systemInstructions: '' },
+          expanded: true,
+        },
+        position: { x: -400, y: -150 },
+      } as unknown as Node
+
+      // Set state first so UI reflects immediately
+      set({
+        feNodes: [defaultNode],
+        feEdges: [],
+        feCurrentProfile: nameTrim,
+        feSelectedTemplate: nameTrim,
+        feHasUnsavedChanges: false,
+        feFlowState: {},
+        fePausedNode: null,
+        feStatus: 'stopped',
+        feEvents: [],
+        feLog: '',
+        feStreamingText: '',
+        feActiveTools: new Set(),
+      })
+
+      // Persist and refresh template list
+      const result = await saveFlowProfile([defaultNode], [], nameTrim, '')
+      if (result?.success) {
+        // Snapshot last-saved state
+        const savedState = JSON.stringify({
+          nodes: [{ id: defaultNode.id, nodeType: (defaultNode.data as any)?.nodeType, config: (defaultNode.data as any)?.config, position: defaultNode.position, expanded: (defaultNode.data as any)?.expanded }],
+          edges: []
+        })
+        set({ feLastSavedState: savedState })
+
+        // Update last used in workspace and session
+        try {
+          const settings = await loadWorkspaceSettings()
+          settings.lastUsedFlow = nameTrim
+          await saveWorkspaceSettings(settings)
+        } catch (e) {
+          console.error('[flowEditor] Failed to save last used flow (new):', e)
+        }
+
+        const storeState = get() as any
+        if (storeState.updateCurrentSessionFlow) {
+          await storeState.updateCurrentSessionFlow(nameTrim)
+        }
+
+        await get().feLoadTemplates()
+      } else {
+        console.error('[feCreateNewFlowNamed] Save failed:', result?.error)
+      }
+    } catch (err) {
+      console.error('[feCreateNewFlowNamed] Error:', err)
+    }
+  },
+
+
 
   feSaveCurrentProfile: async () => {
     const { feCurrentProfile, feNodes, feEdges } = get()
@@ -983,51 +1426,42 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   },
 
   feStartPeriodicSave: () => {
-    const state = get() as any
-
-    // Clear any existing timeout and subscription
-    if (state.__periodicSaveTimeout) {
-      clearTimeout(state.__periodicSaveTimeout)
-      state.__periodicSaveTimeout = null
+    // Clear any existing module-level timeout and subscription
+    if (__fePeriodicSaveTimeout) {
+      clearTimeout(__fePeriodicSaveTimeout)
+      __fePeriodicSaveTimeout = null
     }
-    if (state.__periodicSaveUnsubscribe) {
-      state.__periodicSaveUnsubscribe()
-      state.__periodicSaveUnsubscribe = null
+    if (__fePeriodicSaveUnsubscribe) {
+      __fePeriodicSaveUnsubscribe()
+      __fePeriodicSaveUnsubscribe = null
     }
-
 
     // Subscribe to changes in nodes and edges
-    const unsubscribe = store.subscribe(async (currentState: any, prevState: any) => {
+    __fePeriodicSaveUnsubscribe = store.subscribe(async (currentState: any, prevState: any) => {
       // Only watch nodes and edges for flow changes
       if (currentState.feNodes === prevState.feNodes && currentState.feEdges === prevState.feEdges) {
         return
       }
 
-
       const { feCurrentProfile } = currentState
       const profileToSave = feCurrentProfile // Only save to the active user profile; ignore selectedTemplate to avoid overwriting during pending selection/modal
 
       // Don't save system templates or when no active user profile
-      if (!profileToSave) {
-        return
-      }
+      if (!profileToSave) return
       const isSystem = await isSystemTemplate(profileToSave)
-      if (isSystem) {
-        return
-      }
-
+      if (isSystem) return
 
       // Debounce: clear existing timeout and set a new one
-      const state = get() as any
-      if (state.__periodicSaveTimeout) {
-        clearTimeout(state.__periodicSaveTimeout)
+      if (__fePeriodicSaveTimeout) {
+        clearTimeout(__fePeriodicSaveTimeout)
+        __fePeriodicSaveTimeout = null
       }
 
-      const timeout = setTimeout(async () => {
+      __fePeriodicSaveTimeout = setTimeout(async () => {
         const { feNodes, feEdges, feLastSavedState } = get()
 
         // Create snapshot of current state
-        const currentState = JSON.stringify({
+        const snapshot = JSON.stringify({
           nodes: feNodes.map(n => {
             const data = n.data as any
             return {
@@ -1049,37 +1483,28 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         })
 
         // Only save if state has changed
-        if (currentState !== feLastSavedState) {
+        if (snapshot !== feLastSavedState) {
           try {
             const result = await saveFlowProfile(feNodes, feEdges, profileToSave, '')
             if (result.success) {
-              set({ feLastSavedState: currentState, feHasUnsavedChanges: false })
+              set({ feLastSavedState: snapshot, feHasUnsavedChanges: false })
             }
           } catch (error) {
             console.error('[Auto-save] Error saving profile:', error)
           }
         }
       }, 1000) // 1 second debounce
-
-      // Store timeout reference
-      ;(get() as any).__periodicSaveTimeout = timeout
     })
-
-    // Store unsubscribe reference
-    ;(get() as any).__periodicSaveUnsubscribe = unsubscribe
   },
 
   feStopPeriodicSave: () => {
-    const state = get() as any
-
-
-    if (state.__periodicSaveTimeout) {
-      clearTimeout(state.__periodicSaveTimeout)
-      state.__periodicSaveTimeout = null
+    if (__fePeriodicSaveTimeout) {
+      clearTimeout(__fePeriodicSaveTimeout)
+      __fePeriodicSaveTimeout = null
     }
-    if (state.__periodicSaveUnsubscribe) {
-      state.__periodicSaveUnsubscribe()
-      state.__periodicSaveUnsubscribe = null
+    if (__fePeriodicSaveUnsubscribe) {
+      __fePeriodicSaveUnsubscribe()
+      __fePeriodicSaveUnsubscribe = null
     }
   },
 
@@ -1152,29 +1577,21 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   // They update the UI state to reflect flow execution progress
 
   feHandleNodeStart: (nodeId: string) => {
-    set({
-      feFlowState: {
-        ...get().feFlowState,
-        [nodeId]: {
-          status: 'executing',
-          cacheHit: false,
-          style: {
-            border: '3px solid #4dabf7',
-            boxShadow: '0 0 20px rgba(77, 171, 247, 0.6), 0 0 40px rgba(77, 171, 247, 0.3)',
-          },
-        },
+    __queueFeFlowState(set, get, nodeId, {
+      status: 'executing',
+      cacheHit: false,
+      style: {
+        border: '3px solid #4dabf7',
+        boxShadow: '0 0 20px rgba(77, 171, 247, 0.6), 0 0 40px rgba(77, 171, 247, 0.3)',
       },
     })
 
-    // Add to session flow debug logs
-    const state = store.getState() as any
-    if (state.addFlowDebugLog) {
-      state.addFlowDebugLog({
-        requestId: get().feRequestId || '',
-        type: 'nodeStart',
-        nodeId,
-      })
-    }
+    __queueFeEvent(set, get, {
+      requestId: get().feRequestId || '',
+      type: 'nodeStart',
+      nodeId,
+      timestamp: Date.now(),
+    })
   },
 
   feHandleNodeEnd: (nodeId: string, durationMs?: number) => {
@@ -1202,31 +1619,25 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       })
     }
 
-    // Update node execution state
-    set({
-      feFlowState: {
-        ...get().feFlowState,
-        [nodeId]: {
-          ...get().feFlowState[nodeId],
-          status: 'completed',
-          cacheHit: false,
-          style: {
-            border: '2px solid #51cf66',
-            boxShadow: '0 0 15px rgba(81, 207, 102, 0.4)',
-          },
-        },
+    // Update node execution state (buffered)
+    __queueFeFlowState(set, get, nodeId, {
+      ...(get().feFlowState[nodeId] || {}),
+      status: 'completed',
+      cacheHit: false,
+      style: {
+        border: '2px solid #51cf66',
+        boxShadow: '0 0 15px rgba(81, 207, 102, 0.4)',
       },
     })
 
-    // Add to session flow debug logs
-    if (state.addFlowDebugLog) {
-      state.addFlowDebugLog({
-        requestId: get().feRequestId || '',
-        type: 'nodeEnd',
-        nodeId,
-        durationMs,
-      })
-    }
+    // Record event (buffered)
+    __queueFeEvent(set, get, {
+      requestId: get().feRequestId || '',
+      type: 'nodeEnd',
+      nodeId,
+      durationMs,
+      timestamp: Date.now(),
+    })
   },
 
   feHandleIO: (nodeId: string, data: string) => {
@@ -1243,27 +1654,20 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     const isCacheHit = /\bcache-hit\b/i.test(d)
 
     const currentState = get().feFlowState[nodeId] || {}
-    set({
-      feFlowState: {
-        ...get().feFlowState,
-        [nodeId]: {
-          ...currentState,
-          status: st,
-          cacheHit: isCacheHit ? true : currentState.cacheHit,
-        },
-      },
+    __queueFeFlowState(set, get, nodeId, {
+      ...currentState,
+      status: st,
+      cacheHit: isCacheHit ? true : currentState.cacheHit,
     })
 
-    // Add to session flow debug logs
-    const state = store.getState() as any
-    if (state.addFlowDebugLog) {
-      state.addFlowDebugLog({
-        requestId: get().feRequestId || '',
-        type: 'io',
-        nodeId,
-        data,
-      })
-    }
+    // Record event (buffered)
+    __queueFeEvent(set, get, {
+      requestId: get().feRequestId || '',
+      type: 'io',
+      nodeId,
+      data,
+      timestamp: Date.now(),
+    })
   },
 
   feHandleChunk: (text: string, nodeId?: string, provider?: string, model?: string) => {
@@ -1292,34 +1696,120 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
     const activeTools = new Set(get().feActiveTools)
     activeTools.add(toolName)
-    set({ feActiveTools: activeTools })
+    __queueFeActiveTools(set, get, activeTools)
 
-    // Add to session flow debug logs
-    const state = store.getState() as any
-    if (state.addFlowDebugLog) {
-      state.addFlowDebugLog({
-        requestId: get().feRequestId || '',
-        type: 'toolStart',
-        toolName,
-      })
+    // Record event (buffered)
+    __queueFeEvent(set, get, {
+      requestId: get().feRequestId || '',
+      type: 'toolStart',
+      toolName,
+      timestamp: Date.now(),
+    })
+
+    // Format badge label and metadata
+    // Convert tool name to proper case (e.g., "fs.readFile" -> "FS.ReadFile")
+    const formatToolName = (name: string): string => {
+      const parts = name.split('.')
+      return parts.map(part => {
+        if (part.toLowerCase() === 'fs') return 'FS'
+        // Capitalize first letter, keep rest as-is
+        return part.charAt(0).toUpperCase() + part.slice(1)
+      }).join('.')
     }
 
-    // Format badge label with contextual information
-    let badgeLabel = toolName.toUpperCase()
+    let badgeLabel = formatToolName(toolName)
+    let badgeMetadata: any = undefined
+
     if (toolArgs) {
       const normalizedToolName = toolName.replace(/\./g, '_')
 
-      if (normalizedToolName === 'fs_read_file' || normalizedToolName === 'fs_write_file') {
-        const path = toolArgs.path || toolArgs.file_path
+      if (normalizedToolName === 'fs_read_file' || normalizedToolName === 'fs_write_file' ||
+          normalizedToolName === 'fs_read_dir' || normalizedToolName === 'fs_create_dir') {
+        const path = toolArgs.path || toolArgs.file_path || toolArgs.dir_path
         if (path) {
-          const filename = path.split(/[/\\]/).pop()
-          badgeLabel = `${toolName.toUpperCase()}: ${filename}`
+          badgeMetadata = { filePath: path }
         }
-      } else if (normalizedToolName === 'fs_read_dir' || normalizedToolName === 'fs_create_dir') {
-        const path = toolArgs.path || toolArgs.dir_path
-        if (path) {
-          const foldername = path.split(/[/\\]/).pop() || path
-          badgeLabel = `${toolName.toUpperCase()}: ${foldername}`
+      } else if (normalizedToolName === 'index_search') {
+        const query = toolArgs.query
+        if (query) {
+          badgeMetadata = {
+            query: String(query).slice(0, 100),
+            fullParams: toolArgs
+          }
+        }
+      } else if (normalizedToolName === 'code_search_ast') {
+        const pattern = toolArgs.pattern
+        if (pattern) {
+          const languages = toolArgs.languages && Array.isArray(toolArgs.languages) && toolArgs.languages.length
+            ? ` [${toolArgs.languages.slice(0, 2).join(', ')}${toolArgs.languages.length > 2 ? '...' : ''}]`
+            : ''
+          badgeMetadata = {
+            query: String(pattern).slice(0, 80) + languages,
+            fullParams: toolArgs
+          }
+          // Store shallow, display-only params at a top-level map to avoid deep snapshot truncation in renderer bridges
+          if (callId) {
+            const sanitizedParams = {
+              pattern: String(toolArgs.pattern || ''),
+              languages: Array.isArray(toolArgs.languages) ? toolArgs.languages.map((s: any) => String(s)) : [],
+              includeGlobs: Array.isArray(toolArgs.includeGlobs) ? toolArgs.includeGlobs.map((s: any) => String(s)) : [],
+              excludeGlobs: Array.isArray(toolArgs.excludeGlobs) ? toolArgs.excludeGlobs.map((s: any) => String(s)) : [],
+              maxMatches: typeof toolArgs.maxMatches === 'number' ? toolArgs.maxMatches : undefined,
+              contextLines: typeof toolArgs.contextLines === 'number' ? toolArgs.contextLines : undefined,
+            }
+            set((state) => ({
+              feToolParamsByKey: {
+                ...(state as any).feToolParamsByKey,
+                [callId]: sanitizedParams
+              }
+            }))
+          }
+
+        }
+      } else if (normalizedToolName === 'workspace_search') {
+        // Compact text-only rendering of inputs; no schema change, only UI formatting
+        // Prefer queries[] if provided; otherwise, support a simple '|' delimited query string for display only
+        const termsRaw: string[] = Array.isArray(toolArgs.queries) && toolArgs.queries.length
+          ? toolArgs.queries
+          : (typeof toolArgs.query === 'string' ? toolArgs.query.split('|') : [])
+
+        const terms = termsRaw
+          .map((s: any) => String(s || '').trim())
+          .filter(Boolean)
+
+        if (terms.length) {
+          const shown = terms.slice(0, 2)  // Show max 2 queries in header
+          const suffix = terms.length > 2 ? ` +${terms.length - 2}` : ''
+          const mode = toolArgs.mode ? ` [${toolArgs.mode}]` : ''
+          badgeMetadata = {
+            query: shown.join(' | ') + suffix + mode,
+            fullParams: toolArgs  // Store full params for expanded view
+          }
+        }
+
+        // Store shallow, display-only params at a top-level map to avoid deep snapshot truncation in renderer bridges
+        if (callId) {
+          const f = (toolArgs && toolArgs.filters) || {}
+          const sanitizedParams = {
+            queries: terms,
+            mode: String(toolArgs.mode || 'auto'),
+            filters: {
+              languages: Array.isArray(f.languages)
+                ? f.languages.map((s: any) => String(s))
+                : (typeof f.languages === 'string' ? [String(f.languages)] : []),
+              pathsInclude: Array.isArray(f.pathsInclude) ? f.pathsInclude.map((s: any) => String(s)) : [],
+              pathsExclude: Array.isArray(f.pathsExclude) ? f.pathsExclude.map((s: any) => String(s)) : [],
+              maxResults: typeof f.maxResults === 'number' ? f.maxResults : undefined,
+              maxSnippetLines: typeof f.maxSnippetLines === 'number' ? f.maxSnippetLines : undefined,
+              timeBudgetMs: typeof f.timeBudgetMs === 'number' ? f.timeBudgetMs : undefined,
+            }
+          }
+          set((state) => ({
+            feToolParamsByKey: {
+              ...(state as any).feToolParamsByKey,
+              [callId]: sanitizedParams
+            }
+          }))
         }
       }
     }
@@ -1328,6 +1818,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     const node = get().feNodes.find(n => n.id === nodeId)
     if (!node) return
 
+    const state = store.getState() as any
     if (state.appendToNodeExecution) {
       state.appendToNodeExecution({
         nodeId,
@@ -1343,7 +1834,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             color: 'orange',
             variant: 'filled' as const,
             status: 'running' as const,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            ...(badgeMetadata ? { metadata: badgeMetadata } : {})
           }
         },
         // Use provided provider/model from execution context, fallback to global if not provided
@@ -1353,29 +1845,156 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feHandleToolEnd: (toolName: string, callId?: string, nodeId?: string) => {
+  feHandleToolEnd: (toolName: string, callId?: string, nodeId?: string, result?: any) => {
     const activeTools = new Set(get().feActiveTools)
     activeTools.delete(toolName)
-    set({ feActiveTools: activeTools })
+    __queueFeActiveTools(set, get, activeTools)
 
-    // Add to session flow debug logs
-    const state = store.getState() as any
-    if (state.addFlowDebugLog) {
-      state.addFlowDebugLog({
-        requestId: get().feRequestId || '',
-        type: 'toolEnd',
-        toolName,
-      })
-    }
+    // Record event (buffered)
+    __queueFeEvent(set, get, {
+      requestId: get().feRequestId || '',
+      type: 'toolEnd',
+      toolName,
+      timestamp: Date.now(),
+    })
 
     // Update badge status to success
+    const state = store.getState() as any
     if (callId && nodeId && state.updateBadgeInNodeExecution) {
+      const normalizedToolName = toolName.replace(/\./g, '_')
+
+      // Handle index.search results
+      if (normalizedToolName === 'index_search' && result && Array.isArray(result.chunks) && result.chunks.length) {
+        // Store search results in unified cache using callId as key
+        get().registerToolResult({ key: callId, data: result.chunks })
+
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId: callId,
+          updates: {
+            status: 'success',
+            color: 'green',
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'search' as const,
+            metadata: {
+              resultCount: result.chunks.length,
+            },
+            interactive: { type: 'search', data: { key: callId, count: result.chunks.length } }
+          }
+        })
+        return
+      }
+
+      // Handle workspace.search results
+      if (normalizedToolName === 'workspace_search' && result?.ok && result.data) {
+        const resultData = result.data
+        const resultCount = resultData.results?.length || 0
+
+        // Store full result in unified cache
+        get().registerToolResult({ key: callId, data: resultData })
+
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId: callId,
+          updates: {
+            status: 'success',
+            color: 'green',
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'workspace-search' as const,
+            metadata: {
+              resultCount,
+            },
+            interactive: { type: 'workspace-search', data: { key: callId, count: resultCount } }
+          }
+        })
+        return
+      }
+
+      // Handle code.search_ast results
+      if (normalizedToolName === 'code_search_ast' && result?.ok) {
+        const matchCount = result.matches?.length || 0
+
+        // Store full result in unified cache
+        get().registerToolResult({ key: callId, data: result })
+
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId: callId,
+          updates: {
+            status: 'success',
+            color: 'green',
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'ast-search' as const,
+            metadata: {
+              resultCount: matchCount,
+            },
+            interactive: { type: 'ast-search', data: { key: callId, count: matchCount } }
+          }
+        })
+        return
+      }
+
+      // Prefer pointer-based interactive payload to avoid large store payloads
+      let interactive: any = undefined
+      if (result && Array.isArray(result.fileEditsPreview) && result.fileEditsPreview.length) {
+        // Compute total line additions/removals for summary pills
+        const compute = (before?: string, after?: string) => {
+          const a = (before ?? '').split(/\r?\n/)
+          const b = (after ?? '').split(/\r?\n/)
+          let i = 0, j = 0, added = 0, removed = 0
+          while (i < a.length && j < b.length) {
+            if (a[i] === b[j]) { i++; j++; continue }
+            if (i + 1 < a.length && a[i + 1] === b[j]) { removed++; i++; continue }
+            if (j + 1 < b.length && a[i] === b[j + 1]) { added++; j++; continue }
+            removed++; added++; i++; j++
+          }
+          if (i < a.length) removed += (a.length - i)
+          if (j < b.length) added += (b.length - j)
+          return { added, removed }
+        }
+        let totAdded = 0, totRemoved = 0
+        for (const f of result.fileEditsPreview) {
+          const { added, removed } = compute(f.before, f.after)
+          totAdded += added
+          totRemoved += removed
+        }
+        // Store in unified cache using callId as key
+        get().registerToolResult({ key: callId, data: result.fileEditsPreview })
+        interactive = { type: 'diff', data: { key: callId, count: result.fileEditsPreview.length } }
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId: callId,
+          updates: {
+            status: 'success',
+            color: 'green',
+            addedLines: totAdded,
+            removedLines: totRemoved,
+            filesChanged: result.fileEditsPreview.length,
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'diff' as const,
+            metadata: {
+              fileCount: result.fileEditsPreview.length,
+              // Show filename if only one file, otherwise show count
+              filePath: result.fileEditsPreview.length === 1 ? result.fileEditsPreview[0].path : undefined,
+            },
+            ...(interactive ? { interactive } : {})
+          }
+        })
+        return
+      } else if (result && result.diffPreviewKey) {
+        interactive = { type: 'diff', data: { key: result.diffPreviewKey, count: result.previewCount } }
+      }
       state.updateBadgeInNodeExecution({
         nodeId,
         badgeId: callId,
         updates: {
           status: 'success',
-          color: 'green'
+          color: 'green',
+          ...(interactive ? { interactive } : {})
         }
       })
     }
@@ -1384,20 +2003,19 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   feHandleToolError: (toolName: string, error: string, callId?: string, nodeId?: string) => {
     const activeTools = new Set(get().feActiveTools)
     activeTools.delete(toolName)
-    set({ feActiveTools: activeTools })
+    __queueFeActiveTools(set, get, activeTools)
 
-    // Add to session flow debug logs
-    const state = store.getState() as any
-    if (state.addFlowDebugLog) {
-      state.addFlowDebugLog({
-        requestId: get().feRequestId || '',
-        type: 'toolError',
-        toolName,
-        error,
-      })
-    }
+    // Record event (buffered)
+    __queueFeEvent(set, get, {
+      requestId: get().feRequestId || '',
+      type: 'toolError',
+      toolName,
+      error,
+      timestamp: Date.now(),
+    })
 
     // Update badge status to error
+    const state = store.getState() as any
     if (callId && nodeId && state.updateBadgeInNodeExecution) {
       state.updateBadgeInNodeExecution({
         nodeId,
@@ -1411,23 +2029,22 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   },
 
   feHandleIntentDetected: (nodeId: string, intent: string, provider?: string, model?: string) => {
-    // Add to session flow debug logs
-    const state = store.getState() as any
-    if (state.addFlowDebugLog) {
-      state.addFlowDebugLog({
-        requestId: get().feRequestId || '',
-        type: 'intentDetected',
-        nodeId,
-        intent,
-        provider,
-        model,
-      })
-    }
+    // Record event (buffered)
+    __queueFeEvent(set, get, {
+      requestId: get().feRequestId || '',
+      type: 'intentDetected',
+      nodeId,
+      intent,
+      provider,
+      model,
+      timestamp: Date.now(),
+    })
 
     // Append intent badge to the node's execution box
     const node = get().feNodes.find(n => n.id === nodeId)
     if (!node) return
 
+    const state = store.getState() as any
     if (state.appendToNodeExecution) {
       state.appendToNodeExecution({
         nodeId,
@@ -1456,16 +2073,15 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     if (provider && model && usage) {
       const state = store.getState() as any
 
-      // Add to session flow debug logs
-      if (state.addFlowDebugLog) {
-        state.addFlowDebugLog({
-          requestId: get().feRequestId || '',
-          type: 'tokenUsage',
-          provider,
-          model,
-          usage,
-        })
-      }
+      // Record event (buffered)
+      __queueFeEvent(set, get, {
+        requestId: get().feRequestId || '',
+        type: 'tokenUsage',
+        provider,
+        model,
+        usage,
+        timestamp: Date.now(),
+      })
 
       if (state.recordTokenUsage) {
         // Call with object parameter as expected by the function signature
@@ -1527,19 +2143,15 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
     const state = store.getState() as any
 
-    // Add to session flow debug logs
-    if (state.addFlowDebugLog) {
-      state.addFlowDebugLog({
-        requestId: get().feRequestId || '',
-        type: 'rateLimitWait',
-        nodeId,
-        attempt,
-        waitMs,
-        reason,
-        provider,
-        model,
-      })
-    }
+    // Record event in non-persisted flow events (avoid mutating sessions)
+    // Record event (buffered)
+    __queueFeEvent(set, get, {
+      requestId: get().feRequestId || '',
+      type: 'rateLimitWait',
+      nodeId,
+      data: { attempt, waitMs, reason, provider, model },
+      timestamp: Date.now(),
+    })
 
     // Add a badge to the node execution box
     const badgeId = `rate-limit-${nodeId}-${attempt}-${Date.now()}`
@@ -1603,34 +2215,26 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       }
     }
 
-    // Update node execution state to show it's waiting for input
-    set({
-      feStatus: 'waitingForInput',
-      fePausedNode: nodeId,
-      feStreamingText: '',
-      feFlowState: {
-        ...get().feFlowState,
-        [nodeId]: {
-          status: 'executing',  // Keep as executing since it's paused mid-execution
-          style: {
-            border: '3px solid #f59e0b',
-            boxShadow: '0 0 20px rgba(245, 158, 11, 0.6), 0 0 40px rgba(245, 158, 11, 0.3)',
-          },
-        },
+    // Update node execution state to show it's waiting for input (buffered)
+    set({ feStatus: 'waitingForInput', fePausedNode: nodeId, feStreamingText: '' })
+    __queueFeFlowState(set, get, nodeId, {
+      status: 'executing',  // Keep as executing since it's paused mid-execution
+      style: {
+        border: '3px solid #f59e0b',
+        boxShadow: '0 0 20px rgba(245, 158, 11, 0.6), 0 0 40px rgba(245, 158, 11, 0.3)',
       },
     })
 
-    // Add to session flow debug logs
-    const state = store.getState() as any
-    if (state.addFlowDebugLog) {
-      state.addFlowDebugLog({
-        requestId: requestId,
-        type: 'waitingForInput',
-        nodeId,
-      })
-    }
+    // Record event (buffered)
+    __queueFeEvent(set, get, {
+      requestId: requestId,
+      type: 'waitingForInput',
+      nodeId,
+      timestamp: Date.now(),
+    })
 
     // Save flow state to session
+    const state = store.getState() as any
     const currentSession = state.sessions?.find((s: any) => s.id === state.currentId)
     if (currentSession && state.saveCurrentSession) {
       const sessions = state.sessions.map((s: any) =>
@@ -1654,16 +2258,15 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   feHandleDone: () => {
     set({ feStatus: 'stopped', feMainFlowContext: null, feIsolatedContexts: {} })
 
-    // Add to session flow debug logs
-    const state = store.getState() as any
-    if (state.addFlowDebugLog) {
-      state.addFlowDebugLog({
-        requestId: get().feRequestId || '',
-        type: 'done',
-      })
-    }
+    // Record event (buffered)
+    __queueFeEvent(set, get, {
+      requestId: get().feRequestId || '',
+      type: 'done',
+      timestamp: Date.now(),
+    })
 
     // Clear flow state from session
+    const state = store.getState() as any
     const currentSession = state.sessions?.find((s: any) => s.id === state.currentId)
     if (currentSession && state.saveCurrentSession) {
       const sessions = state.sessions.map((s: any) =>
@@ -1674,23 +2277,31 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       ;(store as any).setState({ sessions })
       state.saveCurrentSession()
     }
+
+    // Best-effort: flush any buffered UI updates now that we're done
+    // Force a flush by scheduling with 0ms interval if there are pending buffers
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(function immediateFlush(set: any, get: any) {
+      if (!__feFlushTimer && (__fePendingEvents.length || Object.keys(__fePendingFlowState).length)) {
+        __scheduleFeFlush(set, get, 0)
+      }
+    })(set, get)
   },
 
   feHandleError: (error: string) => {
     console.error('[flowEditor] Flow error:', error)
     set({ feStatus: 'stopped', feMainFlowContext: null, feIsolatedContexts: {} })
 
-    // Add to session flow debug logs
-    const state = store.getState() as any
-    if (state.addFlowDebugLog) {
-      state.addFlowDebugLog({
-        requestId: get().feRequestId || '',
-        type: 'error',
-        error,
-      })
-    }
+    // Record event (buffered)
+    __queueFeEvent(set, get, {
+      requestId: get().feRequestId || '',
+      type: 'error',
+      error,
+      timestamp: Date.now(),
+    })
 
     // Clear flow state from session
+    const state = store.getState() as any
     const currentSession = state.sessions?.find((s: any) => s.id === state.currentId)
     if (currentSession && state.saveCurrentSession) {
       const sessions = state.sessions.map((s: any) =>
@@ -1721,15 +2332,10 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       // Update the appropriate context based on type
       if (context.contextType === 'isolated') {
         // Update isolated context
-        set((state) => ({
-          feIsolatedContexts: {
-            ...state.feIsolatedContexts,
-            [context.contextId]: context
-          }
-        }))
+        __queueFeIsolatedContext(set, get, context.contextId, context)
       } else {
         // Update main context
-        set({ feMainFlowContext: context })
+        __queueFeMainContext(set, get, context)
 
         // Debounce sync to session.currentContext (1 second) - only for main context
         if (syncTimeout) clearTimeout(syncTimeout)

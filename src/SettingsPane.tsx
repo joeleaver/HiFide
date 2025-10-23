@@ -1,5 +1,5 @@
 import { useAppStore, useDispatch, selectModelsByProvider, selectProviderValid, selectDefaultModels, selectAutoRetry, selectAutoApproveEnabled, selectAutoApproveThreshold, selectSettingsApiKeys, selectSettingsSaving, selectSettingsSaved, selectStartupMessage } from './store'
-import { Button, Group, Stack, Text, TextInput, Title, Select, Switch, Slider, Progress, Divider, Card, Alert } from '@mantine/core'
+import { Button, Group, Stack, Text, TextInput, Title, Select, Switch, Slider, Progress, Divider, Card, Alert, NumberInput } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import PricingSettings from './components/PricingSettings'
 import { useEffect, useState } from 'react'
@@ -44,6 +44,11 @@ export default function SettingsPane() {
   const idxResults = useAppStore((s) => s.idxResults ?? [])
   const idxProg = useAppStore((s) => s.idxProg)
 
+  // Index auto-refresh configuration
+  const idxAutoRefresh = useAppStore((s) => s.idxAutoRefresh)
+  const idxLastRebuildAt = useAppStore((s) => s.idxLastRebuildAt)
+
+
   // Use local state for index query to avoid IPC calls on every keystroke
   const [localIdxQuery, setLocalIdxQuery] = useState(idxQuery)
 
@@ -52,8 +57,9 @@ export default function SettingsPane() {
     setLocalIdxQuery(idxQuery)
   }, [idxQuery])
 
-  // Refresh index status on mount (subscription is initialized in store)
+  // Refresh index status on mount and ensure progress subscription from main store
   useEffect(() => {
+    dispatch('ensureIndexProgressSubscription')
     void dispatch('refreshIndexStatus')
   }, [dispatch])
 
@@ -306,6 +312,10 @@ export default function SettingsPane() {
                   Status: {idxStatus.ready ? '✓ Ready' : '⚠ Not Ready'}
                 </Text>
                 <Text size="xs" c="dimmed">
+                  Last auto-refresh: {idxLastRebuildAt ? new Date(idxLastRebuildAt).toLocaleString() : '—'}
+                </Text>
+
+                <Text size="xs" c="dimmed">
                   {idxStatus.chunks} chunks indexed • Model: {idxStatus.modelId || 'local'} • Dim: {idxStatus.dim || 384}
                 </Text>
               </Stack>
@@ -317,7 +327,7 @@ export default function SettingsPane() {
                   Clear
                 </Button>
                 {idxProg?.inProgress && (
-                  <Button variant="light" color="orange" onClick={() => window.indexing?.cancel?.()} size="sm">
+                  <Button variant="light" color="orange" onClick={() => dispatch('cancelIndexing')} size="sm">
                     Cancel
                   </Button>
                 )}
@@ -342,9 +352,102 @@ export default function SettingsPane() {
             })()} />
             <Text size="xs" c="dimmed">
               {idxProg.phase || 'idle'} • Files: {idxProg.processedFiles ?? 0}/{idxProg.totalFiles ?? 0} • Chunks: {idxProg.processedChunks ?? 0}/{idxProg.totalChunks ?? 0} • {Math.round((idxProg.elapsedMs || 0)/1000)}s
+
             </Text>
           </Stack>
         )}
+
+
+        {/* Auto-maintenance (Semantic Index) */}
+        <Card withBorder p="sm">
+          <Stack gap="sm">
+            <div>
+              <Text size="sm" fw={600}>Semantic Index Auto-Refresh</Text>
+              <Text size="xs" c="dimmed">Keep the semantic index fresh based on workspace activity. Rebuilds run in the background and do not block search.</Text>
+            </div>
+
+            <Switch
+              label="Enable auto-refresh"
+              checked={!!idxAutoRefresh?.enabled}
+              onChange={(e) => dispatch('setIndexAutoRefresh', { config: { enabled: e.currentTarget.checked } })}
+            />
+
+            <Group grow>
+              <NumberInput
+                label="TTL (minutes)"
+                description="Rebuild if index is older than this"
+                min={5}
+                max={1440}
+                step={5}
+                value={idxAutoRefresh?.ttlMinutes ?? 120}
+                onChange={(v) => typeof v === 'number' && dispatch('setIndexAutoRefresh', { config: { ttlMinutes: Math.max(5, Math.min(1440, v)) } })}
+              />
+              <NumberInput
+                label="Min interval (minutes)"
+                description="Backoff between rebuilds to avoid thrash"
+                min={1}
+                max={120}
+                step={1}
+                value={idxAutoRefresh?.minIntervalMinutes ?? 10}
+                onChange={(v) => typeof v === 'number' && dispatch('setIndexAutoRefresh', { config: { minIntervalMinutes: Math.max(1, Math.min(120, v)) } })}
+              />
+            </Group>
+
+            <Group grow>
+              <NumberInput
+                label="File change threshold (absolute)"
+                description="Rebuild when this many files change"
+                min={0}
+                step={10}
+                value={idxAutoRefresh?.changeAbsoluteThreshold ?? 100}
+                onChange={(v) => typeof v === 'number' && dispatch('setIndexAutoRefresh', { config: { changeAbsoluteThreshold: Math.max(0, v) } })}
+              />
+              <NumberInput
+                label="File change threshold (%)"
+                description="Rebuild when this fraction of files changes"
+                min={0}
+                max={1}
+                step={0.01}
+                
+                value={idxAutoRefresh?.changePercentThreshold ?? 0.02}
+                onChange={(v) => typeof v === 'number' && dispatch('setIndexAutoRefresh', { config: { changePercentThreshold: Math.max(0, Math.min(1, v)) } })}
+              />
+            </Group>
+
+            <Switch
+              label="Trigger on lockfile changes"
+              description="Rebuild when package lockfiles change"
+              checked={!!idxAutoRefresh?.lockfileTrigger}
+              onChange={(e) => dispatch('setIndexAutoRefresh', { config: { lockfileTrigger: e.currentTarget.checked } })}
+            />
+            <TextInput
+              label="Lockfile globs"
+              description="Comma-separated list"
+              value={(idxAutoRefresh?.lockfileGlobs || []).join(', ')}
+              onChange={(e) => {
+                const arr = e.currentTarget.value.split(',').map(s => s.trim()).filter(Boolean)
+                dispatch('setIndexAutoRefresh', { config: { lockfileGlobs: arr } })
+              }}
+              placeholder="pnpm-lock.yaml, package-lock.json, yarn.lock"
+            />
+
+            <Group grow>
+              <Switch
+                label="Trigger on embedding model change"
+                checked={!!idxAutoRefresh?.modelChangeTrigger}
+                onChange={(e) => dispatch('setIndexAutoRefresh', { config: { modelChangeTrigger: e.currentTarget.checked } })}
+              />
+              <NumberInput
+                label="Max rebuilds per hour"
+                min={0}
+                max={12}
+                step={1}
+                value={idxAutoRefresh?.maxRebuildsPerHour ?? 3}
+                onChange={(v) => typeof v === 'number' && dispatch('setIndexAutoRefresh', { config: { maxRebuildsPerHour: Math.max(0, Math.min(12, v)) } })}
+              />
+            </Group>
+          </Stack>
+        </Card>
 
         <Stack gap="sm">
           <Text size="sm" fw={500}>Test Search</Text>

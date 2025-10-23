@@ -1,9 +1,11 @@
 import { Stack, Text, ScrollArea, Badge, Group, UnstyledButton } from '@mantine/core'
 import { IconTrash } from '@tabler/icons-react'
-import { useAppStore, useDispatch, selectSessions, selectCurrentId } from '../store'
+import { useAppStore, useDispatch } from '../store'
 import { useUiStore } from '../store/ui'
 import { useRef, useEffect } from 'react'
 import CollapsiblePanel from './CollapsiblePanel'
+
+import { useRerenderTrace } from '../utils/perf'
 
 export default function AgentDebugPanel() {
   const dispatch = useDispatch()
@@ -28,12 +30,16 @@ export default function AgentDebugPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only run on mount
 
-  const sessions = useAppStore(selectSessions)
-  const currentId = useAppStore(selectCurrentId)
+  // Read runtime (non-persisted) flow events from main store to avoid heavy session updates
+  const flowEvents = useAppStore((s) => s.feEvents)
 
-  // Get flow debug logs from current session
-  const currentSession = sessions.find((s) => s.id === currentId)
-  const flowEvents = currentSession?.flowDebugLogs || []
+  // Dev-only: concise rerender trace
+  useRerenderTrace('AgentDebugPanel', {
+    collapsed: Boolean(collapsed),
+    height: Number(height || 0),
+    eventsLen: flowEvents.length,
+    userHasScrolledUp: Boolean(userHasScrolledUp),
+  })
 
   // Smart auto-scroll: track if user has manually scrolled up
   const scrollAreaRef = useRef<HTMLDivElement>(null)
@@ -60,7 +66,7 @@ export default function AgentDebugPanel() {
 
   // Clear flow events
   const handleClearAll = () => {
-    dispatch('clearFlowDebugLogs')
+    dispatch('feClearLogs')
   }
 
   const formatTime = (timestamp: number) => {

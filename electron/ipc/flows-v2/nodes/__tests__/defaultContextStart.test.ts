@@ -68,5 +68,50 @@ describe('defaultContextStart Node', () => {
     // Empty string should be treated as falsy, so it falls back to contextIn
     expect(result.context?.systemInstructions).toBe(context.systemInstructions)
   })
+
+  it('should fill missing provider/model from global store when context is provided', async () => {
+    const baseFlow = createMockFlowAPI()
+    const flow = {
+      ...baseFlow,
+      store: {
+        ...baseFlow.store,
+        selectedProvider: 'gemini',
+        selectedModel: 'gemini-2.0-flash-exp'
+      }
+    } as any
+
+    // Simulate a scheduler-pushed context with missing provider/model
+    const context = createMainFlowContext({ provider: '' as any, model: '' as any })
+    const inputs = createMockNodeInputs()
+
+    const result = await defaultContextStartNode(flow, context, undefined, inputs, {})
+
+    expect(result.status).toBe('success')
+    expect(result.context?.provider).toBe('gemini')
+    expect(result.context?.model).toBe('gemini-2.0-flash-exp')
+    expect((result.context as any).contextType).toBe('main')
+  })
+
+  it('should override provider/model with global selection even when context has values', async () => {
+    const baseFlow = createMockFlowAPI()
+    const flow = {
+      ...baseFlow,
+      store: {
+        ...baseFlow.store,
+        selectedProvider: 'openai',
+        selectedModel: 'gpt-4.1'
+      }
+    } as any
+
+    // Context has provider/model that should be overridden by global selection
+    const context = createMainFlowContext({ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' })
+    const inputs = createMockNodeInputs()
+
+    const result = await defaultContextStartNode(flow, context, undefined, inputs, {})
+
+    expect(result.status).toBe('success')
+    expect(result.context?.provider).toBe('openai')
+    expect(result.context?.model).toBe('gpt-4.1')
+  })
 })
 

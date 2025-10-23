@@ -6,51 +6,50 @@ export type EmbeddingEngine = {
   embed: (texts: string[]) => Promise<number[][]>
 }
 
-// Very small, dependency-free local embedder (placeholder) using hashing over character n-grams.
-class SimpleLocalEmbedder implements EmbeddingEngine {
-  id = 'simple-hash-emb-384'
-  dim = 384
-  async embed(texts: string[]): Promise<number[][]> {
-    return texts.map((t) => this.embedOne(t))
-  }
-  private embedOne(t: string): number[] {
-    const d = new Array(this.dim).fill(0)
-    const s = t.toLowerCase()
-    for (let i = 0; i < s.length - 2; i++) {
-      const tri = s.slice(i, i + 3)
-      let h = 2166136261
-      for (let j = 0; j < tri.length; j++) {
-        h ^= tri.charCodeAt(j)
-        h += (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)
-      }
-      const idx = Math.abs(h) % this.dim
-      d[idx] += 1
-    }
-    // L2 normalize
-    let norm = Math.sqrt(d.reduce((acc, v) => acc + v * v, 0)) || 1
-    return d.map((v) => v / norm)
-  }
-}
-
+// Required fastembed engine. We use dynamic import to respect ESM and avoid CJS.
 export async function getLocalEngine(): Promise<EmbeddingEngine> {
-  // Try to load a local embedding model from fastembed at runtime without type dependency
-  try {
-    const { createRequire } = await import('node:module')
-    const req = createRequire(import.meta.url)
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const fe: any = req('fastembed')
-    const model = process.env.HIFIDE_EMB_MODEL || 'bge-small-en-v1.5'
-    const instance: any = fe?.default ? new fe.default(model) : new fe.FastEmbed(model)
-    const id = `fastembed-${model}`
-    const dim = 384
-    const embed = async (texts: string[]): Promise<number[][]> => {
-      const res = await instance.embed(texts)
-      return res as number[][]
-    }
-    return { id, dim, embed }
-  } catch {
-    return new SimpleLocalEmbedder()
+  const mod = await import('fastembed').catch((e) => {
+    const hint = 'fastembed not found. Please install it: pnpm add fastembed'
+    throw new Error(`[embedding] Failed to load fastembed: ${String(e?.message || e)}. ${hint}`)
+  })
+  const { EmbeddingModel, FlagEmbedding } = mod as any
+  if (!FlagEmbedding) throw new Error('[embedding] fastembed module does not export FlagEmbedding')
+
+  const resolveModel = (name: string | undefined) => {
+    const n = (name || '').toLowerCase().trim()
+    // Accept both canonical and short aliases
+    if (!n || n === 'bge-small-en-v1.5' || n === 'fast-bge-small-en-v1.5') return EmbeddingModel?.BGESmallENV15 ?? 'fast-bge-small-en-v1.5'
+    if (n === 'bge-base-en-v1.5' || n === 'fast-bge-base-en-v1.5') return EmbeddingModel?.BGEBaseENV15 ?? 'fast-bge-base-en-v1.5'
+    if (n === 'bge-small-en' || n === 'fast-bge-small-en') return EmbeddingModel?.BGESmallEN ?? 'fast-bge-small-en'
+    if (n === 'bge-base-en' || n === 'fast-bge-base-en') return EmbeddingModel?.BGEBaseEN ?? 'fast-bge-base-en'
+    if (n === 'all-minilm-l6-v2' || n === 'fast-all-minilm-l6-v2') return EmbeddingModel?.AllMiniLML6V2 ?? 'fast-all-MiniLM-L6-v2'
+    // Fallback to provided string; fastembed will error if invalid
+    return name
   }
+
+  const modelInput = process.env.HIFIDE_EMB_MODEL || 'fast-bge-small-en-v1.5'
+  const model = resolveModel(modelInput)
+  const instance: any = await FlagEmbedding.init({ model })
+
+  // Determine dim from supported models list
+  let dim = 384
+  try {
+    const info = instance.listSupportedModels?.() || []
+    const match = info.find((m: any) => m.model === model)
+    if (match?.dim) dim = match.dim
+  } catch {}
+
+  const id = `fastembed-${typeof model === 'string' ? model : String(model)}`
+  const embed = async (texts: string[]): Promise<number[][]> => {
+    const out: number[][] = []
+    // FlagEmbedding.embed returns an AsyncGenerator of number[][] batches
+    const gen: AsyncGenerator<number[][]> = instance.embed(texts)
+    for await (const batch of gen) {
+      for (const v of batch) out.push(v)
+    }
+    return out
+  }
+  return { id, dim, embed }
 }
 
 export function cosine(a: number[], b: number[]): number {

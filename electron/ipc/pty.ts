@@ -123,11 +123,14 @@ async function createAgentPtySession(opts: { shell?: string; cwd?: string; cols?
   const ptyModule = require('@homebridge/node-pty-prebuilt-multiarch')
   let p: IPty
   try {
-    p = (ptyModule as any).spawn(shell, [], { name: 'xterm-color', cols, rows, cwd, env: process.env })
+    // Use conservative args for agent PTY to avoid PSReadLine/continuation issues on Windows
+    const shellArgs = (isWin && shell.toLowerCase().includes('powershell')) ? ['-NoLogo', '-NoProfile'] : []
+    p = (ptyModule as any).spawn(shell, shellArgs, { name: 'xterm-256color', cols, rows, cwd, env: process.env })
   } catch (e) {
     // Fallback once to a safe default shell
     shell = (isWin ? 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe' : (process.env.SHELL || '/bin/bash'))
-    p = (ptyModule as any).spawn(shell, [], { name: 'xterm-color', cols, rows, cwd, env: process.env })
+    const shellArgs = (isWin && shell.toLowerCase().includes('powershell')) ? ['-NoLogo', '-NoProfile'] : []
+    p = (ptyModule as any).spawn(shell, shellArgs, { name: 'xterm-256color', cols, rows, cwd, env: process.env })
   }
 
   const sessionId = opts.sessionId || randomUUID()

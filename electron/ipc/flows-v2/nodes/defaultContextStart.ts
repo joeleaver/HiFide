@@ -57,17 +57,25 @@ export const defaultContextStartNode: NodeFunction = async (flow, context, _data
 
   const systemInstructions = (config as any)?.systemInstructions
 
+  // Always override provider/model with global selection
+  const provider = flow.store?.selectedProvider || 'openai'
+  const model = flow.store?.selectedModel || 'gpt-4o'
+  const withProviderModel = flow.context.update(executionContext, { provider, model })
+
   flow.log.debug('Input context', {
-    provider: executionContext.provider,
-    model: executionContext.model,
-    systemInstructions: executionContext.systemInstructions?.substring(0, 50),
-    messageHistoryLength: executionContext.messageHistory.length
+    provider: withProviderModel.provider,
+    model: withProviderModel.model,
+    systemInstructions: withProviderModel.systemInstructions?.substring(0, 50),
+    messageHistoryLength: withProviderModel.messageHistory.length
   })
 
   // Use ContextAPI to update system instructions (immutable)
-  const outputContext = systemInstructions
-    ? flow.context.update(executionContext, { systemInstructions })
-    : executionContext
+  const baseContext = systemInstructions
+    ? flow.context.update(withProviderModel, { systemInstructions })
+    : withProviderModel
+
+  // Ensure main context is explicitly labeled
+  const outputContext = flow.context.update(baseContext, { contextType: 'main' as const } as any)
 
   flow.log.debug('Output context', {
     provider: outputContext.provider,

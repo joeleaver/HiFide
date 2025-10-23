@@ -1,5 +1,6 @@
 import { Group, Text, UnstyledButton, Badge } from '@mantine/core'
 import { IconPlus, IconX, IconChevronUp, IconChevronDown } from '@tabler/icons-react'
+import { useEffect } from 'react'
 import { useAppStore, useDispatch, selectAgentTerminalTabs, selectAgentActiveTerminal, selectExplorerTerminalTabs, selectExplorerActiveTerminal } from '../store'
 import { useTerminalStore } from '../store/terminal'
 import { usePanelResize } from '../hooks/usePanelResize'
@@ -54,6 +55,15 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
       tabs.forEach((tabId) => fitTerminal(tabId))
     },
   })
+
+  // Ensure the newly activated tab fits once visible, and when panel opens
+  useEffect(() => {
+    if (!open) return
+    if (!activeTab) return
+    // Delay to next frame so display:none -> block has taken effect
+    const id = requestAnimationFrame(() => fitTerminal(activeTab))
+    return () => cancelAnimationFrame(id)
+  }, [activeTab, open, fitTerminal])
 
   return (
     <div

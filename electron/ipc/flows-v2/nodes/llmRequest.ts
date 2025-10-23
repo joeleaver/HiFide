@@ -37,27 +37,36 @@ export const metadata = {
  */
 export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs, config) => {
   // Get message - use dataIn if provided (push), otherwise pull from input
-  const message = dataIn ?? (inputs.has('data') ? await inputs.pull('data') : '')
+  let message = dataIn as string | undefined
+  if (message === undefined) {
+    message = inputs.has('data') ? await inputs.pull('data') : ''
+  }
 
-  // Get context - use pushed context, or pull if edge connected, or create from config
-  let executionContext: MainFlowContext
+  // Resolve context with a strict preference for the connected branch context when available
+  // Rationale: when a context edge is connected (and unambiguous), that branch's provider/model must win
+  let executionContext: MainFlowContext | undefined
+  let contextSource: 'pulled' | 'pushed' | 'config' = 'config'
 
+  // Prefer pushed context when present; otherwise pull if unambiguous; otherwise create from config
   if (context) {
-    // Context was pushed - use it
     executionContext = context
+    contextSource = 'pushed'
   } else if (inputs.has('context')) {
-    // Context edge connected but not pushed - pull it
-    executionContext = await inputs.pull('context')
-  } else {
-    // No context edge - create from config
+    try {
+      executionContext = await inputs.pull('context')
+      contextSource = 'pulled'
+    } catch {
+      // If pull fails (ambiguous/missing), fall back to config below
+    }
+  }
+
+  if (!executionContext) {
+    // No usable context edge; create from node config
     const provider = (config.provider as string) || 'openai'
     const model = (config.model as string) || 'gpt-4o'
-    executionContext = flow.context.create({
-      provider,
-      model,
-      systemInstructions: ''
-    })
-    flow.log.debug('No context provided, created from config', {
+    executionContext = flow.context.create({ provider, model, systemInstructions: '' })
+    contextSource = 'config'
+    flow.log.debug('No context provided/usable, created from config', {
       provider: executionContext.provider,
       model: executionContext.model
     })
@@ -69,6 +78,7 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
     hasDataIn: dataIn !== undefined,
     hasDataInput: inputs.has('data'),
     hasTools: inputs.has('tools'),
+    contextSource,
     contextProvider: executionContext?.provider,
     contextModel: executionContext?.model
   })
@@ -102,31 +112,12 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
   // Pull tools if connected (lazy evaluation)
   const tools = inputs.has('tools') ? await inputs.pull('tools') : undefined
 
-  flow.log.debug('Calling LLM service', {
-    provider: executionContext.provider,
-    model: executionContext.model,
-    messageLength: message.length,
-    hasTools: !!tools,
-    toolCount: tools?.length || 0
-  })
-
-  console.log(`[llmRequestNode] About to call llmService.chat()`)
-
   // Call LLM service - it handles everything!
   const result = await llmService.chat({
     message,
     tools,
     context: executionContext,
     flowAPI: flow
-  })
-
-  console.log(`[llmRequestNode] llmService.chat() returned`)
-
-  flow.log.debug('LLM service response', {
-    hasError: !!result.error,
-    error: result.error,
-    textLength: result.text?.length || 0,
-    messageHistoryLength: result.updatedContext.messageHistory.length
   })
 
   if (result.error) {
@@ -138,25 +129,10 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
     }
   }
 
-  flow.log.info('SUCCESS', {
-    responseLength: result.text.length,
-    responsePreview: result.text.substring(0, 100) + '...'
-  })
-
-  // TODO: Report usage via flow.usage.report() when llmService provides usage data
-
-  console.log(`[llmRequestNode] About to return from node function`)
-  const returnValue = {
+  return {
     context: result.updatedContext,
     data: result.text,
     status: 'success' as const
   }
-  console.log(`[llmRequestNode] Returning:`, {
-    hasContext: !!returnValue.context,
-    messageHistoryLength: returnValue.context?.messageHistory?.length,
-    dataLength: returnValue.data?.length,
-    status: returnValue.status
-  })
-  return returnValue
 }
 

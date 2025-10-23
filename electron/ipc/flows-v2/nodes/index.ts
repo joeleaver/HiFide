@@ -78,7 +78,7 @@ const NODE_REGISTRY: Record<string, NodeMetadata> = {
 }
 
 export function getNodeFunction(node: FlowNode): NodeFunction {
-  const nodeType = node.type
+  const nodeType = (node as any).nodeType || (node as any).type
   const metadata = NODE_REGISTRY[nodeType]
 
   if (!metadata) {
@@ -95,7 +95,7 @@ export function getNodeExecutionPolicy(node: FlowNode): NodeExecutionPolicy {
   }
 
   // Otherwise use default from registry
-  const nodeType = node.type
+  const nodeType = (node as any).nodeType || (node as any).type
   const metadata = NODE_REGISTRY[nodeType]
 
   if (!metadata) {

@@ -4,11 +4,12 @@ import { useEffect } from 'react'
 import {
   useAppStore,
   useDispatch,
-  selectMetaPanelOpen,
   selectSessions,
   selectCurrentId,
+  selectAgentTerminalTabs,
 } from '../store'
 import { useUiStore } from '../store/ui'
+import { useTerminalStore } from '../store/terminal'
 import SessionPane from '../SessionPane'
 import TerminalPanel from './TerminalPanel'
 import AgentDebugPanel from './AgentDebugPanel'
@@ -18,6 +19,9 @@ import ContextInspectorPanel from './ContextInspectorPanel'
 import TokensCostsPanel from './TokensCostsPanel'
 import { ReactFlowProvider } from 'reactflow'
 
+import { useRerenderTrace } from '../utils/perf'
+const SHOW_FLOW_DEBUG_PANEL = false
+
 
 
 export default function AgentView() {
@@ -25,30 +29,59 @@ export default function AgentView() {
   const dispatch = useDispatch()
 
   // Use selectors for better performance
-  const metaPanelOpen = useAppStore(selectMetaPanelOpen)
   const sessions = useAppStore(selectSessions)
   const currentId = useAppStore(selectCurrentId)
-  const flowCanvasCollapsed = useAppStore((s) => s.windowState.flowCanvasCollapsed)
+  const agentTerminalTabs = useAppStore(selectAgentTerminalTabs)
+  const fitTerminal = useTerminalStore((s) => s.fitTerminal)
 
-  // Read persisted widths from main store
+  // Read persisted window state from main store (hydrate UI store on mount only)
+  const persistedFlowCanvasCollapsed = useAppStore((s) => s.windowState.flowCanvasCollapsed)
+  const persistedMetaPanelOpen = useAppStore((s) => s.windowState.metaPanelOpen)
   const persistedSessionPanelWidth = useAppStore((s) => s.windowState.sessionPanelWidth)
   const persistedMetaPanelWidth = useAppStore((s) => s.windowState.metaPanelWidth)
 
-  // Use UI store for local resize state
+  // Renderer-only UI state
+  const metaPanelOpen = useUiStore((s) => s.metaPanelOpen)
+  const flowCanvasCollapsed = useUiStore((s) => s.flowCanvasCollapsed)
   const sessionPanelWidth = useUiStore((s) => s.sessionPanelWidth)
   const metaPanelWidth = useUiStore((s) => s.metaPanelWidth)
+  const setMetaPanelOpen = useUiStore((s) => s.setMetaPanelOpen)
+  const setFlowCanvasCollapsed = useUiStore((s) => s.setFlowCanvasCollapsed)
   const setSessionPanelWidth = useUiStore((s) => s.setSessionPanelWidth)
   const setMetaPanelWidth = useUiStore((s) => s.setMetaPanelWidth)
   const setIsDraggingSessionPanel = useUiStore((s) => s.setIsDraggingSessionPanel)
   const setIsDraggingMetaPanel = useUiStore((s) => s.setIsDraggingMetaPanel)
 
-  // Sync UI store with persisted widths ONLY on mount
-  // Don't sync during runtime to avoid race conditions with drag updates
+  // Perf: trace rerenders for AgentView hot path
+  useRerenderTrace('AgentView', {
+    metaPanelOpen,
+    currentId,
+    sessionCount: sessions.length,
+    flowCanvasCollapsed,
+  })
+
+  // Hydrate UI store with persisted window state ONLY on mount
   useEffect(() => {
     setSessionPanelWidth(persistedSessionPanelWidth)
     setMetaPanelWidth(persistedMetaPanelWidth)
+    setMetaPanelOpen(persistedMetaPanelOpen)
+    setFlowCanvasCollapsed(persistedFlowCanvasCollapsed)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only run on mount
+
+  // Sync UI store when persisted flowCanvasCollapsed changes (handles async rehydrate)
+  useEffect(() => {
+    const uiCollapsed = useUiStore.getState().flowCanvasCollapsed
+    if (uiCollapsed !== persistedFlowCanvasCollapsed) {
+      setFlowCanvasCollapsed(persistedFlowCanvasCollapsed)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persistedFlowCanvasCollapsed])
+
+
+  // Persist metaPanelOpen inline on explicit toggle (see click handlers below)
+  // Removed debounced effect to avoid unnecessary windowState churn
+
 
   // Session panel resize handler
   const handleSessionPanelMouseDown = (e: React.MouseEvent) => {
@@ -70,8 +103,10 @@ export default function AgentView() {
       setIsDraggingSessionPanel(false)
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
-      // Persist to main store when drag ends
-      dispatch('updateWindowState', { sessionPanelWidth: useUiStore.getState().sessionPanelWidth })
+      // Persist to main (silent, no broadcast) when drag ends
+      dispatch('persistWindowState', { updates: { sessionPanelWidth: useUiStore.getState().sessionPanelWidth } })
+      // After layout settles, re-fit all agent terminals to new width and sync PTY size
+      requestAnimationFrame(() => agentTerminalTabs.forEach((id) => fitTerminal(id)))
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -97,8 +132,10 @@ export default function AgentView() {
       setIsDraggingMetaPanel(false)
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
-      // Persist to main store when drag ends
-      dispatch('updateWindowState', { metaPanelWidth: useUiStore.getState().metaPanelWidth })
+      // Persist to main (silent, no broadcast) when drag ends
+      dispatch('persistWindowState', { updates: { metaPanelWidth: useUiStore.getState().metaPanelWidth } })
+      // After layout settles, re-fit all agent terminals to new width and sync PTY size
+      requestAnimationFrame(() => agentTerminalTabs.forEach((id) => fitTerminal(id)))
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -219,7 +256,10 @@ export default function AgentView() {
       {/* Toggle button when flow canvas is collapsed */}
       {flowCanvasCollapsed && (
         <UnstyledButton
-          onClick={() => dispatch('updateWindowState', { flowCanvasCollapsed: false })}
+          onClick={() => {
+            setFlowCanvasCollapsed(false)
+            dispatch('updateWindowState', { flowCanvasCollapsed: false })
+          }}
           style={{
             width: 24,
             height: '100%',
@@ -293,7 +333,7 @@ export default function AgentView() {
               Tools
             </Text>
             <UnstyledButton
-              onClick={() => dispatch('updateWindowState', { metaPanelOpen: false })}
+              onClick={() => { setMetaPanelOpen(false); dispatch('updateWindowState', { metaPanelOpen: false }) }}
               style={{
                 color: '#cccccc',
                 display: 'flex',
@@ -325,15 +365,15 @@ export default function AgentView() {
           {/* Tokens & Costs Panel */}
           <TokensCostsPanel />
 
-          {/* Flow Debug Panel - Fixed at bottom */}
-          <AgentDebugPanel />
+          {/* Flow Debug Panel - Hidden by default */}
+          {SHOW_FLOW_DEBUG_PANEL && <AgentDebugPanel />}
         </div>
       )}
 
       {/* Toggle button when panel is closed */}
       {!metaPanelOpen && (
         <UnstyledButton
-          onClick={() => dispatch('updateWindowState', { metaPanelOpen: true })}
+          onClick={() => { setMetaPanelOpen(true); dispatch('updateWindowState', { metaPanelOpen: true }) }}
           style={{
             width: 24,
             height: '100%',

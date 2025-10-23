@@ -25,6 +25,11 @@ export const metadata = {
   description: 'Caches data from upstream nodes to avoid re-executing expensive operations.'
 }
 
+// Back-compat for older unit tests: cache now lives in session store.
+// This is a no-op exported function so tests can import and call it safely.
+export const clearCache = () => {}
+
+
 /**
  * Node implementation
  */

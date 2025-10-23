@@ -240,7 +240,8 @@ export type NodeReExecutable = boolean
  */
 export interface FlowNode {
   id: string
-  type: string // Node type (e.g., 'llmRequest', 'userInput', 'tools')
+  nodeType?: string // Preferred field name
+  type?: string // Back-compat
   config?: Record<string, any> // Node-specific configuration
   position?: { x: number; y: number } // UI position
   data?: any // Additional data

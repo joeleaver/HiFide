@@ -1,17 +1,17 @@
 {
   "name": "default",
   "description": "",
-  "version": "7.0.0",
+  "version": "8.0.0",
   "nodes": [
     {
       "id": "defaultContextStart",
       "nodeType": "defaultContextStart",
       "config": {
-        "systemInstructions": "You are a master of agentic coding. There's nothing you can't do. Soar. Build incredible code, amazing products."
+        "systemInstructions": "You are a master coder. You code all the things. There's nothing you can't do. Plan code, write code, test it interactively. \n\nWORKSPACE SEARCH POLICY:\n- Prefer workspace.search for code discovery over raw file reads.\n- When you have multiple related keywords or symbol variants, call workspace.search ONCE with queries: [\"term1\",\"term2\",...]. Do NOT make many sequential single-term calls.\n- Use mode: \"auto\" unless you explicitly need structural patterns (mode: \"ast\") or globbing (mode: \"path\").\n- Narrow scope with filters.pathsInclude (e.g., [\"src/**\"]) and filters.pathsExclude when helpful.\n- After a search, pick bestHandle or one of topHandles, then call workspace.search again with action: \"expand\" and that handle to fetch the full region.\n- Avoid re-running search without changing filters/terms; expand first, then iterate.\n- Do not read entire files when a handle exists; expand only the relevant region.\n- Prefer filters.pathsInclude (e.g., [\"src/**\",\"electron/**\"]) and exclude heavy paths like node_modules/**, dist/**, .git/**.\n- Avoid generic terms (e.g., \"name\"); keep queries specific to symbols or filenames.\n- Optionally do path-first: mode:\"path\" with [\"startrader\",\"StarTrader\"], then content search scoped to those paths.\n- After search, use bestHandle/topHandles and call action:\"expand\" with the chosen handle."
       },
       "position": {
-        "x": -450.9392196802464,
-        "y": -149.2251824952608
+        "x": 794.528503004688,
+        "y": 391.5157165665104
       },
       "expanded": true
     },
@@ -23,17 +23,16 @@
         "tools": [
           "fs.read_file",
           "fs.read_dir",
-          "index.search",
           "code.search_ast",
-          "code.apply_edits_targeted",
-          "edits.apply"
+          "workspace.search",
+          "fs.read_lines"
         ]
       },
       "position": {
-        "x": 1268.2772518182537,
-        "y": 243.25573764118786
+        "x": 2040,
+        "y": 40
       },
-      "expanded": true
+      "expanded": false
     },
     {
       "id": "intentRouter-1760503463693",
@@ -41,18 +40,18 @@
       "label": "plan/execute/info",
       "config": {
         "provider": "openai",
-        "model": "gpt-4.1-nano",
+        "model": "gpt-4.1-mini",
         "routes": {
           "plan": "user wants to plan something",
-          "execute": "user wants to execute the plan",
+          "execute": "user wants to do something or execute a plan",
           "info": "user just wants info about the project"
         }
       },
       "position": {
-        "x": 704.8134860928681,
-        "y": -108.4162864256626
+        "x": 2040,
+        "y": 390
       },
-      "expanded": true
+      "expanded": false
     },
     {
       "id": "tools-1760504451346",
@@ -75,21 +74,25 @@
           "fs.truncate_file",
           "fs.truncate_dir",
           "edits.apply",
-          "index.search",
           "terminal.run",
           "terminal.session_present",
           "terminal.session_exec",
+          "terminal.session_close",
+          "code.search_ast",
+          "code.apply_edits_targeted",
+          "workspace.search",
+          "terminal.exec",
           "terminal.session_search_output",
           "terminal.session_tail",
           "terminal.session_restart",
-          "terminal.session_close",
-          "code.search_ast",
-          "code.apply_edits_targeted"
+          "fs.read_lines",
+          "code.replace_call",
+          "code.replace_console_level"
         ]
       },
       "position": {
-        "x": 1279.534515050198,
-        "y": -396.59952944013816
+        "x": 2040,
+        "y": 740
       },
       "expanded": false
     },
@@ -99,8 +102,8 @@
       "label": "execute",
       "config": {},
       "position": {
-        "x": 1265.9848465569928,
-        "y": -154.81335514111584
+        "x": 2466.390158215458,
+        "y": 613.609841784542
       },
       "expanded": false
     },
@@ -110,8 +113,8 @@
       "label": "plan/chat",
       "config": {},
       "position": {
-        "x": 1265.491372710202,
-        "y": -5.987704220896802
+        "x": 2440,
+        "y": 40
       },
       "expanded": false
     },
@@ -123,21 +126,8 @@
         "id": "main"
       },
       "position": {
-        "x": -381.78116101268154,
-        "y": -493.4346598236705
-      },
-      "expanded": false
-    },
-    {
-      "id": "portalInput-1760644103829",
-      "nodeType": "portalInput",
-      "label": "main in",
-      "config": {
-        "id": "main"
-      },
-      "position": {
-        "x": 1786.5320950025982,
-        "y": -69.16242802469242
+        "x": 840,
+        "y": 740
       },
       "expanded": false
     },
@@ -151,8 +141,8 @@
         "pinned": true
       },
       "position": {
-        "x": 70.31811973447225,
-        "y": -126.78088398364764
+        "x": 1640,
+        "y": 990
       },
       "expanded": true
     },
@@ -162,11 +152,11 @@
       "label": "Context Bootstrap",
       "config": {
         "ttl": 12000,
-        "invalidate": 1760919704898
+        "invalidate": 1761186579437
       },
       "position": {
-        "x": 81.79667555714991,
-        "y": -1058.2161322851684
+        "x": 1240,
+        "y": 1090
       },
       "expanded": true
     },
@@ -180,8 +170,8 @@
         "overrideModel": "gpt-5-mini"
       },
       "position": {
-        "x": -259.14871373264845,
-        "y": -1029.6687943522634
+        "x": 840,
+        "y": 1090
       },
       "expanded": true
     },
@@ -199,8 +189,8 @@
         ]
       },
       "position": {
-        "x": -584.4319243004976,
-        "y": -711.3142349534954
+        "x": 440,
+        "y": 1090
       },
       "expanded": false
     },
@@ -212,8 +202,8 @@
         "message": "Use tools to gather a concise but detailed context bootstrap for this project. It should include language, entry points, a listing of important source files, their paths, and a summary of their contents. It should be concise, but comprehensive enough to avoid spending a bunch of tokens on future folder and file scanning. "
       },
       "position": {
-        "x": -688.6255844133226,
-        "y": -995.2524799945777
+        "x": 461.2200319311455,
+        "y": 1436.9685668669792
       },
       "expanded": true
     },
@@ -227,8 +217,8 @@
         "provider": "openai"
       },
       "position": {
-        "x": -686.8750109566671,
-        "y": -1393.2022773994356
+        "x": 40,
+        "y": 1440
       },
       "expanded": true
     },
@@ -238,10 +228,23 @@
       "label": "User Input",
       "config": {},
       "position": {
-        "x": 552.6021559441729,
-        "y": -462.25081998210555
+        "x": 1240,
+        "y": 390
       },
       "expanded": false
+    },
+    {
+      "id": "portalInput-1761183102773",
+      "nodeType": "portalInput",
+      "label": "Portal In",
+      "config": {
+        "id": "main"
+      },
+      "position": {
+        "x": 2990.556012234169,
+        "y": 368.79141393280685
+      },
+      "expanded": true
     }
   ],
   "edges": [
@@ -302,46 +305,11 @@
       "targetHandle": "data"
     },
     {
-      "id": "llmRequest-1760643452620-portalInput-1760644103829-context-context",
-      "source": "llmRequest-1760643452620",
-      "target": "portalInput-1760644103829",
-      "sourceHandle": "context",
-      "targetHandle": "context"
-    },
-    {
-      "id": "llmRequest-1760643455771-portalInput-1760644103829-context-context",
-      "source": "llmRequest-1760643455771",
-      "target": "portalInput-1760644103829",
-      "sourceHandle": "context",
-      "targetHandle": "context"
-    },
-    {
-      "id": "llmRequest-1760643452620-portalInput-1760644103829-data-data",
-      "source": "llmRequest-1760643452620",
-      "target": "portalInput-1760644103829",
-      "sourceHandle": "data",
-      "targetHandle": "data"
-    },
-    {
-      "id": "llmRequest-1760643455771-portalInput-1760644103829-data-data",
-      "source": "llmRequest-1760643455771",
-      "target": "portalInput-1760644103829",
-      "sourceHandle": "data",
-      "targetHandle": "data"
-    },
-    {
       "id": "llmRequest-1760719205056-cache-1760719078674-data-data",
       "source": "llmRequest-1760719205056",
       "target": "cache-1760719078674",
       "sourceHandle": "data",
       "targetHandle": "data"
-    },
-    {
-      "id": "tools-1760719213981-llmRequest-1760719205056-tools-tools",
-      "source": "tools-1760719213981",
-      "target": "llmRequest-1760719205056",
-      "sourceHandle": "tools",
-      "targetHandle": "tools"
     },
     {
       "id": "manualInput-1760719272740-llmRequest-1760719205056-data-data",
@@ -351,27 +319,6 @@
       "targetHandle": "data"
     },
     {
-      "id": "defaultContextStart-injectMessages-1760719050283-context-context",
-      "source": "defaultContextStart",
-      "target": "injectMessages-1760719050283",
-      "sourceHandle": "context",
-      "targetHandle": "context"
-    },
-    {
-      "id": "portalOutput-1760644097622-injectMessages-1760719050283-context-context",
-      "source": "portalOutput-1760644097622",
-      "target": "injectMessages-1760719050283",
-      "sourceHandle": "context",
-      "targetHandle": "context"
-    },
-    {
-      "id": "newContext-1760722425172-llmRequest-1760719205056-context-context",
-      "source": "newContext-1760722425172",
-      "target": "llmRequest-1760719205056",
-      "sourceHandle": "context",
-      "targetHandle": "context"
-    },
-    {
       "id": "cache-1760719078674-injectMessages-1760719050283-data-assistantMessage",
       "source": "cache-1760719078674",
       "target": "injectMessages-1760719050283",
@@ -379,25 +326,88 @@
       "targetHandle": "assistantMessage"
     },
     {
-      "id": "injectMessages-1760719050283-userInput-1760756690239-context-context",
-      "source": "injectMessages-1760719050283",
-      "target": "userInput-1760756690239",
-      "sourceHandle": "context",
-      "targetHandle": "context"
-    },
-    {
-      "id": "userInput-1760756690239-intentRouter-1760503463693-context-context",
-      "source": "userInput-1760756690239",
-      "target": "intentRouter-1760503463693",
-      "sourceHandle": "context",
-      "targetHandle": "context"
-    },
-    {
       "id": "userInput-1760756690239-intentRouter-1760503463693-data-data",
       "source": "userInput-1760756690239",
       "target": "intentRouter-1760503463693",
       "sourceHandle": "data",
       "targetHandle": "data"
+    },
+    {
+      "id": "newContext-1760722425172-manualInput-1760719272740-context-context",
+      "source": "newContext-1760722425172",
+      "target": "manualInput-1760719272740",
+      "sourceHandle": "context",
+      "targetHandle": "context"
+    },
+    {
+      "id": "manualInput-1760719272740-llmRequest-1760719205056-context-context",
+      "source": "manualInput-1760719272740",
+      "target": "llmRequest-1760719205056",
+      "sourceHandle": "context",
+      "targetHandle": "context"
+    },
+    {
+      "id": "defaultContextStart-userInput-1760756690239-context-context",
+      "source": "defaultContextStart",
+      "target": "userInput-1760756690239",
+      "sourceHandle": "context",
+      "targetHandle": "context"
+    },
+    {
+      "id": "userInput-1760756690239-injectMessages-1760719050283-context-context",
+      "source": "userInput-1760756690239",
+      "target": "injectMessages-1760719050283",
+      "sourceHandle": "context",
+      "targetHandle": "context"
+    },
+    {
+      "id": "portalOutput-1760644097622-userInput-1760756690239-context-context",
+      "source": "portalOutput-1760644097622",
+      "target": "userInput-1760756690239",
+      "sourceHandle": "context",
+      "targetHandle": "context"
+    },
+    {
+      "id": "injectMessages-1760719050283-intentRouter-1760503463693-context-context",
+      "source": "injectMessages-1760719050283",
+      "target": "intentRouter-1760503463693",
+      "sourceHandle": "context",
+      "targetHandle": "context"
+    },
+    {
+      "id": "tools-1760719213981-llmRequest-1760719205056-tools-tools",
+      "source": "tools-1760719213981",
+      "target": "llmRequest-1760719205056",
+      "sourceHandle": "tools",
+      "targetHandle": "tools"
+    },
+    {
+      "id": "llmRequest-1760643455771-portalInput-1761183102773-data-data",
+      "source": "llmRequest-1760643455771",
+      "target": "portalInput-1761183102773",
+      "sourceHandle": "data",
+      "targetHandle": "data"
+    },
+    {
+      "id": "llmRequest-1760643452620-portalInput-1761183102773-data-data",
+      "source": "llmRequest-1760643452620",
+      "target": "portalInput-1761183102773",
+      "sourceHandle": "data",
+      "targetHandle": "data"
+    },
+    {
+      "id": "llmRequest-1760643452620-portalInput-1761183102773-context-context",
+      "source": "llmRequest-1760643452620",
+      "target": "portalInput-1761183102773",
+      "sourceHandle": "context",
+      "targetHandle": "context"
+    },
+    {
+      "id": "llmRequest-1760643455771-portalInput-1761183102773-context-context",
+      "source": "llmRequest-1760643455771",
+      "target": "portalInput-1761183102773",
+      "sourceHandle": "context",
+      "targetHandle": "context"
     }
   ]
 }

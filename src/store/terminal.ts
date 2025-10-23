@@ -75,44 +75,67 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   mountTerminal: async ({ tabId, container, sessionId }) => {
     get().initEvents()
 
-    // Create and mount xterm instance
+    // Create xterm instance but delay opening until fonts and layout are ready
     const instance = terminalInstances.createTerminalInstance(tabId)
     instance.terminal.options.disableStdin = true // Agent terminals are read-only
-    terminalInstances.mountTerminalInstance(tabId, container)
+    instance.terminal.options.convertEol = true
 
-    // Wait for fonts and fit
-    try {
-      await (document as any).fonts?.ready
-    } catch {}
+    // Ensure fonts and layout are ready before opening to avoid xterm viewport errors
+    try { await (document as any).fonts?.ready } catch {}
+
+    // Wait for a frame and until container has non-zero size
+    const waitNextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()))
+    let attempts = 0
+    while ((container.clientWidth === 0 || container.clientHeight === 0) && attempts < 10) {
+      await waitNextFrame()
+      attempts++
+    }
+
+    // Now open/mount and fit
+    terminalInstances.mountTerminalInstance(tabId, container)
     terminalInstances.fitTerminalInstance(tabId)
 
     // Attach to PTY in main process
-    const cols = instance.terminal.cols
-    const rows = instance.terminal.rows
-    
-    try {
-      const result = await ptySvc.attachAgent({ requestId: sessionId, tailBytes: 400 })
-      if (!result?.ok) {
-        throw new Error('Failed to attach to PTY')
-      }
+    let cols = instance.terminal.cols
+    let rows = instance.terminal.rows
+    if (!cols || !rows) {
+      // Attempt another fit if initial measurement was zero
+      terminalInstances.fitTerminalInstance(tabId)
+      cols = instance.terminal.cols
+      rows = instance.terminal.rows
+    }
 
-      // Track the session ID
+    try {
+      // Determine if we are re-attaching to an existing mapping
+      const prev = get().sessionIds[tabId]
+
+      // Map this tab to the target session BEFORE attaching so tail/data delivered during attach
+      // can be routed to this terminal via our onData listener.
       set({ sessionIds: { ...get().sessionIds, [tabId]: sessionId } })
 
-      // Subscribe to data
+      // Install data subscriber BEFORE attach so any tail sent immediately is rendered
       set({
         dataSubscribers: {
           ...get().dataSubscribers,
           [tabId]: (data: string) => {
-            try {
-              instance.terminal.write(data)
-            } catch {}
+            try { instance.terminal.write(data) } catch {}
           }
         }
       })
 
-      // Resize PTY to match terminal
-      await ptySvc.resize(sessionId, cols, rows)
+      // For first attach, request a small tail so users see an initial prompt/output.
+      // For re-attach, avoid tail to prevent duplicate output.
+      const tailBytes = prev ? 0 : 500
+
+      const result = await ptySvc.attachAgent({ requestId: sessionId, tailBytes })
+      if (!result?.ok) {
+        throw new Error('Failed to attach to PTY')
+      }
+
+      // Resize PTY to match terminal dimensions after attach (guard against zeros)
+      if (cols && rows) {
+        await ptySvc.resize(sessionId, cols, rows)
+      }
     } catch (err: any) {
       instance.terminal.writeln(`\r\n[PTY Error: ${err?.message || String(err)}]`)
     }

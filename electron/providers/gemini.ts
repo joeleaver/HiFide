@@ -349,14 +349,17 @@ export const GeminiProvider: ProviderAdapter = {
 
                 const result = await Promise.resolve(tool?.run(args, toolMeta))
 
-                // Notify tool end
+                // Notify tool end (full result to UI)
                 try { onToolEnd?.({ callId, name, result }) } catch {}
 
                 if (result && result._meta && result._meta.trigger_pruning) {
                   shouldPrune = true
                   pruneData = result._meta.summary
                 }
-                toolResponses.push({ functionResponse: { name, response: { content: typeof result === 'string' ? result : JSON.stringify(result) } } })
+                // Minify heavy tool results before adding to conversation
+                const { minifyToolResult } = await import('./toolResultMinify')
+                const compact = minifyToolResult(name, result)
+                toolResponses.push({ functionResponse: { name, response: { content: typeof compact === 'string' ? compact : JSON.stringify(compact) } } })
               } catch (e: any) {
                 // Notify tool error
                 try { onToolError?.({ callId, name, error: e?.message || String(e) }) } catch {}

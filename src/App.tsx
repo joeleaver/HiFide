@@ -10,6 +10,7 @@ import SourceControlView from './components/SourceControlView'
 import SettingsPane from './SettingsPane'
 import LoadingScreen from './components/LoadingScreen'
 
+import { useRerenderTrace, logStoreDiff } from './utils/perf'
 // We need a dispatch instance for menu handlers
 // This will be set when the App component mounts
 let globalDispatch: ReturnType<typeof useDispatch> | null = null
@@ -75,6 +76,16 @@ function App() {
   const startupMessage = useAppStore((s) => s.startupMessage)
   const exportResult = useAppStore((s) => s.feExportResult)
   const importResult = useAppStore((s) => s.feImportResult)
+
+  // Perf: trace App re-renders and subscribe to store diffs (dev only)
+  useRerenderTrace('App', { currentView, appBootstrapping, hasExportResult: !!exportResult, hasImportResult: !!importResult })
+  useEffect(() => {
+    const unsub = (useAppStore as any).subscribe?.((next: any, prev: any) => {
+      logStoreDiff('store', prev, next)
+    })
+    return () => unsub && unsub()
+  }, [])
+
 
   // Set global dispatch for menu handlers
   useEffect(() => {
@@ -340,11 +351,6 @@ function App() {
           {/* Activity Bar */}
           <ActivityBar />
 
-          {startupMessage && currentView === 'settings' && (
-            <div style={{ padding: '8px 12px', backgroundColor: '#3a2b2b', color: '#ffffff', borderBottom: '1px solid #3e3e42' }}>
-              {startupMessage}
-            </div>
-          )}
 
           {/* Main View Area */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

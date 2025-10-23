@@ -24,7 +24,10 @@ module.exports = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
     '^electron$': '<rootDir>/electron/__mocks__/electron.ts',
-    '^electron-store$': '<rootDir>/electron/__mocks__/electron-store.ts'
+    '^electron-store$': '<rootDir>/electron/__mocks__/electron-store.ts',
+    // Map relative import from refactors/ts.ts and tools/utils.ts to a lightweight mock
+    '^\.\./store/index\.js$': '<rootDir>/electron/__mocks__/store-index.js',
+    '^\.\./store/index$': '<rootDir>/electron/__mocks__/store-index.js'
   },
   setupFilesAfterEnv: ['<rootDir>/electron/__tests__/setup.ts'],
   collectCoverageFrom: [

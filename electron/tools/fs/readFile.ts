@@ -1,6 +1,6 @@
 /**
  * fs.read_file tool
- * 
+ *
  * Read a UTF-8 text file from the workspace.
  */
 
@@ -18,9 +18,13 @@ export const readFileTool: AgentTool = {
     additionalProperties: false,
   },
   run: async ({ path: rel }: { path: string }) => {
-    const abs = resolveWithinWorkspace(rel)
-    const content = await fs.readFile(abs, 'utf-8')
-    return { ok: true, content }
+    try {
+      const abs = resolveWithinWorkspace(rel)
+      const content = await fs.readFile(abs, 'utf-8')
+      return { ok: true, content }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
   },
 }
 

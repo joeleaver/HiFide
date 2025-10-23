@@ -64,14 +64,11 @@ describe('Scheduler Context Isolation', () => {
       let capturedContext: any = null
       const originalExecuteNode = (scheduler as any).doExecuteNode.bind(scheduler)
       ;(scheduler as any).doExecuteNode = async function(nodeId: string, pushedInputs: any, callerId: any, isPull: boolean) {
-        const result = await originalExecuteNode(nodeId, pushedInputs, callerId, isPull)
-        
-        // Capture context when llmRequest executes
-        if (nodeId === 'llmRequest-1' && pushedInputs.context) {
+        // Capture context immediately on entry so we don't miss it if the node throws
+        if (nodeId === 'llmRequest-1' && pushedInputs && pushedInputs.context) {
           capturedContext = pushedInputs.context
         }
-        
-        return result
+        return originalExecuteNode(nodeId, pushedInputs, callerId, isPull)
       }
 
       // Execute the flow (will fail at llmRequest since we don't have real LLM, but that's OK)
@@ -139,14 +136,10 @@ describe('Scheduler Context Isolation', () => {
       let capturedContext: any = null
       const originalExecuteNode = (scheduler as any).doExecuteNode.bind(scheduler)
       ;(scheduler as any).doExecuteNode = async function(nodeId: string, pushedInputs: any, callerId: any, isPull: boolean) {
-        const result = await originalExecuteNode(nodeId, pushedInputs, callerId, isPull)
-        
-        // Capture context when llmRequest executes
-        if (nodeId === 'llmRequest-1' && pushedInputs.context) {
+        if (nodeId === 'llmRequest-1' && pushedInputs && pushedInputs.context) {
           capturedContext = pushedInputs.context
         }
-        
-        return result
+        return originalExecuteNode(nodeId, pushedInputs, callerId, isPull)
       }
 
       // Execute the flow
@@ -212,13 +205,10 @@ describe('Scheduler Context Isolation', () => {
       let capturedContext: any = null
       const originalExecuteNode = (scheduler as any).doExecuteNode.bind(scheduler)
       ;(scheduler as any).doExecuteNode = async function(nodeId: string, pushedInputs: any, callerId: any, isPull: boolean) {
-        const result = await originalExecuteNode(nodeId, pushedInputs, callerId, isPull)
-        
-        if (nodeId === 'llmRequest-1' && pushedInputs.context) {
+        if (nodeId === 'llmRequest-1' && pushedInputs && pushedInputs.context) {
           capturedContext = pushedInputs.context
         }
-        
-        return result
+        return originalExecuteNode(nodeId, pushedInputs, callerId, isPull)
       }
 
       try {

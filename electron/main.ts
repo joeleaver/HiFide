@@ -32,6 +32,7 @@ import { initializeMainStore } from './store'
 // Agent dependencies
 import { initAgentSessionsCleanup } from './session/agentSessions'
 import { agentTools } from './tools'
+import { verifyAstGrepAvailable } from './tools/astGrep'
 
 // Environment setup
 const DIRNAME = path.dirname(fileURLToPath(import.meta.url))
@@ -68,19 +69,31 @@ providerCapabilities.gemini = { tools: true, jsonSchema: true, vision: true, str
  * Initialize the application
  */
 async function initialize(): Promise<void> {
-  // Initialize main process store FIRST
-  await initializeMainStore()
+  // Create the window immediately so UI appears fast
+  initializeApp(() => {
+    // Build menu after window is created
+    buildMenu()
+  })
 
-  // Register all IPC handlers
+  // Register all IPC handlers early
   registerAllHandlers(ipcMain)
 
   // Initialize agent session cleanup
   initAgentSessionsCleanup()
 
-  // Initialize app lifecycle and create window
-  initializeApp(() => {
-    // Build menu after window is created
-    buildMenu()
+  // Continue heavy initialization after a tick to let the window paint and bridge connect
+  setImmediate(async () => {
+    try {
+      console.time('[main] verifyAstGrepAvailable')
+      await verifyAstGrepAvailable()
+      console.timeEnd('[main] verifyAstGrepAvailable')
+
+      console.time('[main] initializeMainStore')
+      await initializeMainStore()
+      console.timeEnd('[main] initializeMainStore')
+    } catch (err) {
+      console.error('[main] Post-window initialization failed:', err)
+    }
   })
 
 }

@@ -192,18 +192,51 @@ export async function isSystemTemplate(id: string): Promise<boolean> {
  */
 export async function loadFlowTemplate(id: string): Promise<{ nodes: Node[]; edges: Edge[] } | null> {
   try {
-    let profile: FlowProfile | null = null
+    let rawProfile: any = null
 
     // Check system library first
     const systemTemplates = await loadSystemTemplates()
     if (systemTemplates[id]) {
-      profile = systemTemplates[id]
+      rawProfile = systemTemplates[id]
     } else {
       // Check user library
-      profile = profilesStore.get(id) || null
+      rawProfile = profilesStore.get(id) || null
     }
 
-    if (!profile) return null
+    if (!rawProfile || typeof rawProfile !== 'object') return null
+
+    // Sanitize profile structure defensively to avoid crashes on bad saves
+    const nodesArr = Array.isArray(rawProfile.nodes) ? rawProfile.nodes : []
+    const edgesArr = Array.isArray(rawProfile.edges) ? rawProfile.edges : []
+
+    const safeNodes = nodesArr
+      .filter((n: any) => n && typeof n.id === 'string' && typeof n.nodeType === 'string' && n.position && typeof n.position.x === 'number' && typeof n.position.y === 'number')
+      .map((n: any) => ({
+        id: n.id,
+        nodeType: n.nodeType,
+        label: typeof n.label === 'string' ? n.label : undefined,
+        config: (n.config && typeof n.config === 'object') ? n.config : {},
+        position: { x: Number(n.position.x) || 0, y: Number(n.position.y) || 0 },
+        expanded: !!n.expanded,
+      })) as SerializedNode[]
+
+    const safeEdges = edgesArr
+      .filter((e: any) => e && typeof e.source === 'string' && typeof e.target === 'string')
+      .map((e: any) => ({
+        id: typeof e.id === 'string' ? e.id : `${e.source}-${e.target}`,
+        source: e.source,
+        target: e.target,
+        sourceHandle: typeof e.sourceHandle === 'string' ? e.sourceHandle : undefined,
+        targetHandle: typeof e.targetHandle === 'string' ? e.targetHandle : undefined,
+      })) as SerializedEdge[]
+
+    const profile: FlowProfile = {
+      name: typeof rawProfile.name === 'string' ? rawProfile.name : id,
+      description: typeof rawProfile.description === 'string' ? rawProfile.description : '',
+      version: typeof rawProfile.version === 'string' ? rawProfile.version : '7.0.0',
+      nodes: safeNodes,
+      edges: safeEdges,
+    }
 
     // Deserialize nodes and edges
     const nodes = profile.nodes.map(deserializeNode)

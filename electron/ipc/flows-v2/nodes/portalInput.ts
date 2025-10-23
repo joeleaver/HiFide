@@ -16,6 +16,7 @@
  *
  * Outputs:
  * - None (Portal Input has no outgoing edges - it triggers Portal Outputs directly)
+ *   Note: Returns context in result for type compliance only; scheduler ignores portal nodes for store sync.
  *
  * Config:
  * - id: Portal identifier (string) - must be unique among Portal Input nodes
@@ -43,8 +44,7 @@ export const portalInputNode: NodeFunction = async (flow, context, dataIn, input
   if (!portalId) {
     flow.log.error('Portal Input node requires an ID configuration')
     return {
-      context: executionContext,
-      data: dataIn,
+      context: executionContext!,
       status: 'error',
       error: 'Portal Input node requires an ID configuration'
     }
@@ -58,8 +58,7 @@ export const portalInputNode: NodeFunction = async (flow, context, dataIn, input
   if (!hasContext && !hasData) {
     flow.log.error('Portal Input node requires at least one input')
     return {
-      context: executionContext,
-      data: dataIn,
+      context: executionContext!,
       status: 'error',
       error: 'Portal Input node requires at least one input (context or data)'
     }

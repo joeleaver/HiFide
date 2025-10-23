@@ -320,6 +320,9 @@ export const OpenAIProvider: ProviderAdapter = {
             let shouldPrune = false
             let pruneSummary: any = null
 
+            // Per-turn dedupe: reuse identical tool results within this streamed turn
+            const perTurnToolCache: Map<string, any> = new Map()
+
             for (const tc of toolCalls) {
               const name = tc.name
               let tool: any = null
@@ -346,16 +349,43 @@ export const OpenAIProvider: ProviderAdapter = {
                 }
 
                 // Generate tool execution ID
-
-
+                // Use original tool name for events (not sanitized name)
+                const originalName = tool?.name || String(name)
+                const dedupeKey = `${originalName}:${JSON.stringify(args)}`
                 // Notify start
-                try { onToolStart?.({ callId: tc.id, name: String(name), arguments: args }) } catch {}
+                try { onToolStart?.({ callId: tc.id, name: originalName, arguments: args }) } catch {}
 
-                // Execute tool (pass toolMeta)
-                const result = await Promise.resolve(tool.run(args, toolMeta))
+                // Execute tool with a defensive timeout (prevents hangs) and per-turn dedupe
+                // Do not undercut tools that implement their own internal budget (e.g., workspace.search)
+                // Heuristic: derive a minimum from the number of queries, and allow a provided hint to increase it
+                const provided = (args && args.filters && typeof args.filters.timeBudgetMs === 'number') ? args.filters.timeBudgetMs : undefined
+                const qCount = Array.isArray((args as any)?.queries) ? (args as any).queries.length : ((args as any)?.query ? 1 : 0)
+                const estAuto = Math.min(30000, 10000 + Math.max(0, qCount - 1) * 1500) // mirrors tool's computeAutoBudget base/perTerm/cap
+                const baseDefault = 15000
+                const timeoutMs = Math.max(
+                  5000, // never below 5s
+                  Math.min(
+                    30000, // hard cap
+                    Math.max(
+                      baseDefault,
+                      provided ? (provided + 2000) : baseDefault, // give tools a little overhead beyond hint
+                      estAuto + 1000 // leave breathing room beyond internal budget
+                    )
+                  )
+                )
+                let result: any
+                if (perTurnToolCache.has(dedupeKey)) {
+                  result = perTurnToolCache.get(dedupeKey)
+                } else {
+                  result = await Promise.race([
+                    Promise.resolve(tool.run(args, toolMeta)),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error(`Tool '${originalName}' timed out after ${timeoutMs}ms`)), timeoutMs))
+                  ])
+                  perTurnToolCache.set(dedupeKey, result)
+                }
 
-                // Notify end
-                try { onToolEnd?.({ callId: tc.id, name: String(name), result }) } catch {}
+                // Notify end (full result to UI)
+                try { onToolEnd?.({ callId: tc.id, name: originalName, result }) } catch {}
 
                 // Check if tool requested pruning
                 if (result?._meta?.trigger_pruning) {
@@ -363,7 +393,10 @@ export const OpenAIProvider: ProviderAdapter = {
                   pruneSummary = result._meta.summary
                 }
 
-                const output = typeof result === 'string' ? result : JSON.stringify(result)
+                // Minify heavy tool results before adding to conversation
+                const { minifyToolResult } = await import('./toolResultMinify')
+                const compact = minifyToolResult(originalName, result)
+                const output = typeof compact === 'string' ? compact : JSON.stringify(compact)
                 conv.push({
                   type: 'function_call_output',
                   call_id: tc.id,
@@ -371,7 +404,7 @@ export const OpenAIProvider: ProviderAdapter = {
                 })
               } catch (e: any) {
                 // Notify error
-                try { onToolError?.({ callId: tc.id, name: String(name), error: e?.message || String(e) }) } catch {}
+                try { onToolError?.({ callId: tc.id, name: (tool?.name || String(name)), error: e?.message || String(e) }) } catch {}
                 conv.push({
                   type: 'function_call_output',
                   call_id: tc.id,

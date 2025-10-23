@@ -41,3 +41,5 @@ api_key.txt
 # Test coverage
 coverage/
 .nyc_output/
+
+*.onnx*

@@ -6,7 +6,7 @@ import fs from 'node:fs/promises'
 
 export const applyEditsTargetedTool: AgentTool = {
   name: 'code.apply_edits_targeted',
-  description: 'Apply targeted edits: simple text edits and/or cross-language AST rewrites via ast-grep. Supports dryRun and ranges-only modes.',
+  description: 'Apply targeted edits with AST-first rewrites (ast-grep) and optional text edits. Prefer this over bulk reads for discovery. languages:\u00a0\u201cauto\u201d targets all registered parsers (JS/TS/TSX/JSX/HTML/CSS + Python/Go/Java/C/CPP/C#/PHP/Ruby/Kotlin/Swift when installed). Supports dryRun and ranges-only.',
   parameters: {
     type: 'object',
     properties: {
@@ -109,6 +109,12 @@ export const applyEditsTargetedTool: AgentTool = {
     const astOps = Array.isArray(args.astRewrites) ? args.astRewrites : []
     const advOpsFlat = Array.isArray(args.advancedTextEdits) ? args.advancedTextEdits : []
 
+
+	    // Collect diff previews across all edit kinds
+	    const previews: Record<string, { before?: string; after?: string; sizeBefore?: number; sizeAfter?: number; truncated?: boolean }> = {}
+	    const MAX_PREVIEW = 16 * 1024 // 16 KB per file
+	    const clip = (s?: string) => (typeof s === 'string' && s.length > MAX_PREVIEW ? s.slice(0, MAX_PREVIEW) : s)
+
     // Convert flattened advancedTextEdits back to nested format for internal processing
     const advOps = advOpsFlat.map((flat: any) => {
       const op: any = { path: flat.path }
@@ -159,6 +165,8 @@ export const applyEditsTargetedTool: AgentTool = {
         op.action['text.wrap'] = { prefix: flat.wrapPrefix, suffix: flat.wrapSuffix }
       }
 
+
+
       return op
     })
 
@@ -166,6 +174,20 @@ export const applyEditsTargetedTool: AgentTool = {
       const resText = textEdits.length ? await applyFileEditsInternal(textEdits, { dryRun, verify: false }) : { applied: 0, results: [] as any[] }
       const astResults: any[] = []
       let astApplied = 0
+
+	      // Merge previews from simple textEdits if available, before AST ops
+	      if ((resText as any)?.fileEditsPreview?.length) {
+	        for (const f of (resText as any).fileEditsPreview) {
+	          previews[f.path] = {
+	            before: f.before,
+	            after: f.after,
+	            sizeBefore: f.sizeBefore,
+	            sizeAfter: f.sizeAfter,
+	            truncated: !!f.truncated,
+	          }
+	        }
+	      }
+
       for (const op of astOps) {
         const r = await astGrepRewrite({
           pattern: op.pattern,
@@ -176,12 +198,24 @@ export const applyEditsTargetedTool: AgentTool = {
           perFileLimit: op.perFileLimit,
           totalLimit: op.totalLimit,
           maxFileBytes: op.maxFileBytes,
+
           concurrency: op.concurrency,
           dryRun,
           rangesOnly,
         })
         astResults.push(r)
         astApplied += r.changes.reduce((acc, c) => acc + (c.applied ? c.count : 0), 0)
+        if ((r as any)?.fileEditsPreview?.length) {
+          for (const f of (r as any).fileEditsPreview) {
+            previews[f.path] = {
+              before: f.before,
+              after: f.after,
+              sizeBefore: f.sizeBefore,
+              sizeAfter: f.sizeAfter,
+              truncated: !!f.truncated,
+            }
+          }
+        }
       }
 
       // Advanced text edits
@@ -198,6 +232,12 @@ export const applyEditsTargetedTool: AgentTool = {
         let content = ''
         try { content = await fs.readFile(abs, 'utf-8') } catch { advResults.push({ path: p, changed: false, message: 'read-failed' }); continue }
         const origChecksum = crypto.createHash('sha1').update(content, 'utf8').digest('hex')
+
+        // Record preview baseline for advanced edits (per file)
+        if (!previews[p]) {
+          previews[p] = { before: content, sizeBefore: content.length }
+        }
+
         let changed = false
         const lines = content.split(/\r?\n/)
         const idx: number[] = [0]; for (let i=0;i<lines.length;i++) idx.push(idx[i] + lines[i].length + 1)
@@ -210,11 +250,19 @@ export const applyEditsTargetedTool: AgentTool = {
             s = off(op.selector.range.start.line, op.selector.range.start.column)
             e = off(op.selector.range.end.line, op.selector.range.end.column)
           } else if (op.selector?.anchors) {
+
             const before = op.selector.anchors.before || ''
+
+	        // Record preview baseline for advanced edits (per file)
+	        if (!previews[p]) {
+	          previews[p] = { before: content, sizeBefore: content.length }
+	        }
+
             const after = op.selector.anchors.after || ''
             const occ = Math.max(1, op.selector.anchors.occurrence || 1)
             if (before) {
               let pos = -1, from = 0
+
               for (let i=0;i<occ;i++) { pos = content.indexOf(before, from); if (pos === -1) break; from = pos + before.length }
               if (pos !== -1) s = pos + before.length
             }
@@ -268,6 +316,10 @@ export const applyEditsTargetedTool: AgentTool = {
           if (!dryRun && !rangesOnly && next !== content) { content = next; changed = true }
         }
 
+
+	        const prevP = previews[p] || {}
+	        previews[p] = { ...prevP, after: content, sizeAfter: content.length }
+
         if (!dryRun && !rangesOnly && changed) {
           await atomicWrite(abs, content)
           advApplied += 1
@@ -278,6 +330,16 @@ export const applyEditsTargetedTool: AgentTool = {
       if (verify && !dryRun && !rangesOnly) {
         try { verification = tsVerify(args.tsconfigPath) } catch {}
       }
+
+	      const fileEditsPreview = Object.entries(previews).map(([p, v]) => ({
+	        path: p,
+	        before: clip(v.before),
+	        after: clip(v.after),
+	        sizeBefore: v.sizeBefore,
+	        sizeAfter: v.sizeAfter,
+	        truncated: (v.before && (v.before as string).length > MAX_PREVIEW) || (v.after && (v.after as string).length > MAX_PREVIEW) ? true : false,
+	      }))
+
       return {
         ok: true,
         applied: (resText.applied || 0) + astApplied + advApplied,
@@ -289,6 +351,7 @@ export const applyEditsTargetedTool: AgentTool = {
         dryRun,
         rangesOnly,
         verification,
+        fileEditsPreview,
       }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }

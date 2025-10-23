@@ -189,9 +189,12 @@ export function createMockFlowAPI(overrides?: Partial<FlowAPI>): FlowAPI {
     feWaitForUserInput: jest.fn(() => Promise.resolve('mock user input'))
   }
 
+  const emittedEvents: any[] = []
+
   const mockFlowAPI: FlowAPI = {
     nodeId: 'test-node',
     requestId: 'test-request',
+    executionId: 'test-exec',
     signal: new AbortController().signal,
     checkCancelled: jest.fn(),
     store: mockStore,
@@ -239,12 +242,17 @@ export function createMockFlowAPI(overrides?: Partial<FlowAPI>): FlowAPI {
     },
     waitForUserInput: jest.fn(() => mockStore.feWaitForUserInput()),
 
+    emitExecutionEvent: jest.fn((event) => {
+      emittedEvents.push(event)
+    }),
+
     // Expose test helpers
     _testHelpers: {
       logs,
       badges,
       streamChunks,
-      usageReports
+      usageReports,
+      emittedEvents
     },
 
     ...overrides

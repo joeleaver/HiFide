@@ -190,6 +190,30 @@ interface ContextAPI {
 }
 ```
 
+## Context Types and Store Sync
+
+We distinguish two execution context types. If `contextType` is omitted, treat it as `main`.
+
+- `main`: The primary conversation context for the current session
+- `isolated`: A separate, parallel conversation context (e.g., branch experimentation)
+
+Producers:
+- `defaultContextStart` MUST output `contextType: 'main'`
+- `newContext` MUST output `contextType: 'isolated'`
+
+Scheduler rules:
+- Contexts are immutable; the scheduler never mutates a context object in-place.
+- For main contexts, the scheduler ensures provider/model reflect the current session’s settings; isolated contexts keep their own provider/model.
+- UI sync:
+  - Calls `feUpdateMainFlowContext(context)` for both main and isolated contexts so they appear in the inspector (isolated contexts appear as separate tabs).
+  - Session persistence: only the scheduler syncs from its ExecutionContext to `Session.currentContext` (debounced). Nothing else should write to `Session.currentContext` directly.
+
+Passing context through the graph:
+- Context MUST be passed explicitly via edges. There is never an implicit fallback to a global/main context when a context edge exists.
+- The scheduler prioritizes starting successors that receive `context` to improve the odds that dependent pulls find a running producer.
+- Nodes may pull context only when there is exactly one incoming `context` edge and it hasn’t been pushed yet. When multiple edges target the same input, PULL is forbidden (see Ambiguity rules below), but PUSH is always allowed.
+
+
 ## Node Function Signature
 
 ```typescript
@@ -244,19 +268,19 @@ type NodeFunction = (
 interface NodeOutput {
   // Context output - REQUIRED for most nodes
   context?: MainFlowContext
-  
+
   // Data output - OPTIONAL
   data?: any
-  
+
   // Tools output - OPTIONAL (only for tools node)
   tools?: any[]
-  
+
   // Status - REQUIRED
   status: 'success' | 'error' | 'skipped'
-  
+
   // Error message if status is 'error'
   error?: string
-  
+
   // Execution metadata - OPTIONAL
   metadata?: {
     durationMs?: number
@@ -266,6 +290,37 @@ interface NodeOutput {
   }
 }
 ```
+
+
+## Canonical Naming and Edge Handles
+
+- Node property
+  - `nodeType` is the canonical node identifier. Never use `kind`.
+  - In renderer graphs, `type` may mirror `nodeType` for React Flow; use `nodeType` in code and persistence.
+
+- Edge handle names (inputs and outputs)
+  - `context`, `data`, `tools`
+  - If a handle name is omitted, it defaults to `context`.
+
+- Node I/O keys
+  - Outputs must use: `context`, `data`, `tools` (for tools node), `status` (`'success' | 'error' | 'skipped'`), and optional `error`, `metadata`.
+
+- Legacy handle variants (runtime-normalized by the scheduler)
+  - `contextIn` / `contextOut` / `ctx` → `context`
+  - `dataIn` / `dataOut` / `value` / `output` → `data`
+  - `toolsIn` / `toolsOut` → `tools`
+  - Prefer the canonical names everywhere (editor, node code, saved flows) and rely on normalization only for back-compat.
+
+- Dynamic handles (allowed)
+  - Intent routing: `{intent}-context`, `{intent}-data` (e.g., `plan-context`, `execute-data`).
+  - Node-specific inputs: `userMessage`, `assistantMessage` (injectMessages).
+  - Avoid `...In`/`...Out`/`ctx` suffixes beyond these dynamic cases; use lowerCamelCase descriptive names.
+
+- Tools edges are pull-only
+  - The scheduler never pushes `tools` outputs; nodes pull tools when needed.
+
+- Colors (editor)
+  - See `docs/connection-colors.md`. Purple = context, Green = data, Orange = tools.
 
 ## Example Node Implementations
 
@@ -495,6 +550,38 @@ const data = await inputs.pull('data')
 const result = await executeNode(nodeA)
 return result.data
 ```
+
+
+### Push/Pull Contract and Scheduler Rules
+
+- No empty pushes
+  - A node only pushes to a successor when it has at least one output value mapped to that successor’s target input(s). This avoids accidental “implicit pull” behavior.
+
+- Parallel push with context-first ordering
+  - The scheduler triggers all eligible successors in parallel for responsiveness.
+  - Successors that receive `context` are ordered first to improve the likelihood that dependent pulls resolve against an already-running producer.
+
+- Ambiguity rules (multiple incoming edges to the same input)
+  - Pull: forbidden. If multiple edges target the same input, `inputs.has(name)` returns `false` and `inputs.pull(name)` throws. Nodes must not attempt to pull such inputs.
+  - Push: allowed. Multiple predecessors may push to the same input.
+  - Start gating: If a successor has an input with multiple incoming edges and that input is not present in the coalesced pushed data, the scheduler defers starting that successor until that input is pushed (prevents an immediate forbidden pull).
+
+- In-flight execution reuse (no duplicate starts)
+  - If a successor is already executing and receives additional pushes, the scheduler feeds those values into the running execution (no new `executeNode` call).
+  - NodeInputs are live: `inputs.has()`/`inputs.pull()` consult a per-execution live buffer that includes late-pushed values.
+  - When pulling from a source node that is already executing, the scheduler awaits the in-flight result instead of spawning a duplicate execution.
+
+- Tools are pull-only
+  - `tools` edges never trigger pushes; nodes pull tools if/when needed.
+
+- Defaults
+  - Omitted handle names default to `context`.
+  - The scheduler canonicalizes legacy handle aliases at runtime (see Canonical Naming section).
+
+- Logging (for debugging)
+  - Each node’s PUSH phase logs normalized push edges and the collected inputs per successor.
+  - When deferring a start due to ambiguity, the scheduler logs the missing inputs it is waiting for.
+  - When feeding an in-flight successor, the scheduler logs the keys that were added to its live input buffer.
 
 ### Special Cases
 

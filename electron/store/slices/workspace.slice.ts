@@ -39,11 +39,13 @@ export interface WorkspaceSlice {
   fileWatchEvent: FileWatchEvent | null
   ctxRefreshing: boolean
   ctxResult: ContextRefreshResult | null
-  
+
   // Actions
   setWorkspaceRoot: (folder: string | null) => void
   addRecentFolder: (path: string) => void
   clearRecentFolders: () => void
+  // Centralized workspace bootstrap
+  ensureWorkspaceReady: (params: { baseDir: string; preferAgent?: boolean; overwrite?: boolean }) => Promise<{ ok: boolean }>
   openFolder: (folderPath: string) => Promise<{ ok: boolean; error?: string }>
   hasUnsavedChanges: () => boolean
   refreshContext: () => Promise<void>
@@ -61,19 +63,31 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
   fileWatchEvent: null,
   ctxRefreshing: false,
   ctxResult: null,
-  
+
   // Actions
   setWorkspaceRoot: (folder: string | null) => {
-    set({ workspaceRoot: folder })
+    const prev = get().workspaceRoot
+    // When switching workspace, reset index gating telemetry so we rebuild once for the new root
+    if (prev !== folder) {
+      set({ workspaceRoot: folder, idxLastRebuildAt: undefined } as any)
+    } else {
+      set({ workspaceRoot: folder } as any)
+    }
+    // Ensure tools resolve against the active workspace root
+    try {
+      if (folder) {
+        process.env.HIFIDE_WORKSPACE_ROOT = folder
+      }
+    } catch {}
   },
-  
+
   addRecentFolder: (path: string) => {
     const state = get() as any
     const existing = state.recentFolders || []
-    
+
     // Remove existing entry for this path
     const filtered = existing.filter((f: RecentFolder) => f.path !== path)
-    
+
     // Add to front and limit to MAX_RECENT_FOLDERS
     const updated = [
       { path, lastOpened: Date.now() },
@@ -100,7 +114,26 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
       console.error('[workspace] Failed to rebuild menu:', e)
     }
   },
-  
+
+  ensureWorkspaceReady: async ({ baseDir, preferAgent = false, overwrite = false }: { baseDir: string; preferAgent?: boolean; overwrite?: boolean }) => {
+    try {
+      // Fast bootstrap: create folders and minimal context only
+      await bootstrapWorkspace({ baseDir, preferAgent: false, overwrite })
+      // Optionally kick off AI-enhanced context in background
+      if (preferAgent) {
+        setTimeout(() => {
+          bootstrapWorkspace({ baseDir, preferAgent: true, overwrite: false }).catch((e) => {
+            console.error('[workspace] ensureWorkspaceReady agent-context failed:', e)
+          })
+        }, 100)
+      }
+      return { ok: true }
+    } catch (e) {
+      console.error('[workspace] ensureWorkspaceReady failed:', e)
+      return { ok: false }
+    }
+  },
+
   hasUnsavedChanges: () => {
     const state = get() as any
 
@@ -113,7 +146,7 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
 
     return false
   },
-  
+
   openFolder: async (folderPath: string) => {
     console.log('[workspace] openFolder called with:', folderPath)
     // Store the old workspace root in case we need to restore it on error
@@ -184,7 +217,7 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
         if (state.setStartupMessage) state.setStartupMessage(null)
         return { ok: false, error: String(error) }
       }
-      
+
       // 5. Add to recent folders
       console.log('[workspace] Step 5: Adding to recent folders')
       state.addRecentFolder(folderPath)
@@ -194,19 +227,14 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
       console.log('[workspace] Step 6: Bootstrapping workspace folders')
       if (state.setStartupMessage) state.setStartupMessage('Initializing workspace folders...')
       try {
-        // Create folders and basic context (no LLM call - fast)
-        await bootstrapWorkspace({ baseDir: folderPath, preferAgent: false, overwrite: false })
+        // Centralized bootstrap
+        if (state.ensureWorkspaceReady) {
+          await state.ensureWorkspaceReady({ baseDir: folderPath, preferAgent: true, overwrite: false })
+        }
         console.log('[workspace] Step 6 complete')
       } catch (e) {
         console.error('[workspace] Failed to bootstrap workspace:', e)
       }
-
-      // 6b. Generate AI-enhanced context in the background (don't await)
-      setTimeout(() => {
-        bootstrapWorkspace({ baseDir: folderPath, preferAgent: true, overwrite: false }).catch((e) => {
-          console.error('[workspace] Failed to generate AI context:', e)
-        })
-      }, 100)
 
       // 7. Update workspace root BEFORE loading sessions
       // This ensures that session loading, flow loading, and settings saving all use the correct workspace
@@ -216,6 +244,8 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
         explorerOpenFolders: [folderPath],
         explorerChildrenByDir: {}
       } as any)
+      // Ensure tools resolve against the active workspace root
+      try { process.env.HIFIDE_WORKSPACE_ROOT = folderPath } catch {}
       console.log('[workspace] workspaceRoot updated, current value:', get().workspaceRoot)
 
       // 8. Reload sessions from new workspace
@@ -276,26 +306,17 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
       console.log('[workspace] Step 11: Loading file tree')
       if (state.setStartupMessage) state.setStartupMessage('Loading file tree...')
 
-      // 11b. Check index status and build if needed
+      // 11b. Indexing gate: check heuristics and rebuild if needed (blocking)
       try {
-        console.log('[workspace] Step 11b: Checking code index')
+        console.log('[workspace] Step 11b: Checking code index (heuristics)')
         if (state.setStartupMessage) state.setStartupMessage('Checking code index...')
-        if (state.refreshIndexStatus) {
-          await state.refreshIndexStatus()
-        }
-        const st = state.idxStatus
-        const ready = !!st?.ready
-        const chunks = st?.chunks ?? 0
-        console.log('[workspace] Index status - ready:', ready, 'chunks:', chunks)
-        if (!ready && chunks === 0) {
-          console.log('[workspace] Rebuilding index...')
-          if (state.rebuildIndex) {
-            await state.rebuildIndex()
-          }
+        if (state.refreshIndexStatus) await state.refreshIndexStatus()
+        if (state.maybeAutoRebuildAndWait) {
+          await state.maybeAutoRebuildAndWait()
         }
         console.log('[workspace] Step 11b complete')
       } catch (e) {
-        console.error('[workspace] Failed to check/rebuild index:', e)
+        console.error('[workspace] Failed during indexing gate:', e)
       }
 
       // Refresh context
@@ -321,7 +342,7 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
       // 12. File watching is handled by the IPC layer (fs:watchStart)
       // The renderer will set up file watching via window.fs.watchDir
       // This is intentionally left to the renderer since it needs to subscribe to events
-      
+
       // Done
       set({ appBootstrapping: false } as any)
       if (state.setStartupMessage) state.setStartupMessage(null)
@@ -336,7 +357,7 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
       return { ok: false, error: String(error) }
     }
   },
-  
+
   refreshContext: async () => {
     const state = get() as any
     const folder = state.workspaceRoot

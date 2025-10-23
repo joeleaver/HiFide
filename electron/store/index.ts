@@ -1,9 +1,9 @@
 /**
  * Main Process Zustand Store
- * 
+ *
  * This is the single source of truth for application state.
  * The renderer process will sync with this store via @zubridge/electron.
- * 
+ *
  * Architecture:
  * - Main process owns the store and can directly read/write
  * - Renderer process gets a synced copy via zubridge
@@ -249,6 +249,11 @@ export const useMainStore = create<AppStore>()(
         // NOTE: pricingConfig is NOT persisted - always initialized from DEFAULT_PRICING
         // This ensures new models are available immediately without requiring app restart
 
+
+        // Indexing (persist only config/telemetry we care about)
+        idxAutoRefresh: (state as any).idxAutoRefresh,
+        idxLastRebuildAt: (state as any).idxLastRebuildAt,
+
         // Workspace
         workspaceRoot: state.workspaceRoot,
         recentFolders: state.recentFolders,
@@ -290,11 +295,34 @@ export const useMainStore = create<AppStore>()(
         // workspaceRoot is now the single source of truth - no need to sync to APP_ROOT
         if (state?.workspaceRoot) {
           console.log('[store] Restored workspaceRoot from persistence:', state.workspaceRoot)
+          try { process.env.HIFIDE_WORKSPACE_ROOT = state.workspaceRoot } catch {}
         }
       },
     }
   )
 )
+
+// Development-only: log actual main-store mutations to distinguish renderer heartbeat resyncs
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    // Minimal shallow diff to see which top-level keys truly change in MAIN
+    const shallowDiff = (a: any, b: any): string[] => {
+      const keys = new Set<string>([...Object.keys(a || {}), ...Object.keys(b || {})])
+      const changed: string[] = []
+      for (const k of keys) {
+        if ((a as any)?.[k] !== (b as any)?.[k]) changed.push(k)
+      }
+      return changed
+    }
+    ;(useMainStore as any).subscribe?.((next: any, prev: any) => {
+      const diffs = shallowDiff(prev, next)
+      if (diffs.length) {
+        console.debug('🗂️ [main-store] changed keys:', diffs)
+      }
+    })
+  } catch {}
+}
+
 
 /**
  * Initialize the main store

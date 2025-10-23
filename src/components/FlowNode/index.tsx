@@ -4,6 +4,7 @@ import NodeHeader from './NodeHeader'
 import NodeStatusBadges from './NodeStatusBadges'
 import NodeConfig from './NodeConfig'
 import { getNodeColor } from '../../../electron/store/utils/node-colors'
+import { useRerenderTrace } from '../../utils/perf'
 
 function getNodeTypeFromIdOrData(id: string, data: any): string {
   if (data?.nodeType) return data.nodeType
@@ -61,6 +62,19 @@ export default function FlowNode(props: NodeProps<any>) {
     // Otherwise use selection or default
     return selected ? '0 4px 12px rgba(86, 156, 214, 0.3)' : '0 2px 4px rgba(0,0,0,0.4)'
   }
+
+  // Dev-only: trace node re-renders with concise signals
+  const styleSig = `${Boolean(style?.border)}:${Boolean(style?.boxShadow)}`
+  const configSig = (() => {
+    try { return Object.keys(config || {}).join('|') } catch { return '' }
+  })()
+  useRerenderTrace(`FlowNode(${nodeType}:${id})`, {
+    selected: Boolean(selected),
+    status: status || '',
+    expanded: Boolean(expanded),
+    styleSig,
+    configSig,
+  })
 
   return (
     <div

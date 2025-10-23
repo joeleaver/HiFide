@@ -43,12 +43,15 @@ export const newContextNode: NodeFunction = async (flow, _context, dataIn, _inpu
     systemInstructions
   })
 
-  // Assign deterministic contextId for testability and routing; no extra UI fields
-  ;(newContext as any).contextId = `context-${flow.nodeId}`
-  flow.log.debug('Created context', { provider, model, contextId: (newContext as any).contextId })
+  // Mark as isolated and set deterministic id for testability
+  const isolatedContext = flow.context.update(newContext, {
+    contextType: 'isolated' as const,
+    contextId: `context-${flow.nodeId}`
+  } as any)
+  flow.log.debug('Created context', { provider, model, contextId: (isolatedContext as any).contextId })
 
   return {
-    context: newContext,
+    context: isolatedContext,
     data: dataIn, // Pass through any data
     status: 'success'
   }

@@ -30,11 +30,15 @@ import { getNodeFunction } from './nodes'
 import { createContextAPI } from './context-api'
 import { createEventEmitter } from './execution-events'
 
+import util from 'node:util'
+
 export class FlowScheduler {
   // Graph structure
   private flowDef: FlowDefinition
   private incomingEdges = new Map<string, Edge[]>()
   private outgoingEdges = new Map<string, Edge[]>()
+
+
 
   // Cached store reference (lazy-loaded to avoid circular dependency)
   private storeCache: any = null
@@ -63,9 +67,21 @@ export class FlowScheduler {
   // User input promises: for nodes waiting for external input
   private userInputResolvers = new Map<string, (value: string) => void>()
 
+  // Input waiters (for gating starts on required inputs like 'context')
+  private inputWaiters = new Map<string, Map<string, Array<() => void>>>()
+
   // Multi-context tracking: main context + isolated contexts
   private mainContext: MainFlowContext
   private isolatedContexts = new Map<string, MainFlowContext>()
+
+  // Track in-flight node executions to avoid duplicate work during pulls
+  private inFlightExecutions = new Map<string, Promise<NodeOutput>>()
+
+  // Live pushed inputs for the current execution of each node (mutable during execution)
+  private pushedInputsByNode = new Map<string, Record<string, any>>()
+
+  // Pending pushed inputs for nodes not yet started (coalesced until safe to start)
+  private pendingPushesByNode = new Map<string, Record<string, any>>()
 
   // Output memoization - cache node outputs to prevent duplicate execution
   // private nodeOutputCache = new Map<string, NodeOutput>()
@@ -112,6 +128,9 @@ export class FlowScheduler {
     }
 
     this.buildGraphStructure()
+    // Mark private helpers as referenced to satisfy noUnusedPrivateMembers while keeping them available
+    void this.waitForNodeInput
+
   }
 
   /**
@@ -135,29 +154,159 @@ export class FlowScheduler {
   }
 
   /**
+   * Canonicalize handle names to core outputs/inputs used by the scheduler
+   * We accept common variants from the editor (e.g., contextIn/contextOut, dataOut/value)
+   */
+  private canonicalizeHandleName(name?: string | null): 'context' | 'data' | 'tools' | string {
+    if (!name) return 'context'
+    const raw = String(name).trim().toLowerCase()
+    // remove separators for easy matching
+    const n = raw.replace(/\s+|[-_]/g, '')
+
+    // context synonyms
+    if (n === 'context' || n === 'contextin' || n === 'contextout' || n === 'ctx' || n === 'ctxin' || n === 'ctxout') {
+      return 'context'
+    }
+
+    // data/value synonyms
+    if (n === 'data' || n === 'datain' || n === 'dataout' || n === 'value' || n === 'output') {
+      return 'data'
+    }
+
+    // tools synonyms
+    if (n === 'tools' || n === 'toolsin' || n === 'toolsout') {
+      return 'tools'
+    }
+
+    // Unknown: keep original to avoid over-normalizing
+    return name
+  }
+
+  /**
    * Build graph structure for efficient edge lookups
+   *
+   * Portals are treated as invisible wiring. We rewrite edges so that
+   * portalInput -> portalOutput connections are bridged directly between
+   * the original source and the final target, matching by handle name.
    */
   private buildGraphStructure(): void {
-    for (const edge of this.flowDef.edges) {
-      // Use handle names directly as field names (no mapping needed!)
-      // sourceHandle 'context' → sourceOutput 'context'
-      // targetHandle 'context' → targetInput 'context'
-      const mappedEdge: Edge = {
-        ...edge,
-        sourceOutput: edge.sourceHandle || 'context',
-        targetInput: edge.targetHandle || 'context',
-      }
+    // Clear any previous maps (defensive if called more than once)
+    this.incomingEdges.clear()
+    this.outgoingEdges.clear()
 
-      // Incoming edges (for pulling)
-      const incoming = this.incomingEdges.get(edge.target) || []
-      incoming.push(mappedEdge)
-      this.incomingEdges.set(edge.target, incoming)
 
-      // Outgoing edges (for pushing)
-      const outgoing = this.outgoingEdges.get(edge.source) || []
-      outgoing.push(mappedEdge)
-      this.outgoingEdges.set(edge.source, outgoing)
+    const nodesById = new Map<string, any>()
+    for (const n of this.flowDef.nodes) {
+      nodesById.set(n.id, n)
     }
+
+    // Canonicalize all declared edges first
+    const baseEdges: Edge[] = []
+    for (const edge of this.flowDef.edges) {
+      const mapped: Edge = {
+        ...edge,
+        sourceOutput: this.canonicalizeHandleName(edge.sourceHandle),
+        targetInput: this.canonicalizeHandleName(edge.targetHandle),
+      }
+      baseEdges.push(mapped)
+    }
+
+    // Build portal index by portal id (config.id)
+    const portalInputsByKey = new Map<string, string[]>() // portalId -> nodeIds
+    const portalOutputsByKey = new Map<string, string[]>()
+
+    for (const n of this.flowDef.nodes) {
+      const nodeType = (n as any).nodeType || (n as any).type
+      if (nodeType !== 'portalInput' && nodeType !== 'portalOutput') continue
+      const pid = (n as any)?.config?.id
+      if (!pid) continue
+      if (nodeType === 'portalInput') {
+        const arr = portalInputsByKey.get(pid) || []
+        arr.push(n.id)
+        portalInputsByKey.set(pid, arr)
+      } else {
+        const arr = portalOutputsByKey.get(pid) || []
+        arr.push(n.id)
+        portalOutputsByKey.set(pid, arr)
+      }
+    }
+
+    // Helper to check whether an edge touches a portal node
+    const isPortalNodeId = (id: string) => {
+      const node = nodesById.get(id)
+      if (!node) return false
+      const t = (node as any).nodeType || (node as any).type
+      return t === 'portalInput' || t === 'portalOutput'
+    }
+
+    // Collect edges that do NOT touch portals
+    const nonPortalEdges: Edge[] = baseEdges.filter(e => !isPortalNodeId(e.source) && !isPortalNodeId(e.target))
+
+    // For each portal key, create bridged edges from incoming-to-portalInput to outgoing-from-portalOutput
+    const bridgedEdges: Edge[] = []
+    for (const [portalKey, inputNodeIds] of portalInputsByKey.entries()) {
+      const outputNodeIds = portalOutputsByKey.get(portalKey) || []
+      if (outputNodeIds.length === 0) continue // no outputs => nothing to bridge
+
+      // Incoming edges to any portalInput with this key
+      const incomingToPortal: Edge[] = baseEdges.filter(e => inputNodeIds.includes(e.target))
+      // Outgoing edges from any portalOutput with this key
+      const outgoingFromPortal: Edge[] = baseEdges.filter(e => outputNodeIds.includes(e.source))
+
+      // Bridge by matching handle names: sourceOutput (incoming) -> targetInput (outgoing)
+      for (const out of outgoingFromPortal) {
+        for (const inn of incomingToPortal) {
+          if (out.targetInput !== inn.sourceOutput) continue // only bridge like-for-like handles
+
+          const newEdge: Edge = {
+            id: `bridge:${inn.id}=>${out.id}`,
+            source: inn.source,
+            sourceOutput: inn.sourceOutput,
+            sourceHandle: inn.sourceOutput, // keep for compatibility
+            target: out.target,
+            targetInput: out.targetInput,
+            targetHandle: out.targetInput,
+            metadata: {
+              ...(inn.metadata || {}),
+              // Preserve explicit context flag if either side marked it
+              isContextEdge: (inn.metadata?.isContextEdge ?? false) || (out.metadata?.isContextEdge ?? false)
+            }
+          }
+          bridgedEdges.push(newEdge)
+        }
+      }
+    }
+
+    // Combine and de-duplicate edges
+    const dedup = new Map<string, Edge>()
+    const pushUnique = (e: Edge) => {
+      const key = `${e.source}|${e.sourceOutput}|${e.target}|${e.targetInput}`
+      if (!dedup.has(key)) dedup.set(key, e)
+    }
+
+    for (const e of nonPortalEdges) pushUnique(e)
+    for (const e of bridgedEdges) pushUnique(e)
+
+    const finalEdges = Array.from(dedup.values())
+
+    // Populate incoming/outgoing maps
+    for (const e of finalEdges) {
+      const incoming = this.incomingEdges.get(e.target) || []
+      incoming.push(e)
+      this.incomingEdges.set(e.target, incoming)
+
+      const outgoing = this.outgoingEdges.get(e.source) || []
+      outgoing.push(e)
+      this.outgoingEdges.set(e.source, outgoing)
+    }
+
+    // Debug: show bridged wiring summary
+    try {
+      const bridgedCount = bridgedEdges.length
+      if (bridgedCount > 0) {
+        console.log(`[Scheduler] Portal bridging created ${bridgedCount} virtual edge(s) (portals invisible).`)
+      }
+    } catch {}
   }
 
   /**
@@ -170,10 +319,34 @@ export class FlowScheduler {
     try {
       // Find the entry node - there should be exactly one: defaultContextStart
       // We explicitly look for this node type rather than assuming nodes with no incoming edges are entry nodes
-      const entryNode = this.flowDef.nodes.find(n => n.type === 'defaultContextStart')
+      let entryNode = this.flowDef.nodes.find((n: any) => (n.nodeType === 'defaultContextStart') || (n.type === 'defaultContextStart'))
 
       if (!entryNode) {
-        throw new Error('No defaultContextStart node found in flow - every flow must have exactly one entry node')
+        // Fallback: allow flows without defaultContextStart by selecting the single node with no incoming edges
+        const incomingByTarget = new Map<string, number>()
+        for (const n of this.flowDef.nodes) incomingByTarget.set(n.id, 0)
+        for (const e of this.flowDef.edges) {
+          incomingByTarget.set(e.target, (incomingByTarget.get(e.target) || 0) + 1)
+        }
+        const candidates = this.flowDef.nodes.filter(n => (incomingByTarget.get(n.id) || 0) === 0)
+        if (candidates.length === 1) {
+          console.warn('[FlowScheduler] No defaultContextStart found - using lone entry node', candidates[0].id)
+          entryNode = candidates[0]
+        } else {
+          throw new Error('No defaultContextStart node found in flow - every flow must have exactly one entry node')
+        }
+      }
+
+      // Before starting, override provider/model from global selection to match UI
+      try {
+        const store = await this.getStore()
+        const provider = store?.selectedProvider || 'openai'
+        const model = store?.selectedModel || 'gpt-4o'
+        this.mainContext.provider = provider
+        this.mainContext.model = model
+        console.log('[Scheduler] Using global selection for main context:', { provider, model })
+      } catch (e) {
+        console.warn('[Scheduler] Could not read global selection; using existing context provider/model')
       }
 
       // Execute the entry node with the scheduler's main context
@@ -219,7 +392,18 @@ export class FlowScheduler {
       isPull
     })
 
-    return this.doExecuteNode(nodeId, pushedInputs, callerId, isPull)
+    // Register initial pushed inputs for this execution (mutable during execution)
+    this.pushedInputsByNode.set(nodeId, { ...(pushedInputs || {}) })
+
+    // Register in-flight execution so pulls can await instead of re-executing
+    const promise = this.doExecuteNode(nodeId, pushedInputs, callerId, isPull)
+    this.inFlightExecutions.set(nodeId, promise)
+    // Clean up when done
+    promise.finally(() => {
+      this.inFlightExecutions.delete(nodeId)
+      this.pushedInputsByNode.delete(nodeId)
+    })
+    return promise
   }
 
   /**
@@ -247,9 +431,8 @@ export class FlowScheduler {
     store.feHandleNodeStart(nodeId)
 
     try {
-      // Refresh main context provider/model from Zustand before executing
-      // This ensures we always use the latest values from the UI for the main context
-      await this.refreshMainContextFromStore()
+      // Do NOT refresh from store here. The scheduler is the source of truth during execution.
+      // The UI should reflect the scheduler's ExecutionContext, not the other way around.
 
       // Get node configuration from renderer (fresh on every execution)
       const nodeConfig = this.flowDef.nodes.find(n => n.id === nodeId)
@@ -274,10 +457,10 @@ export class FlowScheduler {
       // Create FlowAPI instance for this node execution
       const flowAPI = this.createFlowAPI(nodeId, executionId)
 
-      // Create NodeInputs with pull/has functions
+      // Create NodeInputs with simple pull/has (no cross-input correlation)
       const inputs: NodeInputs = {
         pull: this.createPullFunction(nodeId),
-        has: this.createHasFunction(nodeId, pushedInputs)
+        has: this.createHasFunction(nodeId)
       }
 
       // Execute the node function with new signature
@@ -287,38 +470,43 @@ export class FlowScheduler {
       // Update context tracking based on result
       if (result.context) {
         const resultContext = result.context
+        const nodeType = (nodeConfig as any)?.nodeType || (nodeConfig as any)?.type
+        const isPortalNode = nodeType === 'portalInput' || nodeType === 'portalOutput'
 
-        if (resultContext.contextType === 'main' || !resultContext.contextType) {
-          // Update main context
-          this.mainContext = resultContext
-          console.log(`[Scheduler] ${nodeId} - Updated main context:`, {
-            contextId: this.mainContext.contextId,
-            messageHistoryLength: this.mainContext.messageHistory.length
-          })
+        if (!isPortalNode) {
+          if (resultContext.contextType === 'main' || !resultContext.contextType) {
+            // Update main context
+            this.mainContext = resultContext
+            console.log(`[Scheduler] ${nodeId} - Updated main context:`, {
+              contextId: this.mainContext.contextId,
+              messageHistoryLength: this.mainContext.messageHistory.length
+            })
 
-          // Sync to store for UI display
-          console.log(`[Scheduler] ${nodeId} - About to call feUpdateMainFlowContext`)
-          store.feUpdateMainFlowContext(this.mainContext)
-          console.log(`[Scheduler] ${nodeId} - feUpdateMainFlowContext returned`)
-        } else if (resultContext.contextType === 'isolated') {
-          // Update isolated context
-          this.isolatedContexts.set(resultContext.contextId, resultContext)
-          console.log(`[Scheduler] ${nodeId} - Updated isolated context:`, {
-            contextId: resultContext.contextId,
-            messageHistoryLength: resultContext.messageHistory.length,
-            totalIsolatedContexts: this.isolatedContexts.size
-          })
+            // Sync to store for UI display
+            console.log(`[Scheduler] ${nodeId} - About to call feUpdateMainFlowContext`)
+            store.feUpdateMainFlowContext(this.mainContext)
+            console.log(`[Scheduler] ${nodeId} - feUpdateMainFlowContext returned`)
+          } else if (resultContext.contextType === 'isolated') {
+            // Update isolated context
+            this.isolatedContexts.set(resultContext.contextId, resultContext)
+            console.log(`[Scheduler] ${nodeId} - Updated isolated context:`, {
+              contextId: resultContext.contextId,
+              messageHistoryLength: resultContext.messageHistory.length,
+              totalIsolatedContexts: this.isolatedContexts.size
+            })
 
-          // Also sync to store (for now, just use the main context update)
-          // TODO: Update store to handle multiple contexts
-          store.feUpdateMainFlowContext(resultContext)
+            // Update UI tabs for isolated contexts; store handles not syncing to session
+            store.feUpdateMainFlowContext(resultContext)
+          }
+        } else {
+          // Portal nodes are transparent; do not sync context to store to avoid noise
+          // We also skip internal main/isolated context updates as they should not change here
         }
       }
 
       const durationMs = Date.now() - startTime
-      console.log(`[Scheduler] ${nodeId} - Calling feHandleNodeEnd, durationMs:`, durationMs)
+      // Reduced logging
       store.feHandleNodeEnd(nodeId, durationMs)
-      console.log(`[Scheduler] ${nodeId} - feHandleNodeEnd completed`)
 
       // Check for error status - stop execution if node failed
       if (result.status === 'error') {
@@ -328,19 +516,11 @@ export class FlowScheduler {
         throw new Error(errorMsg)
       }
 
-      console.log(`[Scheduler] ${nodeId} - About to enter PUSH phase, isPull:`, isPull)
-
       // PUSH PHASE: Call successors with our outputs
       // Skip this phase if node was executed via pull (caller is waiting for return value)
       if (!isPull) {
         // Note: Some nodes (like tools) are pull-only and don't push to successors
         const outgoingEdges = this.outgoingEdges.get(nodeId) || []
-
-        console.log(`[Scheduler] ${nodeId} - PUSH phase:`, {
-          outgoingEdges: outgoingEdges.length,
-          resultKeys: Object.keys(result),
-          status: result.status
-        })
 
         // Filter out pull-only edges (tools edges should only be pulled, not pushed)
         const pushEdges = outgoingEdges.filter(edge => {
@@ -351,31 +531,110 @@ export class FlowScheduler {
           return true
         })
 
-        const successorIds = new Set(pushEdges.map(e => e.target))
+        // Debug: show normalized push edges for this node
+        try {
+          const dbgEdges = pushEdges.map(e => ({ target: e.target, sourceOutput: e.sourceOutput, targetInput: e.targetInput }))
+          console.log(`[Scheduler] ${nodeId} - pushEdges:`, dbgEdges)
+        } catch {}
+
+        // Order successors so we start context recipients first, improving odds of dependent pulls succeeding
+        const successorIds = Array.from(new Set(pushEdges.map(e => e.target)))
+        successorIds.sort((a, b) => {
+          const aHasContext = pushEdges.some(e => e.target === a && e.targetInput === 'context') ? 1 : 0
+          const bHasContext = pushEdges.some(e => e.target === b && e.targetInput === 'context') ? 1 : 0
+          return bHasContext - aHasContext
+        })
+
+        // Kick off all pushes in parallel so pulls can await in-flight producers
+        const runnables: Promise<any>[] = []
 
         for (const successorId of successorIds) {
           // Collect all outputs going to this successor
           const pushedData: Record<string, any> = {}
+          const considered: Array<{sourceOutput: string, targetInput: string, inResult: boolean}> = []
 
           for (const edge of pushEdges) {
             if (edge.target === successorId) {
               const sourceOutput = edge.sourceOutput
               const targetInput = edge.targetInput
 
-              if (sourceOutput in result) {
+              const inResult = sourceOutput in result
+              considered.push({ sourceOutput, targetInput, inResult })
+
+              if (inResult) {
                 const value = (result as any)[sourceOutput]
                 pushedData[targetInput] = value
               }
             }
           }
 
+
+          try {
+            console.log(`[Scheduler] ${nodeId} - collect for ${successorId}:`, considered)
+          } catch {}
+
           // Only push to successor if we have data to push
           // This prevents calling successors with empty inputs (which would be treated as a pull)
           if (Object.keys(pushedData).length > 0) {
-            console.log(`[Scheduler] ${nodeId} - Pushing to ${successorId}:`, Object.keys(pushedData))
-            await this.executeNode(successorId, pushedData, nodeId)
+            const inFlight = this.inFlightExecutions.get(successorId)
+            if (inFlight) {
+              // Feed the currently in-flight execution; do not start a new one
+              const current = this.pushedInputsByNode.get(successorId) || {}
+              const merged = { ...current, ...pushedData }
+              this.pushedInputsByNode.set(successorId, merged)
+              try { this.resolveNodeInputWaiters(successorId, Object.keys(pushedData)) } catch {}
+              const ctxDbg = merged.context ? { provider: merged.context.provider, model: merged.context.model, contextType: merged.context.contextType } : undefined
+              console.log(`[Scheduler] ${nodeId} - Fed in-flight ${successorId} with:`, Object.keys(pushedData), ctxDbg)
+
+            } else {
+              // Coalesce pending pushes until it's safe to start (avoid ambiguous pulls)
+              const curPending = this.pendingPushesByNode.get(successorId) || {}
+              const merged = { ...curPending, ...pushedData }
+              this.pendingPushesByNode.set(successorId, merged)
+              // Resolve any waiters for inputs we just coalesced
+              try { this.resolveNodeInputWaiters(successorId, Object.keys(pushedData)) } catch {}
+
+              // Determine if any inputs have multiple incoming edges (ambiguous pull)
+              // If so, require that those inputs be present in merged before starting
+              const incoming = this.incomingEdges.get(successorId) || []
+              const counts = new Map<string, number>()
+              for (const e of incoming) {
+                if (e.targetInput === 'tools') continue // tools are pull-only
+                counts.set(e.targetInput, (counts.get(e.targetInput) || 0) + 1)
+              }
+              const missingAmbiguous = Array.from(counts.entries())
+                .filter(([name, count]) => count > 1 && !(name in merged))
+                .map(([name]) => name)
+
+              // Require context to be present before starting if the successor has any context input edge
+              const requiresContext = incoming.some(e => e.targetInput === 'context')
+              const missingContext = requiresContext && !('context' in merged)
+
+              if (missingAmbiguous.length === 0 && !missingContext) {
+                // Safe to start now
+                const initial = { ...merged }
+                this.pendingPushesByNode.delete(successorId)
+                const ctxDbg = initial.context ? { provider: initial.context.provider, model: initial.context.model, contextType: initial.context.contextType } : undefined
+                console.log(`[Scheduler] ${nodeId} - Starting ${successorId} with initial pushed:`, Object.keys(initial), ctxDbg)
+                runnables.push(this.executeNode(successorId, initial, nodeId))
+              } else {
+                const waitingFor = [...missingAmbiguous]
+                if (missingContext) waitingFor.push('context')
+                console.log(`[Scheduler] ${nodeId} - Deferring start of ${successorId}; waiting for:`, waitingFor)
+              }
+            }
           } else {
             console.log(`[Scheduler] ${nodeId} - NOT pushing to ${successorId} (no data)`)
+          }
+        }
+
+        if (runnables.length) {
+          // Fire-and-forget: do not await successors
+          for (const p of runnables) {
+            p.catch((err) => {
+              console.error(`[Scheduler] ${nodeId} - Successor error:`, err)
+              try { store.feHandleError(err?.message || String(err)) } catch {}
+            })
           }
         }
       } else {
@@ -490,7 +749,11 @@ export class FlowScheduler {
    * Routes events to appropriate store handlers based on event type
    */
   private async handleExecutionEvent(event: ExecutionEvent): Promise<void> {
-    console.log(`[ExecutionEvent] ${event.nodeId} [${event.executionId}]:`, event.type, event)
+    // Only log tool events for debugging
+    if (event.type === 'tool_start' || event.type === 'tool_end' || event.type === 'tool_error') {
+      console.log(`[ExecutionEvent] ${event.nodeId} [${event.executionId}]: ${event.type}`)
+      console.log(util.inspect(event, { depth: null, colors: false, maxArrayLength: 200 }))
+    }
 
     const store = await this.getStore()
 
@@ -516,7 +779,12 @@ export class FlowScheduler {
 
       case 'tool_end':
         if (event.tool) {
-          store.feHandleToolEnd(event.tool.toolName, event.tool.toolCallId, event.nodeId)
+          store.feHandleToolEnd(
+            event.tool.toolName,
+            event.tool.toolCallId,
+            event.nodeId,
+            event.tool.toolResult
+          )
         }
         break
 
@@ -574,29 +842,58 @@ export class FlowScheduler {
    * Create pull function for a node
    * Allows nodes to lazily pull from connected inputs
    */
-  private createPullFunction(nodeId: string): (inputName: string) => Promise<any> {
+  private createPullFunction(
+    nodeId: string
+  ): (inputName: string) => Promise<any> {
     return async (inputName: string) => {
       console.log(`[Pull] ${nodeId} attempting to pull ${inputName}`)
 
+      // First, check if this input was pushed to the current execution already (late push support)
+      const livePushed = this.pushedInputsByNode.get(nodeId) || {}
+      if (inputName in livePushed) {
+        return (livePushed as any)[inputName]
+      }
+
       const incomingEdges = this.incomingEdges.get(nodeId) || []
-      console.log(`[Pull] ${nodeId} has ${incomingEdges.length} incoming edges`)
+      const edgesForInput = incomingEdges.filter(e => e.targetInput === inputName)
 
-      const edge = incomingEdges.find(e => e.targetInput === inputName)
-
-      if (!edge) {
+      if (edgesForInput.length === 0) {
         console.error(`[Pull] ${nodeId} - No edge found for input '${inputName}'`)
         throw new Error(`No edge found for input '${inputName}' on node '${nodeId}'`)
       }
 
+      if (edgesForInput.length > 1) {
+        console.error(`[Pull] ${nodeId} - Invalid graph: multiple edges target input '${inputName}'`)
+        throw new Error(`Invalid graph: multiple edges target input '${inputName}' on node '${nodeId}'`)
+      }
+
+      const edge = edgesForInput[0]
       console.log(`[Pull] ${nodeId} pulling ${inputName} from ${edge.source}.${edge.sourceOutput}`)
 
-      // Execute source node to get the value
-      // Pass isPull=true to prevent the source from pushing to successors
-      const sourceResult = await this.executeNode(edge.source, {}, nodeId, true)
+      // If source node is already executing, await its result instead of re-executing
+      const inFlight = this.inFlightExecutions.get(edge.source)
+      if (inFlight) {
+        try {
+          const res = await inFlight
+          if (edge.sourceOutput in res) {
+            return (res as any)[edge.sourceOutput]
+          }
+          return undefined
+        } catch (e) {
+          throw e
+        }
+      }
 
-      console.log(`[Pull] ${nodeId} received result from ${edge.source}`)
 
-      // Extract the specific output
+
+      // Execute source node to get the value (pull-only) — include any pending pushed inputs as initial
+      const initialFromPending = { ...(this.pendingPushesByNode.get(edge.source) || {}) }
+      if (Object.keys(initialFromPending).length > 0) {
+        // Clear pending; execute will register pushed for this run
+        this.pendingPushesByNode.delete(edge.source)
+      }
+      const sourceResult = await this.executeNode(edge.source, initialFromPending, nodeId, true)
+
       if (edge.sourceOutput in sourceResult) {
         return (sourceResult as any)[edge.sourceOutput]
       }
@@ -607,33 +904,77 @@ export class FlowScheduler {
 
   /**
    * Create has function for a node
-   * Checks if an input is available (either pushed OR can be pulled)
-   *
-   * IMPORTANT: If an input was already pushed, we should NOT try to pull from other edges
-   * targeting the same input. This prevents pulling from edges we already received data from.
+   * Checks if an input is available (pushed or can be pulled)
    */
-  private createHasFunction(nodeId: string, pushedInputs: Record<string, any>): (inputName: string) => boolean {
+  private createHasFunction(
+    nodeId: string
+  ): (inputName: string) => boolean {
     return (inputName: string) => {
-      // If input was already pushed, we have it - don't pull
-      if (inputName in pushedInputs) {
+      // If input was already pushed to the CURRENT execution, we have it
+      const pushed = this.pushedInputsByNode.get(nodeId) || {}
+      if (inputName in pushed) {
         return true
       }
 
-      // Check if there's an edge connected to this input that we can pull from
-      // Only return true if we can pull (input not already satisfied)
       const incomingEdges = this.incomingEdges.get(nodeId) || []
       const edgesForInput = incomingEdges.filter(e => e.targetInput === inputName)
 
-      // If multiple edges target the same input, this is invalid graph structure
-      // We can't pull because we don't know which edge to use
+      // If exactly one incoming edge, this input can be pulled (if needed)
+      if (edgesForInput.length === 1) {
+        return true
+      }
+
+      // If multiple incoming edges, we cannot PULL (ambiguous), but PUSH is still allowed.
+      // Do not treat this as a hard error in `has()` — simply report as "not available"
+      // so nodes won't attempt to pull. If a predecessor PUSHES, it will still work.
       if (edgesForInput.length > 1) {
-        console.warn(`[Scheduler] ${nodeId} - Multiple edges target input '${inputName}' - cannot pull`)
         return false
       }
 
-      return edgesForInput.length === 1
+      // No incoming edges — not available
+      return false
     }
   }
+
+  /**
+   * Wait until a specific input is available (pushed or pending) for a node
+   */
+  private async waitForNodeInput(nodeId: string, inputName: string): Promise<void> {
+    // Fast path: if already available, return immediately
+    const pushed = this.pushedInputsByNode.get(nodeId) || {}
+    const pending = this.pendingPushesByNode.get(nodeId) || {}
+    if (inputName in pushed || inputName in pending) return
+
+    return new Promise<void>((resolve) => {
+      let byInput = this.inputWaiters.get(nodeId)
+      if (!byInput) {
+        byInput = new Map<string, Array<() => void>>()
+        this.inputWaiters.set(nodeId, byInput)
+      }
+      const arr = byInput.get(inputName) || []
+      arr.push(resolve)
+      byInput.set(inputName, arr)
+    })
+  }
+
+  /**
+   * Resolve any waiters for inputs that just became available for a node
+   */
+  private resolveNodeInputWaiters(nodeId: string, availableKeys: string[]): void {
+    const byInput = this.inputWaiters.get(nodeId)
+    if (!byInput) return
+    for (const key of availableKeys) {
+      const arr = byInput.get(key)
+      if (arr && arr.length) {
+        for (const fn of arr) {
+          try { fn() } catch {}
+        }
+        byInput.delete(key)
+      }
+    }
+    if (byInput.size === 0) this.inputWaiters.delete(nodeId)
+  }
+
 
 
 
@@ -660,49 +1001,26 @@ export class FlowScheduler {
    */
   private async getNodeConfig(nodeId: string): Promise<Record<string, any>> {
     try {
-      // Read directly from main store (no IPC needed!)
+      // Prefer live config from main store (renderer-edited)
       const store = await this.getStore()
-      const node = store.feNodes.find((n: any) => n.id === nodeId)
-      const config = (node?.data as any)?.config || {}
+      const nodeFromStore = store?.feNodes?.find((n: any) => n.id === nodeId)
+      const cfgFromStore = (nodeFromStore?.data as any)?.config
+      if (cfgFromStore && Object.keys(cfgFromStore).length > 0) {
+        return JSON.parse(JSON.stringify(cfgFromStore))
+      }
 
-      // Return a copy to prevent mutations
-      return JSON.parse(JSON.stringify(config))
+      // Fallback to static FlowDefinition config (useful in unit tests or early boot)
+      const nodeFromFlow = this.flowDef.nodes.find((n) => n.id === nodeId)
+      const cfgFromFlow = nodeFromFlow?.config || {}
+      return JSON.parse(JSON.stringify(cfgFromFlow))
     } catch (error: any) {
       console.error(`[FlowScheduler] Error getting config for ${nodeId}:`, error)
-      return {}
+      // Final fallback
+      const nodeFromFlow = this.flowDef.nodes.find((n) => n.id === nodeId)
+      const cfgFromFlow = nodeFromFlow?.config || {}
+      return JSON.parse(JSON.stringify(cfgFromFlow))
     }
   }
-
-  /**
-   * Refresh main context provider/model from session context in store
-   * This ensures we always use the latest values from the session
-   */
-  private async refreshMainContextFromStore(): Promise<void> {
-    try {
-      // Read session context from main store (single source of truth)
-      const store = await this.getStore()
-      const currentSession = store.sessions?.find((s: any) => s.id === store.currentId)
-
-      if (currentSession?.currentContext) {
-        const sessionContext = currentSession.currentContext
-
-        // Only update main context provider/model (preserve message history)
-        // Message history is managed by nodes, not by UI changes
-        if (sessionContext.provider !== this.mainContext.provider ||
-            sessionContext.model !== this.mainContext.model) {
-          this.mainContext.provider = sessionContext.provider
-          this.mainContext.model = sessionContext.model
-          console.log('[Scheduler] Refreshed main context from session:', {
-            provider: this.mainContext.provider,
-            model: this.mainContext.model
-          })
-        }
-      }
-    } catch (error: any) {
-      console.error('[FlowScheduler] Error refreshing main context from store:', error)
-    }
-  }
-
 
 
   /**
@@ -756,9 +1074,10 @@ export class FlowScheduler {
   async triggerPortalOutputs(portalId: string): Promise<void> {
     console.log(`[Scheduler] Triggering portal outputs for ID: ${portalId}`)
 
-    // Find all Portal Output nodes with matching ID
-    const portalOutputNodes = this.flowDef.nodes.filter(node => {
-      return node.type === 'portalOutput' && node.config?.id === portalId
+    // Find all Portal Output nodes with matching ID (support nodeType or legacy type)
+    const portalOutputNodes = this.flowDef.nodes.filter((node: any) => {
+      const t = node.nodeType || node.type
+      return t === 'portalOutput' && node.config?.id === portalId
     })
 
     console.log(`[Scheduler] Found ${portalOutputNodes.length} portal output nodes with ID: ${portalId}`)

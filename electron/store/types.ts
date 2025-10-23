@@ -44,9 +44,30 @@ export type Badge = {
     data: any
   }
 
+  // Optional summary metrics (for edit/diff badges)
+  addedLines?: number
+  removedLines?: number
+  filesChanged?: number
+
   // Status (for tool badges)
   status?: 'running' | 'success' | 'error'
   error?: string
+
+  // Expandable container support
+  expandable?: boolean           // Whether this badge can be expanded
+  defaultExpanded?: boolean      // Initial expansion state
+  contentType?: 'diff' | 'search' | 'workspace-search' | 'ast-search' | 'json' | 'text' | 'custom'  // Type of expanded content
+
+  // Enhanced metadata for header display
+  metadata?: {
+    fileCount?: number           // For edits.apply
+    filePath?: string            // For fs.* tools
+    resultCount?: number         // For index.search and workspace.search
+    query?: string               // For search tools (condensed display)
+    fullParams?: any             // For workspace.search (full params for expanded view)
+    duration?: number            // Execution time in ms
+    [key: string]: any           // Extensible for future tools
+  }
 }
 
 // Session items represent the chronological timeline of a session

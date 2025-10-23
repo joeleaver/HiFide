@@ -74,3 +74,21 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+
+/* HiFide logo glow for loading screen */
+@keyframes logo-glow-pulse {
+  0% { transform: translate(-50%, -50%) scale(0.95); opacity: 0.55; }
+  50% { transform: translate(-50%, -50%) scale(1.05); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(0.95); opacity: 0.55; }
+}
+
+.logo-glow {
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 122, 255, 0.35), rgba(0, 122, 255, 0.08) 60%, transparent 75%);
+  filter: blur(16px);
+  animation: logo-glow-pulse 2.6s ease-in-out infinite;
+  pointer-events: none;
+}
