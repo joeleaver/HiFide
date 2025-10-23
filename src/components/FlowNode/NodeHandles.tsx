@@ -1,6 +1,6 @@
 import { Handle, Position } from 'reactflow'
 import { useAppStore } from '../../store'
-import { CONNECTION_COLORS } from '../../../electron/store/utils/connection-colors'
+import { CONNECTION_COLORS } from '../../../shared/connection-colors'
 
 interface NodeHandlesProps {
   nodeType: string

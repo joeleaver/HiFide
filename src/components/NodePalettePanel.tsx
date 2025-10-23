@@ -1,5 +1,5 @@
 import { Text, Badge } from '@mantine/core'
-import { getNodeColor, getNodeCategory, CATEGORY_LABELS, type NodeCategory } from '../../electron/store/utils/node-colors'
+import { getNodeColor, getNodeCategory, CATEGORY_LABELS, type NodeCategory } from '../../shared/node-colors'
 
 const SHOW_SAFETY_CATEGORY = false
 

@@ -1,4 +1,4 @@
-import { NODE_TYPE_LABELS } from '../../../electron/store/utils/node-colors'
+import { NODE_TYPE_LABELS } from '../../../shared/node-colors'
 
 interface NodeHeaderProps {
   nodeType: string

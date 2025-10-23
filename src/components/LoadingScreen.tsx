@@ -11,7 +11,7 @@ export default function LoadingScreen({ message }: LoadingScreenProps) {
         <div style={{ position: 'relative', width: 120, height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div className="logo-glow" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }} />
           <img
-            src="/hifide-logo.png"
+            src="hifide-logo.png"
             alt="HiFide"
             style={{ width: 80, height: 80, objectFit: 'contain', filter: 'drop-shadow(0 0 12px rgba(0,0,0,0.35))', zIndex: 1 }}
           />

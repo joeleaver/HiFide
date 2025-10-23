@@ -3,7 +3,7 @@ import NodeHandles from './NodeHandles'
 import NodeHeader from './NodeHeader'
 import NodeStatusBadges from './NodeStatusBadges'
 import NodeConfig from './NodeConfig'
-import { getNodeColor } from '../../../electron/store/utils/node-colors'
+import { getNodeColor } from '../../../shared/node-colors'
 import { useRerenderTrace } from '../../utils/perf'
 
 function getNodeTypeFromIdOrData(id: string, data: any): string {

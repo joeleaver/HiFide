@@ -23,8 +23,8 @@ import { IconLayoutDistributeVertical, IconChevronDown, IconPlus, IconCopy, Icon
 import FlowNodeComponent from './FlowNode'
 import { useUiStore } from '../store/ui'
 import { getLayoutedElements } from '../utils/autoLayout'
-import { getNodeColor } from '../../electron/store/utils/node-colors'
-import { getConnectionColorFromHandles, CONNECTION_COLORS } from '../../electron/store/utils/connection-colors'
+import { getNodeColor } from '../../shared/node-colors'
+import { getConnectionColorFromHandles, CONNECTION_COLORS } from '../../shared/connection-colors'
 
 import { notifications } from '@mantine/notifications'
 

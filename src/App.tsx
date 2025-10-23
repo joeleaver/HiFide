@@ -230,7 +230,7 @@ function App() {
             }}
           >
             <img
-              src="/hifide-logo.png"
+              src="hifide-logo.png"
               alt="HiFide"
               style={{
                 width: 16,
