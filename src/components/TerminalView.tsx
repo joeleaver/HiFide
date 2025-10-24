@@ -35,10 +35,21 @@ export default function TerminalView({ tabId, context = 'explorer' }: { tabId: s
         fitTerminal(tabId)
       }
 
-      // For agent terminals, use currentId as the session ID
-      if (context === 'agent' && currentId && trackedSessionId !== currentId) {
-        console.log('[TerminalView] (Re)attaching agent terminal:', { tabId, sessionId: currentId, trackedSessionId })
-        void mountTerminal({ tabId, container, sessionId: currentId })
+      if (context === 'agent') {
+        // For agent terminals, use currentId as the session ID
+        if (currentId && trackedSessionId !== currentId) {
+          console.log('[TerminalView] (Re)attaching agent terminal:', { tabId, sessionId: currentId, trackedSessionId })
+          void mountTerminal({ tabId, container, context: 'agent', sessionId: currentId })
+        }
+      } else {
+        // Explorer terminals: ensure a PTY exists for this tab
+        if (!trackedSessionId) {
+          console.log('[TerminalView] Mounting explorer terminal:', { tabId })
+          void mountTerminal({ tabId, container, context: 'explorer' })
+        } else if (!existing) {
+          // Re-mount terminal instance for existing PTY session
+          void mountTerminal({ tabId, container, context: 'explorer' })
+        }
       }
 
       didMountOrBind = true

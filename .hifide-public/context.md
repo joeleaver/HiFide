@@ -5,5 +5,5 @@
 - Description: 
 - Frameworks: electron, vite, typescript, react
 
-Key Docs: README.md, docs/architecture.md, docs/implementation-plan.md, docs/retrieval.md, docs/tools.md, docs/terminal.md, docs/verification.md, docs/roadmap.md
+Key Docs: README.md
 

@@ -305,8 +305,13 @@ export const createIndexingSlice: StateCreator<IndexingSlice, [], [], IndexingSl
       set({ idxRebuildPromise: rebuildPromise } as any)
       await rebuildPromise
       return { triggered: true }
-    } catch (e) {
-      console.error('[indexing] maybeAutoRebuildAndWait error:', e)
+    } catch (e: any) {
+      const msg = e?.message || String(e)
+      if (/Model file not found|fastembed/i.test(msg)) {
+        console.warn('[indexing] Skipping index rebuild: embedding model not present yet. It will download on first successful init or when network is available.')
+      } else {
+        console.error('[indexing] maybeAutoRebuildAndWait error:', e)
+      }
       return { triggered: false }
     }
   },

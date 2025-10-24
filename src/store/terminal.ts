@@ -30,7 +30,7 @@ interface TerminalStore {
 
   // Actions
   initEvents: () => void
-  mountTerminal: (params: { tabId: string; container: HTMLElement; sessionId: string }) => Promise<void>
+  mountTerminal: (params: { tabId: string; container: HTMLElement; context: 'agent' | 'explorer'; sessionId?: string }) => Promise<void>
   unmountTerminal: (tabId: string) => void
   fitTerminal: (tabId: string) => void
   setTerminalPanelOpen: (context: 'agent' | 'explorer', open: boolean) => void
@@ -72,12 +72,13 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     set({ eventsInitialized: true })
   },
 
-  mountTerminal: async ({ tabId, container, sessionId }) => {
+  // Mount terminal for either agent (attach to agent PTY) or explorer (create a new PTY)
+  mountTerminal: async ({ tabId, container, context, sessionId }) => {
     get().initEvents()
 
     // Create xterm instance but delay opening until fonts and layout are ready
     const instance = terminalInstances.createTerminalInstance(tabId)
-    instance.terminal.options.disableStdin = true // Agent terminals are read-only
+    instance.terminal.options.disableStdin = (context === 'agent')
     instance.terminal.options.convertEol = true
 
     // Ensure fonts and layout are ready before opening to avoid xterm viewport errors
@@ -95,7 +96,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     terminalInstances.mountTerminalInstance(tabId, container)
     terminalInstances.fitTerminalInstance(tabId)
 
-    // Attach to PTY in main process
+    // Compute size for PTY
     let cols = instance.terminal.cols
     let rows = instance.terminal.rows
     if (!cols || !rows) {
@@ -106,35 +107,75 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     }
 
     try {
-      // Determine if we are re-attaching to an existing mapping
-      const prev = get().sessionIds[tabId]
+      if (context === 'agent') {
+        if (!sessionId) throw new Error('No agent sessionId provided')
 
-      // Map this tab to the target session BEFORE attaching so tail/data delivered during attach
-      // can be routed to this terminal via our onData listener.
-      set({ sessionIds: { ...get().sessionIds, [tabId]: sessionId } })
+        const prev = get().sessionIds[tabId]
 
-      // Install data subscriber BEFORE attach so any tail sent immediately is rendered
-      set({
-        dataSubscribers: {
-          ...get().dataSubscribers,
-          [tabId]: (data: string) => {
-            try { instance.terminal.write(data) } catch {}
+        // Map this tab to the target session BEFORE attaching so tail/data delivered during attach
+        set({ sessionIds: { ...get().sessionIds, [tabId]: sessionId } })
+
+        // Install data subscriber BEFORE attach so any tail sent immediately is rendered
+        set({
+          dataSubscribers: {
+            ...get().dataSubscribers,
+            [tabId]: (data: string) => {
+              try { instance.terminal.write(data) } catch {}
+            }
+          }
+        })
+
+        // For first attach, request a small tail so users see an initial prompt/output.
+        const tailBytes = prev ? 0 : 500
+        const result = await ptySvc.attachAgent({ requestId: sessionId, tailBytes })
+        if (!result?.ok) {
+          const reason = (result as any)?.error ? ` (${(result as any).error})` : ''
+          throw new Error(`Failed to attach to PTY${reason}`)
+        }
+
+        // Resize PTY to match terminal dimensions after attach (guard against zeros)
+        if (cols && rows) {
+          await ptySvc.resize(sessionId, cols, rows)
+        }
+      } else {
+        // Explorer terminal: create or reuse a PTY session
+        let sid = get().sessionIds[tabId]
+        if (!sid) {
+          // Use workspace root as cwd if available
+          try {
+            const { useAppStore } = await import('../store')
+            const cwd = useAppStore.getState().workspaceRoot || undefined
+            const res = await ptySvc.create({ cols: cols || 80, rows: rows || 24, cwd })
+            if (!res || !res.sessionId) throw new Error('Failed to create PTY')
+            sid = res.sessionId
+          } catch (e: any) {
+            throw new Error(e?.message || 'Failed to create PTY')
           }
         }
-      })
 
-      // For first attach, request a small tail so users see an initial prompt/output.
-      // For re-attach, avoid tail to prevent duplicate output.
-      const tailBytes = prev ? 0 : 500
+        // Map tab -> session and install subscriber
+        set({ sessionIds: { ...get().sessionIds, [tabId]: sid } })
+        set({
+          dataSubscribers: {
+            ...get().dataSubscribers,
+            [tabId]: (data: string) => {
+              try { instance.terminal.write(data) } catch {}
+            }
+          }
+        })
 
-      const result = await ptySvc.attachAgent({ requestId: sessionId, tailBytes })
-      if (!result?.ok) {
-        throw new Error('Failed to attach to PTY')
-      }
+        // Route terminal input to PTY for explorer terminals
+        instance.terminal.options.disableStdin = false
+        try {
+          instance.terminal.onData((data: string) => {
+            try { ptySvc.write(sid!, data) } catch {}
+          })
+        } catch {}
 
-      // Resize PTY to match terminal dimensions after attach (guard against zeros)
-      if (cols && rows) {
-        await ptySvc.resize(sessionId, cols, rows)
+        // Sync PTY size
+        if (cols && rows) {
+          await ptySvc.resize(sid!, cols, rows)
+        }
       }
     } catch (err: any) {
       instance.terminal.writeln(`\r\n[PTY Error: ${err?.message || String(err)}]`)
@@ -143,7 +184,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
   unmountTerminal: (tabId) => {
     terminalInstances.unmountTerminalInstance(tabId)
-    
+
     // Clean up subscribers and session tracking
     const { [tabId]: __, ...restSubs } = get().dataSubscribers
     const { [tabId]: ___, ...restSessions } = get().sessionIds

@@ -16,14 +16,7 @@
     "app": "src/App.tsx"
   },
   "docs": {
-    "readme": "README.md",
-    "architecture": "docs/architecture.md",
-    "implementationPlan": "docs/implementation-plan.md",
-    "retrieval": "docs/retrieval.md",
-    "tools": "docs/tools.md",
-    "terminal": "docs/terminal.md",
-    "verification": "docs/verification.md",
-    "roadmap": "docs/roadmap.md"
+    "readme": "README.md"
   },
   "goals": []
 }

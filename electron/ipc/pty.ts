@@ -14,6 +14,23 @@ import { logEvent } from '../utils/logging'
 
 const require = createRequire(import.meta.url)
 
+function loadPtyModule(): any | null {
+  try {
+    const resolved = require.resolve('node-pty')
+    console.log('[pty] require.resolve("node-pty") =>', resolved)
+    const mod = require('node-pty')
+    console.log('[pty] node-pty loaded. exports:', Object.keys(mod || {}))
+    return mod
+  } catch (e: any) {
+    const msg = e?.message || String(e)
+    console.warn('[pty] Native PTY module not available:', msg)
+    try {
+      console.warn('[pty] versions', { node: process.versions.node, electron: (process.versions as any).electron, modules: process.versions.modules })
+    } catch {}
+    return null
+  }
+}
+
 /**
  * Minimal PTY interface
  */
@@ -120,7 +137,10 @@ async function createAgentPtySession(opts: { shell?: string; cwd?: string; cols?
   const cwd = opts.cwd || process.cwd()
 
   // Try spawn with requested/normalized shell, then fallback to platform default on failure
-  const ptyModule = require('@homebridge/node-pty-prebuilt-multiarch')
+  const ptyModule = loadPtyModule()
+  if (!ptyModule) {
+    throw new Error('pty-unavailable')
+  }
   let p: IPty
   try {
     // Use conservative args for agent PTY to avoid PSReadLine/continuation issues on Windows
@@ -221,7 +241,10 @@ export function registerPtyHandlers(ipcMain: IpcMain): void {
     const cwd = opts.cwd || process.cwd()
     
     try {
-      const ptyModule = require('@homebridge/node-pty-prebuilt-multiarch')
+      const ptyModule = loadPtyModule()
+      if (!ptyModule) {
+        throw new Error('pty-unavailable')
+      }
       const p = (ptyModule as any).spawn(shell, [], { name: 'xterm-color', cols, rows, cwd, env })
       const sessionId = randomUUID()
       ptySessions.set(sessionId, { p, wcId: wc.id, log: opts.log !== false })
@@ -358,8 +381,13 @@ export function registerPtyHandlers(ipcMain: IpcMain): void {
       const workspaceRoot = useMainStore.getState().workspaceRoot
 
       console.log('[agent-pty:attach] Getting or creating PTY for requestId:', req)
-      sid = await getOrCreateAgentPtyFor(req, { cwd: workspaceRoot || undefined })
-      console.log('[agent-pty:attach] Got sessionId:', sid)
+      try {
+        sid = await getOrCreateAgentPtyFor(req, { cwd: workspaceRoot || undefined })
+        console.log('[agent-pty:attach] Got sessionId:', sid)
+      } catch (e: any) {
+        console.error('[agent-pty:attach] PTY unavailable:', e?.message || String(e))
+        return { ok: false, error: 'pty-unavailable' }
+      }
     }
     const rec = sid ? agentPtySessions.get(sid) : undefined
     if (!sid || !rec) {

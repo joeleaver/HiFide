@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && pnpm -s prepackage:kill && pnpm -s package:electron",
+    "build": "tsc && vite build && pnpm -s prepackage:kill && pnpm -s rebuild:native && pnpm -s package:electron",
     "prepackage:kill": "powershell -NoProfile -Command \"try{Get-Process HiFide -ErrorAction SilentlyContinue|Stop-Process -Force}catch{}; try{Get-Process electron -ErrorAction SilentlyContinue|Stop-Process -Force}catch{}; Start-Sleep -Milliseconds 300\"",
+    "rebuild:native": "pnpm exec electron-rebuild -f -w node-pty",
     "clean:release": "node --input-type=module -e \"import fs from 'fs'; try{fs.rmSync('release',{recursive:true,force:true})}catch(e){}\"",
     "package:electron": "powershell -NoProfile -Command \"$ts=(Get-Date -Format 'yyyyMMdd-HHmmss'); $ver=$env:npm_package_version; $out=\\\"release/$ver-$ts\\\"; electron-builder --config.directories.output=\\\"$out\\\"\"",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
@@ -33,7 +34,6 @@
     "@ast-grep/napi": "^0.39.6",
     "@emotion/react": "^11.14.0",
     "@google/genai": "^1.25.0",
-    "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "@mantine/core": "^8.3.3",
     "@mantine/hooks": "^8.3.3",
     "@mantine/notifications": "^8.3.3",
@@ -56,6 +56,7 @@
     "ignore": "^5.3.2",
     "markdown-it": "^14.1.0",
     "monaco-editor": "^0.54.0",
+    "node-pty": "^1.0.0",
     "openai": "^6.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -85,6 +86,7 @@
     "eslint-plugin-react-refresh": "^0.4.5",
     "jest": "^30.2.0",
     "node-gyp": "^10.3.1",
+    "patch-package": "^8.0.1",
     "ts-jest": "^29.4.5",
     "typescript": "^5",
     "vite": "^5.1.6",
@@ -97,7 +99,9 @@
     "asarUnpack": [
       "**/@ast-grep/napi/**/*.{node,dll,so,dylib}",
       "**/@ast-grep/lang-*/**/*.{dll,so,dylib}",
-      "**/onnxruntime-node/**/*.{node,dll,so,dylib}"
+      "**/onnxruntime-node/**/*.{node,dll,so,dylib}",
+      "**/node-pty/**/*.{node,dll,exe}",
+      "node_modules/node-pty/build/Release/*.{node,dll,exe}"
     ],
     "files": [
       "dist/**",
@@ -112,27 +116,28 @@
     ],
     "npmRebuild": false,
     "icon": "public/hifide-logo.png",
-    "mac": { "icon": "public/hifide-logo.png" },
-    "win": { "icon": "public/hifide-logo.png" },
-    "linux": { "icon": "public/hifide-logo.png" }
+    "mac": {
+      "icon": "public/hifide-logo.png"
+    },
+    "win": {
+      "icon": "public/hifide-logo.png"
+    },
+    "linux": {
+      "icon": "public/hifide-logo.png"
+    }
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "@ast-grep/napi",
-      "@ast-grep/lang-c",
-      "@ast-grep/lang-cpp",
-      "@ast-grep/lang-csharp",
-      "@ast-grep/lang-go",
-      "@ast-grep/lang-java",
-      "@ast-grep/lang-kotlin",
-      "@ast-grep/lang-php",
-      "@ast-grep/lang-python",
-      "@ast-grep/lang-ruby",
-      "@ast-grep/lang-swift",
-      "onnxruntime-node",
       "electron",
-      "keytar"
+      "keytar",
+      "node-pty"
     ],
-    "public-hoist-pattern": ["*"]
+    "public-hoist-pattern": [
+      "*"
+    ],
+    "ignoredBuiltDependencies": [],
+    "patchedDependencies": {
+      "node-pty@1.0.0": "patches/node-pty@1.0.0.patch"
+    }
   }
 }
