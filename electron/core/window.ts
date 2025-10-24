@@ -4,7 +4,7 @@
  * Handles BrowserWindow creation, state persistence, and lifecycle
  */
 
-import { BrowserWindow, screen } from 'electron'
+import { app, BrowserWindow, screen } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setWindow, windowStateStore } from './state'
@@ -196,6 +196,7 @@ export function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      devTools: !app.isPackaged,
     },
   })
 
@@ -235,16 +236,17 @@ export function createWindow(): BrowserWindow {
     console.time('[window] loadFile(prod)')
     win.loadFile(path.join(DIRNAME, '../dist/index.html'))
     console.timeEnd('[window] loadFile(prod)')
-    // Also open dev tools in production for debugging
-    win.webContents.openDevTools({ mode: 'detach' })
+    // DevTools disabled in production
   }
 
-  // Add F12 shortcut to toggle dev tools
-  win.webContents.on('before-input-event', (_event, input) => {
-    if (input.key === 'F12' && input.type === 'keyDown') {
-      win.webContents.toggleDevTools()
-    }
-  })
+  // Add F12 shortcut to toggle dev tools (dev only)
+  if (!app.isPackaged) {
+    win.webContents.on('before-input-event', (_event, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') {
+        win.webContents.toggleDevTools()
+      }
+    })
+  }
 
   // Update global state
   setWindow(win)

@@ -5,7 +5,7 @@
  */
 
 import type { IpcMain, MenuItemConstructorOptions } from 'electron'
-import { BrowserWindow, Menu, shell } from 'electron'
+import { app, BrowserWindow, Menu, shell } from 'electron'
 import { getWindow, windowStateStore } from '../core/state'
 
 /**
@@ -188,7 +188,7 @@ export function buildMenu(): void {
         { type: 'separator' },
         { role: 'reload' },
         { role: 'forceReload' },
-        { role: 'toggleDevTools' },
+        ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' as const }]),
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },
