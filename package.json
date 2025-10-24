@@ -114,6 +114,10 @@
       "!**/*.map",
       "!src/**"
     ],
+    "beforePack": "scripts/beforePack-rebuild-pty.cjs",
+
+    "afterPack": "scripts/afterPack-assert-pty.cjs",
+
     "npmRebuild": false,
     "icon": "public/hifide-logo.png",
     "mac": {
