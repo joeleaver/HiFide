@@ -82,6 +82,7 @@ export const GeminiProvider: ProviderAdapter = {
     const holder: { abort?: () => void } = {}
 
     ;(async () => {
+      let completed = false
       try {
         // Stateless: always use generateContentStream with full message history
         const res: any = await withRetries(() => ai.models.generateContentStream({
@@ -132,9 +133,11 @@ export const GeminiProvider: ProviderAdapter = {
           }
         } catch (e) {
           // Token usage extraction failed, continue anyway
+          console.error('[GeminiProvider] Error extracting token usage:', e)
         }
 
-        // Done
+        // Mark as completed and call onDone
+        completed = true
         onDone()
       } catch (e: any) {
         // Fallback: if streaming is not supported for this model/API version, try non-stream generateContent
@@ -182,13 +185,27 @@ export const GeminiProvider: ProviderAdapter = {
             }
           } catch (e) {
             // Token usage extraction failed, continue anyway
+            console.error('[GeminiProvider] Error extracting token usage in fallback:', e)
           }
 
-          // Done
+          // Mark as completed and call onDone
+          completed = true
           onDone()
         } catch (e2: any) {
           const error = e2?.message || String(e2)
+          console.error('[GeminiProvider] Error in fallback path:', error)
           onError(error)
+        }
+      } finally {
+        // CRITICAL: Ensure onDone is always called if not already called
+        // This prevents the promise from hanging indefinitely
+        if (!completed) {
+          try {
+            console.warn('[GeminiProvider] chatStream completed without explicit onDone call, calling now')
+            onDone()
+          } catch (e) {
+            console.error('[GeminiProvider] Error calling onDone in finally:', e)
+          }
         }
       }
     })().catch((e: any) => {
@@ -236,10 +253,23 @@ export const GeminiProvider: ProviderAdapter = {
 
     let cancelled = false
     let totalUsage: any = null
+    let iteration = 0
+
+    // Helper to check cancellation and throw if cancelled
+    const checkCancelled = () => {
+      if (cancelled) {
+        throw new Error('Agent stream cancelled')
+      }
+    }
 
     const run = async () => {
       try {
-        while (!cancelled) {
+        while (!cancelled && iteration < 200) { // Hard limit of 200 iterations as safety (allows complex multi-file operations)
+          // Check for cancellation at the start of each iteration
+          checkCancelled()
+
+          iteration++
+
           const config: any = {
             systemInstruction: systemInstruction || undefined,
           }
@@ -327,6 +357,9 @@ export const GeminiProvider: ProviderAdapter = {
           } catch {}
 
             for (const fc of functionCalls) {
+              // Check for cancellation before executing each tool
+              checkCancelled()
+
               const name = fc.name
               const args = fc.args || {}
               // Generate a unique call ID for this tool invocation

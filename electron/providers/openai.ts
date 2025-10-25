@@ -42,6 +42,7 @@ export const OpenAIProvider: ProviderAdapter = {
     const holder: { stream?: any; cancelled?: boolean } = {}
 
     ;(async () => {
+      let completed = false
       try {
         // Stateless: just send the messages, no session chaining
         const stream: any = await withRetries(() => Promise.resolve(client.responses.stream({
@@ -87,6 +88,7 @@ export const OpenAIProvider: ProviderAdapter = {
             }
           } catch (e) {
             // Token usage extraction failed, continue anyway
+            console.error('[OpenAIProvider] Error extracting token usage:', e)
           }
           // Update rate limit tracker based on response headers, if available
           try {
@@ -96,19 +98,31 @@ export const OpenAIProvider: ProviderAdapter = {
             }
           } catch {}
 
-
-          // Done
+          // Mark as completed and call onDone
+          completed = true
           onDone()
         } catch (e: any) {
           if (e?.name === 'AbortError') return
           const error = e?.message || String(e)
+          console.error('[OpenAIProvider] Error in stream iteration:', error)
           onError(error)
-
         }
       } catch (e: any) {
         if (e?.name === 'AbortError') return
         const error = e?.message || String(e)
+        console.error('[OpenAIProvider] Error in chatStream:', error)
         onError(error)
+      } finally {
+        // CRITICAL: Ensure onDone is always called if not already called
+        // This prevents the promise from hanging indefinitely
+        if (!completed) {
+          try {
+            console.warn('[OpenAIProvider] chatStream completed without explicit onDone call, calling now')
+            onDone()
+          } catch (e) {
+            console.error('[OpenAIProvider] Error calling onDone in finally:', e)
+          }
+        }
       }
     })().catch((e: any) => {
       // Handle any errors that occur after chatStream returns
@@ -181,6 +195,13 @@ export const OpenAIProvider: ProviderAdapter = {
     let iteration = 0
     let cumulativeTokens = 0
 
+    // Helper to check cancellation and throw if cancelled
+    const checkCancelled = () => {
+      if (cancelled) {
+        throw new Error('Agent stream cancelled')
+      }
+    }
+
     // Helper to prune conversation when agent requests it
     const pruneConversation = (summary: any) => {
       const systemMsgs = (messages || []).filter(m => m.role === 'system')
@@ -197,7 +218,10 @@ export const OpenAIProvider: ProviderAdapter = {
 
     const run = async () => {
       try {
-        while (!cancelled && iteration < 50) { // Hard limit of 50 iterations as safety
+        while (!cancelled && iteration < 200) { // Hard limit of 200 iterations as safety (allows complex multi-file operations)
+          // Check for cancellation at the start of each iteration
+          checkCancelled()
+
           iteration++
           // Start a streaming turn; stream user-visible text as it comes, while accumulating any tool calls
           let useResponseFormat = !!responseSchema
@@ -324,6 +348,9 @@ export const OpenAIProvider: ProviderAdapter = {
             const perTurnToolCache: Map<string, any> = new Map()
 
             for (const tc of toolCalls) {
+              // Check for cancellation before executing each tool
+              checkCancelled()
+
               const name = tc.name
               let tool: any = null
               try {
@@ -403,6 +430,10 @@ export const OpenAIProvider: ProviderAdapter = {
                   output
                 })
               } catch (e: any) {
+                // Check if this is a cancellation error
+                if (e?.message?.includes('cancelled')) {
+                  throw e
+                }
                 // Notify error
                 try { onToolError?.({ callId: tc.id, name: (tool?.name || String(name)), error: e?.message || String(e) }) } catch {}
                 conv.push({
