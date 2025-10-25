@@ -8,7 +8,7 @@
  */
 
 import { llmRequestNode } from '../llmRequest'
-import { createTestContext, createTestConfig, createTestTool, getTestApiKey } from '../../../../__tests__/utils/testHelpers'
+import { createTestContext, createTestConfig, createTestTool, getTestApiKey, createMockFlowAPI, createMockNodeInputs } from '../../../../__tests__/utils/testHelpers'
 import { withFixture, getTestMode } from '../../../../__tests__/utils/fixtures'
 import { providers } from '../../../../core/state'
 import type { ExecutionContext } from '../../types'
@@ -80,9 +80,11 @@ describe('LLM Request Node', () => {
       const message = 'Say "Hello from OpenAI!" and nothing else.'
 
       const result = await withFixture(
-        'llmRequest-openai-simple',
+        'chat-openai-simple',
         async () => {
-          return await llmRequestNode(context, message, {}, config)
+          const flow = createMockFlowAPI()
+          const inputs = createMockNodeInputs({})
+          return await llmRequestNode(flow as any, context as any, message, inputs as any, config)
         }
       )
 
@@ -101,9 +103,11 @@ describe('LLM Request Node', () => {
       const message = 'Say "Hello from Gemini!" and nothing else.'
 
       const result = await withFixture(
-        'llmRequest-gemini-simple',
+        'chat-gemini-simple',
         async () => {
-          return await llmRequestNode(context, message, {}, config)
+          const flow = createMockFlowAPI()
+          const inputs = createMockNodeInputs({})
+          return await llmRequestNode(flow as any, context as any, message, inputs as any, config)
         }
       )
 
@@ -125,9 +129,11 @@ describe('LLM Request Node', () => {
 
       // First turn
       const result1 = await withFixture(
-        'llmRequest-openai-multiturn-1',
+        'chat-openai-multiturn-1',
         async () => {
-          return await llmRequestNode(context, 'My name is Alice.', {}, config)
+          const flow = createMockFlowAPI()
+          const inputs = createMockNodeInputs({})
+          return await llmRequestNode(flow as any, context as any, 'My name is Alice.', inputs as any, config)
         }
       )
 
@@ -136,9 +142,11 @@ describe('LLM Request Node', () => {
 
       // Second turn - use updated context with conversation history
       const result2 = await withFixture(
-        'llmRequest-openai-multiturn-2',
+        'chat-openai-multiturn-2',
         async () => {
-          return await llmRequestNode(result1.context, 'What is my name?', {}, config)
+          const flow = createMockFlowAPI()
+          const inputs = createMockNodeInputs({})
+          return await llmRequestNode(flow as any, result1.context as any, 'What is my name?', inputs as any, config)
         }
       )
 
@@ -159,7 +167,9 @@ describe('LLM Request Node', () => {
       const context = createTestContext()
       const config = createTestConfig()
 
-      const result = await llmRequestNode(context, '', {}, config)
+      const flow = createMockFlowAPI()
+      const inputs = createMockNodeInputs({})
+      const result = await llmRequestNode(flow as any, context as any, '', inputs as any, config)
 
       expect(result.status).toBe('error')
       expect(result.error).toContain('No message provided')
@@ -171,7 +181,9 @@ describe('LLM Request Node', () => {
       })
       const config = createTestConfig()
 
-      const result = await llmRequestNode(context, 'Hello', {}, config)
+      const flow = createMockFlowAPI()
+      const inputs = createMockNodeInputs({})
+      const result = await llmRequestNode(flow as any, context as any, 'Hello', inputs as any, config)
 
       expect(result.status).toBe('error')
       expect(result.error).toContain('Unknown provider')
@@ -189,9 +201,11 @@ describe('LLM Request Node', () => {
       const message = 'What is the weather like? Use the get_weather tool with input "San Francisco".'
 
       const result = await withFixture(
-        'llmRequest-openai-with-tools',
+        'chat-openai-with-tools',
         async () => {
-          return await llmRequestNode(context, message, { tools }, config)
+          const flow = createMockFlowAPI()
+          const inputs = createMockNodeInputs({ tools })
+          return await llmRequestNode(flow as any, context as any, message, inputs as any, config)
         }
       )
 
@@ -218,7 +232,9 @@ describe('LLM Request Node', () => {
       const result = await withFixture(
         'chat-gemini-system-instructions',
         async () => {
-          return await chatNode(context, message, {}, config)
+          const flow = createMockFlowAPI()
+          const inputs = createMockNodeInputs({})
+          return await llmRequestNode(flow as any, context as any, message, inputs as any, config)
         }
       )
 
@@ -279,7 +295,9 @@ describe('LLM Request Node', () => {
       })
       const message = 'Hello!'
 
-      const result = await llmRequestNode(incompleteContext, message, {}, config)
+      const flow = createMockFlowAPI()
+      const inputs = createMockNodeInputs({})
+      const result = await llmRequestNode(flow as any, incompleteContext as any, message, inputs as any, config)
 
       // May fail with API error, but should have created context with config provider/model
       expect(result.context.provider).toBe('gemini')

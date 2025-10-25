@@ -1,0 +1,639 @@
+/* Dark theme overrides for @mdxeditor/editor */
+
+/* Scope to our dark container */
+[data-theme='dark'] .mdxeditor {
+  --kb-bg: #1e1e1e;
+  --kb-fg: #e6e6e6;
+  --kb-muted: #9aa0a6;
+  --kb-border: #2a2a2a;
+  --kb-toolbar: #262626;
+  --kb-accent: #3b82f6;
+  --kb-code-bg: #12161c;
+  --kb-inline-code-bg: #2b2b2b;
+}
+
+[data-theme='dark'] .mdxeditor .mdxeditor-toolbar {
+  background: var(--kb-toolbar);
+  border-color: var(--kb-border);
+  color: var(--kb-fg);
+}
+[data-theme='dark'] .mdxeditor .mdxeditor-toolbar button { color: var(--kb-fg); }
+[data-theme='dark'] .mdxeditor .mdxeditor-toolbar svg { fill: var(--kb-fg); color: var(--kb-fg); }
+
+/* Style toolbar buttons and the block type select trigger */
+[data-theme='dark'] .kb-mde-toolbar button,
+[data-theme='dark'] .kb-mde-toolbar [role='combobox'] {
+  background: #262626;
+  color: var(--kb-fg);
+  border: 1px solid var(--kb-border);
+}
+[data-theme='dark'] .kb-mde-toolbar [data-state='open'] {
+  background: #2a2a2a;
+}
+
+/* Radix Select dropdown content (portal) - dark styling */
+[data-radix-popper-content-wrapper] > div[role='listbox'] {
+  background: #262626 !important;
+  color: #e6e6e6 !important;
+  border: 1px solid #2a2a2a !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+[data-radix-popper-content-wrapper] [role='option'] {
+  color: #e6e6e6;
+}
+[data-radix-popper-content-wrapper] [role='option'][data-highlighted] {
+  background: #2a2a2a;
+}
+[data-radix-popper-content-wrapper] [role='separator'] {
+  background: #2a2a2a;
+}
+
+[data-theme='dark'] .mdxeditor .mdxeditor-root-contenteditable,
+[data-theme='dark'] .mdxeditor .ProseMirror,
+[data-theme='dark'] .mdxeditor [contenteditable='true'] {
+  background: var(--kb-bg) !important;
+  color: var(--kb-fg) !important;
+  caret-color: var(--kb-fg);
+}
+
+[data-theme='dark'] .mdxeditor .mdxeditor-root-contenteditable p,
+[data-theme='dark'] .mdxeditor .ProseMirror p {
+  color: var(--kb-fg);
+}
+
+/* Selection colors (VS Code-like) */
+[data-theme='dark'] .mdxeditor *::selection {
+  background: #264f78;
+  color: #ffffff;
+}
+/* Stronger instance-scoped selection fixes */
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content ::selection { background: #264f78 !important; color: #fff !important; text-shadow: none !important; }
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content ::-moz-selection { background: #264f78 !important; color: #fff !important; }
+[data-theme='dark'] .mdxeditor .mdxeditor-root-contenteditable ::selection { background: #264f78 !important; color: #fff !important; text-shadow: none !important; }
+[data-theme='dark'] .mdxeditor .mdxeditor-root-contenteditable ::-moz-selection { background: #264f78 !important; color: #fff !important; }
+/* CodeMirror selection */
+[data-theme='dark'] .cm-content ::selection { background: rgba(38,79,120,0.85) !important; color: #fff !important; }
+[data-theme='dark'] .cm-selectionBackground,
+[data-theme='dark'] .cm-selectionMatch { background-color: rgba(38,79,120,0.65) !important; }
+/* Highlight mark fix */
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content mark { background: #3c3c3c; color: #fff; }
+
+/* Mark/highlight default */
+[data-theme='dark'] .mdxeditor mark {
+  background: #3a3a3a;
+  color: var(--kb-fg);
+}
+
+[data-theme='dark'] .mdxeditor .mdxeditor-root-contenteditable h1,
+[data-theme='dark'] .mdxeditor .mdxeditor-root-contenteditable h2,
+[data-theme='dark'] .mdxeditor .mdxeditor-root-contenteditable h3,
+[data-theme='dark'] .mdxeditor .mdxeditor-root-contenteditable h4,
+[data-theme='dark'] .mdxeditor .mdxeditor-root-contenteditable h5,
+[data-theme='dark'] .mdxeditor .mdxeditor-root-contenteditable h6 {
+  color: #f3f4f6;
+}
+
+[data-theme='dark'] .mdxeditor .mdxeditor-root-contenteditable a {
+  color: #60a5fa;
+  text-decoration: none;
+}
+[data-theme='dark'] .mdxeditor .mdxeditor-root-contenteditable a:hover {
+  text-decoration: underline;
+}
+
+[data-theme='dark'] .mdxeditor .mdxeditor-root-contenteditable code {
+  background: var(--kb-inline-code-bg);
+  color: var(--kb-fg);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  border: 1px solid var(--kb-border);
+}
+
+[data-theme='dark'] .mdxeditor pre {
+  background: var(--kb-code-bg);
+  color: var(--kb-fg);
+  border: 1px solid var(--kb-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+[data-theme='dark'] .mdxeditor blockquote {
+  border-left: 3px solid var(--kb-accent);
+  background: #121212;
+  color: #d1d5db;
+  padding: 8px 12px;
+  margin: 8px 0;
+}
+
+[data-theme='dark'] .mdxeditor hr {
+  border-color: var(--kb-border);
+}
+
+[data-theme='dark'] .mdxeditor ul li::marker,
+[data-theme='dark'] .mdxeditor ol li::marker {
+  color: var(--kb-muted);
+}
+
+[data-theme='dark'] .mdxeditor table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+/* Strong, explicit dark styling for our instance */
+[data-theme='dark'] .kb-mdx-root { background: #1e1e1e !important; }
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content {
+  background: #1e1e1e !important;
+  color: #e6e6e6 !important;
+  color-scheme: dark;
+  forced-color-adjust: none;
+}
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content p,
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content li,
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content strong,
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content em,
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content h1,
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content h2,
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content h3,
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content h4,
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content h5,
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content h6 { color: #e6e6e6 !important; }
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content a { color: #60a5fa !important; }
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content code { background: #2b2b2b; color: #e6e6e6; }
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content pre { background: #12161c; color: #e6e6e6; }
+
+/* Ensure base text color inside editor root */
+[data-theme='dark'] .mdxeditor,
+[data-theme='dark'] .mdxeditor * {
+  --kb-fg: #e6e6e6;
+}
+
+[data-theme='dark'] .mdxeditor table th,
+[data-theme='dark'] .mdxeditor table td {
+  border: 1px solid var(--kb-border);
+  padding: 6px 8px;
+}
+[data-theme='dark'] .mdxeditor table th {
+  background: #232323;
+  color: #e5e7eb;
+}
+
+/* Placeholder hint color (best-effort) */
+[data-theme='dark'] .mdxeditor .mdxeditor-root-contenteditable [data-placeholder] {
+  color: var(--kb-muted);
+}
+
+
+
+/* --- GitHub-like dark Markdown styling (scoped) ---------------------- */
+[data-theme='dark'] .markdown-body {
+  color: #e6e6e6;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+[data-theme='dark'] .markdown-body p {
+  margin: 0 0 12px;
+}
+
+[data-theme='dark'] .markdown-body h1,
+[data-theme='dark'] .markdown-body h2,
+[data-theme='dark'] .markdown-body h3,
+[data-theme='dark'] .markdown-body h4,
+[data-theme='dark'] .markdown-body h5,
+[data-theme='dark'] .markdown-body h6 {
+  margin: 20px 0 10px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: #f3f4f6;
+}
+[data-theme='dark'] .markdown-body h1 { font-size: 1.6rem; border-bottom: 1px solid #2a2a2a; padding-bottom: 0.3rem; }
+[data-theme='dark'] .markdown-body h2 { font-size: 1.3rem; border-bottom: 1px solid #2a2a2a; padding-bottom: 0.2rem; }
+[data-theme='dark'] .markdown-body h3 { font-size: 1.1rem; }
+
+[data-theme='dark'] .markdown-body hr {
+  height: 1px;
+  background: #2a2a2a;
+  border: 0;
+  margin: 16px 0;
+}
+
+[data-theme='dark'] .markdown-body a {
+  color: #58a6ff;
+  text-decoration: none;
+}
+[data-theme='dark'] .markdown-body a:hover { text-decoration: underline; }
+
+[data-theme='dark'] .markdown-body ul,
+[data-theme='dark'] .markdown-body ol {
+  padding-left: 1.6em;
+  margin: 0 0 12px;
+}
+[data-theme='dark'] .markdown-body li + li { margin-top: 6px; }
+[data-theme='dark'] .markdown-body ul li::marker,
+[data-theme='dark'] .markdown-body ol li::marker { color: #a3a3a3; }
+
+[data-theme='dark'] .markdown-body blockquote {
+  margin: 12px 0;
+  padding: 8px 12px;
+  color: #d1d5db;
+  background: #151515;
+  border-left: 4px solid #3b82f6;
+}
+
+[data-theme='dark'] .markdown-body code {
+  background: #2b2b2b;
+  color: #e6e6e6;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  border: 1px solid #333;
+}
+
+[data-theme='dark'] .markdown-body pre code { border: 0; padding: 0; background: transparent; }
+[data-theme='dark'] .markdown-body pre {
+  background: #12161c;
+  color: #e6e6e6;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow: auto;
+}
+
+[data-theme='dark'] .markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+[data-theme='dark'] .markdown-body table th,
+[data-theme='dark'] .markdown-body table td {
+  border: 1px solid #2a2a2a;
+  padding: 6px 8px;
+}
+[data-theme='dark'] .markdown-body table th { background: #232323; color: #f0f0f0; }
+
+[data-theme='dark'] .markdown-body kbd {
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-bottom-color: #1f1f1f;
+  box-shadow: inset 0 -1px 0 #1f1f1f;
+  color: #e6e6e6;
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-size: 12px;
+}
+
+[data-theme='dark'] .markdown-body mark { background: #3a3a3a; color: #fff; }
+[data-theme='dark'] .markdown-body strong { color: #ffffff; }
+[data-theme='dark'] .markdown-body em { color: #e8e8e8; }
+
+
+/* --- Fallback: target actual MDXEditor DOM classes (.mdxeditor-root) --- */
+/* These ensure dark styling even if kb-mdx-* classes or .mdxeditor wrapper are missing */
+[data-theme='dark'] .mdxeditor-root {
+  /* Our theme tokens */
+  --kb-bg: #1e1e1e;
+  --kb-fg: #e6e6e6;
+  --kb-muted: #9aa0a6;
+  --kb-border: #2a2a2a;
+  --kb-accent: #3b82f6;
+  --kb-code-bg: #12161c;
+  --kb-inline-code-bg: #2b2b2b;
+
+  /* Override MDXEditor base tokens used by its CSS modules */
+  --basePageBg: #1e1e1e;
+  --baseBg: #2b2b2b;
+  --baseBgSubtle: #222222;
+  --baseBgHover: #333333;
+  --baseBgActive: #3b3b3b;
+  --baseBorder: #2a2a2a;
+  --baseLine: #2a2a2a;
+  --baseText: #d4d4d4;
+  --baseTextContrast: #e6e6e6;
+}
+
+[data-theme='dark'] .mdxeditor-root .mdxeditor-toolbar {
+  background: #262626 !important;
+  border-color: var(--kb-border) !important;
+  color: var(--kb-fg) !important;
+}
+
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable,
+[data-theme='dark'] .mdxeditor-root [contenteditable='true'] {
+  background: var(--kb-bg) !important;
+  color: var(--kb-fg) !important;
+  color-scheme: dark;
+  caret-color: var(--kb-fg);
+}
+
+/* Selection */
+[data-theme='dark'] .mdxeditor-root *::selection { background:#264f78 !important; color:#fff !important; }
+[data-theme='dark'] .mdxeditor-root *::-moz-selection { background:#264f78 !important; color:#fff !important; }
+
+/* Inline code + pre */
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable code {
+  background: var(--kb-inline-code-bg) !important;
+  color: var(--kb-fg) !important;
+  border: 1px solid var(--kb-border) !important;
+  border-radius: 4px !important;
+  padding: 0.1rem 0.35rem !important;
+}
+[data-theme='dark'] .mdxeditor-root pre {
+  background: var(--kb-code-bg) !important;
+  color: var(--kb-fg) !important;
+  border: 1px solid var(--kb-border) !important;
+  border-radius: 8px !important;
+}
+
+/* Typography */
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable h1,
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable h2,
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable h3,
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable h4,
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable h5,
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable h6 { color:#f3f4f6 !important; }
+
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable a { color:#58a6ff !important; text-decoration:none; }
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable a:hover { text-decoration:underline; }
+
+/* Blockquote, hr, lists, tables */
+[data-theme='dark'] .mdxeditor-root blockquote { border-left:3px solid var(--kb-accent) !important; background:#121212 !important; color:#d1d5db !important; padding:8px 12px; margin:8px 0; }
+[data-theme='dark'] .mdxeditor-root hr { border-color: var(--kb-border) !important; background: var(--kb-border) !important; height:1px; }
+[data-theme='dark'] .mdxeditor-root ul li::marker,
+[data-theme='dark'] .mdxeditor-root ol li::marker { color: var(--kb-muted) !important; }
+[data-theme='dark'] .mdxeditor-root table { width:100%; border-collapse:collapse; }
+[data-theme='dark'] .mdxeditor-root table th,
+[data-theme='dark'] .mdxeditor-root table td { border:1px solid var(--kb-border) !important; padding:6px 8px !important; }
+[data-theme='dark'] .mdxeditor-root table th { background:#232323 !important; color:#e5e7eb !important; }
+
+
+
+/* Override MDXEditor CSS-module variables on the actual editor root (hashed class)
+   This ensures var(--baseBg) etc. resolve to dark values even when the module sets light defaults. */
+[data-theme='dark'] .mdxeditor [class*="editorRoot"] {
+  --basePageBg: #1e1e1e !important;
+  --baseBg: #2b2b2b !important;
+  --baseBgSubtle: #222222 !important;
+  --baseBgHover: #333333 !important;
+  --baseBgActive: #3b3b3b !important;
+  --baseBorder: #2a2a2a !important;
+  --baseLine: #2a2a2a !important;
+  --baseText: #d4d4d4 !important;
+  --baseTextContrast: #e6e6e6 !important;
+}
+
+/* Hashed inline code class (span._code_...): force dark chip */
+[data-theme='dark'] .mdxeditor [class*="code"] {
+  background: var(--kb-inline-code-bg) !important;
+  color: var(--kb-fg) !important;
+  border: 1px solid var(--kb-border) !important;
+  border-radius: 4px !important;
+  padding: 0.1rem 0.35rem !important;
+}
+
+/* --- Vibrant dark accents ------------------------------------------------- */
+/* Token definitions shared by mdxeditor wrapper and root */
+[data-theme='dark'] .mdxeditor,
+[data-theme='dark'] .mdxeditor-root {
+  --kb-blue: #60a5fa;
+  --kb-purple: #a78bfa;
+  --kb-pink: #f472b6;
+  --kb-cyan: #22d3ee;
+  --kb-green: #34d399;
+  --kb-orange: #fb923c;
+  --kb-yellow: #fcd34d;
+  --kb-inline-code-fg: #f8c555; /* inline code text */
+  --kb-quote-bg: #10151f;
+  --kb-table-header-bg: #1f2430;
+}
+
+/* Headings with subtle color coding */
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable h1{ color: var(--kb-purple) !important; }
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable h2{ color: var(--kb-blue) !important; }
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable h3{ color: var(--kb-pink) !important; }
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable h4{ color: var(--kb-cyan) !important; }
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable h5{ color: var(--kb-green) !important; }
+[data-theme='dark'] .mdxeditor-root .mdxeditor-root-contenteditable h6{ color: var(--kb-orange) !important; }
+
+/* Additional MDXEditor token overrides for panel/controls (used by Select trigger) */
+[data-theme='dark'] .mdxeditor [class*="editorRoot"]{
+  --panel:#262626 !important;         /* generic panel bg */
+  --panel-solid:#262626 !important;    /* some builds use dash naming */
+  --panelSolid:#262626 !important;     /* some builds use camelCase */
+  --panel-border:#2a2a2a !important;
+  --panelBorder:#2a2a2a !important;
+  --control-bg:#262626 !important;
+  --controlBg:#262626 !important;
+  --control-border:#2a2a2a !important;
+  --controlBorder:#2a2a2a !important;
+  --text-contrast:#e6e6e6 !important;
+  --textContrast:#e6e6e6 !important;
+}
+
+/* Fallback: target hashed Select trigger class anywhere (portal-safe) */
+[data-theme='dark'] [class*="selectTrigger_"]{
+  background-color:#262626 !important;
+  color:var(--kb-fg) !important;
+  border:1px solid var(--kb-border) !important;
+  border-radius:6px !important;
+}
+[data-theme='dark'] [class*="selectTrigger_"]:hover{ background-color:#2a2a2a !important; }
+[data-theme='dark'] [class*="selectTrigger_"]:focus{ outline:1px solid var(--kb-focus) !important; }
+[data-theme='dark'] [class*="selectTrigger_"] svg{ color:var(--kb-fg) !important; }
+
+/* Fallback: portal listbox/content and items */
+[data-theme='dark'] [class*="selectContent_"],
+[data-theme='dark'] [data-radix-popper-content-wrapper] [role='listbox']{
+  background:#1f1f1f !important;
+  color:var(--kb-fg) !important;
+  border:1px solid var(--kb-border) !important;
+  border-radius:8px !important;
+  box-shadow:0 4px 16px rgba(0,0,0,0.45) !important;
+}
+[data-theme='dark'] [class*="selectItem_"],
+[data-theme='dark'] [role='option']{
+  color:var(--kb-fg) !important;
+}
+[data-theme='dark'] [class*="selectItem_"].data-highlighted,
+[data-theme='dark'] [role='option'][data-highlighted]{
+  background:#2a2a2a !important;
+}
+
+/* CodeMirror tooltips (hover, autocomplete, lint) */
+[data-theme='dark'] .mdxeditor-root .cm-tooltip,
+[data-theme='dark'] .kb-mdx-root .cm-tooltip{
+  background:#1f1f1f !important;
+  color:var(--kb-fg) !important;
+  border:1px solid var(--kb-border) !important;
+  box-shadow:0 4px 16px rgba(0,0,0,0.45) !important;
+}
+[data-theme='dark'] .mdxeditor-root .cm-tooltip .cm-tooltip-autocomplete ul,
+[data-theme='dark'] .kb-mdx-root .cm-tooltip .cm-tooltip-autocomplete ul{ background:transparent !important; }
+[data-theme='dark'] .mdxeditor-root .cm-tooltip .cm-completionLabel,
+[data-theme='dark'] .kb-mdx-root .cm-tooltip .cm-completionLabel{ color:var(--kb-fg) !important; }
+[data-theme='dark'] .mdxeditor-root .cm-tooltip .cm-completionIcon,
+[data-theme='dark'] .kb-mdx-root .cm-tooltip .cm-completionIcon{ color:var(--kb-muted) !important; }
+[data-theme='dark'] .mdxeditor-root .cm-tooltip .cm-completionSelected,
+[data-theme='dark'] .kb-mdx-root .cm-tooltip .cm-completionSelected{ background:#2a2a2a !important; }
+
+
+/* Last-resort: style any Radix Select trigger by ARIA in the editor */
+[data-theme='dark'] .mdxeditor-root button[aria-haspopup='listbox'],
+[data-theme='dark'] .mdxeditor-root [role='button'][aria-haspopup='listbox']{
+  background-color:#262626 !important;
+  color:var(--kb-fg) !important;
+  border:1px solid var(--kb-border) !important;
+  border-radius:6px !important;
+}
+[data-theme='dark'] .mdxeditor-root button[aria-haspopup='listbox']:hover,
+[data-theme='dark'] .mdxeditor-root [role='button'][aria-haspopup='listbox']:hover{
+  background-color:#2a2a2a !important;
+}
+
+
+
+
+/* Inline code chips get warm syntax-like color */
+
+/* Force CodeMirror editor surfaces to dark */
+[data-theme='dark'] .mdxeditor-root .cm-editor,
+[data-theme='dark'] .kb-mdx-root .cm-editor{
+  color-scheme: dark !important;
+  background:#1b1b1b !important;
+  color:var(--kb-fg) !important;
+  border:1px solid var(--kb-border) !important;
+  border-radius:8px !important;
+}
+[data-theme='dark'] .mdxeditor-root .cm-scroller,
+[data-theme='dark'] .kb-mdx-root .cm-scroller{ background:#1b1b1b !important; }
+[data-theme='dark'] .mdxeditor-root .cm-content,
+[data-theme='dark'] .kb-mdx-root .cm-content{
+  background:transparent !important;
+  color:var(--kb-fg) !important;
+  caret-color:var(--kb-fg) !important;
+}
+[data-theme='dark'] .mdxeditor-root .cm-gutters,
+[data-theme='dark'] .kb-mdx-root .cm-gutters{
+  background:#161616 !important;
+  color:var(--kb-muted) !important;
+  border-right:1px solid var(--kb-border) !important;
+}
+[data-theme='dark'] .mdxeditor-root .cm-activeLine,
+[data-theme='dark'] .kb-mdx-root .cm-activeLine{ background:#202020 !important; }
+[data-theme='dark'] .mdxeditor-root .cm-activeLineGutter,
+[data-theme='dark'] .kb-mdx-root .cm-activeLineGutter{ background:#202020 !important; color:var(--kb-fg) !important; }
+[data-theme='dark'] .mdxeditor-root .cm-selectionBackground,
+[data-theme='dark'] .kb-mdx-root .cm-selectionBackground{ background:#2a4b7a88 !important; }
+
+[data-theme='dark'] .mdxeditor .mdxeditor-root-contenteditable code { color: var(--kb-inline-code-fg) !important; }
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content code { color: var(--kb-inline-code-fg) !important; }
+[data-theme='dark'] .mdxeditor [class*="code"] { color: var(--kb-inline-code-fg) !important; }
+
+/* Blockquote with tinted bg + accent bar */
+[data-theme='dark'] .mdxeditor-root blockquote{
+  background: var(--kb-quote-bg) !important;
+  border-left: 3px solid var(--kb-blue) !important;
+  color: #cfe5ff !important;
+}
+
+/* List markers pop a bit more */
+[data-theme='dark'] .mdxeditor-root ul li::marker,
+[data-theme='dark'] .mdxeditor-root ol li::marker { color: var(--kb-cyan) !important; }
+
+/* Table header tint */
+[data-theme='dark'] .mdxeditor-root table th{ background: var(--kb-table-header-bg) !important; color: #e8f0ff !important; }
+
+
+/* --- CodeMirror (code block editor) dark styling ------------------------- */
+[data-theme='dark'] .mdxeditor-root .cm-editor {
+  background: var(--kb-code-bg) !important;
+  color: var(--kb-fg) !important;
+  border: 1px solid var(--kb-border) !important;
+  border-radius: 8px !important;
+}
+[data-theme='dark'] .mdxeditor-root .cm-scroller { background: var(--kb-code-bg) !important; }
+[data-theme='dark'] .mdxeditor-root .cm-content { color: var(--kb-fg) !important; }
+[data-theme='dark'] .mdxeditor-root .cm-activeLine { background: rgba(255,255,255,0.05) !important; }
+
+/* Line numbers / gutters */
+[data-theme='dark'] .mdxeditor-root .cm-gutters {
+  background: #0f141b !important;
+  color: #7f8a98 !important;
+  border-right: 1px solid var(--kb-border) !important;
+}
+[data-theme='dark'] .mdxeditor-root .cm-activeLineGutter { color: #c9d1d9 !important; background: #111820 !important; }
+[data-theme='dark'] .mdxeditor-root .cm-lineNumbers .cm-gutterElement { padding: 0 8px !important; }
+
+/* Code block language selector (Radix Select trigger + dropdown) */
+[data-theme='dark'] .mdxeditor-root [role='combobox']{
+  background: #262626 !important;
+  color: var(--kb-fg) !important;
+  border: 1px solid var(--kb-border) !important;
+  border-radius: 6px !important;
+}
+[data-theme='dark'] .mdxeditor-root [role='combobox'][data-state='open']{ background: #2a2a2a !important; }
+/* Dropdown content already themed above via [data-radix-popper-content-wrapper] */
+/* Extra robust targeting for MDXEditor language trigger (selector varies by version) */
+[data-theme='dark'] .mdxeditor-root button[role='combobox'],
+[data-theme='dark'] .mdxeditor-root button[aria-haspopup='listbox'],
+[data-theme='dark'] .mdxeditor-root [aria-haspopup='listbox'],
+[data-theme='dark'] .mdxeditor-root select {
+  background: #262626 !important;
+  color: var(--kb-fg) !important;
+  border: 1px solid var(--kb-border) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+[data-theme='dark'] .mdxeditor-root [aria-haspopup='listbox'] svg,
+[data-theme='dark'] .mdxeditor-root button[aria-haspopup='listbox'] svg,
+[data-theme='dark'] .mdxeditor-root button[role='combobox'] svg {
+  color: var(--kb-inline-code-fg) !important;
+  fill: currentColor !important;
+}
+[data-theme='dark'] .mdxeditor-root button[role='combobox']:hover,
+[data-theme='dark'] .mdxeditor-root button[aria-haspopup='listbox']:hover,
+[data-theme='dark'] .mdxeditor-root [aria-haspopup='listbox']:hover,
+[data-theme='dark'] .mdxeditor-root select:hover { background: #2a2a2a !important; }
+
+/* Target MDXEditor's hashed Select trigger explicitly */
+[data-theme='dark'] .mdxeditor-root [class*="selectTrigger"],
+[data-theme='dark'] .kb-mdx-root [class*="selectTrigger"]{
+  background:#262626!important;
+  color:var(--kb-fg)!important;
+  border:1px solid var(--kb-border)!important;
+  border-radius:6px!important;
+}
+[data-theme='dark'] .mdxeditor-root [class*="selectTrigger"][data-state='open'],
+[data-theme='dark'] .kb-mdx-root [class*="selectTrigger"][data-state='open']{ background:#2a2a2a!important; }
+[data-theme='dark'] .mdxeditor-root [class*="selectTrigger"] svg,
+[data-theme='dark'] .kb-mdx-root [class*="selectTrigger"] svg{ color:var(--kb-fg)!important; fill:currentColor!important; }
+[data-theme='dark'] .mdxeditor-root [class*="selectTrigger"] [class*="Value"],
+[data-theme='dark'] .kb-mdx-root [class*="selectTrigger"] [class*="Value"]{ color:var(--kb-fg)!important; }
+
+/* Portal content: listbox */
+[data-theme='dark'] [class*="selectContent"],
+[data-theme='dark'] [role='listbox']{
+  background:#1f1f1f!important;
+  color:var(--kb-fg)!important;
+  border:1px solid var(--kb-border)!important;
+  border-radius:8px!important;
+}
+[data-theme='dark'] [class*="selectItem"]{ color:var(--kb-fg)!important; }
+[data-theme='dark'] [class*="selectItem"][data-highlighted],
+[data-theme='dark'] [class*="selectItem"][data-state='checked']{
+  background:#2a2a2a!important; color:var(--kb-blue)!important;
+}
+
+
+
+/* Catch-all for MDXEditor's inline code hashed classes */
+[data-theme='dark'] .mdxeditor-root [class*="code"] {
+  background: var(--kb-inline-code-bg) !important;
+  color: var(--kb-fg) !important;
+  border: 1px solid var(--kb-border) !important;
+  border-radius: 4px !important;
+  padding: 0.1rem 0.35rem !important;
+}
+
+/* Ensure nested spans do not reintroduce light backgrounds inside code */
+[data-theme='dark'] .mdxeditor-root code * { background: transparent !important; }

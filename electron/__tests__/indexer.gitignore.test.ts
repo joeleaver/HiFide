@@ -3,6 +3,16 @@ import os from 'node:os'
 import path from 'node:path'
 import { Indexer } from '../indexing/indexer'
 
+// Stub embedding engine to avoid native deps during tests
+jest.mock('../indexing/engine', () => ({
+  getLocalEngine: async () => ({
+    id: 'test-embed',
+    dim: 3,
+    embed: async (texts: string[]) => texts.map(() => [0.1, 0.2, 0.3])
+  })
+}))
+
+
 describe('Indexer - respects .gitignore (with negation)', () => {
   let tmpDir: string
 

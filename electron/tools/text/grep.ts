@@ -148,7 +148,22 @@ export const grepTool: AgentTool = {
     // Discover files (sorted for deterministic traversal) and post-filter using .gitignore if present
     const discovered = await fg(includeGlobs, { cwd: root, ignore: excludeGlobs, absolute: true, onlyFiles: true, dot: false })
     discovered.sort((a, b) => a.localeCompare(b))
-    const filtered = ig ? discovered.filter(abs => !ig.ignores(path.relative(root, path.resolve(abs)))) : discovered
+    if (process.env.DEBUG_GREP) {
+      try { console.log('[grep] discovered', discovered.map(p => path.relative(root, p))) } catch {}
+    }
+    const filtered = ig
+      ? (() => {
+          const filter = ig.createFilter()
+          return discovered.filter(abs => {
+            const rel = path.relative(root, path.resolve(abs))
+            const relPosix = rel.split(path.sep).join('/')
+            return filter(relPosix)
+          })
+        })()
+      : discovered
+    if (process.env.DEBUG_GREP) {
+      try { console.log('[grep] filtered', filtered.map(p => path.relative(root, p))) } catch {}
+    }
     const candidates = filtered.slice(0, maxFiles)
 
     // Pagination cursor handling

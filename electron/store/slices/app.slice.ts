@@ -202,7 +202,7 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
       try {
         const hasValidProvider = validMap.openai || validMap.anthropic || validMap.gemini
         if (!hasValidProvider) {
-          if (state.setCurrentView) state.setCurrentView('settings')
+          if (state.setCurrentView) state.setCurrentView({ view: 'settings' })
           set({ startupMessage: 'No valid API keys found. Open Settings to configure providers.' })
         }
       } catch (e) {

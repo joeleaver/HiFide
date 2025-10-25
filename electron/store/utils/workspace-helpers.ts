@@ -1,6 +1,6 @@
 /**
  * Workspace helper functions
- * 
+ *
  * Shared utilities for workspace operations that can be called directly
  * from the store without going through IPC.
  */
@@ -56,11 +56,11 @@ async function ensureGitIgnoreHasPrivate(baseDir: string): Promise<boolean> {
   } catch {
     text = ''
   }
-  
+
   if (text.includes('.hifide-private')) {
     return false // Already present
   }
-  
+
   const add = `${text && !text.endsWith('\n') ? '\n' : ''}# Hifide\n.hifide-private\n`
   await fs.writeFile(giPath, text + add, 'utf-8')
   return true
@@ -81,7 +81,7 @@ async function generateContextPack(baseDir: string, preferAgent?: boolean, overw
   await ensureDir(publicDir)
   const ctxJson = path.join(publicDir, 'context.json')
   const ctxMd = path.join(publicDir, 'context.md')
-  
+
   if (!overwrite && await pathExists(ctxJson)) {
     return false // Already exists
   }
@@ -92,7 +92,7 @@ async function generateContextPack(baseDir: string, preferAgent?: boolean, overw
   try {
     pkg = JSON.parse(await fs.readFile(pkgPath, 'utf-8'))
   } catch {}
-  
+
   const has = async (rel: string) => await pathExists(path.join(baseDir, rel))
   const docs: Record<string, string> = {}
   const docFiles = [
@@ -105,17 +105,17 @@ async function generateContextPack(baseDir: string, preferAgent?: boolean, overw
     ['verification', 'docs/verification.md'],
     ['roadmap', 'docs/roadmap.md'],
   ] as const
-  
+
   for (const [key, rel] of docFiles) {
     if (await has(rel)) docs[key] = rel
   }
-  
+
   const frameworks: string[] = []
   if (await has('electron/main.ts')) frameworks.push('electron')
   if (await has('vite.config.ts')) frameworks.push('vite')
   if (await has('tsconfig.json')) frameworks.push('typescript')
   if (await has('src/App.tsx') || await has('src/main.tsx')) frameworks.push('react')
-  
+
   const entryPoints: Record<string, string> = {}
   const entries = [
     ['electronMain', 'electron/main.ts'],
@@ -123,7 +123,7 @@ async function generateContextPack(baseDir: string, preferAgent?: boolean, overw
     ['webMain', 'src/main.tsx'],
     ['app', 'src/App.tsx'],
   ] as const
-  
+
   for (const [k, rel] of entries) {
     if (await has(rel)) entryPoints[k] = rel
   }
@@ -146,12 +146,12 @@ async function generateContextPack(baseDir: string, preferAgent?: boolean, overw
       }
       return null
     }
-    
+
     const sel = await pickProvider()
     if (sel) {
       const provider = providers[sel.id] as ProviderAdapter
       const model = sel.id === 'anthropic' ? 'claude-3-5-sonnet' : sel.id === 'gemini' ? 'gemini-1.5-pro' : 'gpt-4o'
-      
+
       // Read a few high-signal files to feed the model safely (bounded size)
       const readText = async (rel: string) => {
         try {
@@ -160,16 +160,16 @@ async function generateContextPack(baseDir: string, preferAgent?: boolean, overw
           return ''
         }
       }
-      
+
       const readme = docs.readme ? await readText(docs.readme) : ''
       const impl = docs.implementationPlan ? await readText(docs.implementationPlan) : ''
       const arch = docs.architecture ? await readText(docs.architecture) : ''
-      
+
       const prompt = `You will extract project goals and a one-paragraph summary.
 Return ONLY JSON: {"goals": string[], "summary": string}.
 Be concise and specific to this repository.`
       const user = `README.md:\n${readme}\n\nimplementation-plan.md:\n${impl}\n\narchitecture.md:\n${arch}`.slice(0, 14000)
-      
+
       let out = ''
       try {
         await provider.chatStream({
@@ -183,7 +183,7 @@ Be concise and specific to this repository.`
           onDone: () => {},
           onError: (_e) => {},
         })
-        
+
         // Try to parse JSON from out (strip code fences if present)
         const match = out.match(/\{[\s\S]*\}/)
         if (match) {
@@ -215,6 +215,7 @@ export async function bootstrapWorkspace(args: { baseDir?: string; preferAgent?:
     const { useMainStore } = await import('../index.js')
     const baseDir = path.resolve(String(args?.baseDir || useMainStore.getState().workspaceRoot || process.cwd()))
     const publicDir = path.join(baseDir, '.hifide-public')
+    const kbDir = path.join(publicDir, 'kb')
     const privateDir = path.join(baseDir, '.hifide-private')
     let createdPublic = false
     let createdPrivate = false
@@ -225,7 +226,10 @@ export async function bootstrapWorkspace(args: { baseDir?: string; preferAgent?:
       await ensureDir(publicDir)
       createdPublic = true
     }
-    
+
+    // Ensure Knowledge Base directory exists per spec
+    try { await ensureDir(kbDir) } catch {}
+
     if (!(await pathExists(privateDir))) {
       await ensureDir(privateDir)
       createdPrivate = true
@@ -246,4 +250,57 @@ export async function bootstrapWorkspace(args: { baseDir?: string; preferAgent?:
     return { ok: false, error: String(error) }
   }
 }
+
+/**
+ * Recursively list workspace files (relative paths)
+ * - Skips common heavy/ignored dirs
+ * - Optionally filters by extension
+ */
+export async function listWorkspaceFiles(
+  baseDir: string,
+  opts?: { includeExts?: string[]; ignoreDirs?: string[]; max?: number }
+): Promise<string[]> {
+  const includeExts = opts?.includeExts || [
+    'ts','tsx','js','jsx','json','md','mdx','yml','yaml','toml','xml','html','css','scss','less',
+    'py','rb','php','rs','go','java','kt','c','h','cpp','cc','hpp','cs','sh','ps1','sql','vue','svelte'
+  ]
+  const ignoreDirs = new Set((opts?.ignoreDirs || [
+    'node_modules','.git','.hifide-private','.hifide-public','dist','build','.cache','.next','out'
+  ]).map((d) => path.sep + d + path.sep))
+  const max = opts?.max ?? 5000
+
+  const out: string[] = []
+
+  async function walk(dir: string, rel: string) {
+    if (out.length >= max) return
+    let entries: any[] = []
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true }) as any
+    } catch {
+      return
+    }
+    for (const ent of entries) {
+      const nextAbs = path.join(dir, ent.name)
+      const nextRel = path.join(rel, ent.name)
+      if (ent.isDirectory()) {
+        const normalized = path.sep + nextRel + path.sep
+        let skip = false
+        for (const ig of ignoreDirs) { if (normalized.includes(ig)) { skip = true; break } }
+        if (skip) continue
+        await walk(nextAbs, nextRel)
+        if (out.length >= max) return
+      } else if (ent.isFile()) {
+        const ext = (ent.name.split('.').pop() || '').toLowerCase()
+        if (!includeExts.includes(ext)) continue
+        out.push(nextRel)
+        if (out.length >= max) return
+      }
+    }
+  }
+
+  await walk(baseDir, '')
+  // Remove leading path separators
+  return out.map((p) => p.replace(/^\\|^\//, ''))
+}
+
 

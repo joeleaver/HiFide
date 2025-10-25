@@ -113,5 +113,65 @@ describe('defaultContextStart Node', () => {
     expect(result.context?.provider).toBe('openai')
     expect(result.context?.model).toBe('gpt-4.1')
   })
+
+  it('sanitizes trailing unmatched user message', async () => {
+    const flow = createMockFlowAPI()
+    const context = createMainFlowContext({
+      messageHistory: [
+        { role: 'user', content: 'Hi' },
+        { role: 'assistant', content: 'Hello' },
+        { role: 'user', content: 'Again' }
+      ]
+    })
+    const inputs = createMockNodeInputs()
+
+    const result = await defaultContextStartNode(flow, context, undefined, inputs, {})
+
+    expect(result.status).toBe('success')
+    expect(result.context?.messageHistory.length).toBe(2)
+    expect(result.context?.messageHistory[0].role).toBe('user')
+    expect(result.context?.messageHistory[1].role).toBe('assistant')
+    expect(result.context?.messageHistory[1].content).toBe('Hello')
+  })
+
+  it('sanitizes trailing blank assistant reply (drops the incomplete pair)', async () => {
+    const flow = createMockFlowAPI()
+    const context = createMainFlowContext({
+      messageHistory: [
+        { role: 'user', content: 'Hi' },
+        { role: 'assistant', content: 'Hello' },
+        { role: 'user', content: 'Again' },
+        { role: 'assistant', content: '   ' }
+      ]
+    })
+    const inputs = createMockNodeInputs()
+
+    const result = await defaultContextStartNode(flow, context, undefined, inputs, {})
+
+    expect(result.status).toBe('success')
+    expect(result.context?.messageHistory.length).toBe(2)
+    expect(result.context?.messageHistory[1].role).toBe('assistant')
+    expect(result.context?.messageHistory[1].content).toBe('Hello')
+  })
+
+  it('sanitizes dangling assistant without preceding user', async () => {
+    const flow = createMockFlowAPI()
+    const context = createMainFlowContext({
+      messageHistory: [
+        { role: 'user', content: 'Hi' },
+        { role: 'assistant', content: 'Hello' },
+        { role: 'assistant', content: 'Oops' }
+      ]
+    })
+    const inputs = createMockNodeInputs()
+
+    const result = await defaultContextStartNode(flow, context, undefined, inputs, {})
+
+    expect(result.status).toBe('success')
+    expect(result.context?.messageHistory.length).toBe(2)
+    expect(result.context?.messageHistory[0].role).toBe('user')
+    expect(result.context?.messageHistory[1].role).toBe('assistant')
+    expect(result.context?.messageHistory[1].content).toBe('Hello')
+  })
 })
 

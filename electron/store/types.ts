@@ -8,7 +8,7 @@
 // View Types
 // ============================================================================
 
-export type ViewType = 'agent' | 'explorer' | 'sourceControl' | 'terminal' | 'settings'
+export type ViewType = 'agent' | 'explorer' | 'sourceControl' | 'terminal' | 'settings' | 'knowledgeBase'
 
 // ============================================================================
 // Chat/Session Types

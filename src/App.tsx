@@ -7,6 +7,7 @@ import StatusBar from './components/StatusBar'
 import AgentView from './components/AgentView'
 import ExplorerView from './components/ExplorerView'
 import SourceControlView from './components/SourceControlView'
+import KnowledgeBaseView from './components/KnowledgeBaseView'
 import SettingsPane from './SettingsPane'
 import LoadingScreen from './components/LoadingScreen'
 
@@ -18,13 +19,13 @@ let globalDispatch: ReturnType<typeof useDispatch> | null = null
 // Menu event handlers - defined once at module level
 const menuHandlers = {
   openSettings: () => {
-    globalDispatch?.('setCurrentView', 'settings')
+    globalDispatch?.('setCurrentView', { view: 'settings' })
   },
   openSession: () => {
-    globalDispatch?.('setCurrentView', 'agent')
+    globalDispatch?.('setCurrentView', { view: 'agent' })
   },
   toggleTerminalPanel: () => {
-    globalDispatch?.('setCurrentView', 'explorer')
+    globalDispatch?.('setCurrentView', { view: 'explorer' })
     const currentOpen = useAppStore.getState().windowState.explorerTerminalPanelOpen
     globalDispatch?.('updateWindowState', { explorerTerminalPanelOpen: !currentOpen })
   },
@@ -184,6 +185,8 @@ function App() {
           </div>
 
         )
+      case 'knowledgeBase':
+        return <KnowledgeBaseView />
       default:
         return <AgentView />
     }

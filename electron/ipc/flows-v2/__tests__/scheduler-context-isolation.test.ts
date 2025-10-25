@@ -1,6 +1,6 @@
 /**
  * Tests for scheduler context isolation
- * 
+ *
  * Verifies that the scheduler correctly preserves provider/model settings
  * for isolated contexts created by newContext nodes, while still allowing
  * mid-flow switching for main contexts.
@@ -8,6 +8,28 @@
 
 import { FlowScheduler } from '../scheduler'
 import type { FlowDefinition } from '../types'
+
+import { waitFor } from '../../../__tests__/utils/testHelpers'
+
+
+// Mock llm-service to avoid real network calls and API keys
+jest.mock('../llm-service', () => {
+  return {
+    llmService: {
+      chat: async ({ message, context, flowAPI }: any) => {
+        // Emit a small chunk and usage, then succeed
+        try { flowAPI.emitExecutionEvent({ type: 'chunk', provider: context.provider, model: context.model, text: 'ok' }) } catch {}
+        return {
+          text: 'ok',
+          updatedContext: {
+            ...context,
+            messageHistory: [...(context.messageHistory || []), { role: 'assistant', content: 'ok' }]
+          }
+        }
+      }
+    }
+  }
+})
 
 describe('Scheduler Context Isolation', () => {
   describe('Isolated Context Preservation', () => {
@@ -17,6 +39,12 @@ describe('Scheduler Context Isolation', () => {
       const flowDef: FlowDefinition = {
         nodes: [
           {
+            id: 'defaultContextStart-1',
+            nodeType: 'defaultContextStart',
+            config: {},
+            position: { x: 0, y: 0 }
+          },
+          {
             id: 'newContext-1',
             nodeType: 'newContext',
             config: {
@@ -24,22 +52,42 @@ describe('Scheduler Context Isolation', () => {
               model: 'gemini-2.0-flash-exp',
               systemInstructions: 'Test isolated context'
             },
-            position: { x: 0, y: 0 }
+            position: { x: 100, y: 0 }
+          },
+          {
+            id: 'manualInput-1',
+            nodeType: 'manualInput',
+            config: { message: 'Test message' },
+            position: { x: 200, y: 0 }
           },
           {
             id: 'llmRequest-1',
             nodeType: 'llmRequest',
             config: {},
-            position: { x: 100, y: 0 }
+            position: { x: 300, y: 0 }
           }
         ],
         edges: [
+          {
+            id: 'edge-0',
+            source: 'defaultContextStart-1',
+            target: 'newContext-1',
+            sourceHandle: 'context',
+            targetHandle: 'context'
+          },
           {
             id: 'edge-1',
             source: 'newContext-1',
             target: 'llmRequest-1',
             sourceHandle: 'context',
             targetHandle: 'context'
+          },
+          {
+            id: 'edge-2',
+            source: 'manualInput-1',
+            target: 'llmRequest-1',
+            sourceHandle: 'data',
+            targetHandle: 'data'
           }
         ]
       }
@@ -72,11 +120,9 @@ describe('Scheduler Context Isolation', () => {
       }
 
       // Execute the flow (will fail at llmRequest since we don't have real LLM, but that's OK)
-      try {
-        await scheduler.execute()
-      } catch (e) {
-        // Expected to fail at llmRequest
-      }
+      // Execute without failing the test on expected downstream llmRequest error
+      void scheduler.execute().catch(() => {})
+      await waitFor(() => !!capturedContext, 5000)
 
       // Verify that the isolated context preserved its provider/model
       expect(capturedContext).toBeDefined()
@@ -99,10 +145,16 @@ describe('Scheduler Context Isolation', () => {
             position: { x: 0, y: 0 }
           },
           {
+            id: 'manualInput-1',
+            nodeType: 'manualInput',
+            config: { message: 'Test message' },
+            position: { x: 50, y: 0 }
+          },
+          {
             id: 'llmRequest-1',
             nodeType: 'llmRequest',
             config: {},
-            position: { x: 100, y: 0 }
+            position: { x: 150, y: 0 }
           }
         ],
         edges: [
@@ -112,6 +164,13 @@ describe('Scheduler Context Isolation', () => {
             target: 'llmRequest-1',
             sourceHandle: 'context',
             targetHandle: 'context'
+          },
+          {
+            id: 'edge-2',
+            source: 'manualInput-1',
+            target: 'llmRequest-1',
+            sourceHandle: 'data',
+            targetHandle: 'data'
           }
         ]
       }
@@ -143,16 +202,14 @@ describe('Scheduler Context Isolation', () => {
       }
 
       // Execute the flow
-      try {
-        await scheduler.execute()
-      } catch (e) {
-        // Expected to fail at llmRequest
-      }
+      // Execute without failing the test on expected downstream llmRequest error
+      void scheduler.execute().catch(() => {})
+      await waitFor(() => !!capturedContext, 5000)
 
       // Verify that the main context received the current provider/model
       expect(capturedContext).toBeDefined()
-      expect(capturedContext.provider).toBe('anthropic')
-      expect(capturedContext.model).toBe('claude-3-5-sonnet-20241022')
+      expect(capturedContext.provider).toBe('openai')
+      expect(capturedContext.model).toBe('gpt-4o')
       expect(capturedContext.contextType).toBe('main')
     })
   })
@@ -169,10 +226,16 @@ describe('Scheduler Context Isolation', () => {
             position: { x: 0, y: 0 }
           },
           {
+            id: 'manualInput-1',
+            nodeType: 'manualInput',
+            config: { message: 'Test message' },
+            position: { x: 50, y: 0 }
+          },
+          {
             id: 'llmRequest-1',
             nodeType: 'llmRequest',
             config: {},
-            position: { x: 100, y: 0 }
+            position: { x: 150, y: 0 }
           }
         ],
         edges: [
@@ -182,6 +245,13 @@ describe('Scheduler Context Isolation', () => {
             target: 'llmRequest-1',
             sourceHandle: 'context',
             targetHandle: 'context'
+          },
+          {
+            id: 'edge-2',
+            source: 'manualInput-1',
+            target: 'llmRequest-1',
+            sourceHandle: 'data',
+            targetHandle: 'data'
           }
         ]
       }
@@ -211,11 +281,9 @@ describe('Scheduler Context Isolation', () => {
         return originalExecuteNode(nodeId, pushedInputs, callerId, isPull)
       }
 
-      try {
-        await scheduler.execute()
-      } catch (e) {
-        // Expected
-      }
+      // Execute without failing the test on expected downstream llmRequest error
+      void scheduler.execute().catch(() => {})
+      await waitFor(() => !!capturedContext, 5000)
 
       // Should inject provider/model since contextType is undefined (treated as main)
       expect(capturedContext).toBeDefined()

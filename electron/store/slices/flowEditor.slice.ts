@@ -341,7 +341,7 @@ export interface FlowEditorSlice {
   feHandleRateLimitWait: (nodeId: string, attempt: number, waitMs: number, reason?: string, provider?: string, model?: string) => void
   feHandleWaitingForInput: (nodeId: string, requestId: string) => void
   feHandleDone: () => void
-  feHandleError: (error: string) => void
+  feHandleError: (error: string, nodeId?: string, provider?: string, model?: string) => void
 
   // User input management (for userInput node)
   feWaitForUserInput: (nodeId: string) => Promise<string>
@@ -2288,8 +2288,42 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     })(set, get)
   },
 
-  feHandleError: (error: string) => {
+  feHandleError: (error: string, nodeId?: string, provider?: string, model?: string) => {
     console.error('[flowEditor] Flow error:', error)
+
+    // If we know which node failed, append an error badge to its execution box
+    try {
+      if (nodeId) {
+        const node = get().feNodes.find(n => n.id === nodeId)
+        const state = store.getState() as any
+        if (node && state.appendToNodeExecution) {
+          state.appendToNodeExecution({
+            nodeId,
+            nodeLabel: node.data?.label || node.data?.nodeType || 'Node',
+            nodeKind: node.data?.nodeType || 'unknown',
+            content: {
+              type: 'badge',
+              badge: {
+                id: `error-${Date.now()}`,
+                type: 'error' as const,
+                label: 'LLM Error',
+                icon: '❌',
+                color: 'red',
+                variant: 'filled' as const,
+                status: 'error' as const,
+                error,
+                expandable: true,
+                defaultExpanded: false,
+                timestamp: Date.now()
+              }
+            },
+            provider: provider || state.selectedProvider,
+            model: model || state.selectedModel
+          })
+        }
+      }
+    } catch {}
+
     set({ feStatus: 'stopped', feMainFlowContext: null, feIsolatedContexts: {} })
 
     // Record event (buffered)

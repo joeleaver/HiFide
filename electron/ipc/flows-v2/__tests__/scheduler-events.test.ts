@@ -96,7 +96,7 @@ describe('Scheduler Event Handling', () => {
 
       case 'error':
         if (event.error) {
-          store.feHandleError(event.error)
+          store.feHandleError(event.error, event.nodeId, event.provider, event.model)
         }
         break
     }
@@ -325,7 +325,7 @@ describe('Scheduler Event Handling', () => {
 
       await handleExecutionEvent(event)
 
-      expect(mockStore.feHandleError).toHaveBeenCalledWith('API rate limit exceeded')
+      expect(mockStore.feHandleError).toHaveBeenCalledWith('API rate limit exceeded', 'node-456', 'gemini', 'gemini-2.0-flash-exp')
     })
   })
 

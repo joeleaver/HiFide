@@ -20,9 +20,9 @@ import { setAppView } from '../../services/appBridge'
 export interface ViewSlice {
   // State
   currentView: ViewType
-  
+
   // Actions
-  setCurrentView: (view: ViewType) => void
+  setCurrentView: (params: { view: ViewType }) => void
 }
 
 // ============================================================================
@@ -34,7 +34,7 @@ export const createViewSlice: StateCreator<ViewSlice> = (set) => ({
   currentView: 'agent',
   
   // Actions
-  setCurrentView: (view: ViewType) => {
+  setCurrentView: ({ view }: { view: ViewType }) => {
     set({ currentView: view })
 
     // Also notify the main process (for menu updates, etc.)

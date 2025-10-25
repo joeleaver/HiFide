@@ -326,9 +326,9 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
                       if (contentItem.type === 'badge') {
                         const badge = contentItem.badge
 
-                        // Use ToolBadgeContainer for all tool badges (type === 'tool')
-                        // This ensures consistent rendering even when badges transition from running to complete
-                        if (badge.type === 'tool') {
+                        // Use ToolBadgeContainer for tool and error badges (widgets)
+                        // This ensures consistent rendering and expand/collapse behavior
+                        if (badge.type === 'tool' || badge.type === 'error') {
                           return (
                             <ToolBadgeContainer key={`badge-${badge.id}`} badge={badge}>
                               {badge.contentType === 'diff' && badge.interactive?.data?.key && (
@@ -354,6 +354,11 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
                                   searchKey={badge.interactive.data.key}
                                   fullParams={badge.metadata?.fullParams}
                                 />
+                              )}
+                              {badge.type === 'error' && (
+                                <Text size="xs" c="red.4" style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>
+                                  {badge.error || ''}
+                                </Text>
                               )}
                             </ToolBadgeContainer>
                           )

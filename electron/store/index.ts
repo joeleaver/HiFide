@@ -27,6 +27,7 @@ import { createSettingsSlice, type SettingsSlice } from './slices/settings.slice
 import type { TerminalSlice } from './slices/terminal.slice'
 import { createSessionSlice, type SessionSlice } from './slices/session.slice'
 import { createFlowEditorSlice, type FlowEditorSlice } from './slices/flowEditor.slice'
+import { createKnowledgeBaseSlice, type KnowledgeBaseSlice } from './slices/knowledgeBase.slice'
 import { electronStorage } from './storage'
 
 // Combined store type
@@ -42,7 +43,8 @@ export type AppStore = ViewSlice &
   SettingsSlice &
   TerminalSlice &
   SessionSlice &
-  FlowEditorSlice
+  FlowEditorSlice &
+  KnowledgeBaseSlice
 
 /**
  * Main process store - single source of truth
@@ -224,6 +226,7 @@ export const useMainStore = create<AppStore>()(
         subscribePtyData: () => () => {},
         ...createSessionSlice(set, get, store),
         ...createFlowEditorSlice(set, get, store),
+        ...createKnowledgeBaseSlice(set, get, store),
       }
     },
     {

@@ -48,12 +48,22 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
   let contextSource: 'pulled' | 'pushed' | 'config' = 'config'
 
   // Prefer pushed context when present; otherwise pull if unambiguous; otherwise create from config
+  const ensureProviderModel = (ctx: MainFlowContext | undefined) => {
+    if (!ctx) return ctx
+    if (!ctx.provider || !ctx.model) {
+      const provider = (config.provider as string) || 'openai'
+      const model = (config.model as string) || 'gpt-4o'
+      return flow.context.update(ctx, { provider, model })
+    }
+    return ctx
+  }
+
   if (context) {
-    executionContext = context
+    executionContext = ensureProviderModel(context)
     contextSource = 'pushed'
   } else if (inputs.has('context')) {
     try {
-      executionContext = await inputs.pull('context')
+      executionContext = ensureProviderModel(await inputs.pull('context'))
       contextSource = 'pulled'
     } catch {
       // If pull fails (ambiguous/missing), fall back to config below

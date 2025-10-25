@@ -55,6 +55,10 @@ import { replaceConsoleLevelTool } from './code/replaceConsoleLevel'
 // Text tools
 import { grepTool } from './text/grep'
 
+// Knowledge Base tools
+import { knowledgeBaseSearchTool } from './kb/search'
+import { knowledgeBaseStoreTool } from './kb/store'
+
 /**
  * Complete registry of all agent tools
  */
@@ -104,5 +108,9 @@ export const agentTools: AgentTool[] = [
   applyEditsTargetedTool,
   replaceCallTool,
   replaceConsoleLevelTool,
+
+  // Knowledge Base tools
+  knowledgeBaseSearchTool,
+  knowledgeBaseStoreTool,
 ]
 

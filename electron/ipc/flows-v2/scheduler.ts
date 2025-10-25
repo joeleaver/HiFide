@@ -512,7 +512,7 @@ export class FlowScheduler {
       if (result.status === 'error') {
         const errorMsg = result.error || 'Node execution failed'
         console.error(`[Scheduler] ${nodeId} - ERROR:`, errorMsg)
-        store.feHandleError(`${nodeId}: ${errorMsg}`)
+        store.feHandleError(`${nodeId}: ${errorMsg}`, nodeId)
         throw new Error(errorMsg)
       }
 
@@ -633,7 +633,7 @@ export class FlowScheduler {
           for (const p of runnables) {
             p.catch((err) => {
               console.error(`[Scheduler] ${nodeId} - Successor error:`, err)
-              try { store.feHandleError(err?.message || String(err)) } catch {}
+              try { store.feHandleError(err?.message || String(err), nodeId) } catch {}
             })
           }
         }
@@ -646,7 +646,7 @@ export class FlowScheduler {
       const error = e?.message || String(e)
       console.error(`[FlowScheduler] Error in ${nodeId}:`, error)
       const store = await this.getStore()
-      store.feHandleError(error)
+      store.feHandleError(error, nodeId)
       throw e
     }
   }
@@ -816,7 +816,7 @@ export class FlowScheduler {
 
       case 'error':
         if (event.error) {
-          store.feHandleError(event.error)
+          store.feHandleError(event.error, event.nodeId, event.provider, event.model)
         }
         break
 

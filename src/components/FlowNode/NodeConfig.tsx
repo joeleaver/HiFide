@@ -871,7 +871,9 @@ function ToolsConfig({ config, onConfigChange }: { config: any; onConfigChange: 
   const groupedTools = useMemo(() => {
     const groups: Record<string, Array<{ name: string; description: string }>> = {}
     availableTools.forEach(tool => {
-      const prefix = tool.name.includes('.') ? tool.name.split('.')[0] : 'other'
+      const prefix = (tool.name === 'knowledgeBaseStore' || tool.name === 'knowledgeBaseSearch')
+        ? 'workspace'
+        : (tool.name.includes('.') ? tool.name.split('.')[0] : 'other')
       if (!groups[prefix]) groups[prefix] = []
       groups[prefix].push(tool)
     })
@@ -930,6 +932,7 @@ function ToolsConfig({ config, onConfigChange }: { config: any; onConfigChange: 
     index: '🔍 Search',
     terminal: '💻 Terminal',
     code: '🔧 Code Analysis',
+    workspace: '🗂️ Workspace',
     other: '📦 Other',
   }
 
