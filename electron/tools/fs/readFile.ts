@@ -10,7 +10,7 @@ import fs from 'node:fs/promises'
 
 export const readFileTool: AgentTool = {
   name: 'fs.read_file',
-  description: 'Read a UTF-8 text file from the workspace',
+  description: 'Read a UTF-8 text file from the workspace. Use sparingly: prefer workspace.search to locate exact regions and then proceed to code.apply_edits_targeted or edits.apply. Avoid repeatedly reading many files without making edits or forming a concrete patch.',
   parameters: {
     type: 'object',
     properties: { path: { type: 'string', description: 'Workspace-relative path' } },

@@ -549,7 +549,7 @@ export function computeAutoBudget(numTerms: number, provided?: number): number {
 
 export const searchWorkspaceTool: AgentTool = {
   name: 'workspace.search',
-  description: 'Preferred entry point for workspace code discovery. Returns compact hits with handles. You can pass multiple queries via queries[] to batch and run in parallel. After receiving results, select a handle and call again with action="expand" to fetch the full code region. Avoid repeating "search" unless changing filters. The tool dedupes identical queries for ~20s and returns bestHandle + topHandles to guide expansion. Prioritizes code in src/** over docs/locks. Runs semantic, grep, and AST in parallel per query with compact snippets and expand handles.',
+  description: 'Preferred entry point for workspace code discovery. Returns compact hits with handles. You can pass multiple queries via queries[] to batch and run in parallel. After receiving results, select a handle and call again with action="expand" to fetch the full code region. Avoid repeating "search" unless changing filters. The tool dedupes identical queries for ~20s and returns bestHandle + topHandles to guide expansion. Prioritizes code in src/** over docs/locks. Runs semantic, grep, and AST in parallel per query with compact snippets and expand handles. Action bias: after a couple of expand calls, switch to code.apply_edits_targeted or edits.apply to make minimal changes instead of scanning more files.',
   parameters: {
     type: 'object',
     properties: {

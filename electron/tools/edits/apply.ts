@@ -3,7 +3,7 @@ import { applyFileEditsInternal } from '../utils'
 
 export const applyEditsTool: AgentTool = {
   name: 'edits.apply',
-  description: 'Apply a list of precise edits (verify with TypeScript when possible)',
+  description: 'Apply a list of precise edits to files. Use this when you know exactly what to change. Prefer small, surgical diffs. If uncertain, use code.apply_edits_targeted with dryRun first, then apply for real with verify enabled.',
   parameters: {
     type: 'object',
     properties: {
