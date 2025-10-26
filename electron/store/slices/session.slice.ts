@@ -22,6 +22,8 @@ import { MAX_SESSIONS } from '../utils/constants'
 import { deriveTitle } from '../utils/sessions'
 import { loadAllSessions, sessionSaver, deleteSessionFromDisk } from '../utils/session-persistence'
 
+import { loadWorkspaceSettings, saveWorkspaceSettings } from '../../ipc/workspace'
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -157,7 +159,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
   loadSessions: async () => {
     let sessions = await loadAllSessions()
 
-    // Use persisted currentId if valid; otherwise choose most recent
+    // Determine target currentId using workspace settings (lastSessionId) or persisted currentId
     let currentId: string | null = (get() as any).currentId || null
 
     // If no valid sessions found, create a new one automatically
@@ -167,7 +169,18 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       return
     }
 
-    // If no current ID or session doesn't exist, use most recent
+    // Prefer workspace-scoped lastSessionId if available
+    try {
+      const settings = await loadWorkspaceSettings()
+      const preferredId = (settings as any)?.lastSessionId
+      if (preferredId && sessions.find(s => s.id === preferredId)) {
+        currentId = preferredId
+      }
+    } catch (e) {
+      console.error('[sessions] Failed to read workspace settings:', e)
+    }
+
+    // If no current ID or session doesn't exist in this workspace, use most recent
     if (!currentId || !sessions.find(s => s.id === currentId)) {
       currentId = sessions[0]?.id || null
     }
@@ -283,6 +296,17 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 
     set({ currentId: id })
 
+    // Persist last selected session per workspace
+    ;(async () => {
+      try {
+        const settings = await loadWorkspaceSettings()
+        ;(settings as any).lastSessionId = id
+        await saveWorkspaceSettings(settings)
+      } catch (e) {
+        console.error('[sessions] Failed to save lastSessionId:', e)
+      }
+    })()
+
     // Initialize the selected session (loads flow; does not start execution)
     const state = get()
     const stateAny = state as any
@@ -340,6 +364,17 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       const sessions = [session, ...s.sessions].slice(0, MAX_SESSIONS)
       return { sessions, currentId: session.id }
     })
+    // Persist last selected session per workspace (new session)
+    ;(async () => {
+      try {
+        const settings = await loadWorkspaceSettings()
+        ;(settings as any).lastSessionId = session.id
+        await saveWorkspaceSettings(settings)
+      } catch (e) {
+        console.error('[sessions] Failed to save lastSessionId (newSession):', e)
+      }
+    })()
+
 
     // Initialize the new session (loads flow; does not start execution)
     const initializeSession = state.initializeSession

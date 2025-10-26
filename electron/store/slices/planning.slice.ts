@@ -12,7 +12,6 @@
  * Dependencies:
  * - Session slice (for getCurrentMessages, currentId)
  * - Provider slice (for selectedModel, selectedProvider)
- * - Settings slice (for autoApproveEnabled, autoApproveThreshold)
  * - Debug slice (for addDebugLog)
  */
 
@@ -120,13 +119,9 @@ export const createPlanningSlice: StateCreator<PlanningSlice, [], [], PlanningSl
     const state = get() as any
     const selectedModel = state.selectedModel || 'gpt-4'
     const selectedProvider = state.selectedProvider || 'openai'
-    const autoApproveEnabled = state.autoApproveEnabled ?? false
-    const autoApproveThreshold = state.autoApproveThreshold ?? 0.5
 
-    const autoEnabled = plan.autoApproveEnabled ?? autoApproveEnabled
-    const autoThresh = typeof plan.autoApproveThreshold === 'number' ? plan.autoApproveThreshold : autoApproveThreshold
 
-    const sys1 = 'EXECUTION MODE. Execute exactly the indicated step then stop and report. Verify per plan. Respect auto-approve policy.'
+    const sys1 = 'EXECUTION MODE. Execute exactly the indicated step then stop and report. Verify per plan.'
     const sys2 = `ApprovedPlan:\n\`\`\`json\n${JSON.stringify(plan)}\n\`\`\``
     const user = `Execute exactly step ${first.id} only. Stop after verification with a brief report.`
 
@@ -165,7 +160,7 @@ export const createPlanningSlice: StateCreator<PlanningSlice, [], [], PlanningSl
 
       // Build a single user instruction that embeds plan + policy
       const planningPrompt = [
-        sys1 + ` AutoApprove: enabled=${autoEnabled} threshold=${autoThresh}.`,
+        sys1,
         sys2,
         user,
       ].join('\n\n')
@@ -212,18 +207,12 @@ export const createPlanningSlice: StateCreator<PlanningSlice, [], [], PlanningSl
     const state = get() as any
     const selectedModel = state.selectedModel || 'gpt-4'
     const selectedProvider = state.selectedProvider || 'openai'
-    const autoApproveEnabled = state.autoApproveEnabled ?? false
-    const autoApproveThreshold = state.autoApproveThreshold ?? 0.5
 
-    const autoEnabled = plan.autoApproveEnabled ?? autoApproveEnabled
-    const autoThresh = typeof plan.autoApproveThreshold === 'number' ? plan.autoApproveThreshold : autoApproveThreshold
 
     const sys1 = [
       'EXECUTION MODE. Execute the ApprovedPlan steps in order, autonomously.',
       'After each step: run Verify, summarize the result briefly.',
-      'If verification passes, proceed to the next step automatically.',
-      'If verification fails or you detect risk beyond auto-approve policy, STOP and report.',
-      'Respect auto-approve policy for risky operations; ask only when required.',
+      'If verification fails or you detect a critical risk, STOP and report.',
     ].join(' ')
 
     const sys2 = `ApprovedPlan:\n\`\`\`json\n${JSON.stringify(plan)}\n\`\`\``
@@ -263,7 +252,7 @@ export const createPlanningSlice: StateCreator<PlanningSlice, [], [], PlanningSl
       }
 
       const planningPrompt = [
-        sys1 + ` AutoApprove: enabled=${autoEnabled} threshold=${autoThresh}.`,
+        sys1,
         sys2,
         user,
       ].join('\n\n')

@@ -41,6 +41,51 @@ const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
 
+
+// ----------------------------------------------------------------------------
+// Global error hardening
+// Swallow benign OS pipe errors (e.g., EPIPE from PTY/streams) so they don't
+// bubble as uncaught exceptions that zubridge will log and potentially exit on.
+// ----------------------------------------------------------------------------
+(() => {
+  const isIgnorable = (err: any) => {
+    if (!err) return false
+    const code = (err as any).code as string | undefined
+    const syscall = (err as any).syscall as string | undefined
+    const msg = String((err as any).message || err)
+    // Common benign cases during PTY/child stream teardown
+    if (code === 'EPIPE' && (syscall === 'read' || syscall === 'write')) return true
+    if (code === 'ECONNRESET' && /socket|pipe|stream/i.test(msg)) return true
+    return false
+  }
+
+  // Prefer capture callback so other listeners (e.g., zubridge) don’t see ignorable errors
+  const setCapture = (process as any).setUncaughtExceptionCaptureCallback as
+    | ((cb: ((err: any) => void) | null) => void)
+    | undefined
+
+  if (typeof setCapture === 'function') {
+    const capture = (err: any) => {
+      if (isIgnorable(err)) {
+        console.warn('[main] Ignored uncaught exception', { code: (err as any).code, syscall: (err as any).syscall })
+        return
+      }
+      // Forward all other errors to existing listeners exactly once
+      setCapture(null)
+      process.emit('uncaughtException', err as any)
+      setCapture(capture)
+    }
+    setCapture(capture)
+  } else {
+    // Fallback: handle first and continue propagation
+    process.prependListener('uncaughtException', (err: any) => {
+      if (isIgnorable(err)) {
+        console.warn('[main] Ignored uncaught exception', { code: err?.code, syscall: err?.syscall })
+      }
+    })
+  }
+})()
+
 // Initialize provider adapters
 providers.openai = OpenAIProvider as any
 providers.anthropic = AnthropicProvider as any

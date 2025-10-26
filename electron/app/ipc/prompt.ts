@@ -33,6 +33,6 @@ export function buildPlanningPrompt(): string {
     '- Proposed Steps should be concrete and verifiable; include a short Verify sub-bullet for each step.',
     'Final output requirement:',
     '- End your final message with a fenced JSON block labeled ApprovedPlan that follows this schema:',
-    '- ApprovedPlan: { goals?: string[]; constraints?: string[]; assumptions?: string[]; risks?: string[]; steps: Array<{ id: string; title: string; kind?: string; targets?: string[]; actions?: any[]; verify?: any[]; rollback?: any[]; dependencies?: string[] }>; autoApproveEnabled?: boolean; autoApproveThreshold?: number }'
+    '- ApprovedPlan: { goals?: string[]; constraints?: string[]; assumptions?: string[]; risks?: string[]; steps: Array<{ id: string; title: string; kind?: string; targets?: string[]; actions?: any[]; verify?: any[]; rollback?: any[]; dependencies?: string[] }> }'
   ].join('\n')
 }

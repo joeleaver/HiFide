@@ -141,7 +141,7 @@ let indexer: Indexer | null = null
 export async function getIndexer(): Promise<Indexer> {
   if (!indexer) {
     const { useMainStore } = await import('../store/index.js')
-    indexer = new Indexer(useMainStore.getState().workspaceRoot || process.cwd())
+    indexer = new Indexer(useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd())
   }
   return indexer
 }

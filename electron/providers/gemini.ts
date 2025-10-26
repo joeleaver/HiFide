@@ -380,6 +380,10 @@ export const GeminiProvider: ProviderAdapter = {
                 // Notify tool start
                 try { onToolStart?.({ callId, name, arguments: args }) } catch {}
 
+                // Prefer raw code blocks for read_lines to help LLM comprehension
+                if (name === 'fs.read_lines' && args && args.includeLineNumbers !== false) {
+                  args.includeLineNumbers = false
+                }
                 const result = await Promise.resolve(tool?.run(args, toolMeta))
 
                 // Notify tool end (full result to UI)

@@ -346,7 +346,7 @@ function isExactBasenameMatch(pth: string, matched: Set<string>): boolean {
 
 // ---- Auto-refresh preflight ----------------------------------------------------------
 
-const defaultExcludes = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.cache', 'coverage', '.turbo', '.yarn', '.pnpm-store', 'out', '.idea', '.vscode'])
+const defaultExcludes = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.cache', 'coverage', '.turbo', '.yarn', '.pnpm-store', 'out', '.idea', '.vscode', '.hifide-public', '.hifide_public'])
 async function countWorkspaceFiles(root: string): Promise<number> {
   async function walk(dir: string): Promise<number> {
     let entries: any[] = []
@@ -485,7 +485,38 @@ async function runGrep(query: string, include: string[]|undefined, exclude: stri
   return out
 }
 
+// Heuristic: only send safe, single-node patterns to ast-grep; avoid multi-line or multi-statement snippets
+function isLikelyAstPattern(q: string): boolean {
+  const s = (q || '').trim()
+  if (!s) return false
+  // Hard denylists: known crashy inputs for napi (not catchable from JS)
+  if (/[\r\n]/.test(s)) return false // multi-line => often multiple nodes
+  if (s.includes('@')) return false // decorators/email/package@version
+  if (s.length > 200) return false // overly large snippet
+  // Disallow obvious multi-node delimiters
+  if (/[;,]/.test(s)) return false
+  // Require balanced brackets
+  const stack: string[] = []
+  for (const ch of s) {
+    if (ch === '(' || ch === '{' || ch === '[') stack.push(ch)
+    else if (ch === ')') { if (stack.pop() !== '(') return false }
+    else if (ch === '}') { if (stack.pop() !== '{') return false }
+    else if (ch === ']') { if (stack.pop() !== '[') return false }
+  }
+  if (stack.length) return false
+  // Positive signals
+  if (/\$[A-Za-z_]/.test(s)) return true // ast-grep capture variables
+  if (/(?:kind|has|inside|matches|regex|and|or|not)\s*\(/i.test(s)) return true // DSL
+  // Allow simple single-node expressions like identifiers, call expr, arrow fn with braces
+  if (/=>/.test(s)) return true
+  if (/^[A-Za-z_$][A-Za-z0-9_$]*\s*\(/.test(s)) return true // call expression like foo(bar)
+  // Otherwise, be conservative
+  return false
+}
+
+
 async function runAstGrep(query: string, languages: string[]|undefined, include: string[]|undefined, exclude: string[]|undefined, maxResults: number) {
+  if (!isLikelyAstPattern(query)) return []
   try {
     const res = await astGrepSearch({ pattern: query, languages: (languages && languages.length) ? languages : 'auto', includeGlobs: include, excludeGlobs: exclude, maxMatches: maxResults, contextLines: 1 })
     return res.matches.map(m => ({ path: m.filePath, startLine: m.startLine, endLine: m.endLine, text: m.snippet }))
@@ -598,7 +629,7 @@ export const searchWorkspaceTool: AgentTool = {
 
     const filters = normalizeFilters(args.filters)
     const include = filters.pathsInclude
-    const exclude = filters.pathsExclude
+    const exclude = [ ...(filters.pathsExclude || []), '.hifide-public/**', '.hifide_public/**' ]
     const languages = filters.languages
     const maxResults = filters.maxResults
     const maxSnippetLines = filters.maxSnippetLines

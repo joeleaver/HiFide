@@ -1,26 +1,24 @@
 import type { AgentTool } from '../../providers/provider'
 import { getWebContents } from '../../core/state'
-import { logEvent, isRiskyCommand } from '../utils'
+
 import { useMainStore } from '../../store/index'
 import path from 'node:path'
 
 export const terminalExecTool: AgentTool = {
   name: 'terminal.exec',
-  description: 'Execute a command in the persistent terminal session (visible in UI). Auto-creates session if needed. Output streams to the visible terminal panel. Risk gating applies to destructive operations.',
+  description: 'Execute a command in the persistent terminal session (visible in UI). Auto-creates session if needed. Output streams to the visible terminal panel.',
   parameters: {
     type: 'object',
     properties: {
       command: { type: 'string', description: 'Shell command to execute' },
       cwd: { type: 'string', description: 'Optional working directory (workspace-relative or absolute). Only used when creating a new session.' },
-      autoApproveEnabled: { type: 'boolean' },
-      autoApproveThreshold: { type: 'number' },
-      confidence: { type: 'number' }
+
     },
     required: ['command'],
     additionalProperties: false,
   },
   run: async (
-    args: { command: string; cwd?: string; autoApproveEnabled?: boolean; autoApproveThreshold?: number; confidence?: number },
+    args: { command: string; cwd?: string },
     meta?: { requestId?: string }
   ) => {
     const req = meta?.requestId
@@ -51,18 +49,7 @@ export const terminalExecTool: AgentTool = {
       if (wc) rec.attachedWcIds.add(wc.id)
     } catch {}
 
-    // Risk gating
-    const { risky, reason } = isRiskyCommand(args.command)
-    await logEvent(sid, 'agent_pty_command_attempt', { command: args.command, risky, reason })
-    if (risky) {
-      const autoEnabled = !!args.autoApproveEnabled
-      const threshold = typeof args.autoApproveThreshold === 'number' ? args.autoApproveThreshold : 1.1
-      const conf = typeof args.confidence === 'number' ? args.confidence : -1
-      if (!(autoEnabled && conf >= threshold)) {
-        await logEvent(sid, 'agent_pty_command_blocked', { command: args.command, reason, confidence: conf, threshold })
-        return { ok: false, blocked: true, reason }
-      }
-    }
+
 
     // Execute command
     console.log('[terminal.exec] Executing command:', args.command)

@@ -206,10 +206,18 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
         await fs.access(resolved)
         console.log('[workspace] Directory exists, reinitializing indexer')
 
+        // Set new workspace root BEFORE reinitializing indexer so the indexer picks up the correct path
+        set({
+          workspaceRoot: resolved,
+          explorerOpenFolders: [resolved],
+          explorerChildrenByDir: {}
+        } as any)
+        try { process.env.HIFIDE_WORKSPACE_ROOT = resolved } catch {}
+
         // Reinitialize indexer with new root
         resetIndexer()
         await getIndexer()
-        console.log('[workspace] Step 4 complete')
+        console.log('[workspace] Step 4 complete (root set to:', resolved, ')')
       } catch (error) {
         console.error('[workspace] Step 4 failed:', error)
         // Restore old workspace root on error
@@ -236,18 +244,8 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
         console.error('[workspace] Failed to bootstrap workspace:', e)
       }
 
-      // 7. Update workspace root BEFORE loading sessions
-      // This ensures that session loading, flow loading, and settings saving all use the correct workspace
-      console.log('[workspace] Setting workspaceRoot to:', folderPath)
-      set({
-        workspaceRoot: folderPath,
-        explorerOpenFolders: [folderPath],
-        explorerChildrenByDir: {}
-      } as any)
-      // Ensure tools resolve against the active workspace root
-      try { process.env.HIFIDE_WORKSPACE_ROOT = folderPath } catch {}
-      console.log('[workspace] workspaceRoot updated, current value:', get().workspaceRoot)
-
+      // 7. Workspace root already updated in Step 4 (before indexer init). Just log current root.
+      console.log('[workspace] Workspace root is set to:', get().workspaceRoot)
       // 8. Reload sessions from new workspace
       console.log('[workspace] Step 8: Loading sessions')
       if (state.setStartupMessage) state.setStartupMessage('Loading sessions...')

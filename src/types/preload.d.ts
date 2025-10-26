@@ -31,7 +31,7 @@ declare global {
       write: (sessionId: string, data: string) => Promise<{ ok: boolean }>;
       resize: (sessionId: string, cols: number, rows: number) => Promise<{ ok: boolean }>;
       dispose: (sessionId: string) => Promise<{ ok: boolean }>;
-      execAgent: (sessionId: string, command: string, opts?: { confidence?: number; autoApproveEnabled?: boolean; autoApproveThreshold?: number }) => Promise<{ ok: boolean; blocked?: boolean; error?: string }>;
+      execAgent: (sessionId: string, command: string) => Promise<{ ok: boolean; blocked?: boolean; error?: string }>;
 
       onData: (listener: (payload: { sessionId: string; data: string }) => void) => () => void;
       onExit: (listener: (payload: { sessionId: string; exitCode: number }) => void) => () => void;
@@ -93,7 +93,7 @@ declare global {
         getTools: () => Promise<Array<{ name: string; description: string }>>;
       };
       flowExec?: {
-        run: (args: { requestId: string; flowId?: string; flowDef?: any; input?: string; model?: string; provider?: string; sessionId?: string; policy?: { autoApproveEnabled?: boolean; autoApproveThreshold?: number; redactor?: { enabled?: boolean; rules?: string[] }; budgetGuard?: { maxUSD?: number; blockOnExceed?: boolean }; errorDetection?: { enabled?: boolean; blockOnFlag?: boolean; patterns?: string[] }; pricing?: { inputCostPer1M?: number; outputCostPer1M?: number } } }) => Promise<{ ok: boolean }>;
+        run: (args: { requestId: string; flowId?: string; flowDef?: any; input?: string; model?: string; provider?: string; sessionId?: string; policy?: { redactor?: { enabled?: boolean; rules?: string[] }; budgetGuard?: { maxUSD?: number; blockOnExceed?: boolean }; errorDetection?: { enabled?: boolean; blockOnFlag?: boolean; patterns?: string[] }; pricing?: { inputCostPer1M?: number; outputCostPer1M?: number } } }) => Promise<{ ok: boolean }>;
         stop: (requestId: string) => Promise<{ ok: boolean }>;
       pause: (requestId: string) => Promise<{ ok: boolean }>;
       resume: (requestId: string) => Promise<{ ok: boolean }>;

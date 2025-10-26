@@ -31,6 +31,9 @@ export type DiffFile = {
   truncated?: boolean
 }
 
+// Stable empty array to avoid new reference on each render
+const EMPTY_DIFF_LIST: DiffFile[] = []
+
 /**
  * Diff editor content for expandable tool badges
  * Displays the first file's diff inline
@@ -44,7 +47,8 @@ export const BadgeDiffContent = memo(function BadgeDiffContent({ badgeId, diffKe
   }, [diffKey, dispatch])
 
   // Read diff from state
-  const data = useAppStore((s) => s.feLoadedToolResults?.[diffKey] || [])
+  const dataFromStore = useAppStore((s) => s.feLoadedToolResults?.[diffKey])
+  const data = dataFromStore ?? EMPTY_DIFF_LIST
 
   if (!data.length) {
     return (

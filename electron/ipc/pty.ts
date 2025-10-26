@@ -5,11 +5,11 @@
  */
 
 import type { IpcMain } from 'electron'
-import { BrowserWindow, dialog } from 'electron'
+import { BrowserWindow } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { getWindow } from '../core/state'
-import { redactOutput, isRiskyCommand } from '../utils/security'
+
+import { redactOutput } from '../utils/security'
 import { logEvent } from '../utils/logging'
 
 const require = createRequire(import.meta.url)
@@ -277,45 +277,11 @@ export function registerPtyHandlers(ipcMain: IpcMain): void {
   /**
    * Execute agent-initiated command with policy gating
    */
-  ipcMain.handle('pty:exec-agent', async (_event, args: { sessionId: string; command: string; confidence?: number; autoApproveEnabled?: boolean; autoApproveThreshold?: number }) => {
+  ipcMain.handle('pty:exec-agent', async (_event, args: { sessionId: string; command: string }) => {
     const s = ptySessions.get(args.sessionId)
     if (!s) return { ok: false, error: 'no-session' }
     
-    const { risky, reason } = isRiskyCommand(args.command)
-    await logEvent(args.sessionId, 'command_attempt', { command: args.command, risky, reason })
-    
-    if (risky) {
-      const autoEnabled = !!args.autoApproveEnabled
-      const threshold = typeof args.autoApproveThreshold === 'number' ? args.autoApproveThreshold : 1.1 // impossible
-      const conf = typeof args.confidence === 'number' ? args.confidence : -1
-      const shouldAutoApprove = autoEnabled && conf >= threshold
 
-      if (shouldAutoApprove) {
-        await logEvent(args.sessionId, 'command_decision', { command: args.command, allowed: true, decision_reason: 'auto_approved', confidence: conf, threshold })
-      } else {
-        let allowed = false
-        try {
-          const win = getWindow()
-          if (win && !win.isDestroyed()) {
-            const r = await dialog.showMessageBox(win, {
-              type: 'warning',
-              buttons: ['Allow', 'Cancel'],
-              defaultId: 1,
-              cancelId: 1,
-              title: 'Confirm risky command',
-              message: `This command may be risky (${reason}).`,
-              detail: args.command,
-              noLink: true,
-            })
-            allowed = r.response === 0
-          }
-        } catch {
-          allowed = false
-        }
-        await logEvent(args.sessionId, 'command_decision', { command: args.command, allowed, decision_reason: 'manual', confidence: conf, threshold })
-        if (!allowed) return { ok: false, blocked: true }
-      }
-    }
     
     // Write command followed by newline
     s.p.write(args.command + (process.platform === 'win32' ? '\r\n' : '\n'))

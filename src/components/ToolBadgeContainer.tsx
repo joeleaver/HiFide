@@ -1,4 +1,4 @@
-import { ReactNode, useEffect } from 'react'
+import { ReactNode, useEffect, memo } from 'react'
 import { Group, Text, Badge, UnstyledButton, useMantineTheme } from '@mantine/core'
 import { IconChevronDown, IconChevronUp } from '@tabler/icons-react'
 import { useUiStore } from '../store/ui'
@@ -14,19 +14,20 @@ interface ToolBadgeContainerProps {
  * Expandable container for tool badges
  * Replaces simple badges with a sophisticated header + collapsible content area
  */
-export default function ToolBadgeContainer({ badge, children }: ToolBadgeContainerProps) {
-  console.log('[ToolBadgeContainer] Component rendering:', badge.id)
+function ToolBadgeContainer({ badge, children }: ToolBadgeContainerProps) {
+  if (import.meta.env.VITE_DEBUG_BADGES === 'true') {
+    console.debug('[ToolBadgeContainer] render:', badge.id)
+  }
 
   const theme = useMantineTheme()
   const dispatch = useDispatch()
-  const expandedBadges = useUiStore((s) => s.expandedBadges)
+  // Narrow selectors to avoid unrelated global changes re-rendering all badges
+  const isExpanded = useUiStore((s) => s.expandedBadges?.has(badge.id) ?? (badge.defaultExpanded ?? false))
   const toggleBadgeExpansion = useUiStore((s) => s.toggleBadgeExpansion)
   const openInlineDiffForBadge = useUiStore((s) => s.openInlineDiffForBadge)
-  const inlineDiffByBadge = useUiStore((s) => s.inlineDiffByBadge)
+  const inlineDiff = useUiStore((s) => s.inlineDiffByBadge?.[badge.id])
 
-  // Use expandedBadges state if available, otherwise fall back to defaultExpanded
-  // Note: We check expandedBadges first because user interaction should override defaults
-  const isExpanded = expandedBadges ? expandedBadges.has(badge.id) : (badge.defaultExpanded ?? false)
+  // Use expanded state or default
   const canExpand = !!(badge.expandable && children)
 
   // Status indicator color
@@ -38,32 +39,25 @@ export default function ToolBadgeContainer({ badge, children }: ToolBadgeContain
 
   // Load diff data when expanded (for diff badges)
   useEffect(() => {
-    if (isExpanded && badge.contentType === 'diff' && badge.interactive?.type === 'diff') {
-      const payload = badge.interactive.data
-      const existing = inlineDiffByBadge[badge.id]
+    if (!isExpanded) return
+    if (badge.contentType !== 'diff' || badge.interactive?.type !== 'diff') return
 
-      // If we already have cached data, nothing to do
-      if (existing && existing.length) {
-        return
-      }
+    const payload = badge.interactive?.data
+    const existing = inlineDiff
+    if (existing && existing.length) return
 
-      // Load diff data from main process cache
-      if (payload && typeof payload === 'object' && payload.key) {
-        // Note: do NOT include `dispatch` in deps to avoid re-runs from identity changes
-        dispatch('loadDiffPreview', { key: payload.key }).then(() => {
-          const files = (useAppStore as any).getState().feLatestDiffPreview || []
-          if (files.length) {
-            openInlineDiffForBadge(badge.id, files)
-          }
-        }).catch((e: any) => {
-          console.error('Failed to load diff preview:', e)
-        })
-      } else if (Array.isArray(payload)) {
-        // Direct payload (legacy)
-        openInlineDiffForBadge(badge.id, payload)
-      }
+    if (payload && typeof payload === 'object' && payload.key) {
+      // Note: do NOT include `dispatch` in deps to avoid re-runs from identity changes
+      dispatch('loadDiffPreview', { key: payload.key }).then(() => {
+        const files = (useAppStore as any).getState().feLatestDiffPreview || []
+        if (files.length) openInlineDiffForBadge(badge.id, files)
+      }).catch((e: any) => {
+        console.error('Failed to load diff preview:', e)
+      })
+    } else if (Array.isArray(payload)) {
+      openInlineDiffForBadge(badge.id, payload)
     }
-  }, [isExpanded, badge.id, badge.contentType, badge.interactive, openInlineDiffForBadge, inlineDiffByBadge])
+  }, [isExpanded, badge.id, badge.contentType, inlineDiff, openInlineDiffForBadge])
 
   const handleToggle = () => {
     console.log('[ToolBadgeContainer] handleToggle called:', {
@@ -140,6 +134,11 @@ export default function ToolBadgeContainer({ badge, children }: ToolBadgeContain
             >
               {badge.metadata.filePath}
             </Text>
+          )}
+
+          {/* Requested lines/region (for fs.read_lines) */}
+          {badge.metadata?.lineRange && (
+            <Text size="xs" c="dimmed">{badge.metadata.lineRange}</Text>
           )}
 
           {/* File count (only shown for multi-file edits when no filePath) */}
@@ -281,4 +280,28 @@ export default function ToolBadgeContainer({ badge, children }: ToolBadgeContain
     </div>
   )
 }
+
+export default memo(ToolBadgeContainer, (prev, next) => {
+  const a = prev.badge, b = next.badge
+  if (a.id !== b.id) return false
+  if (a.status !== b.status) return false
+  if (a.label !== b.label) return false
+  if ((a.metadata?.filePath || '') !== (b.metadata?.filePath || '')) return false
+  if ((a.metadata?.resultCount || 0) !== (b.metadata?.resultCount || 0)) return false
+  if ((a.metadata?.fileCount || 0) !== (b.metadata?.fileCount || 0)) return false
+  if ((a.metadata?.duration || 0) !== (b.metadata?.duration || 0)) return false
+  if ((a.metadata?.query || '') !== (b.metadata?.query || '')) return false
+  if ((a.metadata?.lineRange || '') !== (b.metadata?.lineRange || '')) return false
+  if ((a.addedLines || 0) !== (b.addedLines || 0)) return false
+  if ((a.removedLines || 0) !== (b.removedLines || 0)) return false
+  if ((a.filesChanged || 0) !== (b.filesChanged || 0)) return false
+  if ((a.expandable || false) !== (b.expandable || false)) return false
+  if ((a.defaultExpanded || false) !== (b.defaultExpanded || false)) return false
+  if (a.contentType !== b.contentType) return false
+  const aKey = (a as any)?.interactive?.data?.key
+  const bKey = (b as any)?.interactive?.data?.key
+  if (aKey !== bKey) return false
+  return true
+})
+
 

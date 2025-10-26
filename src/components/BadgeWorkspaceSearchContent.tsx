@@ -132,16 +132,16 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
             Results
           </Text>
           <Badge size="xs" variant="light" color="green">
-            {results.results.length} {results.results.length === 1 ? 'match' : 'matches'}
+            {Array.isArray(results.results) ? results.results.length : 0} {(Array.isArray(results.results) && results.results.length === 1) ? 'match' : 'matches'}
           </Badge>
-          {results.meta.truncated && (
+          {results.meta?.truncated && (
             <Badge size="xs" variant="light" color="orange">
               truncated
             </Badge>
           )}
         </Group>
 
-        {results.results.length === 0 ? (
+        {Array.isArray(results.results) && results.results.length === 0 ? (
           <Text size="sm" c="dimmed">
             No matches found
           </Text>
@@ -161,7 +161,7 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
               },
             }}
           >
-            {results.results.slice(0, 10).map((hit: any, idx: number) => (
+            {(Array.isArray(results.results) ? results.results.slice(0, 10) : []).map((hit: any, idx: number) => (
               <Accordion.Item key={idx} value={`result-${idx}`}>
                 <Accordion.Control>
                   <Group gap={8}>
@@ -178,9 +178,11 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
                         {hit.language}
                       </Badge>
                     )}
-                    <Badge size="xs" variant="light" color="grape">
-                      {hit.score.toFixed(2)}
-                    </Badge>
+                    {typeof hit.score === 'number' && (
+                      <Badge size="xs" variant="light" color="grape">
+                        {hit.score.toFixed(2)}
+                      </Badge>
+                    )}
                   </Group>
                 </Accordion.Control>
                 <Accordion.Panel>
@@ -225,7 +227,7 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
           </Accordion>
         )}
 
-        {results.results.length > 10 && (
+        {Array.isArray(results.results) && results.results.length > 10 && (
           <Text size="xs" c="dimmed" mt={8}>
             Showing first 10 of {results.results.length} results
           </Text>
@@ -235,11 +237,11 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
       {/* Meta Information */}
       <Group gap={8} mt={4}>
         <Text size="xs" c="dimmed">
-          {results.meta.elapsedMs}ms
+          {Math.round(results.meta?.elapsedMs ?? 0)}ms
         </Text>
-        {results.meta.strategiesUsed.length > 0 && (
+        {Array.isArray(results.meta?.strategiesUsed) && results.meta!.strategiesUsed.length > 0 && (
           <Text size="xs" c="dimmed">
-            • {results.meta.strategiesUsed.join(', ')}
+            • {results.meta!.strategiesUsed.join(', ')}
           </Text>
         )}
       </Group>

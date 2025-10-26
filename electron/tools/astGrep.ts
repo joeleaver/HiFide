@@ -163,6 +163,24 @@ function extToLang(ext: string, Available: Record<string, any>): string | undefi
   return undefined
 }
 
+function isSafeAstGrepPattern(input: string): boolean {
+  const s = (input || '').trim()
+  if (!s) return false
+  if (/[\r\n]/.test(s)) return false
+  if (s.includes('@')) return false
+  if (s.length > 200) return false
+  if (/[;,]/.test(s)) return false
+  const stack: string[] = []
+  for (const ch of s) {
+    if (ch === '(' || ch === '{' || ch === '[') stack.push(ch)
+    else if (ch === ')') { if (stack.pop() !== '(') return false }
+    else if (ch === '}') { if (stack.pop() !== '{') return false }
+    else if (ch === ']') { if (stack.pop() !== '[') return false }
+  }
+  return stack.length === 0
+}
+
+
 function linesAround(content: string, startLine1: number, endLine1: number, context: number): string {
   const lines = content.split(/\r?\n/)
   const from = Math.max(1, startLine1 - context)
@@ -184,6 +202,7 @@ export async function astGrepSearch(opts: AstGrepSearchOptions): Promise<AstGrep
   const include = (opts.includeGlobs && opts.includeGlobs.length ? opts.includeGlobs : ['**/*'])
   const exclude = [
     'node_modules/**', 'dist/**', 'dist-electron/**', 'release/**', '.git/**',
+    '.hifide-public/**', '.hifide_public/**',
     ...(opts.excludeGlobs || [])
   ]
   const maxMatches = Math.max(1, opts.maxMatches ?? 500)
@@ -192,6 +211,10 @@ export async function astGrepSearch(opts: AstGrepSearchOptions): Promise<AstGrep
   const concurrency = Math.max(1, Math.min(32, opts.concurrency ?? 6))
   const pattern = (opts.pattern || '').trim()
   if (!pattern) throw new Error('pattern is required')
+  if (!isSafeAstGrepPattern(pattern)) {
+    const durationMs = performance.now() - t0
+    return { matches: [], truncated: false, stats: { scannedFiles: 0, matchedCount: 0, durationMs } }
+  }
 
   // Discover candidate files
   const files = await fg(include, { cwd, ignore: exclude, absolute: true, onlyFiles: true, dot: false })

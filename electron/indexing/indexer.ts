@@ -120,7 +120,7 @@ export class Indexer {
 
   private defaultExcludes = new Set([
     'node_modules','vendor','target','dist','build','out','dist-electron','release',
-    '.git','.hifide-private','.next','.nuxt','.svelte-kit','.expo','.vercel',
+    '.git','.hifide-private','.hifide-public','.hifide_public','.next','.nuxt','.svelte-kit','.expo','.vercel',
     '.cache','.parcel-cache','.rollup.cache','.turbo','.yarn','.pnpm-store','.idea','.vscode',
     '.venv','venv','.pytest_cache','.mypy_cache','.gradle','jspm_packages','bower_components',
     'coverage','storybook-static','Pods'
@@ -183,7 +183,7 @@ export class Indexer {
     // Fast file discovery via fast-glob with standard ignores, then filter with gitignore/defaultExcludes
     const DEFAULT_EXCLUDE_GLOBS = [
       'node_modules/**','vendor/**','target/**','dist/**','build/**','out/**','dist-electron/**','release/**',
-      '.git/**','.hifide-private/**','.next/**','.nuxt/**','.svelte-kit/**','.expo/**','.vercel/**',
+      '.git/**','.hifide-private/**','.hifide-public/**','.hifide_public/**','.next/**','.nuxt/**','.svelte-kit/**','.expo/**','.vercel/**',
       '.cache/**','.parcel-cache/**','.rollup.cache/**','.turbo/**','.yarn/**','.pnpm-store/**','.idea/**','.vscode/**',
       '.venv/**','venv/**','.pytest_cache/**','.mypy_cache/**','.gradle/**','jspm_packages/**','bower_components/**',
       'coverage/**','storybook-static/**','Pods/**'

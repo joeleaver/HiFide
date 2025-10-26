@@ -245,10 +245,10 @@ export const BadgeAstSearchContent = memo(function BadgeAstSearchContent({
       {/* Stats Section */}
       <Group gap={8} mt={4}>
         <Text size="xs" c="dimmed">
-          Scanned {results.stats.scannedFiles} {results.stats.scannedFiles === 1 ? 'file' : 'files'}
+          Scanned {results.stats?.scannedFiles ?? 0} {(Number(results.stats?.scannedFiles ?? 0) === 1) ? 'file' : 'files'}
         </Text>
         <Text size="xs" c="dimmed">
-          • {results.stats.durationMs.toFixed(0)}ms
+          • {Math.round(results.stats?.durationMs ?? 0)}ms
         </Text>
       </Group>
     </Stack>

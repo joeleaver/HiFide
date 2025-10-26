@@ -38,8 +38,7 @@ export const LS_KEYS = {
   DEFAULT_MODELS: 'hifide:defaultModels',
   
   // Settings
-  AUTO_APPROVE_ENABLED: 'hifide:autoApproveEnabled',
-  AUTO_APPROVE_THRESHOLD: 'hifide:autoApproveThreshold',
+
   PRICING_CONFIG: 'hifide:pricingConfig',
 
   // Session
@@ -77,8 +76,7 @@ export const DEFAULTS = {
   AUTO_RETRY: false,
   
   // Settings
-  AUTO_APPROVE_ENABLED: false,
-  AUTO_APPROVE_THRESHOLD: 0.8,
+
   AUTO_ENFORCE_EDITS_SCHEMA: false,
   
   // Terminal

@@ -87,9 +87,9 @@ contextBridge.exposeInMainWorld('pty', {
     ipcRenderer.invoke('pty:resize', { sessionId, cols, rows }),
   dispose: (sessionId: string) =>
     ipcRenderer.invoke('pty:dispose', { sessionId }),
-  // Agent-only: gated execution path
-  execAgent: (sessionId: string, command: string, opts?: { confidence?: number; autoApproveEnabled?: boolean; autoApproveThreshold?: number }) =>
-    ipcRenderer.invoke('pty:exec-agent', { sessionId, command, ...(opts || {}) }),
+  // Agent-only execution path
+  execAgent: (sessionId: string, command: string) =>
+    ipcRenderer.invoke('pty:exec-agent', { sessionId, command }),
 	  attachAgent: (opts?: { requestId?: string; sessionId?: string; tailBytes?: number }) =>
 	    ipcRenderer.invoke('agent-pty:attach', opts || {}),
 	  detachAgent: (sessionId: string) =>

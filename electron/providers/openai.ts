@@ -404,7 +404,11 @@ export const OpenAIProvider: ProviderAdapter = {
                 if (perTurnToolCache.has(dedupeKey)) {
                   result = perTurnToolCache.get(dedupeKey)
                 } else {
-                  result = await Promise.race([
+                  // Prefer raw code blocks for read_lines to help LLM comprehension
+                if (originalName === 'fs.read_lines' && args && args.includeLineNumbers !== false) {
+                  args.includeLineNumbers = false
+                }
+                result = await Promise.race([
                     Promise.resolve(tool.run(args, toolMeta)),
                     new Promise((_, reject) => setTimeout(() => reject(new Error(`Tool '${originalName}' timed out after ${timeoutMs}ms`)), timeoutMs))
                   ])

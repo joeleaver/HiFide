@@ -39,6 +39,7 @@ interface UiStore {
   contextInspectorHeight: number
   tokensCostsCollapsed: boolean
   tokensCostsHeight: number
+  rightPaneCollapsed: boolean
 
   // Flow Editor: New Flow Modal (renderer-only)
   newFlowModalOpen: boolean
@@ -61,6 +62,7 @@ interface UiStore {
   setContextInspectorHeight: (height: number) => void
   setTokensCostsCollapsed: (collapsed: boolean) => void
   setTokensCostsHeight: (height: number) => void
+  setRightPaneCollapsed: (collapsed: boolean) => void
 
   // New Flow Modal actions
   setNewFlowModalOpen: (open: boolean) => void
@@ -98,6 +100,7 @@ export const useUiStore = create<UiStore>((set) => ({
   metaPanelWidth: 300,
   isDraggingSessionPanel: false,
   isDraggingMetaPanel: false,
+  rightPaneCollapsed: false,
   shouldAutoScroll: true,
   sessionInputValue: '',
 
@@ -122,6 +125,7 @@ export const useUiStore = create<UiStore>((set) => ({
   contextInspectorHeight: 200,
   tokensCostsCollapsed: false,
   tokensCostsHeight: 250,
+
 
   // New Flow Modal state
   newFlowModalOpen: false,
@@ -162,6 +166,7 @@ export const useUiStore = create<UiStore>((set) => ({
   setContextInspectorHeight: (height) => set({ contextInspectorHeight: height }),
   setTokensCostsCollapsed: (collapsed) => set({ tokensCostsCollapsed: collapsed }),
   setTokensCostsHeight: (height) => set({ tokensCostsHeight: height }),
+  setRightPaneCollapsed: (collapsed) => set({ rightPaneCollapsed: collapsed }),
 
   // New Flow Modal actions
   setNewFlowModalOpen: (open) => set({ newFlowModalOpen: open }),

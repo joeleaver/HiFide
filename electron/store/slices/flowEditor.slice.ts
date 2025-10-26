@@ -919,8 +919,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           flowDef,
           initialContext: sessionContext,
           policy: {
-            autoApproveEnabled: storeState.autoApproveEnabled,
-            autoApproveThreshold: storeState.autoApproveThreshold,
+
             redactor: { enabled: get().feRedactorEnabled, rules },
             budgetGuard: { maxUSD, blockOnExceed: get().feBudgetBlock },
             errorDetection: { enabled: get().feErrorDetectEnabled, blockOnFlag: get().feErrorDetectBlock, patterns: (get().feErrorDetectPatterns || '').split(/[\n,]/g).map((s) => s.trim()).filter(Boolean) },
@@ -1730,6 +1729,32 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           badgeMetadata = { filePath: path }
         }
       } else if (normalizedToolName === 'index_search') {
+      } else if (normalizedToolName === 'fs_read_lines') {
+        const path = toolArgs.path
+        const mode = String(toolArgs.mode || 'range')
+        let lineRange: string | undefined
+        if (mode === 'range') {
+          const s = Number(toolArgs.startLine)
+          const e = Number(toolArgs.endLine)
+          if (s && e) lineRange = `L${s}-${e}`
+          else if (s) lineRange = `L${s}`
+        } else if (mode === 'head') {
+          const n = Number(toolArgs.headLines)
+          lineRange = n ? `head:${n}` : 'head'
+        } else if (mode === 'tail') {
+          const n = Number(toolArgs.tailLines)
+          lineRange = n ? `tail:${n}` : 'tail'
+        } else if (mode === 'around') {
+          const L = Number(toolArgs.focusLine)
+          const win = Number(toolArgs.window ?? Math.max(Number(toolArgs.beforeLines || 0), Number(toolArgs.afterLines || 0)))
+          if (L && win) lineRange = `L${L} ±${win}`
+          else if (L) lineRange = `L${L}`
+          else lineRange = 'around'
+        } else if (mode === 'regex') {
+          lineRange = 'regex'
+        }
+        badgeMetadata = { filePath: path, ...(lineRange ? { lineRange } : {}), fullParams: toolArgs }
+
         const query = toolArgs.query
         if (query) {
           badgeMetadata = {
@@ -1907,6 +1932,25 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
               resultCount,
             },
             interactive: { type: 'workspace-search', data: { key: callId, count: resultCount } }
+          }
+        })
+        return
+      }
+      // Handle fs.read_lines results
+      if (normalizedToolName === 'fs_read_lines' && result) {
+        // Store full result in unified cache using callId as key
+        get().registerToolResult({ key: callId, data: result })
+
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId: callId,
+          updates: {
+            status: 'success',
+            color: 'green',
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'read-lines' as const,
+            interactive: { type: 'read-lines', data: { key: callId } }
           }
         })
         return

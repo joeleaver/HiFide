@@ -116,7 +116,8 @@ export const grepTool: AgentTool = {
     let excludeGlobs = [
       'node_modules/**','dist/**','dist-electron/**','release/**','.git/**',
       'coverage/**','.next/**','out/**','build/**','.turbo/**','.cache/**','target/**','vendor/**','.pnpm-store/**',
-      '.venv/**','venv/**','.idea/**'
+      '.venv/**','venv/**','.idea/**',
+      '.hifide-public/**','.hifide_public/**'
     ].concat(options.exclude || [])
 
     // Build full .gitignore semantics filter if available

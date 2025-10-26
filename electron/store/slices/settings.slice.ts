@@ -5,7 +5,7 @@
  * 
  * Responsibilities:
  * - API keys management (load, save, validate)
- * - Auto-approve settings
+
  * - Auto-enforce edits schema
  * - Pricing configuration
  * - Rate limit configuration
@@ -31,9 +31,7 @@ export interface SettingsSlice {
   settingsSaveResult: { ok: boolean; failures: string[] } | null
   settingsValidateResult: { ok: boolean; failures: string[] } | null
 
-  // Auto-approve State
-  autoApproveEnabled: boolean
-  autoApproveThreshold: number
+
 
   // Pricing State
   pricingConfig: PricingConfig
@@ -49,9 +47,7 @@ export interface SettingsSlice {
   resetSettingsSaved: () => void
   clearSettingsResults: () => void
   
-  // Auto-approve Actions
-  setAutoApproveEnabled: (value: boolean) => void
-  setAutoApproveThreshold: (value: number) => void
+
 
   // Pricing Actions
   setPricingForModel: (params: { provider: string; model: string; pricing: ModelPricing }) => void
@@ -76,8 +72,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
   settingsSaveResult: null,
   settingsValidateResult: null,
 
-  autoApproveEnabled: false,
-  autoApproveThreshold: 0.8,
+
 
   pricingConfig: DEFAULT_PRICING,
   defaultPricingConfig: DEFAULT_PRICING,  // Immutable reference for UI comparison
@@ -243,16 +238,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
     set({ settingsSaveResult: null, settingsValidateResult: null })
   },
   
-  // Auto-approve Actions
-  setAutoApproveEnabled: (value: boolean) => {
-    set({ autoApproveEnabled: value })
-  },
 
-  setAutoApproveThreshold: (value: number) => {
-    // Clamp between 0 and 1
-    const clamped = Math.max(0, Math.min(1, value))
-    set({ autoApproveThreshold: clamped })
-  },
 
   // Pricing Actions
   setPricingForModel: ({ provider, model, pricing }: { provider: string; model: string; pricing: ModelPricing }) => {

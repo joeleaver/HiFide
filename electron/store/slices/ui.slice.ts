@@ -58,6 +58,7 @@ export interface WindowState {
   // Explorer Terminal Panel
   explorerTerminalPanelOpen: boolean
   explorerTerminalPanelHeight: number
+  rightPaneCollapsed: boolean
 }
 
 export interface UiSlice {
@@ -90,6 +91,7 @@ const DEFAULT_WINDOW_STATE: WindowState = {
   tokensCostsHeight: 250,
   sessionPanelWidth: 400,
   sessionPanelHeight: 400,
+  rightPaneCollapsed: false,
   agentTerminalPanelOpen: false,
   agentTerminalPanelHeight: 300,
   explorerTerminalPanelOpen: false,

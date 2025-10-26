@@ -112,8 +112,7 @@ export const selectDebugLogs = (state: AppStore) => state.debugLogs
 export const selectApprovedPlan = (state: AppStore) => state.approvedPlan
 
 // Settings selectors
-export const selectAutoApproveEnabled = (state: AppStore) => state.autoApproveEnabled
-export const selectAutoApproveThreshold = (state: AppStore) => state.autoApproveThreshold
+
 export const selectPricingConfig = (state: AppStore) => state.pricingConfig
 export const selectDefaultPricingConfig = (state: AppStore) => state.defaultPricingConfig
 

@@ -198,6 +198,12 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
         console.error('[app] Indexing gate failed:', e)
       }
 
+      // Clear startup banner if we have at least one valid provider
+      try {
+        const hasValidProvider = validMap.openai || validMap.anthropic || validMap.gemini
+        if (hasValidProvider) set({ startupMessage: null })
+      } catch {}
+
       // 6. Navigate if no providers (after indexing so startup stays in loading screen)
       try {
         const hasValidProvider = validMap.openai || validMap.anthropic || validMap.gemini

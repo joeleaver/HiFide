@@ -427,6 +427,10 @@ export const AnthropicProvider: ProviderAdapter = {
                 console.log(`[Anthropic] Running tool:`, { originalName: originalToolName })
 
                 // Pass toolMeta to tool.run()
+                // Prefer raw code blocks for read_lines to help LLM comprehension
+                if (originalToolName === 'fs.read_lines' && tu.input && tu.input.includeLineNumbers !== false) {
+                  tu.input.includeLineNumbers = false
+                }
                 const result = await Promise.resolve(tool.run(tu.input, toolMeta))
 
                 console.log(`[Anthropic] Tool completed:`, {

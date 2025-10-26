@@ -83,7 +83,7 @@ export default function TokensCostsPanel() {
                 <Group gap="xs">
                   <Text size="xs" c="dimmed" style={{ minWidth: '60px' }}>Cost:</Text>
                   <Text size="xs">
-                    <span style={{ color: '#4ade80', fontWeight: 600 }}>${totalCost.toFixed(4)}</span>
+                    <span style={{ color: '#4ade80', fontWeight: 600 }}>${Number(totalCost ?? 0).toFixed(4)}</span>
                     {(() => {
                       // Calculate total savings across all providers/models
                       let totalSavings = 0
@@ -93,11 +93,11 @@ export default function TokensCostsPanel() {
                         })
                       })
                       if (totalSavings > 0) {
-                        const totalWithoutSavings = totalCost + totalSavings
+                        const totalWithoutSavings = (totalCost || 0) + totalSavings
                         const savingsPercent = (totalSavings / totalWithoutSavings) * 100
                         return (
                           <span style={{ color: '#66bb6a', marginLeft: 8 }}>
-                            (saved ${totalSavings.toFixed(4)} · {savingsPercent.toFixed(0)}%)
+                            (saved ${Number(totalSavings ?? 0).toFixed(4)} · {Math.round(savingsPercent || 0)}%)
                           </span>
                         )
                       }
@@ -133,10 +133,10 @@ export default function TokensCostsPanel() {
                             <Group gap="xs" ml="md">
                               <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Cost:</Text>
                               <Text size="xs" c="#4ade80">
-                                ${cost.totalCost.toFixed(4)}
+                                ${Number(cost.totalCost ?? 0).toFixed(4)}
                               </Text>
                               <Text size="xs" c="dimmed">
-                                (${cost.inputCost.toFixed(4)} in + ${cost.outputCost.toFixed(4)} out)
+                                (${Number(cost.inputCost ?? 0).toFixed(4)} in + ${Number(cost.outputCost ?? 0).toFixed(4)} out)
                               </Text>
                             </Group>
                           </div>
@@ -184,10 +184,10 @@ export default function TokensCostsPanel() {
                     <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Cost:</Text>
                     {cost ? (
                       <Text size="xs">
-                        <span style={{ color: '#4ade80' }}>${cost.totalCost.toFixed(4)}</span>
+                        <span style={{ color: '#4ade80' }}>${Number(cost.totalCost ?? 0).toFixed(4)}</span>
                         {cost.savings && cost.savings > 0 && (
                           <span style={{ color: '#66bb6a', marginLeft: 8 }}>
-                            (saved ${cost.savings.toFixed(4)} · {cost.savingsPercent?.toFixed(0)}%)
+                            (saved ${Number(cost.savings ?? 0).toFixed(4)} · {Math.round(cost.savingsPercent ?? 0)}%)
                           </span>
                         )}
                       </Text>

@@ -19,6 +19,20 @@ import type { IndexStatus, IndexProgress } from '../types'
 
 import { getIndexer } from '../../core/state'
 
+
+// Shallow equality to avoid spamming set() with identical values
+function shallowEqual(a: any, b: any): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  const aKeys = Object.keys(a)
+  const bKeys = Object.keys(b)
+  if (aKeys.length !== bKeys.length) return false
+  for (const k of aKeys) {
+    if (a[k] !== (b as any)[k]) return false
+  }
+  return true
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -120,24 +134,25 @@ export const createIndexingSlice: StateCreator<IndexingSlice, [], [], IndexingSl
         .then((indexer) => {
           try {
             indexer.startWatch((p) => {
-              set({
-                idxProg: {
-                  inProgress: p.inProgress,
-                  phase: p.phase,
-                  processedFiles: p.processedFiles,
-                  totalFiles: p.totalFiles,
-                  processedChunks: p.processedChunks,
-                  totalChunks: p.totalChunks,
-                  elapsedMs: p.elapsedMs,
-                } as IndexProgress,
-                idxStatus: {
-                  ready: p.ready,
-                  chunks: p.chunks,
-                  modelId: p.modelId,
-                  dim: p.dim,
-                  indexPath: p.indexPath,
-                } as IndexStatus,
-              })
+              const nextProg: IndexProgress = {
+                inProgress: p.inProgress,
+                phase: p.phase,
+                processedFiles: p.processedFiles,
+                totalFiles: p.totalFiles,
+                processedChunks: p.processedChunks,
+                totalChunks: p.totalChunks,
+                elapsedMs: p.elapsedMs,
+              }
+              const nextStatus: IndexStatus = {
+                ready: p.ready,
+                chunks: p.chunks,
+                modelId: p.modelId,
+                dim: p.dim,
+                indexPath: p.indexPath,
+              }
+              const prev = get()
+              if (shallowEqual(prev.idxProg, nextProg) && shallowEqual(prev.idxStatus, nextStatus)) return
+              set({ idxProg: nextProg, idxStatus: nextStatus })
             })
           } catch {}
         })
@@ -252,24 +267,28 @@ export const createIndexingSlice: StateCreator<IndexingSlice, [], [], IndexingSl
           stateAny.setStartupMessage?.('Indexing workspace...')
           await indexer.rebuild((p) => {
             // Update progress state
-            set({
-              idxProg: {
-                inProgress: p.inProgress,
-                phase: p.phase,
-                processedFiles: p.processedFiles,
-                totalFiles: p.totalFiles,
-                processedChunks: p.processedChunks,
-                totalChunks: p.totalChunks,
-                elapsedMs: p.elapsedMs,
-              },
-              idxStatus: {
-                ready: p.ready,
-                chunks: p.chunks,
-                modelId: p.modelId,
-                dim: p.dim,
-                indexPath: p.indexPath,
-              },
-            })
+            const nextProg: IndexProgress = {
+              inProgress: p.inProgress,
+              phase: p.phase,
+              processedFiles: p.processedFiles,
+              totalFiles: p.totalFiles,
+              processedChunks: p.processedChunks,
+              totalChunks: p.totalChunks,
+              elapsedMs: p.elapsedMs,
+            }
+            const nextStatus: IndexStatus = {
+              ready: p.ready,
+              chunks: p.chunks,
+              modelId: p.modelId,
+              dim: p.dim,
+              indexPath: p.indexPath,
+            }
+            const prev = get()
+            if (shallowEqual(prev.idxProg, nextProg) && shallowEqual(prev.idxStatus, nextStatus)) {
+              // still update the banner message throttled below
+            } else {
+              set({ idxProg: nextProg, idxStatus: nextStatus })
+            }
             const now2 = Date.now()
             if (now2 - lastMsgAt > 500) {
               lastMsgAt = now2
@@ -343,24 +362,25 @@ export const createIndexingSlice: StateCreator<IndexingSlice, [], [], IndexingSl
       // Begin watching for incremental changes
       try {
         indexer.startWatch((p) => {
-          set({
-            idxProg: {
-              inProgress: p.inProgress,
-              phase: p.phase,
-              processedFiles: p.processedFiles,
-              totalFiles: p.totalFiles,
-              processedChunks: p.processedChunks,
-              totalChunks: p.totalChunks,
-              elapsedMs: p.elapsedMs,
-            },
-            idxStatus: {
-              ready: p.ready,
-              chunks: p.chunks,
-              modelId: p.modelId,
-              dim: p.dim,
-              indexPath: p.indexPath,
-            },
-          })
+          const nextProg: IndexProgress = {
+            inProgress: p.inProgress,
+            phase: p.phase,
+            processedFiles: p.processedFiles,
+            totalFiles: p.totalFiles,
+            processedChunks: p.processedChunks,
+            totalChunks: p.totalChunks,
+            elapsedMs: p.elapsedMs,
+          }
+          const nextStatus: IndexStatus = {
+            ready: p.ready,
+            chunks: p.chunks,
+            modelId: p.modelId,
+            dim: p.dim,
+            indexPath: p.indexPath,
+          }
+          const prev = get()
+          if (shallowEqual(prev.idxProg, nextProg) && shallowEqual(prev.idxStatus, nextStatus)) return
+          set({ idxProg: nextProg, idxStatus: nextStatus })
         })
       } catch {}
       const s = indexer.status()

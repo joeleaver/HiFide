@@ -1,5 +1,5 @@
-import { useAppStore, useDispatch, selectModelsByProvider, selectProviderValid, selectDefaultModels, selectAutoRetry, selectAutoApproveEnabled, selectAutoApproveThreshold, selectSettingsApiKeys, selectSettingsSaving, selectSettingsSaved, selectStartupMessage } from './store'
-import { Button, Group, Stack, Text, TextInput, Title, Select, Switch, Slider, Progress, Divider, Card, Alert, NumberInput } from '@mantine/core'
+import { useAppStore, useDispatch, selectModelsByProvider, selectProviderValid, selectDefaultModels, selectAutoRetry, selectSettingsApiKeys, selectSettingsSaving, selectSettingsSaved, selectStartupMessage } from './store'
+import { Button, Group, Stack, Text, TextInput, Title, Select, Switch, Progress, Divider, Card, Alert, NumberInput } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import PricingSettings from './components/PricingSettings'
 import { useEffect, useState } from 'react'
@@ -10,8 +10,7 @@ export default function SettingsPane() {
   const providerValid = useAppStore(selectProviderValid)
   const defaultModels = useAppStore(selectDefaultModels)
   const autoRetry = useAppStore(selectAutoRetry)
-  const autoApproveEnabled = useAppStore(selectAutoApproveEnabled)
-  const autoApproveThreshold = useAppStore(selectAutoApproveThreshold)
+
   const settingsApiKeys = useAppStore(selectSettingsApiKeys)
   const settingsSaving = useAppStore(selectSettingsSaving)
   const settingsSaved = useAppStore(selectSettingsSaved)
@@ -256,31 +255,7 @@ export default function SettingsPane() {
             onChange={(e) => dispatch('setAutoRetry', e.currentTarget.checked)}
           />
 
-          <Switch
-            label="Auto-approve risky commands"
-            description="Allow agent to execute risky commands without confirmation when confidence is high"
-            checked={autoApproveEnabled}
-            onChange={(e) => dispatch('setAutoApproveEnabled', e.currentTarget.checked)}
-          />
 
-          {autoApproveEnabled && (
-            <Stack gap={4}>
-              <Text size="sm" fw={500}>Auto-approve confidence threshold: {autoApproveThreshold.toFixed(2)}</Text>
-              <Slider
-                min={0}
-                max={1}
-                step={0.05}
-                value={autoApproveThreshold}
-                onChange={(v) => dispatch('setAutoApproveThreshold', v)}
-                marks={[
-                  { value: 0, label: '0' },
-                  { value: 0.5, label: '0.5' },
-                  { value: 1, label: '1' },
-                ]}
-              />
-              <Text size="xs" c="dimmed">Commands with confidence above this threshold will be auto-approved</Text>
-            </Stack>
-          )}
         </Stack>
       </Stack>
 
@@ -318,7 +293,12 @@ export default function SettingsPane() {
                 <Text size="xs" c="dimmed">
                   {idxStatus.chunks} chunks indexed • Model: {idxStatus.modelId || 'local'} • Dim: {idxStatus.dim || 384}
                 </Text>
+                <Text size="xs" c="dimmed">
+                  Index path: {idxStatus.indexPath}
+                </Text>
+
               </Stack>
+
               <Group>
                 <Button onClick={doRebuildIndex} loading={idxLoading} size="sm">
                   Rebuild
@@ -408,7 +388,7 @@ export default function SettingsPane() {
                 min={0}
                 max={1}
                 step={0.01}
-                
+
                 value={idxAutoRefresh?.changePercentThreshold ?? 0.02}
                 onChange={(v) => typeof v === 'number' && dispatch('setIndexAutoRefresh', { config: { changePercentThreshold: Math.max(0, Math.min(1, v)) } })}
               />

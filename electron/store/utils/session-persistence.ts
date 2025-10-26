@@ -1,21 +1,30 @@
 /**
  * Session persistence utilities for Main Process
- * 
+ *
  * Handles saving and loading sessions from disk with debouncing and atomic writes.
  */
 
 import fs from 'fs/promises'
 import path from 'path'
-import { app } from 'electron'
+
 import type { Session } from '../types'
+
+
 
 /**
  * Get the sessions directory path
  */
 export async function getSessionsDir(): Promise<string> {
-  const userDataPath = app.getPath('userData')
-  const sessionsDir = path.join(userDataPath, 'sessions')
-  await fs.mkdir(sessionsDir, { recursive: true })
+  // Resolve workspace-relative sessions directory
+  const { useMainStore } = await import('../index')
+
+  // <workspaceRoot>/.hifide-private/sessions
+
+  const baseDir = path.resolve(useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd())
+  const privateDir = path.join(baseDir, '.hifide-private')
+  const sessionsDir = path.join(privateDir, 'sessions')
+  await fs.mkdir(privateDir, { recursive: true }).catch(() => {})
+  await fs.mkdir(sessionsDir, { recursive: true }).catch(() => {})
   return sessionsDir
 }
 

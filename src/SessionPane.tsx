@@ -14,6 +14,7 @@ import { BadgeDiffContent } from './components/BadgeDiffContent'
 import { BadgeSearchContent } from './components/BadgeSearchContent'
 import { BadgeWorkspaceSearchContent } from './components/BadgeWorkspaceSearchContent'
 import { BadgeAstSearchContent } from './components/BadgeAstSearchContent'
+import { BadgeReadLinesContent } from './components/BadgeReadLinesContent'
 
 import { NodeOutputBox } from './components/NodeOutputBox'
 import { FlowStatusIndicator } from './components/FlowStatusIndicator'
@@ -353,6 +354,12 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
                                   badgeId={badge.id}
                                   searchKey={badge.interactive.data.key}
                                   fullParams={badge.metadata?.fullParams}
+                                />
+                              )}
+                              {badge.contentType === 'read-lines' && badge.interactive?.data?.key && (
+                                <BadgeReadLinesContent
+                                  badgeId={badge.id}
+                                  readKey={badge.interactive.data.key}
                                 />
                               )}
                               {badge.type === 'error' && (
