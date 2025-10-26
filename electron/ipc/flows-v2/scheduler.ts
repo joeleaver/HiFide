@@ -32,6 +32,13 @@ import { createEventEmitter } from './execution-events'
 
 import util from 'node:util'
 
+
+// Treat cooperative cancellation as a non-error
+function isCancellationError(e: any): boolean {
+  const msg = (e && (e.message || e.toString && e.toString())) || ''
+  return (e && e.name === 'AbortError') || /cancel/i.test(String(msg))
+}
+
 export class FlowScheduler {
   // Graph structure
   private flowDef: FlowDefinition
@@ -363,6 +370,10 @@ export class FlowScheduler {
       })
     } catch (e: any) {
       const error = e?.message || String(e)
+      if (isCancellationError(e)) {
+        console.log('[FlowScheduler] Cancelled')
+        return { ok: true }
+      }
       console.error('[FlowScheduler] Error:', error)
       const store = await this.getStore()
       store.feHandleError(error)
@@ -632,6 +643,10 @@ export class FlowScheduler {
           // Fire-and-forget: do not await successors
           for (const p of runnables) {
             p.catch((err) => {
+              if (isCancellationError(err)) {
+                console.log(`[Scheduler] ${nodeId} - Successor cancelled`)
+                return
+              }
               console.error(`[Scheduler] ${nodeId} - Successor error:`, err)
               try { store.feHandleError(err?.message || String(err), nodeId) } catch {}
             })
@@ -644,6 +659,10 @@ export class FlowScheduler {
       return result
     } catch (e: any) {
       const error = e?.message || String(e)
+      if (isCancellationError(e)) {
+        console.log(`[FlowScheduler] ${nodeId} cancelled`)
+        throw e
+      }
       console.error(`[FlowScheduler] Error in ${nodeId}:`, error)
       const store = await this.getStore()
       store.feHandleError(error, nodeId)

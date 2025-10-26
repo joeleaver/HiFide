@@ -485,8 +485,13 @@ export const OpenAIProvider: ProviderAdapter = {
           return
         }
       } catch (e: any) {
-        if (e?.name === 'AbortError') return
-        const error = e?.message || String(e)
+        const msg = e?.message || ''
+        if (e?.name === 'AbortError' || /cancel/i.test(msg)) {
+          // Treat cooperative cancellation as a normal stop
+          try { onDone() } catch {}
+          return
+        }
+        const error = msg || String(e)
         onError(error)
         return
       }
@@ -500,7 +505,13 @@ export const OpenAIProvider: ProviderAdapter = {
     await run().catch((e: any) => {
       console.error('[OpenAIProvider] Error in agentStream run():', e)
       try {
-        const error = e?.message || String(e)
+        const msg = e?.message || ''
+        if (e?.name === 'AbortError' || /cancel/i.test(msg)) {
+          // Swallow cancellation and signal done to resolve promise
+          try { onDone() } catch {}
+          return
+        }
+        const error = msg || String(e)
         onError(error)
       } catch {}
     })

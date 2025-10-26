@@ -493,8 +493,13 @@ export const AnthropicProvider: ProviderAdapter = {
           return
         }
       } catch (e: any) {
-        if (e?.name === 'AbortError') return
-        const error = e?.message || String(e)
+        const msg = e?.message || ''
+        if (e?.name === 'AbortError' || /cancel/i.test(msg)) {
+          // Treat cooperative cancellation as a normal stop
+          try { onDone() } catch {}
+          return
+        }
+        const error = msg || String(e)
         onError(error)
       }
     }
@@ -502,7 +507,13 @@ export const AnthropicProvider: ProviderAdapter = {
     run().catch((e: any) => {
       console.error('[AnthropicProvider] Unhandled error in agentStream run():', e)
       try {
-        const error = e?.message || String(e)
+        const msg = e?.message || ''
+        if (e?.name === 'AbortError' || /cancel/i.test(msg)) {
+          // Swallow cancellation and signal done to resolve promise
+          try { onDone() } catch {}
+          return
+        }
+        const error = msg || String(e)
         onError(error)
       } catch {}
     })
