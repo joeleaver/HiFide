@@ -1,6 +1,6 @@
 /**
  * Window creation and state management
- * 
+ *
  * Handles BrowserWindow creation, state persistence, and lifecycle
  */
 
@@ -255,6 +255,46 @@ export function createWindow(): BrowserWindow {
   console.time('[window] registerWindow')
   registerWindow(win)
   console.timeEnd('[window] registerWindow')
+
+  // Re-assert global error capture AFTER zubridge bridge subscribes windows.
+  // Some libraries set their own uncaughtException capture callbacks; we want
+  // to ignore benign PTY teardown errors so the app doesn't crash on restart.
+  try {
+    const setCapture = (process as any).setUncaughtExceptionCaptureCallback as
+      | ((cb: ((err: any) => void) | null) => void)
+      | undefined
+
+    const isIgnorable = (err: any) => {
+      if (!err) return false
+      const code = (err as any).code as string | undefined
+      const syscall = (err as any).syscall as string | undefined
+      const msg = String((err as any).message || err)
+      if (code === 'EPIPE' && (syscall === 'read' || syscall === 'write')) return true
+      if (code === 'ECONNRESET' && /socket|pipe|stream/i.test(msg)) return true
+      return false
+    }
+
+    if (typeof setCapture === 'function') {
+      const capture = (err: any) => {
+        if (isIgnorable(err)) {
+          console.warn('[window] Ignored uncaught exception', { code: err?.code, syscall: err?.syscall })
+          return
+        }
+        // Let other listeners see non-ignorable errors
+        setCapture(null)
+        process.emit('uncaughtException', err as any)
+        setCapture(capture)
+      }
+      setCapture(capture)
+    } else {
+      process.prependListener('uncaughtException', (err: any) => {
+        if (isIgnorable(err)) {
+          console.warn('[window] Ignored uncaught exception', { code: err?.code, syscall: err?.syscall })
+        }
+      })
+    }
+  } catch {}
+
 
   console.timeEnd('[window] createWindow')
   return win

@@ -47,7 +47,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
 // Swallow benign OS pipe errors (e.g., EPIPE from PTY/streams) so they don't
 // bubble as uncaught exceptions that zubridge will log and potentially exit on.
 // ----------------------------------------------------------------------------
-(() => {
+;(() => {
   const isIgnorable = (err: any) => {
     if (!err) return false
     const code = (err as any).code as string | undefined
