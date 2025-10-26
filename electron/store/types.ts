@@ -40,7 +40,7 @@ export type Badge = {
 
   // Interactive badge data (future)
   interactive?: {
-    type: 'diff' | 'link' | 'action' | 'read-lines'
+    type: 'diff' | 'link' | 'action' | 'read-lines' | 'workspace-search' | 'workspace-jump' | 'workspace-map'
     data: any
   }
 
@@ -56,7 +56,7 @@ export type Badge = {
   // Expandable container support
   expandable?: boolean           // Whether this badge can be expanded
   defaultExpanded?: boolean      // Initial expansion state
-  contentType?: 'diff' | 'search' | 'workspace-search' | 'ast-search' | 'read-lines' | 'json' | 'text' | 'custom'  // Type of expanded content
+  contentType?: 'diff' | 'search' | 'workspace-search' | 'workspace-jump' | 'workspace-map' | 'ast-search' | 'read-lines' | 'json' | 'text' | 'custom'  // Type of expanded content
 
   // Enhanced metadata for header display
   metadata?: {

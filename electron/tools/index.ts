@@ -38,6 +38,8 @@ import { indexSearchTool } from './index/search'
 
 // Workspace tools
 import { searchWorkspaceTool } from './workspace/searchWorkspace'
+import { jumpWorkspaceTool } from './workspace/jump'
+import { workspaceMapTool } from './workspace/map'
 
 // Terminal tools
 import { terminalExecTool } from './terminal/exec'
@@ -88,8 +90,10 @@ export const agentTools: AgentTool[] = [
   // Edits tools
   applyEditsTool,
 
-  // Workspace (preferred discovery tool)
+  // Workspace (preferred discovery tools)
   searchWorkspaceTool,
+  jumpWorkspaceTool,
+  workspaceMapTool,
 
   // Text tools (kept available but de-emphasized)
   grepTool,

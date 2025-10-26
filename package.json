@@ -9,7 +9,7 @@
     "prepackage:kill": "node scripts/prepackage-kill.cjs",
     "rebuild:native": "pnpm exec electron-rebuild -f -w node-pty",
     "clean:release": "node --input-type=module -e \"import fs from 'fs'; try{fs.rmSync('release',{recursive:true,force:true})}catch(e){}\"",
-    "package:electron": "powershell -NoProfile -Command \"$ts=(Get-Date -Format 'yyyyMMdd-HHmmss'); $ver=$env:npm_package_version; $out=\\\"release/$ver-$ts\\\"; electron-builder --config.directories.output=\\\"$out\\\"\"",
+    "package:electron": "node scripts/package-electron.cjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "test": "jest",

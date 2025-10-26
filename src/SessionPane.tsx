@@ -15,6 +15,8 @@ import { BadgeSearchContent } from './components/BadgeSearchContent'
 import { BadgeWorkspaceSearchContent } from './components/BadgeWorkspaceSearchContent'
 import { BadgeAstSearchContent } from './components/BadgeAstSearchContent'
 import { BadgeReadLinesContent } from './components/BadgeReadLinesContent'
+import { BadgeWorkspaceJumpContent } from './components/BadgeWorkspaceJumpContent'
+import { BadgeWorkspaceMapContent } from './components/BadgeWorkspaceMapContent'
 
 import { NodeOutputBox } from './components/NodeOutputBox'
 import { FlowStatusIndicator } from './components/FlowStatusIndicator'
@@ -344,6 +346,20 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
                               )}
                               {badge.contentType === 'workspace-search' && badge.interactive?.data?.key && (
                                 <BadgeWorkspaceSearchContent
+                                  badgeId={badge.id}
+                                  searchKey={badge.interactive.data.key}
+                                  fullParams={badge.metadata?.fullParams}
+                                />
+                              )}
+                              {badge.contentType === 'workspace-jump' && badge.interactive?.data?.key && (
+                                <BadgeWorkspaceJumpContent
+                                  badgeId={badge.id}
+                                  searchKey={badge.interactive.data.key}
+                                  fullParams={badge.metadata?.fullParams}
+                                />
+                              )}
+                              {badge.contentType === 'workspace-map' && badge.interactive?.data?.key && (
+                                <BadgeWorkspaceMapContent
                                   badgeId={badge.id}
                                   searchKey={badge.interactive.data.key}
                                   fullParams={badge.metadata?.fullParams}

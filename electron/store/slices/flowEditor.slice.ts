@@ -1836,6 +1836,48 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             }
           }))
         }
+      } else if (normalizedToolName === 'workspace_jump') {
+        const target = String(toolArgs.target || '').trim()
+        if (target) {
+          badgeMetadata = {
+            query: target,
+            fullParams: toolArgs
+          }
+        }
+        if (callId) {
+          const f = (toolArgs && toolArgs.filters) || {}
+          const sanitizedParams = {
+            target,
+            expand: toolArgs.expand !== false,
+            filters: {
+              languages: Array.isArray(f.languages) ? f.languages.map((s: any) => String(s)) : [],
+              pathsInclude: Array.isArray(f.pathsInclude) ? f.pathsInclude.map((s: any) => String(s)) : [],
+              pathsExclude: Array.isArray(f.pathsExclude) ? f.pathsExclude.map((s: any) => String(s)) : [],
+              maxSnippetLines: typeof f.maxSnippetLines === 'number' ? f.maxSnippetLines : undefined,
+              timeBudgetMs: typeof f.timeBudgetMs === 'number' ? f.timeBudgetMs : undefined,
+            }
+          }
+          set((state) => ({
+            feToolParamsByKey: {
+              ...(state as any).feToolParamsByKey,
+              [callId]: sanitizedParams
+            }
+          }))
+        }
+      } else if (normalizedToolName === 'workspace_map') {
+        const maxPerSection = typeof toolArgs.maxPerSection === 'number' ? toolArgs.maxPerSection : undefined
+        badgeMetadata = {
+          query: maxPerSection ? `maxPerSection=${maxPerSection}` : 'project map',
+          fullParams: toolArgs
+        }
+        if (callId) {
+          set((state) => ({
+            feToolParamsByKey: {
+              ...(state as any).feToolParamsByKey,
+              [callId]: { maxPerSection }
+            }
+          }))
+        }
       }
     }
 
@@ -1932,6 +1974,59 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
               resultCount,
             },
             interactive: { type: 'workspace-search', data: { key: callId, count: resultCount } }
+          }
+        })
+        return
+      }
+      // Handle workspace.jump results
+      if (normalizedToolName === 'workspace_jump' && result?.ok) {
+        const resultData = result.data || {}
+        // Store full result in unified cache
+        get().registerToolResult({ key: callId, data: resultData })
+
+        const filePath = (resultData?.path) || (resultData?.bestHandle?.path) || undefined
+        const hasPreview = typeof (resultData?.preview) === 'string' || (Array.isArray(resultData?.results) && resultData.results.length > 0)
+        const resultCount = hasPreview ? 1 : 0
+
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId: callId,
+          updates: {
+            status: 'success',
+            color: 'green',
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'workspace-jump' as const,
+            metadata: {
+              ...(filePath ? { filePath } : {}),
+              resultCount,
+            },
+            interactive: { type: 'workspace-jump', data: { key: callId, count: resultCount } }
+          }
+        })
+        return
+      }
+      // Handle workspace.map results
+      if (normalizedToolName === 'workspace_map' && result?.ok) {
+        const resultData = result.data || {}
+        // Store full result in unified cache
+        get().registerToolResult({ key: callId, data: resultData })
+
+        const sectionCount = Array.isArray(resultData?.sections) ? resultData.sections.length : 0
+
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId: callId,
+          updates: {
+            status: 'success',
+            color: 'green',
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'workspace-map' as const,
+            metadata: {
+              resultCount: sectionCount,
+            },
+            interactive: { type: 'workspace-map', data: { key: callId, count: sectionCount } }
           }
         })
         return
