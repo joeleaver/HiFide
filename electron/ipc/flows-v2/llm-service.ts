@@ -499,8 +499,14 @@ class LLMService {
       const errorMessage = e.message || String(e)
       console.error(`[LLMService] Error during chat:`, errorMessage)
 
-      // Send error event to UI
-      eventHandlers.onError(errorMessage)
+      // Treat cancellations/terminations as non-errors for UI event emission
+      const isCancellation = /\b(cancel|canceled|cancelled|abort|aborted|terminate|terminated|stop|stopped)\b/i.test(errorMessage)
+      if (!isCancellation) {
+        // Send error event to UI only for real errors
+        eventHandlers.onError(errorMessage)
+      } else {
+        console.log('[LLMService] Cancellation detected, suppressing error event')
+      }
 
       return {
         text: '',

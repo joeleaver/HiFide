@@ -138,7 +138,7 @@ export const createKnowledgeBaseSlice: StateCreator<KnowledgeBaseSlice> = (set, 
       }
       const items = await listItems(baseDir)
       const byRel: Record<string, KbHit> = {}
-      for (const it of items) byRel[it.relPath.replace(/^\\\\?/, '')] = it as KbHit
+      for (const it of items) byRel[it.relPath.replace(/^\\?/, '')] = it as KbHit
       const k = Math.max(100, limit * 3)
       let sem = await idx.search(qLower || '', k)
       if ((sem.chunks?.length || 0) === 0) {
@@ -159,7 +159,7 @@ export const createKnowledgeBaseSlice: StateCreator<KnowledgeBaseSlice> = (set, 
       const seen = new Set<string>()
       const candidates: KbHit[] = []
       sem.chunks.forEach((c, i) => {
-        const p = String(c.path).replace(/^\\\\?/, '')
+        const p = String(c.path).replace(/^\\?/, '')
         if (seen.has(p)) return
         seen.add(p)
         const meta = byRel[p]

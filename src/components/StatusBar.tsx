@@ -39,13 +39,24 @@ export default function StatusBar() {
       { value: 'openai', label: 'OpenAI' },
       { value: 'anthropic', label: 'Anthropic' },
       { value: 'gemini', label: 'Gemini' },
+      { value: 'fireworks', label: 'Fireworks' },
     ] as const
     const anyValidated = Object.values(providerValid || {}).some(Boolean)
-    return anyValidated ? all.filter((p) => providerValid[p.value]) : all
+    return anyValidated ? all.filter((p) => (providerValid as any)[p.value]) : all
   }, [providerValid])
 
   // Subscribe to only the current provider's models, with shallow comparator to avoid ref churn
   const modelOptions = useAppStore((s) => s.modelsByProvider[selectedProvider] || [])
+
+  // For Fireworks, show only the last path segment as the label to keep it readable
+  const displayModelOptions = useMemo(() => {
+    const opts = modelOptions || []
+    if (selectedProvider !== 'fireworks') return opts
+    return opts.map((o: any) => {
+      const last = (o.label || o.value || '').toString().split('/').pop() || o.label || o.value
+      return { ...o, label: last }
+    })
+  }, [modelOptions, selectedProvider])
 
   const handleFolderClick = async () => {
     const result = await window.workspace?.openFolderDialog?.()
@@ -150,7 +161,7 @@ export default function StatusBar() {
               <Select
                 value={selectedModel}
                 onChange={(v) => v && dispatch('setSelectedModel', v)}
-                data={modelOptions as any}
+                data={displayModelOptions as any}
                 size="xs"
                 variant="unstyled"
                 disabled={providerOptions.length === 0}
@@ -190,7 +201,7 @@ export default function StatusBar() {
               <Select
                 value={selectedModel}
                 onChange={(v) => v && dispatch('setSelectedModel', v)}
-                data={modelOptions as any}
+                data={displayModelOptions as any}
                 size="xs"
                 variant="unstyled"
                 disabled={providerOptions.length === 0}

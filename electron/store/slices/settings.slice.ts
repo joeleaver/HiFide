@@ -41,18 +41,19 @@ export interface SettingsSlice {
   setOpenAiApiKey: (value: string) => void
   setAnthropicApiKey: (value: string) => void
   setGeminiApiKey: (value: string) => void
+  setFireworksApiKey: (value: string) => void
   loadSettingsApiKeys: () => Promise<void>
   saveSettingsApiKeys: () => Promise<void>
   validateApiKeys: () => Promise<{ ok: boolean; failures: string[] }>
   resetSettingsSaved: () => void
   clearSettingsResults: () => void
-  
+
 
 
   // Pricing Actions
   setPricingForModel: (params: { provider: string; model: string; pricing: ModelPricing }) => void
   resetPricingToDefaults: () => void
-  resetProviderPricing: (provider: 'openai' | 'anthropic' | 'gemini') => void
+  resetProviderPricing: (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks') => void
   calculateCost: (provider: string, model: string, usage: TokenUsage) => TokenCost | null
 }
 
@@ -66,6 +67,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
     openai: '',
     anthropic: '',
     gemini: '',
+    fireworks: '',
   },
   settingsSaving: false,
   settingsSaved: false,
@@ -107,7 +109,17 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
       settingsSaved: false,
     }))
   },
-  
+
+  setFireworksApiKey: (value: string) => {
+    set((state) => ({
+      settingsApiKeys: {
+        ...state.settingsApiKeys,
+        fireworks: value || '',
+      },
+      settingsSaved: false,
+    }))
+  },
+
   loadSettingsApiKeys: async () => {
     // In the new architecture, API keys are loaded at app startup into the store
     // This function is kept for compatibility but is a no-op
@@ -210,6 +222,28 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
         }
       }
 
+      // Validate Fireworks
+      if (keys.fireworks?.trim()) {
+        try {
+          const f: any = (globalThis as any).fetch
+          if (!f) {
+            failures.push('Fireworks: Fetch API unavailable')
+          } else {
+            const resp = await f('https://api.fireworks.ai/inference/v1/models', {
+              method: 'GET',
+              headers: { Authorization: `Bearer ${keys.fireworks}` },
+            })
+            if (resp.ok) {
+            } else {
+              const txt = await resp.text().catch(() => '')
+              failures.push(`Fireworks: HTTP ${resp.status}: ${txt.slice(0, 100)}`)
+            }
+          }
+        } catch (e: any) {
+          failures.push(`Fireworks: ${e?.message || String(e)}`)
+        }
+      }
+
       const result = failures.length > 0
         ? { ok: false, failures }
         : { ok: true, failures: [] }
@@ -221,11 +255,12 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
           openai: !!keys.openai?.trim() && !lc.some((f) => f.includes('openai')),
           anthropic: !!keys.anthropic?.trim() && !lc.some((f) => f.includes('anthropic')),
           gemini: !!keys.gemini?.trim() && !lc.some((f) => f.includes('gemini')),
+          fireworks: !!keys.fireworks?.trim() && !lc.some((f) => f.includes('fireworks')),
         }
         const anyState: any = state as any
         anyState.setProvidersValid?.(map)
         // Clear startup banner if at least one provider is valid now
-        if (map.openai || map.anthropic || map.gemini) {
+        if (map.openai || map.anthropic || map.gemini || map.fireworks) {
           anyState.setStartupMessage?.(null)
         }
         // Fetch models for newly valid providers
@@ -275,7 +310,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
     set({ pricingConfig: DEFAULT_PRICING })
   },
   
-  resetProviderPricing: (provider: 'openai' | 'anthropic' | 'gemini') => {
+  resetProviderPricing: (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks') => {
     set((state) => {
       const newConfig = {
         ...state.pricingConfig,
@@ -283,7 +318,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
       }
       
       // Check if any provider still has custom rates
-      const hasCustomRates = (['openai', 'anthropic', 'gemini'] as const).some(
+      const hasCustomRates = (['openai', 'anthropic', 'gemini', 'fireworks'] as const).some(
         (p) =>
           p !== provider &&
           JSON.stringify(newConfig[p]) !== JSON.stringify(DEFAULT_PRICING[p])

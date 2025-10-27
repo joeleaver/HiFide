@@ -246,6 +246,8 @@ export const useMainStore = create<AppStore>()(
         autoRetry: state.autoRetry,
         defaultModels: state.defaultModels,
         routeHistory: state.routeHistory,
+        // Fireworks models allowlist (user-configurable)
+        fireworksAllowedModels: (state as any).fireworksAllowedModels,
 
         // Settings
         settingsApiKeys: state.settingsApiKeys,

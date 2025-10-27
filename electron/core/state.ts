@@ -13,6 +13,7 @@ import { Indexer } from '../indexing/indexer'
 import { OpenAIProvider } from '../providers/openai'
 import { AnthropicProvider } from '../providers/anthropic'
 import { GeminiProvider } from '../providers/gemini'
+import { FireworksProvider } from '../providers/fireworks'
 import type { ProviderAdapter } from '../providers/provider'
 
 /**
@@ -70,16 +71,18 @@ export async function getProviderKey(provider: string): Promise<string | null> {
     if (provider === 'openai' && keys.openai?.trim()) return keys.openai
     if (provider === 'anthropic' && keys.anthropic?.trim()) return keys.anthropic
     if (provider === 'gemini' && keys.gemini?.trim()) return keys.gemini
+    if (provider === 'fireworks' && (keys as any).fireworks?.trim()) return (keys as any).fireworks
   }
 
   // Fallback to legacy electron-store for migration
-  const keyName = provider === 'anthropic' ? 'anthropic' : provider === 'gemini' ? 'gemini' : 'openai'
+  const keyName = provider === 'anthropic' ? 'anthropic' : provider === 'gemini' ? 'gemini' : provider === 'fireworks' ? 'fireworks' : 'openai'
   const stored = legacySecureStore.get(keyName) as string | undefined
   if (stored) {
     // Migrate to new system
     if (provider === 'openai') state.setOpenAiApiKey(stored)
     if (provider === 'anthropic') state.setAnthropicApiKey(stored)
     if (provider === 'gemini') state.setGeminiApiKey(stored)
+    if (provider === 'fireworks') (state as any).setFireworksApiKey?.(stored)
     // Remove from legacy storage
     legacySecureStore.delete(keyName)
     return stored
@@ -92,6 +95,7 @@ export async function getProviderKey(provider: string): Promise<string | null> {
   if (provider === 'gemini' && (env?.GEMINI_API_KEY || env?.GOOGLE_API_KEY)) {
     return env.GEMINI_API_KEY || env.GOOGLE_API_KEY || null
   }
+  if (provider === 'fireworks' && env?.FIREWORKS_API_KEY) return env.FIREWORKS_API_KEY
 
   return null
 }
@@ -120,6 +124,7 @@ export const providerCapabilities: Record<string, Record<string, boolean>> = {
   openai: { tools: true, jsonSchema: true, vision: false, streaming: true },
   anthropic: { tools: true, jsonSchema: false, vision: false, streaming: true },
   gemini: { tools: true, jsonSchema: true, vision: true, streaming: true },
+  fireworks: { tools: true, jsonSchema: true, vision: false, streaming: true },
 }
 
 /**
@@ -129,6 +134,7 @@ export const providers: Record<string, ProviderAdapter> = {
   openai: OpenAIProvider,
   anthropic: AnthropicProvider,
   gemini: GeminiProvider,
+  fireworks: FireworksProvider,
 }
 
 /**

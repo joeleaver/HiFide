@@ -84,13 +84,14 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
       }
 
       // 2. Load API keys
-      const keys = state.settingsApiKeys || { openai: '', anthropic: '', gemini: '' }
+      const keys = state.settingsApiKeys || { openai: '', anthropic: '', gemini: '', fireworks: '' }
       const okey = keys.openai?.trim()
       const akey = keys.anthropic?.trim()
       const gkey = keys.gemini?.trim()
+      const fkey = keys.fireworks?.trim()
 
       // 3. Validate API keys
-      let validMap: Record<string, boolean> = { openai: false, anthropic: false, gemini: false }
+      let validMap: Record<string, boolean> = { openai: false, anthropic: false, gemini: false, fireworks: false }
       try {
         if (state.setStartupMessage) state.setStartupMessage('Validating provider keys…')
         const t = Date.now()
@@ -101,22 +102,26 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
             validMap.openai = !!okey
             validMap.anthropic = !!akey
             validMap.gemini = !!gkey
+            validMap.fireworks = !!fkey
           } else {
             const failures = validationResult?.failures || []
             validMap.openai = !!okey && !failures.some((f: string) => f.toLowerCase().includes('openai'))
             validMap.anthropic = !!akey && !failures.some((f: string) => f.toLowerCase().includes('anthropic'))
             validMap.gemini = !!gkey && !failures.some((f: string) => f.toLowerCase().includes('gemini'))
+            validMap.fireworks = !!fkey && !failures.some((f: string) => f.toLowerCase().includes('fireworks'))
           }
         } else {
           validMap.openai = !!okey
           validMap.anthropic = !!akey
           validMap.gemini = !!gkey
+          validMap.fireworks = !!fkey
         }
       } catch (e) {
         console.error('[app] Failed to validate API keys:', e)
         validMap.openai = !!okey
         validMap.anthropic = !!akey
         validMap.gemini = !!gkey
+        validMap.fireworks = !!fkey
       }
 
       // 4. Update provider validation state
@@ -129,7 +134,7 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
         if (state.setStartupMessage) state.setStartupMessage('Loading models…')
         const t = Date.now()
         await Promise.all(
-          (['openai', 'anthropic', 'gemini'] as const).map(async (p) => {
+          (['openai', 'anthropic', 'gemini', 'fireworks'] as const).map(async (p) => {
             if (validMap[p]) {
               try {
                 if (state.refreshModels) {
@@ -200,13 +205,13 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
 
       // Clear startup banner if we have at least one valid provider
       try {
-        const hasValidProvider = validMap.openai || validMap.anthropic || validMap.gemini
+        const hasValidProvider = validMap.openai || validMap.anthropic || validMap.gemini || validMap.fireworks
         if (hasValidProvider) set({ startupMessage: null })
       } catch {}
 
       // 6. Navigate if no providers (after indexing so startup stays in loading screen)
       try {
-        const hasValidProvider = validMap.openai || validMap.anthropic || validMap.gemini
+        const hasValidProvider = validMap.openai || validMap.anthropic || validMap.gemini || validMap.fireworks
         if (!hasValidProvider) {
           if (state.setCurrentView) state.setCurrentView({ view: 'settings' })
           set({ startupMessage: 'No valid API keys found. Open Settings to configure providers.' })

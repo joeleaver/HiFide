@@ -1,8 +1,8 @@
 /**
  * Provider Slice
- * 
+ *
  * Manages LLM provider and model selection.
- * 
+ *
  * Responsibilities:
  * - Track selected provider and model
  * - Manage provider validation state
@@ -10,7 +10,7 @@
  * - Handle default models per provider
  * - Track route history for auto-routing
  * - Ensure provider/model consistency
- * 
+ *
  * Dependencies:
  * - None (relatively independent)
  */
@@ -33,7 +33,9 @@ export interface ProviderSlice {
   modelsByProvider: Record<string, ModelOption[]>
   defaultModels: Record<string, string>
   routeHistory: RouteRecord[]
-  
+  // Fireworks-specific allowlist
+  fireworksAllowedModels: string[]
+
   // Actions
   setSelectedModel: (model: string) => void
   setSelectedProvider: (provider: string) => void
@@ -41,11 +43,17 @@ export interface ProviderSlice {
   setProviderValid: (params: { provider: string; valid: boolean }) => void
   setProvidersValid: (map: Record<string, boolean>) => void
   setModelsForProvider: (params: { provider: string; models: ModelOption[] }) => void
-  refreshModels: (provider: 'openai' | 'anthropic' | 'gemini') => Promise<void>
+  refreshModels: (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks') => Promise<void>
   refreshAllModels: () => Promise<void>
   setDefaultModel: (params: { provider: string; model: string }) => void
   pushRouteRecord: (record: RouteRecord) => void
   ensureProviderModelConsistency: () => void
+
+  // Fireworks allowlist actions
+  setFireworksAllowedModels: (params: { models: string[] }) => void
+  addFireworksModel: (params: { model: string }) => void
+  removeFireworksModel: (params: { model: string }) => void
+  loadFireworksRecommendedDefaults: () => void
 }
 
 // ============================================================================
@@ -61,15 +69,24 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
     openai: false,
     anthropic: false,
     gemini: false,
+    fireworks: false,
   },
   modelsByProvider: {
     openai: [],
     anthropic: [],
     gemini: [],
+    fireworks: [],
   },
   defaultModels: {},
   routeHistory: [],
-  
+  // Pre-seed Fireworks with sensible defaults; user can edit in Settings
+  fireworksAllowedModels: [
+    'accounts/fireworks/models/qwen3-coder-480b-a35b-instruct',
+    'accounts/fireworks/models/glm-4p6',
+    'accounts/fireworks/models/kimi-k2-instruct-0905',
+    'accounts/fireworks/models/deepseek-v3p1-terminus',
+  ],
+
   // Actions
   setSelectedModel: (model: string) => {
     set({ selectedModel: model })
@@ -117,7 +134,7 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
   setAutoRetry: (value: boolean) => {
     set({ autoRetry: value })
   },
-  
+
   setProviderValid: ({ provider, valid }: { provider: string; valid: boolean }) => {
     set((state) => ({
       providerValid: {
@@ -126,7 +143,7 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
       },
     }))
   },
-  
+
   setProvidersValid: (map: Record<string, boolean>) => {
     set((state) => ({
       providerValid: {
@@ -138,7 +155,7 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
     // Ensure consistency after provider validation changes
     get().ensureProviderModelConsistency()
   },
-  
+
   setModelsForProvider: ({ provider, models }: { provider: string; models: ModelOption[] }) => {
     set((state) => ({
       modelsByProvider: {
@@ -150,8 +167,8 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
     // Ensure consistency after models are loaded
     get().ensureProviderModelConsistency()
   },
-  
-  refreshModels: async (provider: 'openai' | 'anthropic' | 'gemini') => {
+
+  refreshModels: async (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks') => {
     try {
       // Inline the models fetching logic directly here
       const key = await getProviderKey(provider)
@@ -228,21 +245,28 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
           return hasGenerate && isNotEmbedding && isNotImageGen
         })
         list = models.map((m: any) => ({ value: m.id, label: m.label }))
+      } else if (provider === 'fireworks') {
+        // Fireworks has many models; we use an allowlist from settings
+        // If no API key, treat as no models
+        const fwAllowed = ((get() as any).fireworksAllowedModels || []) as string[]
+        const uniq = Array.from(new Set(fwAllowed.filter(Boolean)))
+        list = uniq.map((id) => ({ value: id, label: id }))
       }
 
-      
+
+
       set((state) => ({
         modelsByProvider: {
           ...state.modelsByProvider,
           [provider]: list,
         },
       }))
-      
+
       // Auto-select first model as default if no default is set OR if current default is not in the list
       const state = get()
       const currentDefault = state.defaultModels?.[provider]
       const isCurrentDefaultValid = currentDefault && list.some((m) => m.value === currentDefault)
-      
+
       if (list.length > 0 && !isCurrentDefaultValid) {
         const firstModel = list[0].value
         state.setDefaultModel({ provider, model: firstModel })
@@ -257,10 +281,10 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
       }))
     }
   },
-  
+
   refreshAllModels: async () => {
-    const providers: Array<'openai' | 'anthropic' | 'gemini'> = ['openai', 'anthropic', 'gemini']
-    
+    const providers: Array<'openai' | 'anthropic' | 'gemini' | 'fireworks'> = ['openai', 'anthropic', 'gemini', 'fireworks']
+
     for (const provider of providers) {
       try {
         await get().refreshModels(provider)
@@ -269,7 +293,7 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
       }
     }
   },
-  
+
   setDefaultModel: ({ provider, model }: { provider: string; model: string }) => {
     set((state) => {
       const next = {
@@ -281,13 +305,54 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
       return { defaultModels: next }
     })
   },
-  
+
+  // Fireworks allowlist management
+  setFireworksAllowedModels: ({ models }: { models: string[] }) => {
+    const uniq = Array.from(new Set((models || []).filter(Boolean)))
+    set({ fireworksAllowedModels: uniq })
+    // Refresh the provider list and ensure selection is valid
+    get().refreshModels('fireworks').catch((e) => console.warn('[provider] refresh fireworks failed', e))
+    get().ensureProviderModelConsistency()
+  },
+
+  addFireworksModel: ({ model }: { model: string }) => {
+    const trimmed = (model || '').trim()
+    if (!trimmed) return
+    const current = (get() as any).fireworksAllowedModels || []
+    if (current.includes(trimmed)) return
+    const next = [...current, trimmed]
+    set({ fireworksAllowedModels: next })
+    get().refreshModels('fireworks').catch((e) => console.warn('[provider] refresh fireworks failed', e))
+    get().ensureProviderModelConsistency()
+  },
+
+  removeFireworksModel: ({ model }: { model: string }) => {
+    const current = (get() as any).fireworksAllowedModels || []
+    const next = current.filter((m: string) => m !== model)
+    set({ fireworksAllowedModels: next })
+    get().refreshModels('fireworks').catch((e) => console.warn('[provider] refresh fireworks failed', e))
+    get().ensureProviderModelConsistency()
+  },
+
+  loadFireworksRecommendedDefaults: () => {
+    const defaults = [
+      'accounts/fireworks/models/qwen3-coder-480b-a35b-instruct',
+      'accounts/fireworks/models/glm-4p6',
+      'accounts/fireworks/models/kimi-k2-instruct-0905',
+      'accounts/fireworks/models/deepseek-v3p1-terminus',
+    ]
+    set({ fireworksAllowedModels: defaults })
+    get().refreshModels('fireworks').catch((e) => console.warn('[provider] refresh fireworks failed', e))
+    get().ensureProviderModelConsistency()
+  },
+
+
   pushRouteRecord: (record: RouteRecord) => {
     set((state) => ({
       routeHistory: [record, ...state.routeHistory].slice(0, MAX_ROUTE_HISTORY),
     }))
   },
-  
+
   ensureProviderModelConsistency: () => {
     const state = get()
     const validMap = state.providerValid || {}
@@ -295,8 +360,8 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
 
     // Get list of valid providers, or all providers if none are validated yet
     const providerOptions = anyValidated
-      ? (['openai', 'anthropic', 'gemini'] as const).filter((p) => validMap[p])
-      : (['openai', 'anthropic', 'gemini'] as const)
+      ? (['openai', 'anthropic', 'gemini', 'fireworks'] as const).filter((p) => validMap[p])
+      : (['openai', 'anthropic', 'gemini', 'fireworks'] as const)
 
     let provider = state.selectedProvider
 

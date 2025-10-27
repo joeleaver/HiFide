@@ -2,7 +2,7 @@ import { useAppStore, useDispatch, selectModelsByProvider, selectProviderValid, 
 import { Button, Group, Stack, Text, TextInput, Title, Select, Switch, Progress, Divider, Card, Alert, NumberInput } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import PricingSettings from './components/PricingSettings'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export default function SettingsPane() {
   // Use selectors for better performance
@@ -23,6 +23,10 @@ export default function SettingsPane() {
 
   // Use local state for API keys to avoid IPC calls on every keystroke
   const [localApiKeys, setLocalApiKeys] = useState(settingsApiKeys)
+  const [newFwModel, setNewFwModel] = useState('')
+
+  // Gate toasts to only fire after an explicit Save & Validate click
+  const awaitingValidationRef = useRef(false)
 
   // Hydrate local state once on mount to avoid clobbering in-progress edits
   useEffect(() => {
@@ -33,6 +37,8 @@ export default function SettingsPane() {
   const openaiOptions = modelsByProvider.openai || []
   const anthropicOptions = modelsByProvider.anthropic || []
   const geminiOptions = modelsByProvider.gemini || []
+  const fireworksOptions = (modelsByProvider as any).fireworks || []
+  const fireworksAllowed = useAppStore((s) => (s as any).fireworksAllowedModels || [])
 
   // Debug logging
 
@@ -63,20 +69,22 @@ export default function SettingsPane() {
     void dispatch('refreshIndexStatus')
   }, [dispatch])
 
-  // Handle save/validate results reactively
+  // Handle save/validate results reactively but only after explicit user action
+  // 1) Show immediate error toast if save failed
   useEffect(() => {
     if (!settingsSaveResult) return
-
     if (!settingsSaveResult.ok) {
       notifications.show({
         color: 'red',
         title: 'Save failed',
         message: settingsSaveResult.failures.join(' | ') || 'Failed to save API keys'
       })
-      return
     }
+  }, [settingsSaveResult])
 
-    // Save succeeded, check validation result
+  // 2) Show validation result toast once per Save click
+  useEffect(() => {
+    if (!awaitingValidationRef.current) return
     if (!settingsValidateResult) return
 
     if (settingsValidateResult.ok) {
@@ -93,7 +101,11 @@ export default function SettingsPane() {
         message: failures.join(' | ') || 'Unknown error'
       })
     }
-  }, [settingsSaveResult, settingsValidateResult])
+
+    // Prevent duplicate toasts from subsequent unrelated updates
+    awaitingValidationRef.current = false
+    dispatch('clearSettingsResults')
+  }, [settingsValidateResult])
 
 
   const doRebuildIndex = async () => {
@@ -119,7 +131,8 @@ export default function SettingsPane() {
 
   const save = async () => {
     try {
-      // Clear previous results
+      // Clear previous results and mark that user initiated a validation run
+      awaitingValidationRef.current = true
       dispatch('clearSettingsResults')
 
       // Update store with local API keys
@@ -132,6 +145,9 @@ export default function SettingsPane() {
       if (localApiKeys.gemini !== settingsApiKeys.gemini) {
         dispatch('setGeminiApiKey', localApiKeys.gemini)
       }
+      if ((localApiKeys as any).fireworks !== (settingsApiKeys as any).fireworks) {
+        dispatch('setFireworksApiKey', (localApiKeys as any).fireworks)
+      }
 
       // First save (marks as saved, auto-persisted via Zustand middleware)
       await dispatch('saveSettingsApiKeys')
@@ -139,11 +155,11 @@ export default function SettingsPane() {
       // Then validate the keys
       await dispatch('validateApiKeys')
 
-      // Results will be available in state via settingsSaveResult and settingsValidateResult
-      // The useEffect below will handle showing notifications
+      // Results will be handled by the validation effect and then cleared
     } catch (e: any) {
       console.error('[SettingsPane] Save error:', e)
       notifications.show({ color: 'red', title: 'Save failed', message: e?.message || String(e) })
+      awaitingValidationRef.current = false
     }
   }
 
@@ -189,6 +205,61 @@ export default function SettingsPane() {
             onChange={(e) => setLocalApiKeys({ ...localApiKeys, gemini: e.currentTarget.value })}
             rightSection={providerValid.gemini ? <Text size="xs" c="teal">✓</Text> : null}
           />
+          <TextInput
+            label="Fireworks API Key"
+            placeholder="fk-..."
+            type="password"
+            value={(localApiKeys as any).fireworks || ''}
+            onChange={(e) => setLocalApiKeys({ ...localApiKeys, fireworks: e.currentTarget.value })}
+            rightSection={(providerValid as any).fireworks ? <Text size="xs" c="teal">✓</Text> : null}
+          />
+
+          {/* Fireworks Models Allowlist (only when Fireworks key is valid) */}
+          {(providerValid as any).fireworks && (
+            <Stack gap="xs">
+              <Title order={4}>Fireworks Models</Title>
+              <Text size="sm" c="dimmed">Select which Fireworks models to expose in the app. Start with recommended defaults or add specific model IDs.</Text>
+
+              <Group align="flex-end">
+                <TextInput
+                  style={{ flex: 1 }}
+                  label="Add model by ID"
+                  placeholder="e.g., accounts/fireworks/models/qwen3-coder-480b-a35b-instruct"
+                  value={newFwModel}
+                  onChange={(e) => setNewFwModel(e.currentTarget.value)}
+                />
+                <Button
+                  onClick={() => { const v = newFwModel.trim(); if (v) { dispatch('addFireworksModel', { model: v }); setNewFwModel('') } }}
+                  disabled={!newFwModel.trim()}
+                >
+                  Add
+                </Button>
+                <Button variant="light" onClick={() => dispatch('loadFireworksRecommendedDefaults')}>
+                  Load Recommended Defaults
+                </Button>
+                <Button variant="light" onClick={() => dispatch('refreshModels', 'fireworks')}>
+                  Refresh
+                </Button>
+              </Group>
+
+              {/* Current allowlist */}
+              <Stack gap={4}>
+                {fireworksAllowed.length === 0 ? (
+                  <Text size="xs" c="dimmed">No allowed models yet.</Text>
+                ) : (
+                  fireworksAllowed.map((m: string) => (
+                    <Group key={m} justify="space-between" wrap="nowrap">
+                      <Text size="xs" c="#ccc" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</Text>
+
+                      <Button size="xs" variant="light" color="red" onClick={() => dispatch('removeFireworksModel', { model: m })}>Remove</Button>
+                    </Group>
+                  ))
+                )}
+              </Stack>
+            </Stack>
+          )}
+
+          <Divider />
         </Stack>
 
         <Group>
@@ -236,6 +307,17 @@ export default function SettingsPane() {
             disabled={!providerValid.gemini || geminiOptions.length === 0}
             description={!providerValid.gemini ? 'Add a Gemini API key first' : geminiOptions.length === 0 ? 'Loading models...' : undefined}
           />
+          {(providerValid as any).fireworks && (
+            <Select
+              label="Fireworks Default Model"
+              placeholder="Select a model..."
+              data={fireworksOptions}
+              value={(defaultModels as any)?.fireworks || null}
+              onChange={(v) => v && dispatch('setDefaultModel', { provider: 'fireworks', model: v })}
+              disabled={fireworksOptions.length === 0}
+              description={fireworksOptions.length === 0 ? 'Populate allowlist or refresh models' : undefined}
+            />
+          )}
         </Stack>
       </Stack>
 
@@ -244,6 +326,7 @@ export default function SettingsPane() {
       {/* Agent Behavior Section */}
       <Stack gap="md">
         <div>
+
           <Title order={3}>Agent Behavior</Title>
           <Text size="sm" c="dimmed">Configure how the agent handles commands and code changes</Text>
         </div>

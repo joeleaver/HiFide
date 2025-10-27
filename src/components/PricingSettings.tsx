@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Card, Stack, Group, Text, Button, Accordion, Table, NumberInput, Badge } from '@mantine/core'
-import { useAppStore, useDispatch, selectModelsByProvider, selectPricingConfig, selectDefaultPricingConfig } from '../store'
+import { useAppStore, useDispatch, selectModelsByProvider, selectPricingConfig, selectDefaultPricingConfig, selectProviderValid } from '../store'
 import type { ModelPricing } from '../store'
 
 export default function PricingSettings() {
@@ -8,12 +8,13 @@ export default function PricingSettings() {
   const modelsByProvider = useAppStore(selectModelsByProvider)
   const pricingConfig = useAppStore(selectPricingConfig)
   const defaultPricingConfig = useAppStore(selectDefaultPricingConfig)
+  const providerValid = useAppStore(selectProviderValid)
 
   // Use dispatch for actions
   const dispatch = useDispatch()
-  
+
   const [expanded, setExpanded] = useState<string | null>(null)
-  
+
   return (
     <Card withBorder style={{ backgroundColor: '#1e1e1e', borderColor: '#3e3e42' }}>
       <Stack gap="md">
@@ -37,9 +38,9 @@ export default function PricingSettings() {
             Reset All to Defaults
           </Button>
         </Group>
-        
-        <Accordion 
-          value={expanded} 
+
+        <Accordion
+          value={expanded}
           onChange={setExpanded}
           styles={{
             item: {
@@ -86,7 +87,7 @@ export default function PricingSettings() {
               />
             </Accordion.Panel>
           </Accordion.Item>
-          
+
           {/* Anthropic */}
           <Accordion.Item value="anthropic">
             <Accordion.Control>
@@ -144,8 +145,38 @@ export default function PricingSettings() {
               />
             </Accordion.Panel>
           </Accordion.Item>
+          {/* Fireworks (only when Fireworks key is valid) */}
+          {providerValid.fireworks && (
+            <Accordion.Item value="fireworks">
+              <Accordion.Control>
+                <Group justify="space-between" style={{ width: '100%', paddingRight: '16px' }}>
+                  <Text size="sm" c="#cccccc">Fireworks Models</Text>
+                  <Text
+                    size="xs"
+                    c="dimmed"
+                    style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      dispatch('resetProviderPricing', 'fireworks')
+                    }}
+                  >
+                    Reset
+                  </Text>
+                </Group>
+              </Accordion.Control>
+              <Accordion.Panel>
+                <PricingTable
+                  provider="fireworks"
+                  models={(modelsByProvider as any).fireworks || []}
+                  pricing={(pricingConfig as any).fireworks}
+                  defaultPricing={(defaultPricingConfig as any).fireworks}
+                  onUpdate={(model, pricing) => dispatch('setPricingForModel', { provider: 'fireworks', model, pricing })}
+                />
+              </Accordion.Panel>
+            </Accordion.Item>
+          )}
         </Accordion>
-        
+
         <Stack gap="xs">
           <Text size="xs" c="dimmed">
             💡 Pricing is per 1 million tokens. Costs are estimates based on published rates.

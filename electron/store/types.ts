@@ -293,6 +293,7 @@ export type PricingConfig = {
   openai: ProviderPricing
   anthropic: ProviderPricing
   gemini: ProviderPricing
+  fireworks: ProviderPricing
   customRates?: boolean
 }
 
@@ -372,6 +373,7 @@ export type ApiKeys = {
   openai: string
   anthropic: string
   gemini: string
+  fireworks: string
 }
 
 // ============================================================================

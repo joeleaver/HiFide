@@ -39,6 +39,7 @@ interface TrackerState {
   openai: ProviderLimits
   anthropic: ProviderLimits
   gemini: ProviderLimits
+  fireworks: ProviderLimits
 }
 
 /**
@@ -48,15 +49,17 @@ class RateLimitTracker {
   private state: TrackerState = {
     openai: {},
     anthropic: {},
-    gemini: {}
+    gemini: {},
+    fireworks: {}
   }
 
   /**
    * Check if we should wait before making a request
    * Returns wait time in ms (0 if no wait needed)
    */
-  async checkAndWait(provider: 'openai' | 'anthropic' | 'gemini', model: string): Promise<number> {
-    const limits = this.state[provider][model]
+  async checkAndWait(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks', model: string): Promise<number> {
+    const providerState = (this.state as any)[provider] as ProviderLimits | undefined
+    const limits = providerState ? providerState[model] : undefined
     if (!limits) return 0
 
     const now = new Date()
@@ -98,12 +101,16 @@ class RateLimitTracker {
   /**
    * Update limits from successful response headers
    */
-  updateFromHeaders(provider: 'openai' | 'anthropic' | 'gemini', model: string, headers: any): void {
-    if (!this.state[provider][model]) {
-      this.state[provider][model] = {}
+  updateFromHeaders(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks', model: string, headers: any): void {
+    if (!(this.state as any)[provider]) {
+      // Initialize missing provider bucket defensively
+      ;(this.state as any)[provider] = {}
+    }
+    if (!(this.state as any)[provider][model]) {
+      ;(this.state as any)[provider][model] = {}
     }
 
-    const limits = this.state[provider][model]
+    const limits: RateLimitInfo = (this.state as any)[provider][model]
 
     if (provider === 'openai') {
       // OpenAI headers:
@@ -166,6 +173,8 @@ class RateLimitTracker {
     } else if (provider === 'gemini') {
       // Gemini doesn't expose detailed headers, but we can track from errors
       // No-op for now
+    } else if (provider === 'fireworks') {
+      // Fireworks (OpenAI-compatible Responses API). No documented headers yet; keep slot initialized.
     }
 
     console.log(`[RateLimitTracker] Updated limits for ${provider}/${model}:`, limits)
@@ -174,12 +183,15 @@ class RateLimitTracker {
   /**
    * Update limits from 429 error
    */
-  updateFromError(provider: 'openai' | 'anthropic' | 'gemini', model: string, error: any, parsedInfo: any): void {
-    if (!this.state[provider][model]) {
-      this.state[provider][model] = {}
+  updateFromError(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks', model: string, error: any, parsedInfo: any): void {
+    if (!(this.state as any)[provider]) {
+      ;(this.state as any)[provider] = {}
+    }
+    if (!(this.state as any)[provider][model]) {
+      ;(this.state as any)[provider][model] = {}
     }
 
-    const limits = this.state[provider][model]
+    const limits: RateLimitInfo = (this.state as any)[provider][model]
 
     // Store the error info for future proactive waiting
     limits.lastRateLimitError = {
@@ -210,8 +222,9 @@ class RateLimitTracker {
    * Decrement request/token counters (optimistic tracking)
    * Called before making a request to track usage even if headers aren't available
    */
-  recordRequest(provider: 'openai' | 'anthropic' | 'gemini', model: string, estimatedTokens: number = 1000): void {
-    const limits = this.state[provider][model]
+  recordRequest(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks', model: string, estimatedTokens: number = 1000): void {
+    const providerState = (this.state as any)[provider] as ProviderLimits | undefined
+    const limits = providerState ? providerState[model] : undefined
     if (!limits) return
 
     // Decrement request counter
@@ -228,18 +241,21 @@ class RateLimitTracker {
   /**
    * Get current limits for debugging/UI display
    */
-  getLimits(provider: 'openai' | 'anthropic' | 'gemini', model: string): RateLimitInfo | undefined {
-    return this.state[provider][model]
+  getLimits(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks', model: string): RateLimitInfo | undefined {
+    const providerState = (this.state as any)[provider] as ProviderLimits | undefined
+    return providerState ? providerState[model] : undefined
   }
 
   /**
    * Clear limits for a specific provider/model (for testing)
    */
-  clearLimits(provider: 'openai' | 'anthropic' | 'gemini', model?: string): void {
+  clearLimits(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks', model?: string): void {
+    const providerState = (this.state as any)[provider]
+    if (!providerState) return
     if (model) {
-      delete this.state[provider][model]
+      delete providerState[model]
     } else {
-      this.state[provider] = {}
+      ;(this.state as any)[provider] = {}
     }
   }
 

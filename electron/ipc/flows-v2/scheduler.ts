@@ -33,10 +33,14 @@ import { createEventEmitter } from './execution-events'
 import util from 'node:util'
 
 
-// Treat cooperative cancellation as a non-error
+// Treat cooperative cancellation as a non-error (stop/terminate/abort/cancel)
 function isCancellationError(e: any): boolean {
-  const msg = (e && (e.message || e.toString && e.toString())) || ''
-  return (e && e.name === 'AbortError') || /cancel/i.test(String(msg))
+  const msg = (e && (e.message || (e.toString && e.toString()))) || ''
+  // Match common cancellation words: cancel/canceled/cancelled, abort/aborted, terminate/terminated, stop/stopped
+  return (
+    (e && e.name === 'AbortError') ||
+    /\b(cancel|canceled|cancelled|abort|aborted|terminate|terminated|stop|stopped)\b/i.test(String(msg))
+  )
 }
 
 export class FlowScheduler {
@@ -376,7 +380,7 @@ export class FlowScheduler {
       }
       console.error('[FlowScheduler] Error:', error)
       const store = await this.getStore()
-      store.feHandleError(error)
+      store.feHandleError(this.requestId, error)
       return { ok: false, error }
     }
   }
@@ -439,7 +443,7 @@ export class FlowScheduler {
     console.log(`[Scheduler] ${nodeId} - Starting execution ${executionId}, isPull: ${isPull}, callerId: ${callerId}, pushedInputs:`, Object.keys(pushedInputs))
 
     const store = await this.getStore()
-    store.feHandleNodeStart(nodeId)
+    store.feHandleNodeStart(this.requestId, nodeId)
 
     try {
       // Do NOT refresh from store here. The scheduler is the source of truth during execution.
@@ -517,7 +521,7 @@ export class FlowScheduler {
 
       const durationMs = Date.now() - startTime
       // Reduced logging
-      store.feHandleNodeEnd(nodeId, durationMs)
+      store.feHandleNodeEnd(this.requestId, nodeId, durationMs)
 
       // Check for error status - do not hard-stop the flow here
       if (result.status === 'error') {
@@ -694,7 +698,7 @@ export class FlowScheduler {
         } catch {}
       } else {
         // Top-level error (entry execution): stop the flow and surface globally
-        try { store.feHandleError(error, nodeId) } catch {}
+        try { store.feHandleError(this.requestId, error, nodeId) } catch {}
       }
       throw e
     }
@@ -774,7 +778,7 @@ export class FlowScheduler {
 
         // Notify store that we're waiting for input
         const store = await this.getStore()
-        store.feHandleWaitingForInput(nodeId, this.requestId)
+        store.feHandleWaitingForInput(this.requestId, nodeId)
 
         // Create a promise that will be resolved when resumeWithInput is called
         const userInput = await new Promise<string>((resolve) => {
@@ -798,6 +802,24 @@ export class FlowScheduler {
    * Routes events to appropriate store handlers based on event type
    */
   private async handleExecutionEvent(event: ExecutionEvent): Promise<void> {
+    // If flow has been cancelled, drop streaming/tool events to stop UI updates
+    if (this.abortController.signal.aborted) {
+      if (
+        event.type === 'chunk' ||
+        event.type === 'tool_start' ||
+        event.type === 'tool_end' ||
+        event.type === 'tool_error' ||
+        event.type === 'rate_limit_wait'
+      ) {
+        return
+      }
+      // Ignore error events emitted after cancellation
+      if (event.type === 'error') {
+        return
+      }
+      // Allow 'usage' so tokens can be recorded; 'done' is harmless if duplicate
+    }
+
     // Only log tool events for debugging
     if (event.type === 'tool_start' || event.type === 'tool_end' || event.type === 'tool_error') {
       console.log(`[ExecutionEvent] ${event.nodeId} [${event.executionId}]: ${event.type}`)
@@ -809,13 +831,14 @@ export class FlowScheduler {
     switch (event.type) {
       case 'chunk':
         if (event.chunk) {
-          store.feHandleChunk(event.chunk, event.nodeId, event.provider, event.model)
+          store.feHandleChunk(this.requestId, event.chunk, event.nodeId, event.provider, event.model)
         }
         break
 
       case 'tool_start':
         if (event.tool) {
           store.feHandleToolStart(
+            this.requestId,
             event.tool.toolName,
             event.nodeId,
             event.tool.toolArgs,
@@ -829,6 +852,7 @@ export class FlowScheduler {
       case 'tool_end':
         if (event.tool) {
           store.feHandleToolEnd(
+            this.requestId,
             event.tool.toolName,
             event.tool.toolCallId,
             event.nodeId,
@@ -840,6 +864,7 @@ export class FlowScheduler {
       case 'tool_error':
         if (event.tool) {
           store.feHandleToolError(
+            this.requestId,
             event.tool.toolName,
             event.tool.toolError || 'Unknown error',
             event.tool.toolCallId,
@@ -850,7 +875,7 @@ export class FlowScheduler {
 
       case 'usage':
         if (event.usage) {
-          store.feHandleTokenUsage(event.provider, event.model, {
+          store.feHandleTokenUsage(this.requestId, event.provider, event.model, {
             inputTokens: event.usage.inputTokens,
             outputTokens: event.usage.outputTokens,
             totalTokens: event.usage.totalTokens
@@ -860,18 +885,19 @@ export class FlowScheduler {
 
       case 'done':
         // Flow execution completed
-        store.feHandleDone()
+        store.feHandleDone(this.requestId)
         break
 
       case 'error':
         if (event.error) {
-          store.feHandleError(event.error, event.nodeId, event.provider, event.model)
+          store.feHandleError(this.requestId, event.error, event.nodeId, event.provider, event.model)
         }
         break
 
       case 'rate_limit_wait':
         if (event.rateLimitWait) {
           store.feHandleRateLimitWait(
+            this.requestId,
             event.nodeId,
             event.rateLimitWait.attempt,
             event.rateLimitWait.waitMs,

@@ -17,7 +17,7 @@ export const knowledgeBaseSearchTool: AgentTool = {
   run: async (input: any) => {
     const baseDir = useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
     const query = typeof input?.query === 'string' ? input.query : ''
-    const tags = Array.isArray(input?.tags) ? input.tags : []
+    const tags: string[] = Array.isArray(input?.tags) ? (input.tags as any[]).map((t) => String(t)) : []
     const limit = typeof input?.limit === 'number' ? input.limit : 50
 
     const qLower = (query || '').toLowerCase().trim()
@@ -31,7 +31,7 @@ export const knowledgeBaseSearchTool: AgentTool = {
 
     const items = await listItems(baseDir)
     const byRel: Record<string, KbHit> = {}
-    for (const it of items) byRel[it.relPath.replace(/^\\\\?/, '')] = it as KbHit
+    for (const it of items) byRel[it.relPath.replace(/^\\?/, '')] = it as KbHit
 
     const k = Math.max(100, limit * 3)
     let sem = await idx.search(qLower || '', k)
@@ -45,7 +45,7 @@ export const knowledgeBaseSearchTool: AgentTool = {
     const seen = new Set<string>()
     const groups: { path: string; baseScore: number; chunkText: string }[] = []
     sem.chunks.forEach((c, i) => {
-      const p = String(c.path).replace(/^\\\\?/, '')
+      const p = String(c.path).replace(/^\\?/, '')
       if (seen.has(p)) return
       seen.add(p)
       const baseScore = 1 - i / Math.max(1, sem.chunks.length)
@@ -102,7 +102,7 @@ export const knowledgeBaseSearchTool: AgentTool = {
           title: r.title,
           tags: r.tags,
           files: (r as any).files || [],
-          path: r.relPath.replace(/^\\\\?/, ''),
+          path: r.relPath.replace(/^\\?/, ''),
           excerpt: r.excerpt,
           score: r.score ?? 1,
         }))

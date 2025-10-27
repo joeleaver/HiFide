@@ -328,20 +328,20 @@ export interface FlowEditorSlice {
   feExportTrace: () => Promise<void>
 
   // Flow event handlers - called by scheduler to update UI state
-  feHandleNodeStart: (nodeId: string) => void
-  feHandleNodeEnd: (nodeId: string, durationMs?: number) => void
+  feHandleNodeStart: (requestId: string, nodeId: string) => void
+  feHandleNodeEnd: (requestId: string, nodeId: string, durationMs?: number) => void
   feUpdateMainFlowContext: (context: MainFlowContext) => void
-  feHandleIO: (nodeId: string, data: string) => void
-  feHandleChunk: (text: string, nodeId?: string, provider?: string, model?: string) => void
-  feHandleToolStart: (toolName: string, nodeId?: string, toolArgs?: any, callId?: string, provider?: string, model?: string) => void
-  feHandleToolEnd: (toolName: string, callId?: string, nodeId?: string, result?: any) => void
-  feHandleToolError: (toolName: string, error: string, callId?: string, nodeId?: string) => void
-  feHandleIntentDetected: (nodeId: string, intent: string, provider?: string, model?: string) => void
-  feHandleTokenUsage: (provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }) => void
-  feHandleRateLimitWait: (nodeId: string, attempt: number, waitMs: number, reason?: string, provider?: string, model?: string) => void
-  feHandleWaitingForInput: (nodeId: string, requestId: string) => void
-  feHandleDone: () => void
-  feHandleError: (error: string, nodeId?: string, provider?: string, model?: string) => void
+  feHandleIO: (requestId: string, nodeId: string, data: string) => void
+  feHandleChunk: (requestId: string, text: string, nodeId?: string, provider?: string, model?: string) => void
+  feHandleToolStart: (requestId: string, toolName: string, nodeId?: string, toolArgs?: any, callId?: string, provider?: string, model?: string) => void
+  feHandleToolEnd: (requestId: string, toolName: string, callId?: string, nodeId?: string, result?: any) => void
+  feHandleToolError: (requestId: string, toolName: string, error: string, callId?: string, nodeId?: string) => void
+  feHandleIntentDetected: (requestId: string, nodeId: string, intent: string, provider?: string, model?: string) => void
+  feHandleTokenUsage: (requestId: string, provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }) => void
+  feHandleRateLimitWait: (requestId: string, nodeId: string, attempt: number, waitMs: number, reason?: string, provider?: string, model?: string) => void
+  feHandleWaitingForInput: (requestId: string, nodeId: string) => void
+  feHandleDone: (requestId: string) => void
+  feHandleError: (requestId: string, error: string, nodeId?: string, provider?: string, model?: string) => void
 
   // User input management (for userInput node)
   feWaitForUserInput: (nodeId: string) => Promise<string>
@@ -1575,7 +1575,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   // These are called by the flow scheduler in the main process
   // They update the UI state to reflect flow execution progress
 
-  feHandleNodeStart: (nodeId: string) => {
+  feHandleNodeStart: (requestId: string, nodeId: string) => {
+    if (!requestId || requestId !== get().feRequestId) return
     __queueFeFlowState(set, get, nodeId, {
       status: 'executing',
       cacheHit: false,
@@ -1586,14 +1587,15 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     })
 
     __queueFeEvent(set, get, {
-      requestId: get().feRequestId || '',
+      requestId,
       type: 'nodeStart',
       nodeId,
       timestamp: Date.now(),
     })
   },
 
-  feHandleNodeEnd: (nodeId: string, durationMs?: number) => {
+  feHandleNodeEnd: (requestId: string, nodeId: string, durationMs?: number) => {
+    if (!requestId || requestId !== get().feRequestId) return
     // Compute cost for LLM Request node
     const node = get().feNodes.find(n => n.id === nodeId)
     const nodeType = node?.data?.nodeType
@@ -1631,7 +1633,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
     // Record event (buffered)
     __queueFeEvent(set, get, {
-      requestId: get().feRequestId || '',
+      requestId,
       type: 'nodeEnd',
       nodeId,
       durationMs,
@@ -1639,7 +1641,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     })
   },
 
-  feHandleIO: (nodeId: string, data: string) => {
+  feHandleIO: (requestId: string, nodeId: string, data: string) => {
+    if (!requestId || requestId !== get().feRequestId) return
     const logEntry = `[${nodeId}] ${data}\n`
     set({ feLog: get().feLog + logEntry })
 
@@ -1661,7 +1664,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
     // Record event (buffered)
     __queueFeEvent(set, get, {
-      requestId: get().feRequestId || '',
+      requestId,
       type: 'io',
       nodeId,
       data,
@@ -1669,7 +1672,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     })
   },
 
-  feHandleChunk: (text: string, nodeId?: string, provider?: string, model?: string) => {
+  feHandleChunk: (requestId: string, text: string, nodeId?: string, provider?: string, model?: string) => {
+    if (!requestId || requestId !== get().feRequestId) return
     if (!text || !nodeId) return
 
     // Append text chunk to the node's execution box
@@ -1690,7 +1694,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feHandleToolStart: (toolName: string, nodeId?: string, toolArgs?: any, callId?: string, provider?: string, model?: string) => {
+  feHandleToolStart: (requestId: string, toolName: string, nodeId?: string, toolArgs?: any, callId?: string, provider?: string, model?: string) => {
+    if (!requestId || requestId !== get().feRequestId) return
     if (!nodeId) return
 
     const activeTools = new Set(get().feActiveTools)
@@ -1699,7 +1704,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
     // Record event (buffered)
     __queueFeEvent(set, get, {
-      requestId: get().feRequestId || '',
+      requestId,
       type: 'toolStart',
       toolName,
       timestamp: Date.now(),
@@ -1974,14 +1979,15 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feHandleToolEnd: (toolName: string, callId?: string, nodeId?: string, result?: any) => {
+  feHandleToolEnd: (requestId: string, toolName: string, callId?: string, nodeId?: string, result?: any) => {
+    if (!requestId || requestId !== get().feRequestId) return
     const activeTools = new Set(get().feActiveTools)
     activeTools.delete(toolName)
     __queueFeActiveTools(set, get, activeTools)
 
     // Record event (buffered)
     __queueFeEvent(set, get, {
-      requestId: get().feRequestId || '',
+      requestId,
       type: 'toolEnd',
       toolName,
       timestamp: Date.now(),
@@ -2255,14 +2261,15 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feHandleToolError: (toolName: string, error: string, callId?: string, nodeId?: string) => {
+  feHandleToolError: (requestId: string, toolName: string, error: string, callId?: string, nodeId?: string) => {
+    if (!requestId || requestId !== get().feRequestId) return
     const activeTools = new Set(get().feActiveTools)
     activeTools.delete(toolName)
     __queueFeActiveTools(set, get, activeTools)
 
     // Record event (buffered)
     __queueFeEvent(set, get, {
-      requestId: get().feRequestId || '',
+      requestId,
       type: 'toolError',
       toolName,
       error,
@@ -2283,10 +2290,11 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feHandleIntentDetected: (nodeId: string, intent: string, provider?: string, model?: string) => {
+  feHandleIntentDetected: (requestId: string, nodeId: string, intent: string, provider?: string, model?: string) => {
+    if (!requestId || requestId !== get().feRequestId) return
     // Record event (buffered)
     __queueFeEvent(set, get, {
-      requestId: get().feRequestId || '',
+      requestId,
       type: 'intentDetected',
       nodeId,
       intent,
@@ -2324,13 +2332,14 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feHandleTokenUsage: (provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }) => {
+  feHandleTokenUsage: (requestId: string, provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }) => {
+    if (!requestId || requestId !== get().feRequestId) return
     if (provider && model && usage) {
       const state = store.getState() as any
 
       // Record event (buffered)
       __queueFeEvent(set, get, {
-        requestId: get().feRequestId || '',
+        requestId,
         type: 'tokenUsage',
         provider,
         model,
@@ -2343,6 +2352,9 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         state.recordTokenUsage({ provider, model, usage })
       }
 
+      // Capture the session at event time to avoid cross-session updates
+      const sessionIdAtEvent = (store.getState() as any).currentId
+
       // Update the most recent badge group with matching provider/model to add cost info
       // This handles cases like intentRouter where the badge is created before token usage is reported
       // We need to wait a tick for recordTokenUsage to update lastRequestTokenUsage
@@ -2350,12 +2362,12 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         const updatedState = store.getState() as any
         if (updatedState.lastRequestTokenUsage) {
           const { cost } = updatedState.lastRequestTokenUsage
-          if (cost && updatedState.currentId) {
-            const currentSession = updatedState.sessions?.find((s: any) => s.id === updatedState.currentId)
-            if (currentSession) {
+          if (cost && sessionIdAtEvent) {
+            const session = updatedState.sessions?.find((s: any) => s.id === sessionIdAtEvent)
+            if (session) {
               // Find the most recent badge group with matching provider/model but no cost
-              for (let i = currentSession.items.length - 1; i >= 0; i--) {
-                const item = currentSession.items[i]
+              for (let i = session.items.length - 1; i >= 0; i--) {
+                const item = session.items[i]
                 if (
                   item.type === 'badge-group' &&
                   item.provider === provider &&
@@ -2364,7 +2376,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
                 ) {
                   // Update this badge group with cost information using the store's setState
                   const updatedSessions = updatedState.sessions.map((sess: any) => {
-                    if (sess.id !== updatedState.currentId) return sess
+                    if (sess.id !== sessionIdAtEvent) return sess
 
                     return {
                       ...sess,
@@ -2393,7 +2405,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feHandleRateLimitWait: (nodeId: string, attempt: number, waitMs: number, reason?: string, provider?: string, model?: string) => {
+  feHandleRateLimitWait: (requestId: string, nodeId: string, attempt: number, waitMs: number, reason?: string, provider?: string, model?: string) => {
+    if (!requestId || requestId !== get().feRequestId) return
     if (!nodeId) return
 
     const state = store.getState() as any
@@ -2401,7 +2414,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     // Record event in non-persisted flow events (avoid mutating sessions)
     // Record event (buffered)
     __queueFeEvent(set, get, {
-      requestId: get().feRequestId || '',
+      requestId,
       type: 'rateLimitWait',
       nodeId,
       data: { attempt, waitMs, reason, provider, model },
@@ -2451,7 +2464,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }, waitMs)
   },
 
-  feHandleWaitingForInput: (nodeId: string, requestId: string) => {
+  feHandleWaitingForInput: (requestId: string, nodeId: string) => {
+    if (!requestId || requestId !== get().feRequestId) return
     // Flush streaming text to assistant message before pausing
     const streamingText = get().feStreamingText
     if (streamingText) {
@@ -2510,12 +2524,13 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feHandleDone: () => {
+  feHandleDone: (requestId: string) => {
+    if (!requestId || requestId !== get().feRequestId) return
     set({ feStatus: 'stopped', feMainFlowContext: null, feIsolatedContexts: {} })
 
     // Record event (buffered)
     __queueFeEvent(set, get, {
-      requestId: get().feRequestId || '',
+      requestId,
       type: 'done',
       timestamp: Date.now(),
     })
@@ -2543,7 +2558,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     })(set, get)
   },
 
-  feHandleError: (error: string, nodeId?: string, provider?: string, model?: string) => {
+  feHandleError: (requestId: string, error: string, nodeId?: string, provider?: string, model?: string) => {
+    if (!requestId || requestId !== get().feRequestId) return
     console.error('[flowEditor] Flow error:', error)
 
     // If we know which node failed, append an error badge to its execution box
@@ -2583,7 +2599,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
     // Record event (buffered)
     __queueFeEvent(set, get, {
-      requestId: get().feRequestId || '',
+      requestId,
       type: 'error',
       error,
       timestamp: Date.now(),
