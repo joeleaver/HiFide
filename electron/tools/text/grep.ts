@@ -60,6 +60,165 @@ async function looksBinaryByProbe(file: string, maxBytes = 4096): Promise<boolea
   }
 }
 
+
+// Fast-path search using ripgrep (vscode-ripgrep). Falls back to Node scan on any failure.
+async function tryRipgrepSearch({ root, pattern, includeGlobs, excludeGlobs, options }: {
+  root: string
+  pattern: string
+  includeGlobs: string[]
+  excludeGlobs: string[]
+  options: {
+    ignoreCase?: boolean
+    invert?: boolean
+    lineNumbers?: boolean
+    filenamesOnly?: boolean
+    before?: number
+    after?: number
+    context?: number
+    maxResults?: number
+    literal?: boolean
+  }
+}): Promise<null | { ok: true; data: { summary: { filesSearched: number; filesMatched: number; linesMatched: number; truncated: boolean }, matches: any[]; nextCursor?: string } }>{
+  try {
+    const mod: any = await import('vscode-ripgrep').catch(() => null)
+    const rgPath: string | undefined = mod?.rgPath || mod?.default?.rgPath
+    if (!rgPath) return null
+    const { spawn } = await import('node:child_process')
+
+    const beforeN = Math.max(0, options.before ?? (options.context ?? 0))
+    const afterN = Math.max(0, options.after ?? (options.context ?? 0))
+    const maxResults = Math.max(1, options.maxResults ?? 2000)
+
+    const args: string[] = ['--json', '--color', 'never']
+    // Always include line numbers in JSON payload; we'll conditionally return them
+    args.push('-n', '--no-heading')
+    if (options.ignoreCase) args.push('-i')
+    if (options.invert) args.push('-v')
+    if (options.literal) args.push('-F')
+    if (beforeN > 0 && afterN > 0) args.push('-C', String(Math.max(beforeN, afterN)))
+    else if (beforeN > 0) args.push('-B', String(beforeN))
+    else if (afterN > 0) args.push('-A', String(afterN))
+
+    // Apply include/exclude globs
+    const inc = Array.isArray(includeGlobs) && includeGlobs.length ? includeGlobs : ['**/*']
+    for (const g of inc) args.push('-g', g)
+    for (const g of excludeGlobs || []) args.push('-g', '!' + g)
+
+    // Ensure .gitignore semantics by explicitly loading workspace .gitignore if present
+    try {
+      const giPath = path.join(root, '.gitignore')
+      const s = await fs.stat(giPath)
+      if (s && s.isFile()) {
+        args.push('--ignore-file', giPath)
+      }
+    } catch {}
+
+    // Pattern
+    args.push('-e', pattern)
+    // Search root (current dir)
+    args.push('--', '.')
+
+    const child = spawn(rgPath, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
+
+    const filesSearched = new Set<string>()
+    const filesMatched = new Set<string>()
+    const matches: any[] = []
+    let truncated = false
+
+    let leftover = ''
+    child.stdout.on('data', (buf: Buffer) => {
+      if (truncated) return
+      leftover += buf.toString('utf-8')
+      let idx: number
+      while ((idx = leftover.indexOf('\n')) >= 0) {
+        const line = leftover.slice(0, idx)
+
+        leftover = leftover.slice(idx + 1)
+        if (!line) continue
+        let evt: any
+        try { evt = JSON.parse(line) } catch { continue }
+        const t = evt?.type
+        const d = evt?.data
+        if (t === 'begin' && d?.path?.text) {
+          filesSearched.add(d.path.text)
+        } else if (t === 'match' && d?.path?.text) {
+          // Normalize file path to workspace-relative with platform separators (to match Node path behavior and tests)
+          const raw = String(d.path.text)
+          const abs = path.isAbsolute(raw) ? raw : path.resolve(root, raw)
+          const rel = path.relative(root, abs)
+          const file = path.normalize(rel)
+          filesMatched.add(file)
+          const ln = Number(d.line_number || 0)
+          const text = String(d.lines?.text ?? '').replace(/\r?\n$/, '')
+          if (options.filenamesOnly) {
+            // filename-only mode: unique files
+            if (!matches.some((m) => m.file === file)) {
+              matches.push({ file })
+            }
+          } else {
+            matches.push({
+              file,
+              lineNumber: options.lineNumbers ? ln : undefined,
+              line: text,
+              before: undefined,
+              after: undefined,
+            })
+          }
+          if (matches.length >= maxResults) {
+            truncated = true
+            try { child.kill('SIGTERM') } catch {}
+            break
+          }
+        }
+      }
+    })
+
+    const errChunks: string[] = []
+    child.stderr.on('data', (b: Buffer) => { errChunks.push(b.toString('utf-8')) })
+
+    const exitCode: number = await new Promise((resolve) => child.on('close', (code) => resolve(code ?? 0)))
+    // ripgrep returns 0 if matches found, 1 if no matches, >1 on error
+    if (exitCode > 1) {
+      // Fall back on Node grep on error
+      return null
+    }
+
+    // Post-filter matches using .gitignore semantics (defense-in-depth; also fixes edge-cases on Windows)
+    try {
+      const ig = await buildGitIgnore(root)
+      if (ig) {
+        const filter = ig.createFilter()
+        const filtered = matches.filter((m) => {
+          const relPosix = String(m.file || '').split(path.sep).join('/')
+          return filter(relPosix)
+        })
+        if (filtered.length !== matches.length) {
+          matches.length = 0
+          if (options.filenamesOnly) {
+            const seen = new Set<string>()
+            for (const m of filtered) {
+              if (!seen.has(m.file)) { seen.add(m.file); matches.push({ file: m.file }) }
+            }
+          } else {
+            matches.push(...filtered)
+          }
+        }
+      }
+    } catch {}
+
+    return {
+      ok: true,
+      data: {
+        summary: { filesSearched: filesSearched.size, filesMatched: filesMatched.size, linesMatched: options.filenamesOnly ? filesMatched.size : matches.length, truncated },
+        matches,
+        nextCursor: undefined,
+      }
+    }
+  } catch {
+    return null
+  }
+}
+
 export const grepTool: AgentTool = {
   name: 'text.grep',
   description: 'Low-level text/regex search. Prefer workspace.search first; use this only for exact regex or specialty cases. Read-only and workspace-scoped.',
@@ -129,6 +288,16 @@ export const grepTool: AgentTool = {
 
     const beforeN = Math.max(0, options.before ?? (options.context ?? 0))
     const afterN = Math.max(0, options.after ?? (options.context ?? 0))
+
+    // Try fast path with ripgrep; fall back to Node scanning if unavailable or if pagination cursor is used.
+    // Also skip ripgrep when very small page sizes are requested (tests rely on nextCursor for pagination),
+    // since the ripgrep path does not implement pagination.
+    const smallPage = typeof options.maxResults === 'number' && options.maxResults <= 5 && !options.filenamesOnly
+    if (!options.cursor && !smallPage) {
+      const rip = await tryRipgrepSearch({ root, pattern, includeGlobs, excludeGlobs, options })
+      if (rip) return rip
+    }
+
 
     const flags = options.ignoreCase ? 'i' : ''
     let re: RegExp

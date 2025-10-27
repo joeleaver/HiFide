@@ -1,6 +1,7 @@
 import type { StateCreator } from 'zustand'
-import { listItems, createItem, updateItem, deleteItem, search, readById, normalizeMarkdown, extractTrailingMeta, type KbItem, type KbHit } from '../utils/knowledgeBase'
+import { listItems, createItem, updateItem, deleteItem, readById, normalizeMarkdown, extractTrailingMeta, type KbItem, type KbHit } from '../utils/knowledgeBase'
 import { listWorkspaceFiles } from '../utils/workspace-helpers'
+import { getKbIndexer } from '../../core/state'
 
 export interface KnowledgeBaseSlice {
   // State
@@ -125,11 +126,63 @@ export const createKnowledgeBaseSlice: StateCreator<KnowledgeBaseSlice> = (set, 
     const baseDir = (get() as any).workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
     const query = params?.query ?? get().kbSearchQuery
     const tags = params?.tags ?? get().kbSearchTags
-    const limit = params?.limit
+    const limit = typeof params?.limit === 'number' ? params!.limit! : 50
+    const qLower = String(query || '').toLowerCase().trim()
     try {
       set({ kbLastError: null, kbLoading: true })
-      const results = await search(baseDir, { query, tags, limit })
-      set({ kbSearchResults: results, kbLoading: false })
+      const idx = await getKbIndexer()
+      // Ensure KB index exists and is fresh enough for immediate search
+      const st1 = idx.status()
+      if (!st1.ready || (st1.chunks ?? 0) === 0) {
+        try { await idx.rebuild(() => {}) } catch {}
+      }
+      const items = await listItems(baseDir)
+      const byRel: Record<string, KbHit> = {}
+      for (const it of items) byRel[it.relPath.replace(/^\\\\?/, '')] = it as KbHit
+      const k = Math.max(100, limit * 3)
+      let sem = await idx.search(qLower || '', k)
+      if ((sem.chunks?.length || 0) === 0) {
+        try { await idx.rebuild(() => {}) } catch {}
+        sem = await idx.search(qLower || '', k)
+      }
+      const tagSet = new Set((tags || []).map((t: string) => t.toLowerCase()))
+      const hasAll = (entryTags: string[]) => {
+        if (!tagSet.size) return true
+        const lc = new Set((entryTags || []).map((t) => t.toLowerCase()))
+        for (const t of tagSet) if (!lc.has(t)) return false
+        return true
+      }
+      const stripPreamble = (s: string) => {
+        const ii = s.indexOf('\n\n'); return ii >= 0 ? s.slice(ii + 2) : s
+      }
+
+      const seen = new Set<string>()
+      const candidates: KbHit[] = []
+      sem.chunks.forEach((c, i) => {
+        const p = String(c.path).replace(/^\\\\?/, '')
+        if (seen.has(p)) return
+        seen.add(p)
+        const meta = byRel[p]
+        if (!meta) return
+        if (!hasAll(meta.tags)) return
+        const baseScore = 1 - i / Math.max(1, sem.chunks.length)
+        const body = stripPreamble(String(c.text || ''))
+        const titleMatch = qLower && meta.title.toLowerCase().includes(qLower)
+        const literalMatch = qLower && body.toLowerCase().includes(qLower)
+        const tagBoost = Array.from(tagSet).filter((t) => meta.tags.map((x) => x.toLowerCase()).includes(t)).length * 0.05
+        const score = baseScore + (titleMatch ? 0.3 : 0) + (literalMatch ? 0.15 : 0) + tagBoost
+        const excerpt = body.slice(0, 320)
+        candidates.push({ ...meta, excerpt, score })
+      })
+      candidates.sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+      let finalResults = candidates
+      if (finalResults.length === 0) {
+        try {
+          const raw = await import('../utils/knowledgeBase')
+          finalResults = await raw.search(baseDir, { query: qLower, tags, limit })
+        } catch {}
+      }
+      set({ kbSearchResults: finalResults.slice(0, limit), kbLoading: false })
     } catch (e: any) {
       set({ kbLoading: false, kbLastError: String(e) })
     }

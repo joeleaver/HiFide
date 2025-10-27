@@ -41,5 +41,8 @@ api_key.txt
 # Test coverage
 coverage/
 .nyc_output/
-
+I
 *.onnx*
+
+# Transformers cache
+.cache/transformers/**

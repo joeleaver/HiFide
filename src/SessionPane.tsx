@@ -13,6 +13,8 @@ import ToolBadgeContainer from './components/ToolBadgeContainer'
 import { BadgeDiffContent } from './components/BadgeDiffContent'
 import { BadgeSearchContent } from './components/BadgeSearchContent'
 import { BadgeWorkspaceSearchContent } from './components/BadgeWorkspaceSearchContent'
+import { BadgeKnowledgeBaseSearchContent } from './components/BadgeKnowledgeBaseSearchContent'
+import { BadgeKnowledgeBaseStoreContent } from './components/BadgeKnowledgeBaseStoreContent'
 import { BadgeAstSearchContent } from './components/BadgeAstSearchContent'
 import { BadgeReadLinesContent } from './components/BadgeReadLinesContent'
 import { BadgeWorkspaceJumpContent } from './components/BadgeWorkspaceJumpContent'
@@ -376,6 +378,20 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
                                 <BadgeReadLinesContent
                                   badgeId={badge.id}
                                   readKey={badge.interactive.data.key}
+                                />
+                              )}
+                              {badge.contentType === 'kb-search' && badge.interactive?.data?.key && (
+                                <BadgeKnowledgeBaseSearchContent
+                                  badgeId={badge.id}
+                                  searchKey={badge.interactive.data.key}
+                                  fullParams={badge.metadata?.fullParams}
+                                />
+                              )}
+                              {badge.contentType === 'kb-store' && badge.interactive?.data?.key && (
+                                <BadgeKnowledgeBaseStoreContent
+                                  badgeId={badge.id}
+                                  resultKey={badge.interactive.data.key}
+                                  fullParams={badge.metadata?.fullParams}
                                 />
                               )}
                               {badge.type === 'error' && (

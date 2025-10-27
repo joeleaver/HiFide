@@ -44,6 +44,19 @@ describe('workspace.search tool', () => {
     expect(exp.data.lines.start).toBeGreaterThan(0)
   })
 })
+  it('finds the dev logger for changed keys in main store', async () => {
+    const res: any = await searchWorkspaceTool.run({
+      mode: 'text',
+      query: "[main-store] changed keys",
+      filters: { pathsInclude: ['electron/store/**'], maxResults: 10, maxSnippetLines: 8 }
+    } as any)
+    ensureOk(res)
+    const out = res.data
+    expect(out.results.length).toBeGreaterThan(0)
+    const found = out.results.some((h: any) => /main-store\] changed keys/i.test(h.preview || ''))
+    expect(found).toBe(true)
+  })
+
 
   it('supports multi-query batching and annotates matchedQueries', async () => {
     const res: any = await searchWorkspaceTool.run({

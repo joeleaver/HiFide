@@ -1,5 +1,11 @@
 import { ipcRenderer, contextBridge } from 'electron'
 import { preloadBridge } from '@zubridge/electron/preload'
+import { EventEmitter as NodeEventEmitter } from 'events'
+
+// Raise listener limits to avoid noisy MaxListeners warnings during bursts of dispatches
+try { NodeEventEmitter.defaultMaxListeners = 50 } catch {}
+try { (ipcRenderer as any)?.setMaxListeners?.(50) } catch {}
+
 
 // --------- Set up zubridge for state synchronization ---------
 const { handlers } = preloadBridge()

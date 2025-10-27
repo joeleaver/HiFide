@@ -65,15 +65,21 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
     )
   }
 
-  // Extract queries and normalize filters (prefer shallow params)
-  const p = (paramsFromStore as any) || fullParams || {}
-  const queriesRaw = Array.isArray(p?.queries)
-    ? p.queries
-    : (p?.query ? [p.query] : [])
+  // Extract queries and normalize filters (prefer shallow params, but fall back to fullParams when store.queries is empty)
+  const pStore: any = paramsFromStore as any
+  const pFull: any = fullParams || {}
+
+  // Prefer non-empty queries[] from store; otherwise fall back to single query or queries[] from full params
+  const queriesRawStore: any[] = Array.isArray(pStore?.queries) ? pStore.queries : []
+  const queriesRawFull: any[] = Array.isArray(pFull?.queries) ? pFull.queries : (pFull?.query ? [pFull.query] : [])
+  const queriesRaw: any[] = (queriesRawStore && queriesRawStore.length > 0) ? queriesRawStore : queriesRawFull
+
   const isMaxDepthToken = (s: any) => typeof s === 'string' && s.startsWith('[Max Depth Exceeded')
   const queries = queriesRaw.map((s: any) => String(s || '')).filter(Boolean).filter((s: string) => !isMaxDepthToken(s))
-  const mode = p?.mode || 'auto'
-  const f = p?.filters || {}
+
+  // Merge filter/mode from store first (sanitized), then fall back to full params
+  const mode = pStore?.mode || pFull?.mode || 'auto'
+  const f = pStore?.filters || pFull?.filters || {}
   const languages: string[] = (Array.isArray(f.languages)
     ? f.languages.map((s: any) => String(s))
     : (typeof f.languages === 'string' ? [String(f.languages)] : [])).filter((s: string) => !isMaxDepthToken(s))

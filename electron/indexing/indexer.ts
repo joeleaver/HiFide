@@ -21,10 +21,18 @@ export type IndexMeta = {
 
 type IndexData = { meta: IndexMeta; chunks: Chunk[] }
 
+export type IndexerOptions = {
+  scanRoot?: string // directory to scan (defaults to root)
+  indexSubdir?: string // subdir under .hifide-private to store index (defaults to 'indexes')
+  useWorkspaceGitignore?: boolean // whether to apply workspace .gitignore (defaults to true only when scanRoot===root)
+  mode?: 'default' | 'kb' // indexing mode; 'kb' augments chunks with KB metadata and strips front matter
+}
+
 export class Indexer {
   private engine: EmbeddingEngine | null = null
   private data: IndexData | null = null
-  private root: string
+  private root: string // workspace root
+  private scanRoot: string // actual directory to scan (may be inside workspace)
   private indexPath: string
   private indexDir: string
   private readonly CHUNKS_PER_FILE = 200 // Safer split: 200 chunks per file to reduce JSON size
@@ -42,6 +50,10 @@ export class Indexer {
   } = { phase: 'idle', processedFiles: 0, totalFiles: 0, processedChunks: 0, totalChunks: 0, startedAt: null }
 
   // gitignore filter (full semantics via ignore package)
+  private useWorkspaceGitignore: boolean = true
+  private mode: 'default' | 'kb' = 'default'
+
+
 
   // Expose current engine info for gating decisions (model change trigger)
   public async getEngineInfo(): Promise<{ id: string; dim: number }> {
@@ -50,13 +62,18 @@ export class Indexer {
   }
   private ig: ReturnType<typeof ignore> | null = null
 
-  constructor(root: string) {
+  constructor(root: string, opts: IndexerOptions = {}) {
     this.root = root
-    // Store index in workspace .hifide-private/indexes/
+    this.scanRoot = opts.scanRoot || root
+    // Store index in workspace .hifide-private/{indexSubdir}/
     const privateDir = path.join(root, '.hifide-private')
-    this.indexDir = path.join(privateDir, 'indexes')
+    const sub = opts.indexSubdir || 'indexes'
+    this.indexDir = path.join(privateDir, sub)
+    this.mode = (opts.mode ?? 'default')
+
     this.indexPath = path.join(this.indexDir, 'meta.json')
     fs.mkdirSync(this.indexDir, { recursive: true })
+    this.useWorkspaceGitignore = opts.useWorkspaceGitignore ?? (this.scanRoot === this.root)
   }
 
   status() {
@@ -133,6 +150,7 @@ export class Indexer {
 
   private loadGitIgnoreFilter() {
     this.ig = null
+    if (!this.useWorkspaceGitignore) return
     try {
       const gi = fs.readFileSync(path.join(this.root, '.gitignore'), 'utf-8')
       const ig = ignore()
@@ -142,15 +160,23 @@ export class Indexer {
   }
 
   private shouldSkip(filePath: string): boolean {
-    const rel = path.relative(this.root, filePath)
-    const relPosix = rel.split(path.sep).join('/')
+    const relFromRoot = path.relative(this.root, filePath)
+    const relFromScan = path.relative(this.scanRoot, filePath)
+    const relPosix = relFromRoot.split(path.sep).join('/')
     const base = path.basename(filePath)
     // skip if inside excluded dirs
-    const parts = rel.split(path.sep)
-    if (parts.some((p) => this.defaultExcludes.has(p))) return true
+    const parts = (this.scanRoot === this.root ? relFromRoot : relFromScan).split(path.sep)
+    if (parts.some((p) => this.defaultExcludes.has(p))) {
+      // If scanning a nested corpus (e.g., KB), do not exclude due to '.hifide-public' at workspace level
+      if (this.scanRoot !== this.root && parts.includes('.hifide-public')) {
+        // allow
+      } else {
+        return true
+      }
+    }
     // skip excluded filenames (lockfiles, etc.)
     if (this.defaultExcludedFiles.has(base)) return true
-    if (this.ig && this.ig.ignores(relPosix)) return true
+    if (this.scanRoot === this.root && this.ig && this.ig.ignores(relPosix)) return true
 
     const ext = path.extname(filePath).toLowerCase()
     const binExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.zip', '.ico', '.dll', '.exe', '.mp4', '.mov', '.mp3', '.wav', '.ogg', '.webm', '.7z', '.rar', '.gz'])
@@ -170,6 +196,131 @@ export class Indexer {
     return chunks
   }
 
+  // KB markdown-aware chunking: split on headings and group paragraphs to ~targetLines
+  private chunkTextKbMarkdown(text: string, targetLines = 40, maxLines = 80, minLines = 8): { startLine: number; endLine: number; text: string }[] {
+    const lines = text.split(/\r?\n/)
+    const out: { startLine: number; endLine: number; text: string }[] = []
+
+    const isHeading = (s: string) => /^#{1,6}\s/.test(s.trim())
+    let inFence = false
+    const fenceToggle = (s: string) => {
+      const m = s.match(/^```/)
+      if (m) inFence = !inFence
+    }
+
+    let bufStart = 1
+    let buf: string[] = []
+    let lastBlankIdx = -1
+
+    const flush = (endIdxExclusive: number) => {
+      if (buf.length === 0) return
+      const startLine = bufStart
+      const endLine = startLine + buf.length - 1
+      out.push({ startLine, endLine, text: buf.join('\n') })
+      buf = []
+      bufStart = endIdxExclusive + 1
+      lastBlankIdx = -1
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      // Detect fenced code blocks
+      fenceToggle(line)
+
+      // New section at heading when not inside code fence
+      if (!inFence && isHeading(line)) {
+        // Flush any existing buffer if not empty
+        if (buf.length > 0) flush(i - 1)
+        // Start new buffer from this heading
+        bufStart = i + 1
+        buf = [line]
+        lastBlankIdx = -1
+        continue
+      }
+
+      // Regular content line
+      buf.push(line)
+      if (!inFence && line.trim() === '') lastBlankIdx = buf.length - 1
+
+      // Size-based flush: try to end on a blank line near target
+      if (!inFence && buf.length >= targetLines) {
+        if (buf.length >= maxLines) {
+          // Hard split if grossly oversized
+          if (lastBlankIdx >= minLines) {
+            const head = buf.slice(0, lastBlankIdx + 1)
+            const tail = buf.slice(lastBlankIdx + 1)
+            const startLine = bufStart
+            const endLine = startLine + head.length - 1
+            out.push({ startLine, endLine, text: head.join('\n') })
+            buf = tail
+            bufStart = endLine + 1 + 1 // +1 to move past blank line
+            lastBlankIdx = -1
+          } else {
+            flush(i)
+          }
+        } else if (lastBlankIdx >= minLines) {
+          const head = buf.slice(0, lastBlankIdx + 1)
+          const tail = buf.slice(lastBlankIdx + 1)
+          const startLine = bufStart
+          const endLine = startLine + head.length - 1
+          out.push({ startLine, endLine, text: head.join('\n') })
+          buf = tail
+          bufStart = endLine + 1 + 1
+          lastBlankIdx = -1
+        }
+      }
+    }
+
+    // Flush remaining buffer
+    if (buf.length > 0) flush(lines.length - 1)
+
+    // If the document had no headings and resulted in a single tiny chunk, fall back to default chunking
+    if (out.length <= 1 && (out[0]?.endLine - out[0]?.startLine + 1 || 0) < minLines) {
+      return this.chunkText(text, 60)
+    }
+
+    return out
+  }
+
+
+  // KB preprocessing: strip simple YAML front matter and build a lightweight metadata preamble
+  private preprocessKb(raw: string): { body: string; preamble: string | null } {
+    if (this.mode !== 'kb') return { body: raw, preamble: null }
+    const { meta, body } = this.parseSimpleFrontMatter(raw)
+    const title = (meta?.title ?? '').toString()
+    const tags = Array.isArray(meta?.tags) ? meta.tags.map((t: any) => String(t)) : []
+    const files = Array.isArray(meta?.files) ? meta.files.map((f: any) => String(f)) : []
+    const lines: string[] = []
+    if (title) lines.push(`[${title}]`)
+    if (tags.length) lines.push(tags.join(', '))
+    if (files.length) lines.push(files.join('\n'))
+    const preamble = lines.length ? lines.join('\n') : null
+    return { body, preamble }
+  }
+
+  private parseSimpleFrontMatter(raw: string): { meta: any; body: string } {
+    if (!raw.startsWith('---')) return { meta: {}, body: raw }
+    const endIdx = raw.indexOf('\n---', 3)
+    if (endIdx === -1) return { meta: {}, body: raw }
+    const header = raw.slice(3, endIdx)
+    const body = raw.slice(endIdx + 4)
+    const meta: any = {}
+    const lines = header.split(/\r?\n/)
+    for (const ln of lines) {
+      const m = ln.match(/^\s*([A-Za-z0-9_]+)\s*:\s*(.*)\s*$/)
+      if (!m) continue
+      const key = m[1]
+      let val = m[2]
+      if (val.startsWith('[') && val.endsWith(']')) {
+        try { meta[key] = JSON.parse(val.replace(/'/g, '"')) } catch { meta[key] = val }
+      } else {
+        meta[key] = val.replace(/^['"]|['"]$/g, '')
+      }
+    }
+    return { meta, body }
+  }
+
+
   cancel() { if (this.inProgress) this.cancelled = true }
 
   async rebuild(onProgress?: (p: ReturnType<Indexer['status']>) => void): Promise<void> {
@@ -188,9 +339,9 @@ export class Indexer {
       '.venv/**','venv/**','.pytest_cache/**','.mypy_cache/**','.gradle/**','jspm_packages/**','bower_components/**',
       'coverage/**','storybook-static/**','Pods/**'
     ]
-    const candidates = fg.sync('**/*', { cwd: this.root, onlyFiles: true, dot: false, followSymbolicLinks: false, ignore: DEFAULT_EXCLUDE_GLOBS })
+    const candidates = fg.sync('**/*', { cwd: this.scanRoot, onlyFiles: true, dot: false, followSymbolicLinks: false, ignore: (this.scanRoot === this.root ? DEFAULT_EXCLUDE_GLOBS : []) })
     const files = candidates
-      .map((rel) => path.join(this.root, rel))
+      .map((rel) => path.join(this.scanRoot, rel))
       .filter((f) => !this.shouldSkip(f))
     this.progress.totalFiles = files.length
 
@@ -263,8 +414,8 @@ export class Indexer {
 
 
 
-    // Engine-aware batching and limits
-    const defaultBatch = this.engine.id.startsWith('fastembed-') ? 64 : 256
+    // Engine-aware batching and limits (transformers.js only)
+    const defaultBatch = 256
 
     // Fast-path: monolithic embed for small workspaces to eliminate per-call overhead
     const MONO_MAX_CHUNKS = Math.max(1, Number(process.env.HIFIDE_EMB_MONO_MAX || 256))
@@ -289,14 +440,16 @@ export class Indexer {
             if (st.size > MAX_FILE_BYTES) continue
             const text = await fs.promises.readFile(f, 'utf8').catch(() => '')
             if (!text) continue
-            const parts = this.chunkText(text)
+            const { body: kbBody, preamble: kbPre } = (this.mode === 'kb') ? this.preprocessKb(text) : { body: text, preamble: null }
+            const parts = (this.mode === 'kb') ? this.chunkTextKbMarkdown(kbBody) : this.chunkText(kbBody)
             totalChunksLocal += parts.length
             // Progress updates
             this.progress.totalChunks = totalChunksLocal
             this.progress.processedFiles = (this.progress.processedFiles || 0) + 1
             onProgress?.(this.status())
             for (const p of parts) {
-              allRecords.push({ path: relPath, startLine: p.startLine, endLine: p.endLine, text: p.text })
+              const t = kbPre ? `${kbPre}\n\n${p.text}` : p.text
+              allRecords.push({ path: relPath, startLine: p.startLine, endLine: p.endLine, text: t })
             }
             if (totalChunksLocal > MONO_MAX_CHUNKS) {
               // Not small; fall back to normal pipeline
@@ -398,7 +551,8 @@ export class Indexer {
         // End record
 
         }
-        const parts = this.chunkText(text)
+        const { body: kbBody, preamble: kbPre } = (this.mode === 'kb') ? this.preprocessKb(text) : { body: text, preamble: null }
+        const parts = (this.mode === 'kb') ? this.chunkTextKbMarkdown(kbBody) : this.chunkText(kbBody)
         totalChunks += parts.length
         this.progress.totalChunks = totalChunks
         if (DEBUG) console.log(`[indexing] w${wid} chunks ${relPath} count=${parts.length}`)
@@ -420,7 +574,7 @@ export class Indexer {
           embedActive--; embedBatchCount++
           const dt = Date.now() - t0
           embedDurations.push(dt)
-          const items: Chunk[] = batch.map((p, j) => ({ path: relPath, startLine: p.startLine, endLine: p.endLine, text: p.text, vector: vectors[j] }))
+          const items: Chunk[] = batch.map((p, j) => ({ path: relPath, startLine: p.startLine, endLine: p.endLine, text: (kbPre ? `${kbPre}\n\n${p.text}` : p.text), vector: vectors[j] }))
           enqueueWrite(items)
           flushCounter++
           if (flushCounter % WRITE_FLUSH_EVERY === 0) {
@@ -570,9 +724,10 @@ export class Indexer {
             const rel = path.relative(this.root, abs)
             let text = ''
             try { text = fs.readFileSync(abs, 'utf-8') } catch { /* file may be removed */ }
-            const parts = text ? this.chunkText(text) : []
-            const vectors = parts.length ? await this.engine.embed(parts.map(p => p.text)) : []
-            const newChunks: Chunk[] = parts.map((p, i) => ({ path: rel, startLine: p.startLine, endLine: p.endLine, text: p.text, vector: vectors[i] }))
+            const { body: kbBody, preamble: kbPre } = text ? ((this.mode === 'kb') ? this.preprocessKb(text) : { body: text, preamble: null }) : { body: '', preamble: null }
+            const parts = kbBody ? ((this.mode === 'kb') ? this.chunkTextKbMarkdown(kbBody) : this.chunkText(kbBody)) : []
+            const vectors = parts.length ? await this.engine.embed(parts.map(p => (kbPre ? `${kbPre}\n\n${p.text}` : p.text))) : []
+            const newChunks: Chunk[] = parts.map((p, i) => ({ path: rel, startLine: p.startLine, endLine: p.endLine, text: (kbPre ? `${kbPre}\n\n${p.text}` : p.text), vector: vectors[i] }))
             this.ensureLoadedFromDisk()
             if (!this.data) return
             // remove old chunks for file

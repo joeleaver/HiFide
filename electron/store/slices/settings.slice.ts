@@ -141,7 +141,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
     // Validate API keys by making test API calls
     // This can only run in the main process where we have Node.js APIs
     if (typeof window !== 'undefined') {
-      const result = { ok: true, failures: [] }
+      const result = { ok: true, failures: [] as string[] }
       set({ settingsValidateResult: result })
       return result
     }
@@ -214,11 +214,25 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
         ? { ok: false, failures }
         : { ok: true, failures: [] }
 
-      set({ settingsValidateResult: result })
+      // Update provider validity map and refresh models so UI reacts immediately
+      try {
+        const lc = failures.map((f) => f.toLowerCase())
+        const map: Record<string, boolean> = {
+          openai: !!keys.openai?.trim() && !lc.some((f) => f.includes('openai')),
+          anthropic: !!keys.anthropic?.trim() && !lc.some((f) => f.includes('anthropic')),
+          gemini: !!keys.gemini?.trim() && !lc.some((f) => f.includes('gemini')),
+        }
+        const anyState: any = state as any
+        anyState.setProvidersValid?.(map)
+        // Clear startup banner if at least one provider is valid now
+        if (map.openai || map.anthropic || map.gemini) {
+          anyState.setStartupMessage?.(null)
+        }
+        // Fetch models for newly valid providers
+        void anyState.refreshAllModels?.()
+      } catch {}
 
-      if (failures.length > 0) {
-      } else {
-      }
+      set({ settingsValidateResult: result })
 
       return result
     } catch (e: any) {

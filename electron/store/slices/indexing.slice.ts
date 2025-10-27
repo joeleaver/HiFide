@@ -326,10 +326,11 @@ export const createIndexingSlice: StateCreator<IndexingSlice, [], [], IndexingSl
       return { triggered: true }
     } catch (e: any) {
       const msg = e?.message || String(e)
-      if (/Model file not found|fastembed/i.test(msg)) {
-        console.warn('[indexing] Skipping index rebuild: embedding model not present yet. It will download on first successful init or when network is available.')
-      } else {
-        console.error('[indexing] maybeAutoRebuildAndWait error:', e)
+      // Log the full error for visibility
+      console.error('[indexing] maybeAutoRebuildAndWait error:', e)
+      // Classify common native/engine pre-req issues and provide actionable guidance
+      if (/(sharp|vips|ERR_DLOPEN_FAILED|node-gyp|node-pre-gyp|onnxruntime)/i.test(msg)) {
+        console.warn('[indexing] Prerequisite not ready for semantic indexing (native dep). On Windows/Electron dev: run "pnpm rebuild sharp" then "pnpm exec electron-rebuild -f -w sharp". If onnxruntime errors persist, the engine now prefers the WASM backend automatically.')
       }
       return { triggered: false }
     }
@@ -389,7 +390,12 @@ export const createIndexingSlice: StateCreator<IndexingSlice, [], [], IndexingSl
       })
       return { ok: true, status: { ready: s.ready, chunks: s.chunks, modelId: s.modelId, dim: s.dim, indexPath: s.indexPath } as IndexStatus }
     } catch (e) {
+      const msg = (e && (e as any).message) ? (e as any).message : String(e)
+      // Always log the full error once
       console.error('[indexing] Index rebuild error:', e)
+      if (/(sharp|vips|ERR_DLOPEN_FAILED|node-gyp|node-pre-gyp|onnxruntime)/i.test(msg)) {
+        console.warn('[indexing] Prerequisite not ready for semantic indexing (native dep). On Windows/Electron dev: run "pnpm rebuild sharp" then "pnpm exec electron-rebuild -f -w sharp". If onnxruntime errors persist, the engine now prefers the WASM backend automatically.')
+      }
       return { ok: false, error: e }
     } finally {
       set({ idxLoading: false })

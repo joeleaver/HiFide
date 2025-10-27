@@ -519,11 +519,11 @@ export class FlowScheduler {
       // Reduced logging
       store.feHandleNodeEnd(nodeId, durationMs)
 
-      // Check for error status - stop execution if node failed
+      // Check for error status - do not hard-stop the flow here
       if (result.status === 'error') {
         const errorMsg = result.error || 'Node execution failed'
         console.error(`[Scheduler] ${nodeId} - ERROR:`, errorMsg)
-        store.feHandleError(`${nodeId}: ${errorMsg}`, nodeId)
+        // Let the caller handle UI; non-entry executions will append an error badge in the catch() below
         throw new Error(errorMsg)
       }
 
@@ -557,7 +557,7 @@ export class FlowScheduler {
         })
 
         // Kick off all pushes in parallel so pulls can await in-flight producers
-        const runnables: Promise<any>[] = []
+        const runnables: Array<{ id: string; promise: Promise<any> }> = []
 
         for (const successorId of successorIds) {
           // Collect all outputs going to this successor
@@ -627,7 +627,7 @@ export class FlowScheduler {
                 this.pendingPushesByNode.delete(successorId)
                 const ctxDbg = initial.context ? { provider: initial.context.provider, model: initial.context.model, contextType: initial.context.contextType } : undefined
                 console.log(`[Scheduler] ${nodeId} - Starting ${successorId} with initial pushed:`, Object.keys(initial), ctxDbg)
-                runnables.push(this.executeNode(successorId, initial, nodeId))
+                runnables.push({ id: successorId, promise: this.executeNode(successorId, initial, nodeId) })
               } else {
                 const waitingFor = [...missingAmbiguous]
                 if (missingContext) waitingFor.push('context')
@@ -641,14 +641,15 @@ export class FlowScheduler {
 
         if (runnables.length) {
           // Fire-and-forget: do not await successors
-          for (const p of runnables) {
-            p.catch((err) => {
+          for (const { id: succId, promise } of runnables) {
+            promise.catch((err) => {
               if (isCancellationError(err)) {
-                console.log(`[Scheduler] ${nodeId} - Successor cancelled`)
+                console.log(`[Scheduler] ${nodeId} - Successor ${succId} cancelled`)
                 return
               }
-              console.error(`[Scheduler] ${nodeId} - Successor error:`, err)
-              try { store.feHandleError(err?.message || String(err), nodeId) } catch {}
+              console.error(`[Scheduler] ${nodeId} - Successor ${succId} error:`, err)
+              // Avoid stopping the whole flow. Errors will be surfaced by doExecuteNode catch for non-entry nodes.
+              // We still attach a catch to prevent unhandledRejection warnings.
             })
           }
         }
@@ -665,7 +666,36 @@ export class FlowScheduler {
       }
       console.error(`[FlowScheduler] Error in ${nodeId}:`, error)
       const store = await this.getStore()
-      store.feHandleError(error, nodeId)
+      if (callerId) {
+        // Non-entry node failed: append an error badge but keep the flow running
+        try {
+          const nodeCfg = this.flowDef.nodes.find((n) => n.id === nodeId)
+          store.appendToNodeExecution?.({
+            nodeId,
+            nodeLabel: (nodeCfg as any)?.data?.label || (nodeCfg as any)?.data?.nodeType || 'Node',
+            nodeKind: (nodeCfg as any)?.data?.nodeType || 'unknown',
+            content: {
+              type: 'badge',
+              badge: {
+                id: `error-${Date.now()}`,
+                type: 'error',
+                label: 'Node Error',
+                icon: '❌',
+                color: 'red',
+                variant: 'filled',
+                status: 'error',
+                error,
+                expandable: true,
+                defaultExpanded: false,
+                timestamp: Date.now()
+              }
+            }
+          })
+        } catch {}
+      } else {
+        // Top-level error (entry execution): stop the flow and surface globally
+        try { store.feHandleError(error, nodeId) } catch {}
+      }
       throw e
     }
   }

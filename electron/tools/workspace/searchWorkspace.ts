@@ -93,6 +93,7 @@ export interface SearchWorkspaceResultHit {
   reasons: string[]
   matchedQueries?: string[]
   handle: string
+  corpus?: 'workspace'|'kb'
 }
 
 export interface SearchWorkspaceResult {
@@ -448,19 +449,19 @@ async function autoRefreshPreflight(): Promise<{ triggered: boolean }> {
 }
 
 
+
+
 // ---- Orchestrator --------------------------------------------------------------------
 
 async function runSemantic(query: string, k: number) {
   try {
-    const indexer = await getIndexer()
-    const res = await indexer.search(query, k)
-    return (res?.chunks || []).map((c: any) => ({
-      path: c.path as string,
-      startLine: c.startLine as number,
-      endLine: c.endLine as number,
-      text: c.text as string,
-      score: 1, // normalized later
-    }))
+    const wsIdx = await getIndexer()
+    const ws = await wsIdx.search(query, k)
+    const items: any[] = []
+    for (const c of (ws?.chunks || [])) {
+      items.push({ path: c.path as string, startLine: c.startLine as number, endLine: c.endLine as number, text: c.text as string, score: 1, corpus: 'workspace' })
+    }
+    return items
   } catch { return [] }
 }
 
@@ -667,6 +668,7 @@ export const searchWorkspaceTool: AgentTool = {
 	    // Auto-maintenance (non-blocking): opportunistically refresh semantic index when stale
 	    try { await autoRefreshPreflight() } catch {}
 
+
     const strategiesUsed: string[] = []
     const tasks: Array<() => Promise<{ tag:string; term:string; items:any[] }>> = []
 
@@ -715,7 +717,7 @@ export const searchWorkspaceTool: AgentTool = {
     const settled = await Promise.race([allWithLimit(tasks, 6), timeout]) as any[]
 
     // Merge, normalize, score
-    type Norm = { path:string; startLine:number; endLine:number; text:string; reasons:string[]; parts: Partial<Record<'semantic'|'grep'|'ast'|'recency', number>>; matched:Set<string> }
+    type Norm = { path:string; startLine:number; endLine:number; text:string; reasons:string[]; parts: Partial<Record<'semantic'|'grep'|'ast'|'recency', number>>; matched:Set<string>; corpus?: 'workspace'|'kb' }
     const byFile: Map<string, Norm[]> = new Map()
 
     const pushNorm = (n: Norm) => {
@@ -773,7 +775,8 @@ export const searchWorkspaceTool: AgentTool = {
         parts[tag] = 1 // normalize later if we add true scores per strategy
         const pBoost = pathTokenBoost(pathRel, term)
         if (pBoost > 0) parts.path = Math.max(parts.path||0, pBoost)
-        pushNorm({ path: pathRel, startLine: start, endLine: end, text, reasons: [reason], parts, matched: new Set([term]) })
+        const corpus = (it.corpus === 'kb' ? 'kb' : it.corpus === 'workspace' ? 'workspace' : undefined)
+        pushNorm({ path: pathRel, startLine: start, endLine: end, text, reasons: [reason], parts, matched: new Set([term]), corpus })
       }
     }
 
@@ -791,7 +794,7 @@ export const searchWorkspaceTool: AgentTool = {
         const preview = clampPreview(n.text, maxSnippetLines)
         const handle = toHandle(pathRel, n.startLine, n.endLine)
         const matchedQueries = Array.from(n.matched)
-        hits.push({ type: 'SNIPPET', path: pathRel, lines: { start: n.startLine, end: n.endLine }, score, preview, language: extOf(pathRel), reasons: Array.from(new Set(n.reasons)), matchedQueries, handle })
+        hits.push({ type: 'SNIPPET', path: pathRel, lines: { start: n.startLine, end: n.endLine }, score, preview, language: extOf(pathRel), reasons: Array.from(new Set(n.reasons)), matchedQueries, handle, corpus: n.corpus })
       }
     }
 

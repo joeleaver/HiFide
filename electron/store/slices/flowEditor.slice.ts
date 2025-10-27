@@ -1802,13 +1802,23 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           .map((s: any) => String(s || '').trim())
           .filter(Boolean)
 
+        // Always attach full params so the renderer can fall back even when queries[] is empty (e.g., expand handle)
+        badgeMetadata = { ...(badgeMetadata || {}), fullParams: toolArgs }
+
         if (terms.length) {
           const shown = terms.slice(0, 2)  // Show max 2 queries in header
           const suffix = terms.length > 2 ? ` +${terms.length - 2}` : ''
           const mode = toolArgs.mode ? ` [${toolArgs.mode}]` : ''
           badgeMetadata = {
+            ...(badgeMetadata || {}),
             query: shown.join(' | ') + suffix + mode,
-            fullParams: toolArgs  // Store full params for expanded view
+          }
+        } else if (typeof toolArgs.query === 'string' && toolArgs.query.trim().length) {
+          // If single query is present but terms were empty (edge cases), still show it in the header
+          const mode = toolArgs.mode ? ` [${toolArgs.mode}]` : ''
+          badgeMetadata = {
+            ...(badgeMetadata || {}),
+            query: String(toolArgs.query).trim().slice(0, 120) + mode,
           }
         }
 
@@ -1817,6 +1827,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           const f = (toolArgs && toolArgs.filters) || {}
           const sanitizedParams = {
             queries: terms,
+            // Keep original single query too for fallback display logic in renderer
+            ...(typeof toolArgs.query === 'string' && toolArgs.query.trim().length ? { query: String(toolArgs.query).trim() } : {}),
             mode: String(toolArgs.mode || 'auto'),
             filters: {
               languages: Array.isArray(f.languages)
@@ -1857,6 +1869,56 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
               timeBudgetMs: typeof f.timeBudgetMs === 'number' ? f.timeBudgetMs : undefined,
             }
           }
+          set((state) => ({
+            feToolParamsByKey: {
+              ...(state as any).feToolParamsByKey,
+              [callId]: sanitizedParams
+            }
+          }))
+        }
+      } else if (normalizedToolName === 'knowledgeBaseSearch' || normalizedToolName === 'knowledge_base_search' || normalizedToolName === 'knowledgebase_search') {
+        // Knowledge Base search: show query/tags in header and store sanitized params for expanded view
+        const q = typeof toolArgs.query === 'string' ? toolArgs.query.trim() : ''
+        const tagsArr: string[] = Array.isArray(toolArgs.tags) ? toolArgs.tags.map((t: any) => String(t).trim()).filter(Boolean) : []
+        const limit = typeof toolArgs.limit === 'number' ? toolArgs.limit : undefined
+
+        const headerParts: string[] = []
+        if (q) headerParts.push(q)
+        if (tagsArr.length) headerParts.push(`[tags: ${tagsArr.slice(0,3).join(', ')}${tagsArr.length>3 ? '…' : ''}]`)
+        badgeMetadata = {
+          query: headerParts.join(' '),
+          fullParams: toolArgs
+        }
+
+        if (callId) {
+          const sanitizedParams = {
+            query: q,
+            tags: tagsArr,
+            ...(limit !== undefined ? { limit } : {})
+          }
+          set((state) => ({
+            feToolParamsByKey: {
+              ...(state as any).feToolParamsByKey,
+              [callId]: sanitizedParams
+            }
+          }))
+        }
+      } else if (normalizedToolName === 'knowledgeBaseStore' || normalizedToolName === 'knowledge_base_store' || normalizedToolName === 'knowledgebase_store') {
+        const id = typeof toolArgs.id === 'string' ? toolArgs.id.trim() : ''
+        const title = typeof toolArgs.title === 'string' ? toolArgs.title.trim() : ''
+        const tagsArr: string[] = Array.isArray(toolArgs.tags) ? toolArgs.tags.map((t: any) => String(t).trim()).filter(Boolean) : []
+        const filesArr: string[] = Array.isArray(toolArgs.files) ? toolArgs.files.map((f: any) => String(f).trim()).filter(Boolean) : []
+        const isUpdate = !!id
+
+        const headerParts: string[] = []
+        headerParts.push(isUpdate ? `update: ${title || id}` : (title ? `create: ${title}` : 'create'))
+        if (tagsArr.length) headerParts.push(`[tags: ${tagsArr.slice(0,3).join(', ')}${tagsArr.length>3 ? '…' : ''}]`)
+
+        // Include full params for renderer fallback and store sanitized subset for display
+        badgeMetadata = { query: headerParts.join(' '), fullParams: toolArgs }
+        if (callId) {
+          const sanitizedParams: any = { id, title, tags: tagsArr, files: filesArr }
+          if (typeof toolArgs.description === 'string') sanitizedParams.descPreview = String(toolArgs.description).slice(0, 160)
           set((state) => ({
             feToolParamsByKey: {
               ...(state as any).feToolParamsByKey,
@@ -1974,6 +2036,60 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
               resultCount,
             },
             interactive: { type: 'workspace-search', data: { key: callId, count: resultCount } }
+          }
+        })
+        return
+      }
+      // Handle knowledge base search results
+      if ((normalizedToolName === 'knowledgeBaseSearch' || normalizedToolName === 'knowledge_base_search' || normalizedToolName === 'knowledgebase_search') && result?.ok && result.data) {
+        const resultData = result.data
+        const resultCount = (typeof resultData.count === 'number' ? resultData.count : (Array.isArray(resultData.results) ? resultData.results.length : 0)) || 0
+
+        // Store full result in unified cache
+        get().registerToolResult({ key: callId, data: resultData })
+
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId: callId,
+          updates: {
+            status: 'success',
+            color: 'green',
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'kb-search' as const,
+            metadata: {
+              resultCount,
+            },
+            interactive: { type: 'kb-search', data: { key: callId, count: resultCount } }
+          }
+        })
+        return
+      }
+      // Handle knowledge base store results
+      if ((normalizedToolName === 'knowledgeBaseStore' || normalizedToolName === 'knowledge_base_store' || normalizedToolName === 'knowledgebase_store') && result?.ok && result.data) {
+        const data = result.data || {}
+        // Store full result in unified cache
+        get().registerToolResult({ key: callId, data })
+
+        const filePath = data?.path
+        const id = data?.id
+        const title = data?.title
+
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId: callId,
+          updates: {
+            status: 'success',
+            color: 'green',
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'kb-store' as const,
+            metadata: {
+              ...(filePath ? { filePath } : {}),
+              ...(id ? { id } : {}),
+              ...(title ? { title } : {}),
+            },
+            interactive: { type: 'kb-store', data: { key: callId, id } }
           }
         })
         return

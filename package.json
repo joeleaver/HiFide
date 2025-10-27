@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build && pnpm -s prepackage:kill && pnpm -s rebuild:native && pnpm -s package:electron",
     "prepackage:kill": "node scripts/prepackage-kill.cjs",
-    "rebuild:native": "pnpm exec electron-rebuild -f -w node-pty",
+    "rebuild:native": "pnpm exec electron-rebuild -f -w node-pty -w sharp",
     "clean:release": "node --input-type=module -e \"import fs from 'fs'; try{fs.rmSync('release',{recursive:true,force:true})}catch(e){}\"",
     "package:electron": "node scripts/package-electron.cjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
@@ -42,6 +42,7 @@
     "@tanstack/react-query": "^5.90.2",
     "@types/dagre": "^0.7.53",
     "@uiw/react-json-view": "2.0.0-alpha.39",
+    "@xenova/transformers": "^2.17.2",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "@zubridge/electron": "^2.0.0",
@@ -52,7 +53,6 @@
     "dompurify": "^3.2.7",
     "electron-store": "^11.0.2",
     "fast-glob": "^3.3.3",
-    "fastembed": "^2.0.0",
     "highlight.js": "^11.11.1",
     "ignore": "^5.3.2",
     "markdown-it": "^14.1.0",
@@ -63,6 +63,7 @@
     "react-dom": "^18.2.0",
     "reactflow": "^11.11.4",
     "ts-morph": "^27.0.0",
+    "vscode-ripgrep": "^1.13.2",
     "ws": "^8.18.3",
     "zod": "^4",
     "zustand": "^5.0.8"
@@ -102,7 +103,9 @@
       "**/@ast-grep/lang-*/**/*.{dll,so,dylib}",
       "**/onnxruntime-node/**/*.{node,dll,so,dylib}",
       "**/node-pty/**/*.{node,dll,exe}",
-      "node_modules/node-pty/build/Release/*.{node,dll,exe}"
+      "node_modules/node-pty/build/Release/*.{node,dll,exe}",
+      "**/vscode-ripgrep/**",
+      "**/sharp/**/*.{node,dll,so,dylib}"
     ],
     "files": [
       "dist/**",
@@ -133,7 +136,9 @@
     "onlyBuiltDependencies": [
       "electron",
       "keytar",
-      "node-pty"
+      "protobufjs",
+      "sharp",
+      "vscode-ripgrep"
     ],
     "public-hoist-pattern": [
       "*"

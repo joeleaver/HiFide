@@ -13,13 +13,13 @@ module.exports = async function beforePack(context) {
   if (!electronVersion) {
     throw new Error('Could not determine Electron version for @electron/rebuild')
   }
-  console.log('[beforePack] Rebuilding native module node-pty for Electron', electronVersion, 'in', appDir)
+  console.log('[beforePack] Rebuilding native modules (node-pty, sharp) for Electron', electronVersion, 'in', appDir)
   await rebuild({
     buildPath: appDir,
     electronVersion,
     force: true,
-    onlyModules: ['node-pty']
+    onlyModules: ['node-pty', 'sharp']
   })
-  console.log('[beforePack] node-pty rebuild complete')
+  console.log('[beforePack] native rebuild complete')
 }
 

@@ -30,6 +30,8 @@ import { createFlowEditorSlice, type FlowEditorSlice } from './slices/flowEditor
 import { createKnowledgeBaseSlice, type KnowledgeBaseSlice } from './slices/knowledgeBase.slice'
 import { electronStorage } from './storage'
 
+import { getIndexer, getKbIndexer } from '../core/state'
+
 // Combined store type
 export type AppStore = ViewSlice &
   UiSlice &
@@ -318,9 +320,14 @@ if (process.env.NODE_ENV !== 'production') {
     }
     ;(useMainStore as any).subscribe?.((next: any, prev: any) => {
       const diffs = shallowDiff(prev, next)
-      if (diffs.length) {
-        console.debug('🗂️ [main-store] changed keys:', diffs)
+      if (!diffs.length) return
+      // Suppress high-churn indexing keys to avoid console spam in development
+      const suppressed = new Set(['idxStatus', 'idxProg'])
+      const filtered = diffs.filter((k) => !suppressed.has(k))
+      if (filtered.length) {
+        console.debug('🗂️ [main-store] changed keys:', filtered)
       }
+      // If only suppressed keys changed, do not log
     })
   } catch {}
 }
@@ -342,6 +349,18 @@ export const initializeMainStore = async () => {
 
     // Initialize Flow Editor slice (loads templates, persistence)
     await store.initFlowEditor()
+
+    // Start index watchers (workspace + KB) - best effort
+    try { (await getIndexer()).startWatch() } catch {}
+    try { (await getKbIndexer()).startWatch() } catch {}
+    // Ensure KB index exists/ready at startup (non-blocking)
+    try {
+      const kb = await getKbIndexer()
+      const s = kb.status()
+      if (!s.inProgress && (!s.exists || !s.ready)) {
+        kb.rebuild(() => {}).catch(() => {})
+      }
+    } catch {}
 
   } catch (error) {
     console.error('[main-store] Failed to initialize:', error)

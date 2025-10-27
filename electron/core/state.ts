@@ -1,12 +1,13 @@
 /**
  * Shared application state for the Electron main process
- * 
+ *
  * This module provides centralized state management for cross-cutting concerns
  * to prevent circular dependencies and make state access explicit.
  */
 
 import { BrowserWindow } from 'electron'
 import Store from 'electron-store'
+import path from 'node:path'
 import type { PtySession, FlowHandle, StreamHandle } from '../types'
 import { Indexer } from '../indexing/indexer'
 import { OpenAIProvider } from '../providers/openai'
@@ -136,6 +137,11 @@ export const providers: Record<string, ProviderAdapter> = {
 let indexer: Indexer | null = null
 
 /**
+ * KB Indexer singleton
+ */
+let kbIndexer: Indexer | null = null
+
+/**
  * Get or create the indexer instance
  */
 export async function getIndexer(): Promise<Indexer> {
@@ -147,9 +153,24 @@ export async function getIndexer(): Promise<Indexer> {
 }
 
 /**
+ * Get or create the KB indexer instance (indexes .hifide-public/kb)
+ */
+export async function getKbIndexer(): Promise<Indexer> {
+  if (!kbIndexer) {
+    const { useMainStore } = await import('../store/index.js')
+    const workspaceRoot = useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+    const kbRoot = path.join(workspaceRoot, '.hifide-public', 'kb')
+    kbIndexer = new Indexer(workspaceRoot, { scanRoot: kbRoot, indexSubdir: 'indexes-kb', useWorkspaceGitignore: false, mode: 'kb' })
+  }
+  return kbIndexer
+}
+
+
+/**
  * Reset the indexer (used when workspace root changes)
  */
 export function resetIndexer(): void {
   indexer = null
+  kbIndexer = null
 }
 

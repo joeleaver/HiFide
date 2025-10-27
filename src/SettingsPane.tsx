@@ -24,10 +24,11 @@ export default function SettingsPane() {
   // Use local state for API keys to avoid IPC calls on every keystroke
   const [localApiKeys, setLocalApiKeys] = useState(settingsApiKeys)
 
-  // Sync local state when store changes (e.g., on load)
+  // Hydrate local state once on mount to avoid clobbering in-progress edits
   useEffect(() => {
     setLocalApiKeys(settingsApiKeys)
-  }, [settingsApiKeys])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const openaiOptions = modelsByProvider.openai || []
   const anthropicOptions = modelsByProvider.anthropic || []
@@ -160,7 +161,7 @@ export default function SettingsPane() {
       <Stack gap="md">
         <div>
           <Title order={3}>API Keys</Title>
-          <Text size="sm" c="dimmed">Configure provider API keys (stored locally in browser localStorage)</Text>
+          <Text size="sm" c="dimmed">Configure provider API keys (persisted locally via Electron Store in the main process)</Text>
         </div>
 
         <Stack gap="sm">
