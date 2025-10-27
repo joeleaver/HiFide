@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build && pnpm -s prepackage:kill && pnpm -s rebuild:native && pnpm -s package:electron",
     "prepackage:kill": "node scripts/prepackage-kill.cjs",
-    "rebuild:native": "pnpm exec electron-rebuild -f -w node-pty -w sharp",
+    "rebuild:native": "pnpm exec electron-rebuild -f -w node-pty,sharp",
     "clean:release": "node --input-type=module -e \"import fs from 'fs'; try{fs.rmSync('release',{recursive:true,force:true})}catch(e){}\"",
     "package:electron": "node scripts/package-electron.cjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
