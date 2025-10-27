@@ -601,7 +601,8 @@ export const searchWorkspaceTool: AgentTool = {
         additionalProperties: false
       },
       action: { type: 'string', enum: ['search','expand'] },
-      handle: { type: 'string' }
+      handle: { type: 'string' },
+      searchOnce: { type: 'boolean', description: 'If true, minimize results for early stop (tool may still run all lanes).', default: false }
     },
 
     additionalProperties: false
@@ -632,8 +633,9 @@ export const searchWorkspaceTool: AgentTool = {
     const include = filters.pathsInclude
     const exclude = [ ...(filters.pathsExclude || []), '.hifide-public/**', '.hifide_public/**' ]
     const languages = filters.languages
-    const maxResults = filters.maxResults
+    let maxResults = filters.maxResults
     const maxSnippetLines = filters.maxSnippetLines
+    if ((args as any)?.searchOnce) { maxResults = Math.min(1, maxResults) }
 
     // Normalize include globs for both fast-glob and matcher
     const includeNorm = normalizeIncludeGlobs(include) || include

@@ -77,6 +77,146 @@ function estimateInputTokens(provider: string, formattedMessages: any): number {
 }
 
 /**
+ * Wrap tools with per-request policy to enforce low-discovery, edit-first behavior.
+ * - Limit workspace.search calls (discovery lock)
+ * - Force compact results and searchOnce behavior
+ * - Dedupe fs.read_lines calls and cap per-file reads
+ */
+function wrapToolsWithPolicy(tools: AgentTool[], policy?: {
+  maxWorkspaceSearch?: number
+  dedupeReadLines?: boolean
+  maxReadLinesPerFile?: number
+  dedupeReadFile?: boolean
+  maxReadFilePerFile?: number
+  forceSearchOnce?: boolean
+}): AgentTool[] {
+  const wsSearchSeen = new Map<string, any>()
+  const readLinesSeen = new Set<string>()
+  const readLinesPerFile = new Map<string, number>()
+  const readFileSeen = new Set<string>()
+  const readFilePerFile = new Map<string, number>()
+
+  const parseHandle = (h?: string): { p?: string; s?: number; e?: number } | null => {
+    if (!h) return null
+    try { return JSON.parse(Buffer.from(String(h), 'base64').toString('utf-8')) } catch { return null }
+  }
+
+  return (tools || []).map((t) => {
+    if (!t || !t.name || typeof t.run !== 'function') return t
+
+    if (t.name === 'workspace.search') {
+      const orig = t.run.bind(t)
+      const wrapped: AgentTool = {
+        ...t,
+        run: async (input: any, meta?: any) => {
+          const args = { ...(input || {}) }
+          // Request-level dedupe: identical args → return cached result
+          const key = JSON.stringify(args)
+          if (wsSearchSeen.has(key)) {
+            return wsSearchSeen.get(key)
+          }
+          const out = await orig(args, meta)
+          try { wsSearchSeen.set(key, out) } catch {}
+          return out
+        }
+      }
+      return wrapped
+    }
+
+    if (t.name === 'fs.read_lines') {
+      const orig = t.run.bind(t)
+      const wrapped: AgentTool = {
+        ...t,
+        run: async (input: any, meta?: any) => {
+          const args = input || {}
+          const h = parseHandle(args.handle)
+          const rel = (args.path as string) || (h && h.p) || ''
+          // Build a signature key that captures the specific range/window requested
+          const sigKey = JSON.stringify({
+            tool: 'fs.read_lines',
+            path: rel,
+            handle: !!args.handle,
+            mode: args.mode || 'range',
+            start: args.startLine,
+            end: args.endLine,
+            focus: args.focusLine,
+            window: args.window,
+            before: args.beforeLines,
+            after: args.afterLines
+          })
+
+          // Cap applies to identical range signatures, not the entire file
+          if (typeof policy?.maxReadLinesPerFile === 'number') {
+            const c = readLinesPerFile.get(sigKey) || 0
+            if (c >= policy.maxReadLinesPerFile) {
+              return { ok: false, error: 'read_locked: read limit reached for this range' }
+            }
+          }
+
+          // Dedupe identical reads
+          if (policy?.dedupeReadLines) {
+            const key = JSON.stringify({ tool: 'fs.read_lines', path: rel, handle: !!args.handle, mode: args.mode || 'range', start: args.startLine, end: args.endLine, focus: args.focusLine, window: args.window, before: args.beforeLines, after: args.afterLines })
+            if (readLinesSeen.has(key)) {
+              return { ok: true, cached: true }
+            }
+            readLinesSeen.add(key)
+          }
+
+          const out = await orig(args, meta)
+
+          if (out && out.ok && typeof policy?.maxReadLinesPerFile === 'number') {
+            const c = readLinesPerFile.get(sigKey) || 0
+            readLinesPerFile.set(sigKey, c + 1)
+          }
+          return out
+        }
+      }
+      return wrapped
+    }
+
+    if (t.name === 'fs.read_file') {
+      const orig = t.run.bind(t)
+      const wrapped: AgentTool = {
+        ...t,
+        run: async (input: any, meta?: any) => {
+          const args = input || {}
+          const rel = (args.path as string) || ''
+
+          // Per-file cap
+          if (typeof policy?.maxReadFilePerFile === 'number' && rel) {
+            const c = readFilePerFile.get(rel) || 0
+            if (c >= policy.maxReadFilePerFile) {
+              return { ok: false, error: 'read_locked: fs.read_file per-file read limit reached' }
+            }
+          }
+
+          // Dedupe identical reads
+          if (policy?.dedupeReadFile) {
+            const key = JSON.stringify({ tool: 'fs.read_file', path: rel })
+            if (readFileSeen.has(key)) {
+              return { ok: true, cached: true }
+            }
+            readFileSeen.add(key)
+          }
+
+          const out = await orig(args, meta)
+
+          if (out && out.ok && typeof policy?.maxReadFilePerFile === 'number' && rel) {
+            const c = readFilePerFile.get(rel) || 0
+            readFilePerFile.set(rel, c + 1)
+          }
+          return out
+        }
+      }
+      return wrapped
+    }
+
+    return t
+  })
+}
+
+
+/**
  * Request to the LLM service
  */
 export interface LLMServiceRequest {
@@ -197,7 +337,7 @@ class LLMService {
   constructor() {
     // No state needed - providers are stateless
   }
-  
+
   /**
    * Send a message to the LLM and get a response
    *
@@ -449,9 +589,18 @@ class LLMService {
               if (needsAgentStream && providerAdapter.agentStream) {
                 // Use agentStream with tools and/or structured output
                 console.log('[LLMService] Calling agentStream with toolMeta:', { requestId: context.contextId, contextId: context.contextId })
+                const policyTools = (tools && tools.length)
+                  ? wrapToolsWithPolicy(tools, {
+                      // Disable dedupe for fs.read_lines/fs.read_file to ensure RAW text is returned (no cached JSON stubs)
+                      dedupeReadLines: false,
+                      maxReadLinesPerFile: 1,
+                      dedupeReadFile: false,
+                      maxReadFilePerFile: 1,
+                    })
+                  : []
                 streamHandle = await providerAdapter.agentStream({
                   ...streamOpts,
-                  tools: tools || [],
+                  tools: policyTools,
                   responseSchema,
                   toolMeta: { requestId: context.contextId }, // Use contextId as requestId
                   onToolStart: eventHandlers.onToolStart,
@@ -514,7 +663,7 @@ class LLMService {
         error: errorMessage
       }
     }
-    
+
     // 7. Add assistant response to context (unless skipHistory)
     let finalContext: MainFlowContext
     if (skipHistory) {

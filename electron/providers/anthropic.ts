@@ -447,10 +447,99 @@ export const AnthropicProvider: ProviderAdapter = {
                   pruneSummary = result._meta.summary
                 }
 
-                // IMPORTANT: Minify heavy tool results before adding to conversation to avoid memory blowups
-                const { minifyToolResult } = await import('./toolResultMinify')
-                const compact = minifyToolResult(originalToolName, result)
-                results.push({ type: 'tool_result', tool_use_id: tu.id, content: typeof compact === 'string' ? compact : JSON.stringify(compact) })
+                // For fs.read_file and fs.read_lines, return RAW text with no minification/JSON
+                if (originalToolName === 'fs.read_file') {
+                  const contentStr = (result && result.ok === false)
+                    ? `Error: ${String(result?.error || 'Unknown error')}`
+                    : (typeof result?.content === 'string' ? result.content : '')
+                  results.push({ type: 'tool_result', tool_use_id: tu.id, content: contentStr })
+                } else if (originalToolName === 'fs.read_lines') {
+                  let contentStr = ''
+                  if (result && result.ok === false) {
+                    contentStr = `Error: ${String(result?.error || 'Unknown error')}`
+                  } else if (typeof result?.text === 'string') {
+                    contentStr = result.text
+                  } else if (Array.isArray(result?.lines)) {
+                    const eol = (result?.eol === 'crlf') ? '\r\n' : '\n'
+                    contentStr = result.lines.map((l: any) => (l?.text ?? '')).join(eol)
+                  }
+                  results.push({ type: 'tool_result', tool_use_id: tu.id, content: contentStr })
+                } else if (originalToolName === 'workspace.search' && (tu.input as any)?.action === 'expand') {
+                  const d: any = result && (result as any).data ? (result as any).data : result
+                  const contentStr = typeof d?.preview === 'string' ? d.preview : (typeof d?.data?.preview === 'string' ? d.data.preview : '')
+                  results.push({ type: 'tool_result', tool_use_id: tu.id, content: contentStr })
+                } else if (originalToolName === 'workspace.jump') {
+                  const d: any = result && (result as any).data ? (result as any).data : result
+                  const contentStr = typeof d?.preview === 'string' ? d.preview : (typeof d?.data?.preview === 'string' ? d.data.preview : '')
+                  results.push({ type: 'tool_result', tool_use_id: tu.id, content: contentStr })
+                } else if (originalToolName === 'text.grep') {
+                  let contentStr = ''
+                  if (result && (result as any).ok === false) {
+                    contentStr = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    const m = Array.isArray(d?.matches) && d.matches.length ? d.matches[0] : null
+                    if (m) {
+                      const before = Array.isArray(m.before) ? m.before : []
+                      const after = Array.isArray(m.after) ? m.after : []
+                      const lines = [...before, (m.line ?? ''), ...after]
+                      contentStr = lines.join('\n')
+                    }
+                  }
+                  results.push({ type: 'tool_result', tool_use_id: tu.id, content: contentStr })
+                } else if (originalToolName === 'code.search_ast') {
+                  let contentStr = ''
+                  if (result && (result as any).ok === false) {
+                    contentStr = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    const m = Array.isArray(d?.matches) && d.matches.length ? d.matches[0] : null
+                    contentStr = m ? String(m.snippet || m.text || '') : ''
+                  }
+                  results.push({ type: 'tool_result', tool_use_id: tu.id, content: contentStr })
+                } else if (originalToolName === 'index.search') {
+                  let contentStr = ''
+                  if (result && (result as any).ok === false) {
+                    contentStr = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    const chunks = Array.isArray(d?.chunks) ? d.chunks : (Array.isArray(d?.data?.chunks) ? d.data.chunks : [])
+                    const c0 = chunks && chunks.length ? chunks[0] : null
+                    contentStr = c0 && typeof c0.text === 'string' ? c0.text : ''
+                  }
+                  results.push({ type: 'tool_result', tool_use_id: tu.id, content: contentStr })
+                } else if (originalToolName === 'terminal.session_tail') {
+                  const d: any = result && (result as any).data ? (result as any).data : result
+                  const contentStr = (result && (result as any).ok === false)
+                    ? `Error: ${String((result as any)?.error || 'Unknown error')}`
+                    : (typeof d?.tail === 'string' ? d.tail : (typeof d?.data?.tail === 'string' ? d.data.tail : ''))
+                  results.push({ type: 'tool_result', tool_use_id: tu.id, content: contentStr })
+                } else if (originalToolName === 'terminal.session_search_output') {
+                  let contentStr = ''
+                  if (result && (result as any).ok === false) {
+                    contentStr = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    const h0 = Array.isArray(d?.hits) ? d.hits[0] : (Array.isArray(d?.data?.hits) ? d.data.hits[0] : null)
+                    contentStr = h0 ? String(h0.snippet || '') : ''
+                  }
+                  results.push({ type: 'tool_result', tool_use_id: tu.id, content: contentStr })
+                } else if (originalToolName === 'kb.search') {
+                  let contentStr = ''
+                  if (result && (result as any).ok === false) {
+                    contentStr = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    const r0 = Array.isArray(d?.results) ? d.results[0] : (Array.isArray(d?.data?.results) ? d.data.results[0] : null)
+                    contentStr = r0 ? String(r0.excerpt || '') : ''
+                  }
+                  results.push({ type: 'tool_result', tool_use_id: tu.id, content: contentStr })
+                } else {
+                  // Minify heavy tool results before adding to conversation to avoid memory blowups
+                  const { minifyToolResult } = await import('./toolResultMinify')
+                  const compact = minifyToolResult(originalToolName, result)
+                  results.push({ type: 'tool_result', tool_use_id: tu.id, content: typeof compact === 'string' ? compact : JSON.stringify(compact) })
+                }
               } catch (e: any) {
                 // Get original tool name for error reporting
                 const tool = toolMap.get(tu.name)

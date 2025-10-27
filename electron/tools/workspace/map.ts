@@ -2,6 +2,11 @@ import type { AgentTool } from '../../providers/provider'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import fg from 'fast-glob'
+import { grepTool } from '../text/grep'
+
+import { astGrepSearch } from '../astGrep'
+import { getIndexer } from '../../core/state'
+
 
 async function getWorkspaceRoot(): Promise<string> {
   try {
@@ -32,16 +37,22 @@ async function listFiles(root: string, patterns: string[], ignore: string[]): Pr
 
 export const workspaceMapTool: AgentTool = {
   name: 'workspace.map',
-  description: 'Return a compact project map: core directories, key files, and curated example queries to accelerate discovery. Purely heuristic; does no heavy indexing.',
+  description: 'Return a compact project map (enriched by default): core directories, key files, and high-signal landmarks found via ripgrep. Light-weight and time-budgeted; no heavy indexing required.',
   parameters: {
     type: 'object',
     properties: {
-      maxPerSection: { type: 'integer', minimum: 1, description: 'Cap per section (default 12)' }
+      maxPerSection: { type: 'integer', minimum: 1, description: 'Cap per section (default 12)' },
+      mode: { type: 'string', enum: ['basic','enriched'], description: 'basic = heuristic only; enriched = adds ripgrep landmarks (default).' },
+      timeBudgetMs: { type: 'integer', minimum: 100, description: 'Soft time budget for enriched mode (default ~10s)' }
     },
     additionalProperties: false
   },
-  run: async ({ maxPerSection = 12 }: { maxPerSection?: number } = {}) => {
+  run: async (args: { maxPerSection?: number; mode?: 'basic'|'enriched'; timeBudgetMs?: number } = {}) => {
+    const t0 = Date.now()
     const root = await getWorkspaceRoot()
+    const maxPerSection = Math.max(1, args?.maxPerSection ?? 12)
+    const mode = args?.mode ?? 'enriched'
+    const budgetMs = Math.max(150, args?.timeBudgetMs ?? 10_000)
 
     // Common ignores (align roughly with searchWorkspace)
     const IGN = [
@@ -102,6 +113,125 @@ export const workspaceMapTool: AgentTool = {
     const toolFiles = await listFiles(root, ['electron/tools/**/*.{ts,tsx}'], IGN)
     if (toolFiles.length) sections.push({ title: 'Agent Tools', items: toolFiles.slice(0, maxPerSection).map((p) => ({ path: p, handle: toHandle(p, 1, 1), lines: { start: 1, end: 1 } })) })
 
+    // Enriched additions (default): ripgrep landmarks under a small time budget
+    if (mode !== 'basic') {
+      const k = Math.min(8, maxPerSection)
+      const now = () => Date.now() - t0
+
+      async function grepItems(title: string, pattern: string, files: string[], why: string) {
+        if (now() > budgetMs) return
+        const res: any = await grepTool.run({ pattern, files, options: { lineNumbers: true, maxResults: 50, ignoreCase: true } })
+        const matches = Array.isArray(res?.data?.matches) ? res.data.matches : []
+        const items = matches.slice(0, k).map((m: any) => {
+          const file = String(m.file || '').replace(/\\/g, '/');
+          const ln = Math.max(1, Number(m.lineNumber || 1));
+          const start = Math.max(1, ln - 3); const end = Math.max(start, ln + 3)
+          return { path: file, handle: toHandle(file, start, end), lines: { start, end }, why }
+        })
+        if (items.length) sections.push({ title, items })
+      }
+
+      await Promise.all([
+        grepItems('Landmarks (IPC)', 'ipcMain\\.handle\\(', ['electron/**/*.{ts,tsx}'], 'ipcMain.handle'),
+        (async () => {
+          if (now() > budgetMs) return
+          const res1: any = await grepTool.run({ pattern: 'app\\.whenReady\\(', files: ['electron/**/*.{ts,tsx}'], options: { lineNumbers: true, maxResults: 50, ignoreCase: true } })
+          const res2: any = await grepTool.run({ pattern: 'new\\s+BrowserWindow\\(', files: ['electron/**/*.{ts,tsx}'], options: { lineNumbers: true, maxResults: 50, ignoreCase: true } })
+          const toItems = (arr: any[], why: string) => (arr||[]).slice(0, k).map((m: any) => {
+            const file = String(m.file || '').replace(/\\/g, '/'); const ln = Math.max(1, Number(m.lineNumber || 1)); const start = Math.max(1, ln - 3); const end = Math.max(start, ln + 3)
+            return { path: file, handle: toHandle(file, start, end), lines: { start, end }, why }
+          })
+          const items = [
+            ...toItems(res1?.data?.matches || [], 'app.whenReady'),
+            ...toItems(res2?.data?.matches || [], 'BrowserWindow')
+          ].slice(0, k)
+          if (items.length) sections.push({ title: 'Landmarks (App lifecycle)', items })
+        })(),
+        grepItems('Landmarks (Preload)', 'contextBridge\\.exposeInMainWorld\\(', ['electron/**/*.{ts,tsx}'], 'contextBridge.exposeInMainWorld'),
+        (async () => {
+          if (now() > budgetMs) return
+          const res1: any = await grepTool.run({ pattern: 'create[A-Za-z0-9_]*Slice\\(', files: ['electron/**/*.{ts,tsx}','src/**/*.{ts,tsx}'], options: { lineNumbers: true, maxResults: 50, ignoreCase: true } })
+          const res2: any = await grepTool.run({ pattern: 'persist\\(', files: ['electron/**/*.{ts,tsx}'], options: { lineNumbers: true, maxResults: 50, ignoreCase: true } })
+          const toItems = (arr: any[], why: string) => (arr||[]).slice(0, k).map((m: any) => {
+            const file = String(m.file || '').replace(/\\/g, '/'); const ln = Math.max(1, Number(m.lineNumber || 1)); const start = Math.max(1, ln - 3); const end = Math.max(start, ln + 3)
+            return { path: file, handle: toHandle(file, start, end), lines: { start, end }, why }
+          })
+          const items = [
+            ...toItems(res1?.data?.matches || [], 'create*Slice'),
+            ...toItems(res2?.data?.matches || [], 'persist()')
+          ].slice(0, k)
+          if (items.length) sections.push({ title: 'Landmarks (Store / Slices)', items })
+        })(),
+        (async () => {
+          if (now() > budgetMs) return
+          const prov = await listFiles(root, ['electron/providers/**/*.{ts,tsx}'], IGN)
+          const items = prov.slice(0, k).map((p) => ({ path: p, handle: toHandle(p, 1, 1), lines: { start: 1, end: 1 }, why: 'provider/adapter' }))
+          if (items.length) sections.push({ title: 'Providers & LLM adapters', items })
+
+
+
+        })()
+      ])
+    }
+
+    // Optional AST and semantic enrichments (time-budgeted)
+    if (mode !== 'basic') {
+      const k2 = Math.min(6, maxPerSection)
+      const now2 = () => Date.now() - t0
+
+      // AST-grep: exported symbols (functions/classes)
+      if (now2() <= budgetMs) {
+        try {
+          const [fx, cx] = await Promise.all([
+            astGrepSearch({ pattern: 'export function $NAME', languages: 'auto', includeGlobs: ['electron/**/*.{ts,tsx,js,jsx}','src/**/*.{ts,tsx,js,jsx}'], contextLines: 1, maxMatches: 50 }),
+            astGrepSearch({ pattern: 'export class $NAME', languages: 'auto', includeGlobs: ['electron/**/*.{ts,tsx,js,jsx}','src/**/*.{ts,tsx,js,jsx}'], contextLines: 1, maxMatches: 50 })
+          ])
+          const toItems = (arr: any[], why: string) => (arr||[]).slice(0, k2).map((m: any) => {
+            const p = String(m.filePath || '').replace(/\\/g, '/')
+            const start = Math.max(1, Number(m.startLine || 1) - 2)
+            const end = Math.max(start, Number(m.endLine || m.startLine || 1) + 2)
+            return { path: p, handle: toHandle(p, start, end), lines: { start, end }, why }
+          })
+          const items = [
+            ...toItems(fx?.matches || [], 'export function'),
+            ...toItems(cx?.matches || [], 'export class')
+          ].slice(0, Math.max(1, k2))
+          if (items.length) sections.push({ title: 'Symbols (AST)', items })
+        } catch {
+          // AST optional; ignore if unavailable
+        }
+      }
+
+      // Semantic seeds: only when index is ready
+      if (now2() <= budgetMs) {
+        try {
+          const idx = await getIndexer()
+          const st = idx.status()
+          if (st.ready) {
+            const seedQueries = ['zustand store definition', 'agent tools registry', 'terminal pty lifecycle']
+            const semanticItems: any[] = []
+            for (const q of seedQueries) {
+              if (now2() > budgetMs) break
+              try {
+                const res = await idx.search(q, 3)
+                for (const c of res.chunks.slice(0, 1)) {
+                  const p = String(c.path || '').replace(/\\/g, '/')
+                  const start = Math.max(1, Number(c.startLine || 1))
+                  const end = Math.max(start, Number(c.endLine || start))
+                  semanticItems.push({ path: p, handle: toHandle(p, start, end), lines: { start, end }, why: `semantic: ${q}` })
+                }
+              } catch { /* ignore single seed failure */ }
+            }
+            if (semanticItems.length) sections.push({ title: 'Semantic seeds', items: semanticItems.slice(0, k2) })
+          }
+        } catch {
+          // indexer not available; skip
+        }
+      }
+    }
+
+
+
     // Curated example queries for workspace.search or workspace.jump
     const exampleQueries = [
       'starmap initialization file',
@@ -114,7 +244,8 @@ export const workspaceMapTool: AgentTool = {
       'session management'
     ]
 
-    return { ok: true, data: { root: root.replace(/\\/g, '/'), sections, exampleQueries } }
+    const elapsedMs = Date.now() - t0
+    return { ok: true, data: { root: root.replace(/\\/g, '/'), sections, exampleQueries, meta: { elapsedMs, mode } } }
   }
 }
 

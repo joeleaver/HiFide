@@ -134,7 +134,16 @@ async function createAgentPtySession(opts: { shell?: string; cwd?: string; cols?
   let shell = normalizeShell(opts.shell) || (isWin ? 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe' : (process.env.SHELL || '/bin/bash'))
   const cols = opts.cols || 80
   const rows = opts.rows || 24
-  const cwd = opts.cwd || process.cwd()
+  // Default cwd to workspace root if available
+  let cwd = opts.cwd
+  if (!cwd) {
+    try {
+      const { useMainStore } = await import('../store/index.js')
+      cwd = useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+    } catch {
+      cwd = process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+    }
+  }
 
   // Try spawn with requested/normalized shell, then fallback to platform default on failure
   const ptyModule = loadPtyModule()
@@ -238,7 +247,16 @@ export function registerPtyHandlers(ipcMain: IpcMain): void {
     const cols = opts.cols || 80
     const rows = opts.rows || 24
     const env = { ...process.env, ...(opts.env || {}) }
-    const cwd = opts.cwd || process.cwd()
+    // Default cwd to workspace root if available
+    let cwd = opts.cwd
+    if (!cwd) {
+      try {
+        const { useMainStore } = await import('../store/index.js')
+        cwd = useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+      } catch {
+        cwd = process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+      }
+    }
     
     try {
       const ptyModule = loadPtyModule()

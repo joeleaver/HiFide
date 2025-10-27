@@ -393,10 +393,99 @@ export const GeminiProvider: ProviderAdapter = {
                   shouldPrune = true
                   pruneData = result._meta.summary
                 }
-                // Minify heavy tool results before adding to conversation
-                const { minifyToolResult } = await import('./toolResultMinify')
-                const compact = minifyToolResult(name, result)
-                toolResponses.push({ functionResponse: { name, response: { content: typeof compact === 'string' ? compact : JSON.stringify(compact) } } })
+                // For fs.read_file and fs.read_lines, return RAW text with no minification/JSON
+                if (name === 'fs.read_file') {
+                  const contentStr = (result && result.ok === false)
+                    ? `Error: ${String(result?.error || 'Unknown error')}`
+                    : (typeof result?.content === 'string' ? result.content : '')
+                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
+                } else if (name === 'fs.read_lines') {
+                  let contentStr = ''
+                  if (result && result.ok === false) {
+                    contentStr = `Error: ${String(result?.error || 'Unknown error')}`
+                  } else if (typeof result?.text === 'string') {
+                    contentStr = result.text
+                  } else if (Array.isArray(result?.lines)) {
+                    const eol = (result?.eol === 'crlf') ? '\r\n' : '\n'
+                    contentStr = result.lines.map((l: any) => (l?.text ?? '')).join(eol)
+                  }
+                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
+                } else if (name === 'workspace.search' && (args as any)?.action === 'expand') {
+                  const d: any = result && (result as any).data ? (result as any).data : result
+                  const contentStr = typeof d?.preview === 'string' ? d.preview : (typeof d?.data?.preview === 'string' ? d.data.preview : '')
+                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
+                } else if (name === 'workspace.jump') {
+                  const d: any = result && (result as any).data ? (result as any).data : result
+                  const contentStr = typeof d?.preview === 'string' ? d.preview : (typeof d?.data?.preview === 'string' ? d.data.preview : '')
+                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
+                } else if (name === 'text.grep') {
+                  let contentStr = ''
+                  if (result && (result as any).ok === false) {
+                    contentStr = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    const m = Array.isArray(d?.matches) && d.matches.length ? d.matches[0] : null
+                    if (m) {
+                      const before = Array.isArray(m.before) ? m.before : []
+                      const after = Array.isArray(m.after) ? m.after : []
+                      const lines = [...before, (m.line ?? ''), ...after]
+                      contentStr = lines.join('\n')
+                    }
+                  }
+                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
+                } else if (name === 'code.search_ast') {
+                  let contentStr = ''
+                  if (result && (result as any).ok === false) {
+                    contentStr = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    const m = Array.isArray(d?.matches) && d.matches.length ? d.matches[0] : null
+                    contentStr = m ? String(m.snippet || m.text || '') : ''
+                  }
+                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
+                } else if (name === 'index.search') {
+                  let contentStr = ''
+                  if (result && (result as any).ok === false) {
+                    contentStr = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    const chunks = Array.isArray(d?.chunks) ? d.chunks : (Array.isArray(d?.data?.chunks) ? d.data.chunks : [])
+                    const c0 = chunks && chunks.length ? chunks[0] : null
+                    contentStr = c0 && typeof c0.text === 'string' ? c0.text : ''
+                  }
+                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
+                } else if (name === 'terminal.session_tail') {
+                  const d: any = result && (result as any).data ? (result as any).data : result
+                  const contentStr = (result && (result as any).ok === false)
+                    ? `Error: ${String((result as any)?.error || 'Unknown error')}`
+                    : (typeof d?.tail === 'string' ? d.tail : (typeof d?.data?.tail === 'string' ? d.data.tail : ''))
+                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
+                } else if (name === 'terminal.session_search_output') {
+                  let contentStr = ''
+                  if (result && (result as any).ok === false) {
+                    contentStr = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    const h0 = Array.isArray(d?.hits) ? d.hits[0] : (Array.isArray(d?.data?.hits) ? d.data.hits[0] : null)
+                    contentStr = h0 ? String(h0.snippet || '') : ''
+                  }
+                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
+                } else if (name === 'kb.search') {
+                  let contentStr = ''
+                  if (result && (result as any).ok === false) {
+                    contentStr = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    const r0 = Array.isArray(d?.results) ? d.results[0] : (Array.isArray(d?.data?.results) ? d.data.results[0] : null)
+                    contentStr = r0 ? String(r0.excerpt || '') : ''
+                  }
+                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
+                } else {
+                  // Minify heavy tool results before adding to conversation
+                  const { minifyToolResult } = await import('./toolResultMinify')
+                  const compact = minifyToolResult(name, result)
+                  toolResponses.push({ functionResponse: { name, response: { content: typeof compact === 'string' ? compact : JSON.stringify(compact) } } })
+                }
               } catch (e: any) {
                 // Notify tool error
                 try { onToolError?.({ callId, name, error: e?.message || String(e) }) } catch {}
