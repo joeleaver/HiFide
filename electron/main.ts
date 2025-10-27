@@ -11,7 +11,7 @@
  * - Application initialization
  */
 
-import { ipcMain } from 'electron'
+import { app, ipcMain } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -85,6 +85,25 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
     })
   }
 })()
+
+// ----------------------------------------------------------------------------
+// Additional crash diagnostics (main process)
+// ----------------------------------------------------------------------------
+try {
+  app.on('child-process-gone', (_event, details: any) => {
+    try {
+      console.error('[child-process-gone]', { type: details?.type, reason: details?.reason, exitCode: details?.exitCode })
+    } catch (e) {
+      console.error('[child-process-gone] error logging details', String(e))
+    }
+  })
+} catch {}
+
+process.on('unhandledRejection', (reason: any) => {
+  const msg = reason && (reason as any).stack ? (reason as any).stack : String(reason)
+  console.error('[main] unhandledRejection', msg)
+})
+
 
 // Initialize provider adapters
 providers.openai = OpenAIProvider as any

@@ -226,6 +226,20 @@ export function createWindow(): BrowserWindow {
     win?.webContents.send('main-process-message', (new Date()).toLocaleString())
   })
 
+  // Crash diagnostics for renderer process
+  try {
+    win.webContents.on('render-process-gone', (_event, details: any) => {
+      console.error('[renderer gone]', { reason: details?.reason, exitCode: details?.exitCode })
+    })
+    win.on('unresponsive', () => {
+      console.error('[window] unresponsive')
+    })
+    win.on('responsive', () => {
+      console.log('[window] responsive')
+    })
+  } catch {}
+
+
   // Load URL
   if (VITE_DEV_SERVER_URL) {
     console.time('[window] loadURL(dev)')
