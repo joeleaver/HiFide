@@ -130,7 +130,8 @@ export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
   // Calculate minimum height needed for handles
   // Each handle needs ~20px of vertical space (more compact)
   const maxHandles = Math.max(inputs.length, outputs.length)
-  const minHeight = Math.max(30, maxHandles * 20) // At least 30px, or 20px per handle
+  // Slightly larger row height and offset to avoid overlap with header/overlays
+  const minHeight = Math.max(30, maxHandles * 24) // At least 30px, or 24px per handle
 
   // Debug: log handles for LLM Request nodes
   if (nodeType === 'llmRequest') {
@@ -145,7 +146,7 @@ export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
           style={{
             position: 'absolute',
             left: 0,
-            top: `${idx * 20 + 10}px`, // Stack from top with 20px spacing, 10px offset
+            top: `${idx * 24 + 18}px`, // Stack from top with 24px spacing, extra top offset for safety
             transform: 'translateY(-50%)',
             display: 'flex',
             alignItems: 'center',
@@ -169,6 +170,8 @@ export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
               border: '2px solid #1a1a1a',
               borderRadius: '50%',
               cursor: 'crosshair',
+              zIndex: 50,
+              pointerEvents: 'all',
             }}
           />
           <span
@@ -194,7 +197,7 @@ export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
           style={{
             position: 'absolute',
             right: 0,
-            top: `${idx * 20 + 10}px`, // Stack from top with 20px spacing, 10px offset
+            top: `${idx * 24 + 18}px`, // Stack from top with 24px spacing, extra top offset for safety
             transform: 'translateY(-50%)',
             display: 'flex',
             alignItems: 'center',
@@ -219,6 +222,8 @@ export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
               border: '2px solid #1a1a1a',
               borderRadius: '50%',
               cursor: 'crosshair',
+              zIndex: 50,
+              pointerEvents: 'all',
             }}
           />
           <span

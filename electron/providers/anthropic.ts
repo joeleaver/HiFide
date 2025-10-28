@@ -28,7 +28,7 @@ import { rateLimitTracker } from './rate-limit-tracker'
 export const AnthropicProvider: ProviderAdapter = {
   id: 'anthropic',
 
-  async chatStream({ apiKey, model, system, messages, emit: _emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async chatStream({ apiKey, model, system, messages, temperature, emit: _emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
     const client = new Anthropic({ apiKey, defaultHeaders: { 'anthropic-beta': 'prompt-caching-2024-07-31' } as any })
 
     // Messages are already formatted by llm-service
@@ -45,7 +45,8 @@ export const AnthropicProvider: ProviderAdapter = {
           system: system || undefined,
           messages: messages as any,
           stream: true,
-          max_tokens: 8192 // Increased from 2048 to allow longer responses
+          max_tokens: 8192, // Increased from 2048 to allow longer responses
+          ...(typeof temperature === 'number' ? { temperature } : {}),
         }) as any)
         holder.abort = () => { try { stream?.controller?.abort?.() } catch {} }
 
@@ -126,7 +127,7 @@ export const AnthropicProvider: ProviderAdapter = {
   },
 
   // Agent streaming with tool-calling using Anthropic Messages API
-  async agentStream({ apiKey, model, system, messages, tools, responseSchema: _responseSchema, emit: _emit, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, system, messages, temperature, tools, responseSchema: _responseSchema, emit: _emit, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const client = new Anthropic({ apiKey, defaultHeaders: { 'anthropic-beta': 'prompt-caching-2024-07-31' } as any })
 
     const holder: { abort?: () => void } = {}
@@ -214,6 +215,7 @@ export const AnthropicProvider: ProviderAdapter = {
             tools: anthTools.length ? anthTools : undefined,
             stream: true,
             max_tokens: 8192, // Increased from 2048 to allow longer responses and tool calls
+            ...(typeof temperature === 'number' ? { temperature } : {}),
           }) as any)
           holder.abort = () => { try { stream?.controller?.abort?.() } catch {} }
 

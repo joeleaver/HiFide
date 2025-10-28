@@ -70,7 +70,7 @@ function stripAdditionalProperties(schema: any): any {
 
 export const GeminiProvider: ProviderAdapter = {
   id: 'gemini',
-  async chatStream({ apiKey, model, systemInstruction, contents, emit: _emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async chatStream({ apiKey, model, systemInstruction, contents, temperature, emit: _emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
 
     const ai = new GoogleGenAI({ apiKey })
 
@@ -90,6 +90,7 @@ export const GeminiProvider: ProviderAdapter = {
           contents: contents || [],
           config: {
             systemInstruction: systemInstruction || undefined,
+            ...(typeof temperature === 'number' ? { temperature } : {}),
           },
         }) as any)
         holder.abort = () => { try { res?.controller?.abort?.() } catch {} }
@@ -148,6 +149,7 @@ export const GeminiProvider: ProviderAdapter = {
             contents: contents || [],
             config: {
               systemInstruction: systemInstruction || undefined,
+              ...(typeof temperature === 'number' ? { temperature } : {}),
             },
           }) as any)
           const text = res?.text
@@ -222,7 +224,7 @@ export const GeminiProvider: ProviderAdapter = {
   },
 
   // Agent streaming with Gemini function calling
-  async agentStream({ apiKey, model, systemInstruction, contents, tools, responseSchema: _responseSchema, toolMeta, emit: _emit, onChunk, onDone, onError, onTokenUsage, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, systemInstruction, contents, temperature, tools, responseSchema: _responseSchema, toolMeta, emit: _emit, onChunk, onDone, onError, onTokenUsage, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const ai = new GoogleGenAI({ apiKey })
 
     const holder: { abort?: () => void } = {}
@@ -272,6 +274,7 @@ export const GeminiProvider: ProviderAdapter = {
 
           const config: any = {
             systemInstruction: systemInstruction || undefined,
+            ...(typeof temperature === 'number' ? { temperature } : {}),
           }
           if (_responseSchema) {
             config.responseMimeType = 'application/json'

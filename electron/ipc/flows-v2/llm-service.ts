@@ -529,6 +529,9 @@ class LLMService {
           const baseStreamOpts = {
             apiKey,
             model,
+            // Sampling + reasoning controls (forwarded to providers when supported)
+            ...(typeof updatedContext?.temperature === 'number' ? { temperature: updatedContext.temperature } : {}),
+            ...(updatedContext?.reasoningEffort ? { reasoningEffort: updatedContext.reasoningEffort } : {}),
             // Callbacks that providers call - these are wrapped to emit ExecutionEvents
             onChunk: (text: string) => {
               // Skip duplicate final chunks (some providers send the full response as a final chunk)

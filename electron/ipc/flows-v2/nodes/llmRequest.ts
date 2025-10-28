@@ -104,13 +104,27 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
 
   // Apply override if enabled
   if ((config.overrideEnabled as boolean) && config.overrideProvider && config.overrideModel) {
+    // Update provider/model first
     executionContext = flow.context.update(executionContext, {
       provider: config.overrideProvider as string,
       model: config.overrideModel as string
     })
+
+    // Optional sampling + reasoning overrides scoped to this request
+    const overrideTemperature = (config as any)?.overrideTemperature as number | undefined
+    const overrideReasoningEffort = (config as any)?.overrideReasoningEffort as ('low'|'medium'|'high') | undefined
+    if (typeof overrideTemperature === 'number' || overrideReasoningEffort) {
+      executionContext = flow.context.update(executionContext, {
+        ...(typeof overrideTemperature === 'number' ? { temperature: overrideTemperature } : {}),
+        ...(overrideReasoningEffort ? { reasoningEffort: overrideReasoningEffort } : {}),
+      })
+    }
+
     flow.log.debug('Override enabled', {
       provider: executionContext.provider,
-      model: executionContext.model
+      model: executionContext.model,
+      temperature: (executionContext as any).temperature,
+      reasoningEffort: (executionContext as any).reasoningEffort,
     })
   } else {
     flow.log.debug('Using context provider/model', {

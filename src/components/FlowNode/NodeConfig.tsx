@@ -16,6 +16,8 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
   const modelsByProvider = useAppStore((s) => s.modelsByProvider)
   const feNodes = useAppStore((s) => s.feNodes)
   const feEdges = useAppStore((s) => s.feEdges)
+  const selectedProvider = useAppStore((s) => s.selectedProvider)
+  const selectedModel = useAppStore((s) => s.selectedModel)
   const dispatch = useDispatch()
 
   const providerOptions = useMemo(() => {
@@ -83,6 +85,64 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
               }}
             />
           </label>
+
+          {/* Sampling & reasoning controls (visible only when global provider & model are selected) */}
+          {selectedProvider && selectedModel ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {!(selectedProvider === 'openai' && /(o3|gpt-5|codex)/i.test(String(selectedModel))) && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+                  <span style={{ fontSize: 10, color: '#888', width: 90 }}>Temperature:</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min={0}
+                    max={selectedProvider === 'anthropic' ? 1 : 2}
+                    value={(config.temperature ?? '') as any}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      const num = parseFloat(v)
+                      onConfigChange({ temperature: Number.isFinite(num) ? num : undefined })
+                    }}
+                    placeholder={selectedProvider === 'anthropic' ? '0–1' : '0–2'}
+                    style={{
+                      flex: 1,
+                      padding: '2px 4px',
+                      background: '#252526',
+                      color: '#cccccc',
+                      border: '1px solid #3e3e42',
+                      borderRadius: 3,
+                      fontSize: 10,
+                    }}
+                  />
+                </label>
+              )}
+
+              {/* OpenAI reasoning effort (o3 family) */}
+              {selectedProvider === 'openai' && /(o3|gpt-5|codex)/i.test(String(selectedModel)) && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+                  <span style={{ fontSize: 10, color: '#888', width: 90 }}>Reasoning effort:</span>
+                  <select
+                    value={config.reasoningEffort || ''}
+                    onChange={(e) => onConfigChange({ reasoningEffort: e.target.value || undefined })}
+                    style={{
+                      flex: 1,
+                      padding: '4px 6px',
+                      background: '#252526',
+                      color: '#cccccc',
+                      border: '1px solid #3e3e42',
+                      borderRadius: 3,
+                      fontSize: 10,
+                    }}
+                  >
+                    <option value="">Default</option>
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                  </select>
+                </label>
+              )}
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -202,6 +262,65 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
               }}
             />
           </label>
+
+            {/* Sampling & reasoning controls (visible only when provider & model are selected) */}
+            {config.provider && config.model ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                {!(config.provider === 'openai' && /(o3|gpt-5|codex)/i.test(String(config.model))) && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+                    <span style={{ fontSize: 10, color: '#888', width: 90 }}>Temperature:</span>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min={0}
+                      max={(config.provider === 'anthropic') ? 1 : 2}
+                      value={(config.temperature ?? '') as any}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        const num = parseFloat(v)
+                        onConfigChange({ temperature: Number.isFinite(num) ? num : undefined })
+                      }}
+                      placeholder={(config.provider === 'anthropic') ? '0–1' : '0–2'}
+                      style={{
+                        flex: 1,
+                        padding: '2px 4px',
+                        background: '#252526',
+                        color: '#cccccc',
+                        border: '1px solid #3e3e42',
+                        borderRadius: 3,
+                        fontSize: 10,
+                      }}
+                    />
+                  </label>
+                )}
+
+                {/* OpenAI reasoning effort (o3 family) */}
+                {config.provider === 'openai' && /(o3|gpt-5|codex)/i.test(String(config.model)) && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+                    <span style={{ fontSize: 10, color: '#888', width: 90 }}>Reasoning effort:</span>
+                    <select
+                      value={config.reasoningEffort || ''}
+                      onChange={(e) => onConfigChange({ reasoningEffort: e.target.value || undefined })}
+                      style={{
+                        flex: 1,
+                        padding: '4px 6px',
+                        background: '#252526',
+                        color: '#cccccc',
+                        border: '1px solid #3e3e42',
+                        borderRadius: 3,
+                        fontSize: 10,
+                      }}
+                    >
+                      <option value="">Default</option>
+                      <option value="low">low</option>
+                      <option value="medium">medium</option>
+                      <option value="high">high</option>
+                    </select>
+                  </label>
+                )}
+              </div>
+            ) : null}
+
         </div>
       )}
 
@@ -326,6 +445,7 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
       {nodeType === 'llmRequest' && (() => {
         // Check if context input is connected
         const isContextConnected = feEdges.some((e: any) => e.target === nodeId && e.targetHandle === 'context')
+        const overrideModelOptions = (modelsByProvider[(config.overrideProvider || config.provider || 'openai') as keyof typeof modelsByProvider] || [])
 
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -418,7 +538,7 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
                     <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Model:</span>
                       <select
-                        value={config.overrideModel || (modelOptions[0]?.value || '')}
+                        value={config.overrideModel || (overrideModelOptions[0]?.value || '')}
                         onChange={(e) => onConfigChange({ overrideModel: e.target.value })}
                         className="nodrag"
                         style={{
@@ -430,11 +550,69 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
                           fontSize: 10,
                         }}
                       >
-                        {modelOptions.map((m: any) => (
+                        {overrideModelOptions.map((m: any) => (
                           <option key={m.value} value={m.value}>{m.label}</option>
                         ))}
                       </select>
                     </label>
+
+                    {/* Override sampling & reasoning controls */}
+                    {(config.overrideProvider && config.overrideModel) && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                        {!(config.overrideProvider === 'openai' && /(o3|gpt-5|codex)/i.test(String(config.overrideModel))) && (
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+                            <span style={{ fontSize: 10, color: '#888', width: 90 }}>Temperature:</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min={0}
+                              max={config.overrideProvider === 'anthropic' ? 1 : 2}
+                              value={(config.overrideTemperature ?? '') as any}
+                              onChange={(e) => {
+                                const v = e.target.value
+                                const num = parseFloat(v)
+                                onConfigChange({ overrideTemperature: Number.isFinite(num) ? num : undefined })
+                              }}
+                              placeholder={config.overrideProvider === 'anthropic' ? '0–1' : '0–2'}
+                              style={{
+                                flex: 1,
+                                padding: '2px 4px',
+                                background: '#252526',
+                                color: '#cccccc',
+                                border: '1px solid #3e3e42',
+                                borderRadius: 3,
+                                fontSize: 10,
+                              }}
+                            />
+                          </label>
+                        )}
+
+                        {config.overrideProvider === 'openai' && /(o3|gpt-5|codex)/i.test(String(config.overrideModel)) && (
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+                            <span style={{ fontSize: 10, color: '#888', width: 90 }}>Reasoning effort:</span>
+                            <select
+                              value={config.overrideReasoningEffort || ''}
+                              onChange={(e) => onConfigChange({ overrideReasoningEffort: e.target.value || undefined })}
+                              style={{
+                                flex: 1,
+                                padding: '4px 6px',
+                                background: '#252526',
+                                color: '#cccccc',
+                                border: '1px solid #3e3e42',
+                                borderRadius: 3,
+                                fontSize: 10,
+                              }}
+                            >
+                              <option value="">Default</option>
+                              <option value="low">low</option>
+                              <option value="medium">medium</option>
+                              <option value="high">high</option>
+                            </select>
+                          </label>
+                        )}
+                      </div>
+                    )}
+
                   </div>
                 )}
               </div>
@@ -581,25 +759,36 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Provider:</span>
-                <select
-                  value={config.provider || 'openai'}
-                  onChange={(e) => onConfigChange({ provider: e.target.value, model: '' })}
-                  className="nodrag"
-                  style={{
-                    padding: '4px 6px',
-                    background: '#252526',
-                    color: '#cccccc',
-                    border: '1px solid #3e3e42',
-                    borderRadius: 3,
-                    fontSize: 10,
-                  }}
-                >
-                  {providerOptions.map((p) => (
-                    <option key={p.value} value={p.value}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
+                {(() => {
+                  const currentProv = config.provider
+                  const hasCurrent = !!currentProv && providerOptions.some((p) => p.value === currentProv)
+                  const opts = hasCurrent
+                    ? providerOptions
+                    : (currentProv
+                      ? [...providerOptions, { value: currentProv, label: `${currentProv} (no key)` }]
+                      : providerOptions)
+                  return (
+                    <select
+                      value={currentProv || 'openai'}
+                      onChange={(e) => onConfigChange({ provider: e.target.value, model: '' })}
+                      className="nodrag"
+                      style={{
+                        padding: '4px 6px',
+                        background: '#252526',
+                        color: '#cccccc',
+                        border: '1px solid #3e3e42',
+                        borderRadius: 3,
+                        fontSize: 10,
+                      }}
+                    >
+                      {opts.map((p) => (
+                        <option key={p.value} value={p.value}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </select>
+                  )
+                })()}
               </label>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Model:</span>

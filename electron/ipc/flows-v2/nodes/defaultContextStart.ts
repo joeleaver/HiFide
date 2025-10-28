@@ -131,6 +131,8 @@ export const defaultContextStartNode: NodeFunction = async (flow, context, _data
   }
 
   const systemInstructions = (config as any)?.systemInstructions
+  const temperature = (config as any)?.temperature as number | undefined
+  const reasoningEffort = (config as any)?.reasoningEffort as ('low'|'medium'|'high') | undefined
 
   // Always override provider/model with global selection
   const provider = flow.store?.selectedProvider || 'openai'
@@ -144,9 +146,14 @@ export const defaultContextStartNode: NodeFunction = async (flow, context, _data
     messageHistoryLength: withProviderModel.messageHistory.length
   })
 
-  // Use ContextAPI to update system instructions (immutable)
-  const baseContext = systemInstructions
-    ? flow.context.update(withProviderModel, { systemInstructions })
+  // Apply optional system/temperature/reasoning settings (immutable)
+  const updates: Partial<MainFlowContext> = {}
+  if (systemInstructions) updates.systemInstructions = systemInstructions
+  if (typeof temperature === 'number') (updates as any).temperature = temperature
+  if (reasoningEffort) (updates as any).reasoningEffort = reasoningEffort
+
+  const baseContext = Object.keys(updates).length
+    ? flow.context.update(withProviderModel, updates)
     : withProviderModel
 
   // Sanity-check message history for exact user/assistant pairs at the tail

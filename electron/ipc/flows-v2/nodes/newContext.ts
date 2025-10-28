@@ -29,6 +29,8 @@ export const newContextNode: NodeFunction = async (flow, _context, dataIn, _inpu
   const provider = (config.provider as string) || 'openai'
   const model = (config.model as string) || 'gpt-4o'
   const systemInstructions = (config.systemInstructions as string) || ''
+  const temperature = (config as any)?.temperature as number | undefined
+  const reasoningEffort = (config as any)?.reasoningEffort as ('low'|'medium'|'high') | undefined
 
   flow.log.info('Creating isolated context', {
     provider,
@@ -40,7 +42,9 @@ export const newContextNode: NodeFunction = async (flow, _context, dataIn, _inpu
   const newContext = flow.context.create({
     provider,
     model,
-    systemInstructions
+    systemInstructions,
+    ...(typeof temperature === 'number' ? { temperature } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
   })
 
   // Mark as isolated and set deterministic id for testability

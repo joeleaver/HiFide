@@ -168,19 +168,25 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
   const openModal = useUiStore((s) => s.openDiffPreview)
   const closeInline = useUiStore((s) => s.closeInlineDiffForBadge)
 
+  // Ensure Monaco diff editor detaches models on unmount
+  const editorRef = useRef<any>(null)
+  useEffect(() => {
+    return () => {
+      try { editorRef.current?.setModel(null) } catch {}
+    }
+  }, [])
+
   // If no data has ever been loaded for this badge, render nothing (no editor to mount yet)
   if (!data || !data.length) return null
 
   const f = data[0]
   const { added, removed } = computeLineDelta(f.before, f.after)
 
-  // Keep the editor mounted always; hide/collapse when closed to avoid Monaco model disposal
-  const cardStyle: React.CSSProperties = isOpen
-    ? { overflow: 'hidden' }
-    : { overflow: 'hidden', height: 0, padding: 0, marginTop: 0, border: 'none', visibility: 'hidden' }
+  // Unmount when closed; we detach models on unmount to avoid Monaco disposal errors
+  if (!isOpen) return null
 
   return (
-    <Card withBorder padding="xs" mt={6} style={cardStyle} aria-hidden={!isOpen}>
+    <Card withBorder padding="xs" mt={6}>
       <Group justify="space-between" gap="xs" wrap="nowrap">
         <Group gap={6} wrap="nowrap">
           <Text size="sm" fw={500} style={{ maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.path}</Text>
@@ -220,6 +226,7 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
             scrollBeyondLastLine: false
           }}
           language={undefined}
+          onMount={(ed) => { editorRef.current = ed }}
         />
       </div>
     </Card>

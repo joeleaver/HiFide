@@ -64,15 +64,11 @@ export const BadgeKnowledgeBaseSearchContent = memo(function BadgeKnowledgeBaseS
     dispatch('kbReadItemBody', { id })
   }, [dispatch])
 
-  if (!resultsObj) {
-    return (
-      <Text size="sm" c="dimmed">
-        No results found
-      </Text>
-    )
-  }
 
-  const results = Array.isArray(resultsObj.results) ? resultsObj.results : []
+
+  const hasObj = !!(resultsObj && typeof resultsObj === 'object')
+  const results: KbHit[] = hasObj && Array.isArray((resultsObj as any).results) ? (resultsObj as any).results : []
+  const totalCount: number = hasObj && typeof (resultsObj as any).count === 'number' ? (resultsObj as any).count as number : results.length
 
   // Auto-open and auto-load bodies for top results
   const AUTO_OPEN_TOP = 3
@@ -135,7 +131,7 @@ export const BadgeKnowledgeBaseSearchContent = memo(function BadgeKnowledgeBaseS
         <Group gap={8} mb={6}>
           <Text size="xs" fw={600} c="dimmed">Results</Text>
           <Badge size="xs" variant="light" color="green">
-            {resultsObj.count ?? results.length} {(resultsObj.count ?? results.length) === 1 ? 'entry' : 'entries'}
+            {totalCount} {totalCount === 1 ? 'entry' : 'entries'}
           </Badge>
         </Group>
 

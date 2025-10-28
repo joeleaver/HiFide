@@ -1,6 +1,6 @@
 /**
  * Flow Execution Engine V2 - Type Definitions
- * 
+ *
  * Clean, function-based execution with explicit inputs/outputs
  */
 
@@ -45,6 +45,18 @@ export interface MainFlowContext {
    * Sent to guide the LLM's behavior.
    */
   systemInstructions?: string
+
+
+  /**
+   * Optional sampling temperature for this context
+   * OpenAI/Gemini: 0–2 range; Anthropic: 0–1
+   */
+  temperature?: number
+
+  /**
+   * OpenAI reasoning effort (reasoning models only, e.g., o3 variants)
+   */
+  reasoningEffort?: 'low' | 'medium' | 'high'
 
   /**
    * Conversation history for this context
@@ -210,7 +222,7 @@ export interface Edge {
   target: string // Target node ID
   targetInput: string // Input name for target node (e.g., 'message', 'tools', 'data')
   targetHandle?: string // Original handle name (for compatibility)
-  
+
   /**
    * Optional metadata for special edge types
    */

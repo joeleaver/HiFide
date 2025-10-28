@@ -42,6 +42,10 @@ export interface ProviderAdapter {
     system?: any  // For Anthropic
     contents?: any[]  // For Gemini
     systemInstruction?: string  // For Gemini
+    // Sampling and reasoning controls
+    temperature?: number
+    reasoningEffort?: 'low' | 'medium' | 'high'
+
     // NEW: Event emitter (optional for backward compatibility)
     emit?: EmitExecutionEvent
     // Legacy callbacks (deprecated, use emit instead)
@@ -57,6 +61,10 @@ export interface ProviderAdapter {
     apiKey: string
     model: string
     // Provider-specific message format (formatted by llm-service):
+    // Sampling and reasoning controls
+    temperature?: number
+    reasoningEffort?: 'low' | 'medium' | 'high'
+
     messages?: ChatMessage[]  // For OpenAI
     system?: any  // For Anthropic
     contents?: any[]  // For Gemini

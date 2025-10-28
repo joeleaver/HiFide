@@ -1,3 +1,5 @@
+import { useRef, useEffect } from 'react'
+
 import { Modal, Tabs, Text, ScrollArea, Group, Badge } from '@mantine/core'
 import { DiffEditor } from '@monaco-editor/react'
 import { useUiStore } from '../store/ui'
@@ -19,6 +21,37 @@ function computeLineDelta(before?: string, after?: string): { added: number; rem
   if (i < a.length) removed += (a.length - i)
   if (j < b.length) added += (b.length - j)
   return { added, removed }
+}
+
+function SafeDiff({ before, after, path }: { before?: string; after?: string; path: string }) {
+  const editorRef = useRef<any>(null)
+  useEffect(() => {
+    return () => {
+      try { editorRef.current?.setModel(null) } catch {}
+    }
+  }, [])
+  return (
+    <DiffEditor
+      height="580px"
+      original={before ?? ''}
+      modified={after ?? ''}
+      originalModelPath={`inmemory://modal/${encodeURIComponent(path)}?side=original`}
+      modifiedModelPath={`inmemory://modal/${encodeURIComponent(path)}?side=modified`}
+      theme="vs-dark"
+      options={{
+        readOnly: true,
+        renderSideBySide: true,
+        minimap: { enabled: false },
+        renderOverviewRuler: false,
+        overviewRulerBorder: false,
+        overviewRulerLanes: 0,
+        automaticLayout: true,
+        scrollBeyondLastLine: false
+      }}
+      language={undefined}
+      onMount={(ed) => { editorRef.current = ed }}
+    />
+  )
 }
 
 export default function DiffPreviewModal() {
@@ -52,25 +85,7 @@ export default function DiffPreviewModal() {
           {data.map((f) => (
             <Tabs.Panel key={f.path} value={f.path}>
               <ScrollArea h={600} mt="sm">
-                <DiffEditor
-                  height="580px"
-                  original={f.before ?? ''}
-                  modified={f.after ?? ''}
-                  originalModelPath={`inmemory://modal/${encodeURIComponent(f.path)}?side=original`}
-                  modifiedModelPath={`inmemory://modal/${encodeURIComponent(f.path)}?side=modified`}
-                  theme="vs-dark"
-                  options={{
-                    readOnly: true,
-                    renderSideBySide: true,
-                    minimap: { enabled: false },
-                    renderOverviewRuler: false,
-                    overviewRulerBorder: false,
-                    overviewRulerLanes: 0,
-                    automaticLayout: true,
-                    scrollBeyondLastLine: false
-                  }}
-                  language={undefined}
-                />
+                <SafeDiff before={f.before} after={f.after} path={f.path} />
               </ScrollArea>
             </Tabs.Panel>
           ))}

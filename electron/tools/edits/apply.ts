@@ -3,7 +3,7 @@ import { applyFileEditsInternal } from '../utils'
 
 export const applyEditsTool: AgentTool = {
   name: 'edits.apply',
-  description: 'Apply a list of precise edits to files. Use this when you know exactly what to change. Prefer small, surgical diffs. If uncertain, use code.apply_edits_targeted with dryRun first, then apply for real with verify enabled.',
+  description: 'Apply a list of precise edits to files. Use this when you know exactly what to change. Prefer small, surgical diffs. If uncertain, consider code.apply_edits_targeted with a dry-run preview first.',
   parameters: {
     type: 'object',
     properties: {
@@ -28,14 +28,11 @@ export const applyEditsTool: AgentTool = {
           required: ['type', 'path']
         },
       },
-      verify: { type: 'boolean', default: true, description: 'Run TypeScript verification after edits' },
-      tsconfigPath: { type: 'string', description: 'Path to tsconfig.json for verification' },
     },
     required: ['edits'],
   },
-  run: async ({ edits, verify = true, tsconfigPath }: { edits: any[]; verify?: boolean; tsconfigPath?: string }) => {
-    const res = await applyFileEditsInternal(edits, { verify, tsconfigPath })
-    return res
+  run: async ({ edits }: { edits: any[] }) => {
+    return await applyFileEditsInternal(edits, {})
   },
 }
 

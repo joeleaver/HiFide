@@ -11,6 +11,20 @@ export function minifyToolResult(toolName: string, result: any): any {
   const unwrap = (x: any) => (x && typeof x === 'object' && 'data' in x ? x.data : x)
 
   try {
+    // Never feed raw code/diffs from write tools back into the model
+    // Return only minimal metadata so the model can't copy edited code verbatim
+    if (name === 'edits.apply' || name === 'edits_apply' || name === 'code.apply_edits_targeted' || name === 'code_apply_edits_targeted') {
+      const payload = unwrap(result) as any
+      const files = Array.isArray(payload?.fileEditsPreview) ? payload.fileEditsPreview : []
+      return {
+        ok: payload?.ok ?? true,
+        filesChanged: files.length,
+        // Include only file paths (no contents)
+        paths: files.slice(0, 20).map((f: any) => f?.path).filter(Boolean),
+        truncated: files.length > 20
+      }
+    }
+
     if (name === 'workspace.search') {
       const payload = unwrap(result) as Partial<SearchWorkspaceResult & {
         bestHandle?: any; topHandles?: any[]; meta?: any; results?: any[]; summary?: string[]

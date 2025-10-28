@@ -30,7 +30,7 @@ export const FireworksProvider: ProviderAdapter = {
   id: 'fireworks',
 
   // Plain chat via Responses API with streaming chunks (match OpenAI provider)
-  async chatStream({ apiKey, model, messages, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async chatStream({ apiKey, model, messages, temperature, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey, baseURL: 'https://api.fireworks.ai/inference/v1' })
 
     const holder: { stream?: any; cancelled?: boolean } = {}
@@ -41,6 +41,7 @@ export const FireworksProvider: ProviderAdapter = {
         const stream: any = await withRetries(() => Promise.resolve(client.responses.stream({
           model,
           input: toResponsesInput(messages || []),
+          ...(typeof temperature === 'number' ? { temperature } : {}),
         })))
         holder.stream = stream
         try {
@@ -113,7 +114,7 @@ export const FireworksProvider: ProviderAdapter = {
   },
 
   // Agent loop with tool-calling using Chat Completions API (Fireworks supports tools here)
-  async agentStream({ apiKey, model, messages, tools, emit: _emit, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError: _onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, messages, temperature, tools, emit: _emit, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError: _onToolError }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey, baseURL: 'https://api.fireworks.ai/inference/v1' })
 
     const holder: { abort?: () => void } = {}
@@ -182,7 +183,7 @@ export const FireworksProvider: ProviderAdapter = {
                   messages: ccMsgs as any,
                   tools: ccTools.length ? ccTools : undefined,
                   tool_choice: ccTools.length ? 'auto' : undefined,
-                  temperature: 0.2,
+                  temperature: (typeof temperature === 'number' ? temperature : 0.2),
                   stream: true,
                   // Ask for usage in the stream if provider supports it
                   stream_options: { include_usage: true } as any
@@ -199,7 +200,7 @@ export const FireworksProvider: ProviderAdapter = {
                   messages: ccMsgs as any,
                   tools: ccTools.length ? ccTools : undefined,
                   tool_choice: ccTools.length ? 'auto' : undefined,
-                  temperature: 0.2,
+                  temperature: (typeof temperature === 'number' ? temperature : 0.2),
                   stream: true
                 },
                 { signal: ac.signal }

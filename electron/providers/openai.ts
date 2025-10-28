@@ -36,7 +36,7 @@ export const OpenAIProvider: ProviderAdapter = {
   id: 'openai',
 
   // Plain chat (Responses API). We use non-stream + chunked emit for reliability; can be upgraded to true streaming.
-  async chatStream({ apiKey, model, messages, emit: _emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
+  async chatStream({ apiKey, model, messages, temperature, reasoningEffort, emit: _emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey })
 
     const holder: { stream?: any; cancelled?: boolean } = {}
@@ -45,10 +45,18 @@ export const OpenAIProvider: ProviderAdapter = {
       let completed = false
       try {
         // Stateless: just send the messages, no session chaining
-        const stream: any = await withRetries(() => Promise.resolve(client.responses.stream({
+        const isReasoningModel = /(o3|gpt-5|codex)/i.test(String(model || ''))
+        const requestOpts: any = {
           model,
           input: toResponsesInput(messages || []),
-        })))
+        }
+        if (isReasoningModel && reasoningEffort) {
+          requestOpts.reasoning = { effort: reasoningEffort }
+        }
+        if (!isReasoningModel && typeof temperature === 'number') {
+          requestOpts.temperature = temperature
+        }
+        const stream: any = await withRetries(() => Promise.resolve(client.responses.stream(requestOpts)))
         holder.stream = stream
         try {
           // Generic streaming loop: consume deltas as they arrive
@@ -144,7 +152,7 @@ export const OpenAIProvider: ProviderAdapter = {
   },
 
   // Agent loop with tool-calling via Responses API
-  async agentStream({ apiKey, model, messages, tools, responseSchema, emit: _emit, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, messages, temperature, reasoningEffort, tools, responseSchema, emit: _emit, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey })
 
     const holder: { abort?: () => void } = {}
@@ -226,9 +234,16 @@ export const OpenAIProvider: ProviderAdapter = {
           // Start a streaming turn; stream user-visible text as it comes, while accumulating any tool calls
           let useResponseFormat = !!responseSchema
           const mkOpts = (strict: boolean) => {
+            const isReasoningModel = /(o3|gpt-5|codex)/i.test(String(model || ''))
             const opts: any = {
               model,
               input: conv as any,
+            }
+            if (isReasoningModel && reasoningEffort) {
+              opts.reasoning = { effort: reasoningEffort }
+            }
+            if (!isReasoningModel && typeof temperature === 'number') {
+              opts.temperature = temperature
             }
             // Only add tools if we have valid tools
             if (oaTools.length > 0) {

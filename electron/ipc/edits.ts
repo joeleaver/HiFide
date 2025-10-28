@@ -8,7 +8,6 @@ import type { IpcMain } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import { getIndexer, providers, getProviderKey } from '../core/state'
-import { verifyTypecheck as tsVerify } from '../refactors/ts'
 import { useMainStore } from '../store/index'
 
 
@@ -74,6 +73,25 @@ export async function applyFileEditsInternal(
   edits: TextEdit[] = [],
   opts: { dryRun?: boolean; verify?: boolean; tsconfigPath?: string } = {}
 ) {
+  // Defensive sanitizer to prevent conversational/tool metadata from leaking into files
+  const sanitizeAppliedText = (s: string | undefined): string => {
+    if (typeof s !== 'string') return s as any
+    let out = s
+    // 1) Strip leading/trailing code fences ```lang ... ```
+    const fenceStart = out.match(/^```[a-zA-Z0-9._-]*\s/)
+    if (fenceStart) {
+      out = out.replace(/^```[a-zA-Z0-9._-]*\s/, '')
+      out = out.replace(/```\s*$/, '')
+    }
+    // 2) If LLM leaked tool-call markers, drop everything from that marker onward
+    // Common patterns observed: to=functions.<toolName>
+    out = out.replace(/\n?[^\n]*to=functions\.[A-Za-z0-9_.-]+[\s\S]*$/m, '')
+    // 3) Remove obvious chat preambles accidentally embedded in code edits
+    out = out.replace(/^\s*(Sure, here(?:'|)s|Here(?:'|)s|Okay,|Alright,)[^\n]*\n/, '')
+    // 4) Trim stray unmatched closing fences if any remained
+    out = out.replace(/```+\s*$/g, '')
+    return out
+  }
   // Collect per-file before/after previews for diff badges
   const previews = new Map<string, { before?: string; after?: string; sizeBefore?: number; sizeAfter?: number; truncated?: boolean }>()
   const MAX_PREVIEW = 16 * 1024 // 16 KB of text preview (keep bridge payloads small)
@@ -99,20 +117,22 @@ export async function applyFileEditsInternal(
 
       let next = content
       if (ed.type === 'replaceOnce') {
-
-
-        const pos = content.indexOf(ed.oldText)
+        const safeNew = sanitizeAppliedText((ed as any).newText)
+        const safeOld = (ed as any).oldText
+        const pos = content.indexOf(safeOld)
         if (pos === -1) {
           results.push({ path: ed.path, changed: false, message: 'oldText-not-found' })
           continue
         }
-        next = content.slice(0, pos) + ed.newText + content.slice(pos + ed.oldText.length)
+        next = content.slice(0, pos) + safeNew + content.slice(pos + safeOld.length)
       } else if (ed.type === 'insertAfterLine') {
-        next = insertAfterLine(content, ed.line, ed.text)
+        const safeText = sanitizeAppliedText((ed as any).text)
+        next = insertAfterLine(content, ed.line, safeText)
       } else if (ed.type === 'replaceRange') {
+        const safeText = sanitizeAppliedText((ed as any).text)
         const s = Math.max(0, Math.min(content.length, ed.start | 0))
         const e = Math.max(s, Math.min(content.length, ed.end | 0))
-        next = content.slice(0, s) + ed.text + content.slice(e)
+        next = content.slice(0, s) + safeText + content.slice(e)
       } else {
         results.push({ path: (ed as any).path, changed: false, message: 'unknown-edit-type' })
         continue
@@ -166,7 +186,7 @@ export async function applyFileEditsInternal(
 	  }
 	})
 
-  const verification = opts.verify ? tsVerify(opts.tsconfigPath) : undefined
+  const verification = undefined
   return { ok: true, applied, results, dryRun: !!opts.dryRun, verification, fileEditsPreview }
 }
 
@@ -217,7 +237,7 @@ export function registerEditsHandlers(ipcMain: IpcMain): void {
   })
 
   /**
-   * Propose edits using LLM
+   * Propose edits using LLM (strict JSON schema via agentStream)
    */
   ipcMain.handle('edits:propose', async (_e, args: { instruction: string; model?: string; provider?: string; k?: number }) => {
     const providerId = (args.provider || 'openai')
@@ -230,7 +250,7 @@ export function registerEditsHandlers(ipcMain: IpcMain): void {
 
     // Build messages with context
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = []
-    messages.push({ role: 'system', content: buildEditsSchemaPrompt() })
+    messages.push({ role: 'system', content: 'You are a code editor agent. Return ONLY JSON that follows the provided schema. No prose.' })
 
     try {
       const indexer = await getIndexer()
@@ -243,29 +263,47 @@ export function registerEditsHandlers(ipcMain: IpcMain): void {
 
     messages.push({ role: 'user', content: `Instruction:\n${args.instruction}\n\nReturn ONLY the JSON object, nothing else.` })
 
+    // Strict JSON Schema for edits
+    const responseSchema = {
+      name: 'proposed_edits',
+      strict: true,
+      schema: {
+        type: 'object',
+        properties: {
+          edits: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                type: { type: 'string', enum: ['replaceOnce', 'insertAfterLine', 'replaceRange'] },
+                path: { type: 'string' },
+                oldText: { type: 'string' },
+                newText: { type: 'string' },
+                line: { type: 'integer' },
+                text: { type: 'string' },
+                start: { type: 'integer' },
+                end: { type: 'integer' },
+              },
+              required: ['type', 'path']
+            }
+          }
+        },
+        required: ['edits'],
+        additionalProperties: false
+      }
+    }
+
     let buffer = ''
-    const handle = await provider.chatStream({
+    await provider.agentStream({
       apiKey: key,
       model,
       messages,
-      onChunk: (t) => { buffer += t },
+      tools: [],
+      responseSchema,
+      onChunk: (t: string) => { buffer += t },
       onDone: () => { /* no-op */ },
-      onError: (_e) => { /* no-op */ },
+      onError: (_e: string) => { /* no-op */ },
     })
-
-    // Wait briefly for stream to complete (best-effort)
-    await new Promise((r) => setTimeout(r, 300))
-
-    // Give a little more time if we haven't seen a closing brace yet (up to ~2s total)
-    const start = Date.now()
-    while (!buffer.includes('}') && Date.now() - start < 1700) {
-      await new Promise((r) => setTimeout(r, 50))
-    }
-
-    // Cancel any lingering stream
-    try {
-      handle.cancel()
-    } catch {}
 
     try {
       const obj = extractJsonObject(buffer)

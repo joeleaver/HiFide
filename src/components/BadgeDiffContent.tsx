@@ -1,4 +1,4 @@
-import { memo, useEffect } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import { Text } from '@mantine/core'
 import { DiffEditor } from '@monaco-editor/react'
 
@@ -50,6 +50,14 @@ export const BadgeDiffContent = memo(function BadgeDiffContent({ badgeId, diffKe
   const dataFromStore = useAppStore((s) => s.feLoadedToolResults?.[diffKey])
   const data = dataFromStore ?? EMPTY_DIFF_LIST
 
+  // Ensure Monaco diff editor detaches models on unmount to avoid disposal errors
+  const editorRef = useRef<any>(null)
+  useEffect(() => {
+    return () => {
+      try { editorRef.current?.setModel(null) } catch {}
+    }
+  }, [])
+
   if (!data.length) {
     return (
       <Text size="sm" c="dimmed">
@@ -83,6 +91,7 @@ export const BadgeDiffContent = memo(function BadgeDiffContent({ badgeId, diffKe
             lineNumbers: 'off',
           }}
           language={undefined}
+          onMount={(ed) => { editorRef.current = ed }}
         />
       </div>
     </div>
