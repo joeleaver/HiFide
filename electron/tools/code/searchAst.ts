@@ -40,8 +40,8 @@ function astCacheSet(key: string, data: any) {
 }
 
 export const searchAstTool: AgentTool = {
-  name: 'code.search_ast',
-  description: 'AST-first structural search using ast-grep. Prefer this over reading whole files to discover code. Supports registered languages (JS/TS/TSX/JSX/HTML/CSS + Python/Go/Java/C/CPP/C#\u00a0/ PHP/Ruby/Kotlin/Swift when installed). Use inline patterns like console.log($A), myFn($ARGS), function $NAME($PARAMS) { $$BODY }.',
+  name: 'codeSearchAst',
+  description: 'AST-first structural search using ast-grep to discover code shapes without reading whole files. Supports registered languages; use inline patterns like console.log($A) or function $NAME($PARAMS) { $$BODY }.',
   parameters: {
     type: 'object',
     properties: {

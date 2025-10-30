@@ -76,7 +76,144 @@ function estimateInputTokens(provider: string, formattedMessages: any): number {
   }
 }
 
+// --- Logging helpers (sanitized payload preview) ---
+function previewText(val: any, max = 400): string {
+  try {
+    const s = typeof val === 'string' ? val : JSON.stringify(val)
+    return s.length > max ? s.slice(0, max) + '…' : s
+  } catch {
+    return ''
+  }
+}
+
+function buildLoggablePayload(provider: string, streamOpts: any, extras?: { responseSchema?: any; tools?: AgentTool[] }) {
+  const { apiKey: _omitApiKey, messages, system, systemInstruction, contents, instructions, ...rest } = (streamOpts || {})
+  const out: any = { provider, ...rest }
+
+  if (provider === 'anthropic') {
+    out.systemBlocks = Array.isArray(system) ? system.length : 0
+    out.messages = Array.isArray(messages)
+      ? messages.map((m: any, i: number) => ({ idx: i, role: m?.role, preview: previewText(m?.content, 200) }))
+      : undefined
+  } else if (provider === 'gemini') {
+    out.systemInstructionPreview = previewText(systemInstruction, 200)
+    out.contents = Array.isArray(contents)
+      ? contents.map((c: any, i: number) => ({ idx: i, parts: Array.isArray(c?.parts) ? c.parts.length : 0, preview: previewText((c?.parts || []).map((p: any) => p?.text).join(' '), 200) }))
+      : undefined
+  } else {
+    // OpenAI and default ChatMessage[]
+    if (typeof instructions === 'string' && instructions) {
+      out.instructions = previewText(instructions, 200)
+    } else if (typeof system === 'string' && system) {
+      // Backward-compat if caller passed `system`
+      out.instructions = previewText(system, 200)
+    }
+    out.messages = Array.isArray(messages)
+      ? messages.map((m: any, i: number) => ({ idx: i, role: m?.role, preview: previewText(m?.content, 200) }))
+      : undefined
+  }
+
+  if (extras?.responseSchema) {
+    out.responseSchema = {
+      name: extras.responseSchema.name,
+      strict: !!extras.responseSchema.strict,
+      keys: Object.keys(extras.responseSchema.schema?.properties || {})
+    }
+  }
+  if (extras?.tools) {
+    out.tools = (extras.tools || []).map((t) => t?.name).filter(Boolean)
+  }
+  return out
+}
+
+function logLLMRequestPayload(args: {
+  provider: string
+  model?: string
+  streamType: 'chat' | 'agent'
+  streamOpts: any
+  responseSchema?: any
+  tools?: AgentTool[]
+}) {
+  try {
+    const payload = buildLoggablePayload(args.provider, args.streamOpts, { responseSchema: args.responseSchema, tools: args.tools })
+    console.log('[LLMRequest] Payload', {
+      provider: args.provider,
+      model: args.model,
+      streamType: args.streamType,
+      payload
+    })
+  } catch {}
+}
+
 /**
+// --- Logging helpers (sanitized payload preview) ---
+function previewText(val: any, max = 400): string {
+  try {
+    const s = typeof val === 'string' ? val : JSON.stringify(val)
+    return s.length > max ? s.slice(0, max) + '…' : s
+  } catch {
+    return ''
+  }
+}
+
+function buildLoggablePayload(provider: string, streamOpts: any, extras?: { responseSchema?: any; tools?: AgentTool[] }) {
+  const { apiKey: _omitApiKey, messages, system, systemInstruction, contents, instructions, ...rest } = (streamOpts || {})
+  const out: any = { provider, ...rest }
+
+  if (provider === 'anthropic') {
+    out.systemBlocks = Array.isArray(system) ? system.length : 0
+    out.messages = Array.isArray(messages)
+      ? messages.map((m: any, i: number) => ({ idx: i, role: m?.role, preview: previewText(m?.content, 200) }))
+      : undefined
+  } else if (provider === 'gemini') {
+    out.systemInstructionPreview = previewText(systemInstruction, 200)
+    out.contents = Array.isArray(contents)
+      ? contents.map((c: any, i: number) => ({ idx: i, parts: Array.isArray(c?.parts) ? c.parts.length : 0, preview: previewText((c?.parts || []).map((p: any) => p?.text).join(' '), 200) }))
+      : undefined
+  } else {
+    // OpenAI and default ChatMessage[]
+    if (typeof instructions === 'string' && instructions) {
+      out.instructions = previewText(instructions, 200)
+    } else if (typeof system === 'string' && system) {
+      out.instructions = previewText(system, 200)
+    }
+    out.messages = Array.isArray(messages)
+      ? messages.map((m: any, i: number) => ({ idx: i, role: m?.role, preview: previewText(m?.content, 200) }))
+      : undefined
+  }
+
+  if (extras?.responseSchema) {
+    out.responseSchema = {
+      name: extras.responseSchema.name,
+      strict: !!extras.responseSchema.strict,
+      keys: Object.keys(extras.responseSchema.schema?.properties || {})
+    }
+  }
+  if (extras?.tools) {
+    out.tools = (extras.tools || []).map((t) => t?.name).filter(Boolean)
+  }
+  return out
+}
+
+function logLLMRequestPayload(args: {
+  provider: string
+  model?: string
+  streamType: 'chat' | 'agent'
+  streamOpts: any
+  responseSchema?: any
+  tools?: AgentTool[]
+}) {
+  try {
+    const payload = buildLoggablePayload(args.provider, args.streamOpts, { responseSchema: args.responseSchema, tools: args.tools })
+    console.log('[LLMRequest] Payload', {
+      provider: args.provider,
+      model: args.model,
+      streamType: args.streamType,
+      payload
+    })
+  } catch {}
+}
+
  * Wrap tools with per-request policy to enforce low-discovery, edit-first behavior.
  * - Limit workspace.search calls (discovery lock)
  * - Force compact results and searchOnce behavior
@@ -95,6 +232,9 @@ function wrapToolsWithPolicy(tools: AgentTool[], policy?: {
   const readLinesPerFile = new Map<string, number>()
   const readFileSeen = new Set<string>()
   const readFilePerFile = new Map<string, number>()
+  const readLinesCache = new Map<string, string>()
+  const readFileCache = new Map<string, string>()
+
 
   const parseHandle = (h?: string): { p?: string; s?: number; e?: number } | null => {
     if (!h) return null
@@ -104,7 +244,7 @@ function wrapToolsWithPolicy(tools: AgentTool[], policy?: {
   return (tools || []).map((t) => {
     if (!t || !t.name || typeof t.run !== 'function') return t
 
-    if (t.name === 'workspace.search') {
+    if ((t.name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === 'workspacesearch') {
       const orig = t.run.bind(t)
       const wrapped: AgentTool = {
         ...t,
@@ -123,7 +263,7 @@ function wrapToolsWithPolicy(tools: AgentTool[], policy?: {
       return wrapped
     }
 
-    if (t.name === 'fs.read_lines') {
+    if ((t.name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === 'fsreadlines') {
       const orig = t.run.bind(t)
       const wrapped: AgentTool = {
         ...t,
@@ -133,7 +273,7 @@ function wrapToolsWithPolicy(tools: AgentTool[], policy?: {
           const rel = (args.path as string) || (h && h.p) || ''
           // Build a signature key that captures the specific range/window requested
           const sigKey = JSON.stringify({
-            tool: 'fs.read_lines',
+            tool: t.name,
             path: rel,
             handle: !!args.handle,
             mode: args.mode || 'range',
@@ -149,32 +289,42 @@ function wrapToolsWithPolicy(tools: AgentTool[], policy?: {
           if (typeof policy?.maxReadLinesPerFile === 'number') {
             const c = readLinesPerFile.get(sigKey) || 0
             if (c >= policy.maxReadLinesPerFile) {
-              return { ok: false, error: 'read_locked: read limit reached for this range' }
+              return `Error: read_locked: read limit reached for this range`
             }
           }
 
-          // Dedupe identical reads
+          // Dedupe identical reads — return cached raw text
           if (policy?.dedupeReadLines) {
-            const key = JSON.stringify({ tool: 'fs.read_lines', path: rel, handle: !!args.handle, mode: args.mode || 'range', start: args.startLine, end: args.endLine, focus: args.focusLine, window: args.window, before: args.beforeLines, after: args.afterLines })
+            const key = JSON.stringify({ tool: t.name, path: rel, handle: !!args.handle, mode: args.mode || 'range', start: args.startLine, end: args.endLine, focus: args.focusLine, window: args.window, before: args.beforeLines, after: args.afterLines })
             if (readLinesSeen.has(key)) {
-              return { ok: true, cached: true }
+              if (readLinesCache.has(key)) return readLinesCache.get(key) as string
+              return ''
             }
             readLinesSeen.add(key)
           }
 
           const out = await orig(args, meta)
 
-          if (out && out.ok && typeof policy?.maxReadLinesPerFile === 'number') {
+          if (typeof policy?.maxReadLinesPerFile === 'number') {
             const c = readLinesPerFile.get(sigKey) || 0
             readLinesPerFile.set(sigKey, c + 1)
           }
+
+          // Cache raw text for dedupe
+          try {
+            if (typeof out === 'string') {
+              const key = JSON.stringify({ tool: t.name, path: rel, handle: !!args.handle, mode: args.mode || 'range', start: args.startLine, end: args.endLine, focus: args.focusLine, window: args.window, before: args.beforeLines, after: args.afterLines })
+              readLinesCache.set(key, out)
+            }
+          } catch {}
+
           return out
         }
       }
       return wrapped
     }
 
-    if (t.name === 'fs.read_file') {
+    if ((t.name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === 'fsreadfile') {
       const orig = t.run.bind(t)
       const wrapped: AgentTool = {
         ...t,
@@ -186,25 +336,32 @@ function wrapToolsWithPolicy(tools: AgentTool[], policy?: {
           if (typeof policy?.maxReadFilePerFile === 'number' && rel) {
             const c = readFilePerFile.get(rel) || 0
             if (c >= policy.maxReadFilePerFile) {
-              return { ok: false, error: 'read_locked: fs.read_file per-file read limit reached' }
+              return `Error: read_locked: fsReadFile per-file read limit reached`
             }
           }
 
           // Dedupe identical reads
           if (policy?.dedupeReadFile) {
-            const key = JSON.stringify({ tool: 'fs.read_file', path: rel })
+            const key = JSON.stringify({ tool: t.name, path: rel })
             if (readFileSeen.has(key)) {
-              return { ok: true, cached: true }
+              if (readFileCache.has(key)) return readFileCache.get(key) as string
+              return ''
             }
             readFileSeen.add(key)
           }
 
           const out = await orig(args, meta)
 
-          if (out && out.ok && typeof policy?.maxReadFilePerFile === 'number' && rel) {
+          if (typeof policy?.maxReadFilePerFile === 'number' && rel) {
             const c = readFilePerFile.get(rel) || 0
             readFilePerFile.set(rel, c + 1)
           }
+          try {
+            if (typeof out === 'string') {
+              const key = JSON.stringify({ tool: t.name, path: rel })
+              readFileCache.set(key, out)
+            }
+          } catch {}
           return out
         }
       }
@@ -393,59 +550,65 @@ class LLMService {
       // For stateless calls (like intentRouter), just send the message directly
       // Format it appropriately for each provider
       if (provider === 'anthropic') {
+        // Include system instructions even in stateless mode (skipHistory)
+        const systemText = context.systemInstructions || ''
+        const system = systemText
+          ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }]
+          : undefined
         formattedMessages = {
-          system: undefined,
+          system,
           messages: [{ role: 'user' as const, content: message }]
         }
       } else if (provider === 'gemini') {
+        // Include systemInstruction even in stateless mode (skipHistory)
         formattedMessages = {
-          systemInstruction: '',
+          systemInstruction: context.systemInstructions || '',
           contents: [{ role: 'user', parts: [{ text: message }] }]
         }
       } else {
-        // OpenAI and others
-        formattedMessages = [{ role: 'user' as const, content: message }]
+        // OpenAI and others — include a system message first if present
+        formattedMessages = [
+          ...(context.systemInstructions ? [{ role: 'system' as const, content: context.systemInstructions }] : []),
+          { role: 'user' as const, content: message }
+        ]
       }
     } else {
       // Normal case: format full conversation history for the provider
-      console.log(`[LLMService] Formatting messages for ${provider}:`, {
-        contextMessageHistoryLength: updatedContext.messageHistory.length,
-        systemInstructions: updatedContext.systemInstructions?.substring(0, 50) + '...'
-      })
+
 
       if (provider === 'anthropic') {
         formattedMessages = formatMessagesForAnthropic(updatedContext)
-        console.log(`[LLMService] Anthropic formatted:`, {
-          systemLength: formattedMessages.system?.length || 0,
-          messagesLength: formattedMessages.messages?.length || 0,
-          messages: formattedMessages.messages
-        })
+
       } else if (provider === 'gemini') {
         formattedMessages = formatMessagesForGemini(updatedContext)
-        console.log(`[LLMService] Gemini formatted:`, {
-          systemInstructionLength: formattedMessages.systemInstruction?.length || 0,
-          contentsLength: formattedMessages.contents?.length || 0,
-          contents: formattedMessages.contents
-        })
+
       } else {
         // OpenAI and others
         formattedMessages = formatMessagesForOpenAI(updatedContext)
-        console.log(`[LLMService] OpenAI formatted:`, {
-          messagesLength: formattedMessages.length,
-          messages: formattedMessages
-        })
+
       }
     }
 
     // 5. Set up event handlers using the new execution event system
     // Convert execution events to legacy callbacks for now (migration adapter)
-    // Wrap emitter to suppress chunk events if skipHistory is true
+    // Wrap emitter to suppress chunk events if skipHistory is true (with debug override)
     const emit = skipHistory
       ? (event: any) => {
-          // Suppress chunk events for stateless calls (like intentRouter)
-          if (event.type !== 'chunk') {
-            flowAPI.emitExecutionEvent(event)
+          // By default, suppress chunk events for stateless calls (like intentRouter)
+          // Set HF_SHOW_SKIP_HISTORY_CHUNKS=1 to forward chunks for debugging/visibility.
+          const showSkipChunks = process.env.HF_SHOW_SKIP_HISTORY_CHUNKS === '1'
+          if (event.type === 'chunk') {
+            if (showSkipChunks) {
+              if (process.env.HF_FLOW_DEBUG === '1') {
+                const brief = (event.chunk || '').slice(0, 40)
+                console.log('[llm-service] forwarding skipHistory chunk due to HF_SHOW_SKIP_HISTORY_CHUNKS', { nodeId: flowAPI.nodeId, brief })
+              }
+              flowAPI.emitExecutionEvent(event)
+            }
+            // else: drop chunk
+            return
           }
+          flowAPI.emitExecutionEvent(event)
         }
       : flowAPI.emitExecutionEvent
 
@@ -465,14 +628,7 @@ class LLMService {
     const approxInputTokens = estimateInputTokens(provider, formattedMessages)
 
     // 6. Call provider with formatted messages
-    console.log(`[LLMService] Starting stream:`, {
-      provider,
-      model,
-      hasTools: !!tools && tools.length > 0,
-      toolCount: tools?.length || 0,
-      messageHistoryLength: formattedMessages.messages?.length || 0,
-      toolNames: tools?.map(t => t.name) || []
-    })
+
 
     let response = ''
 
@@ -480,7 +636,7 @@ class LLMService {
       // PROACTIVE RATE LIMIT CHECK - Wait before making request if needed
       const waitMs = await rateLimitTracker.checkAndWait(provider as any, model)
       if (waitMs > 0) {
-        console.log(`[LLMService] Proactive rate limit wait: ${waitMs}ms for ${provider}/${model}`)
+
 
         // Emit event to UI
         flowAPI.emitExecutionEvent({
@@ -534,6 +690,9 @@ class LLMService {
             ...(updatedContext?.reasoningEffort ? { reasoningEffort: updatedContext.reasoningEffort } : {}),
             // Callbacks that providers call - these are wrapped to emit ExecutionEvents
             onChunk: (text: string) => {
+              if (process.env.HF_FLOW_DEBUG === '1') {
+                try { console.log(`[llm-service] onChunk node=${flowAPI.nodeId} provider=${provider}/${model} len=${text?.length}`) } catch {}
+              }
               // Skip duplicate final chunks (some providers send the full response as a final chunk)
               if (text === response) {
                 return
@@ -542,16 +701,12 @@ class LLMService {
               eventHandlers.onChunk(text)
             },
             onDone: () => {
-              console.log(`[LLMService] Stream completed:`, {
-                provider,
-                model,
-                responseLength: response.length
-              })
+
               try { flowAPI.signal?.removeEventListener('abort', onAbort as any) } catch {}
               resolve()
             },
             onError: (error: string) => {
-              console.error(`[LLMService] Stream error:`, error)
+
               try { flowAPI.signal?.removeEventListener('abort', onAbort as any) } catch {}
               reject(new Error(error))
             },
@@ -573,53 +728,62 @@ class LLMService {
               contents: formattedMessages.contents
             }
           } else {
-            // OpenAI and others use standard ChatMessage[] format
+            // OpenAI and others: split system out for top-level and avoid duplication
+            let systemText: string | undefined
+            let nonSystemMessages: any = formattedMessages
+            if (Array.isArray(formattedMessages)) {
+              const sysParts: string[] = []
+              nonSystemMessages = (formattedMessages as any[]).map((m: any) => {
+                if (m?.role === 'system') { sysParts.push(typeof m.content === 'string' ? m.content : String(m.content)); return null }
+                return m
+              }).filter(Boolean)
+              if (sysParts.length) systemText = sysParts.join('\n\n')
+            }
             streamOpts = {
               ...baseStreamOpts,
-              messages: formattedMessages
+              ...(systemText ? { instructions: systemText } : {}),
+              messages: systemText ? nonSystemMessages : formattedMessages
             }
           }
 
-          // Use agentStream if:
-          // 1. We have tools to use, OR
-          // 2. We have a responseSchema (structured output), OR
-          // 3. Both
-          const needsAgentStream = (tools && tools.length > 0) || responseSchema
+          // Single streaming path: agentStream (tools may be empty)
+          // Detailed one-time payload log (sanitized)
+          logLLMRequestPayload({
+            provider,
+            model,
+            streamType: 'agent',
+            streamOpts,
+            responseSchema,
+            tools
+          })
 
           // Wrap provider call with retry logic
           await withRetries(
             async () => {
-              if (needsAgentStream && providerAdapter.agentStream) {
-                // Use agentStream with tools and/or structured output
-                console.log('[LLMService] Calling agentStream with toolMeta:', { requestId: context.contextId, contextId: context.contextId })
-                const policyTools = (tools && tools.length)
-                  ? wrapToolsWithPolicy(tools, {
-                      // Disable dedupe for fs.read_lines/fs.read_file to ensure RAW text is returned (no cached JSON stubs)
-                      dedupeReadLines: false,
-                      maxReadLinesPerFile: 1,
-                      dedupeReadFile: false,
-                      maxReadFilePerFile: 1,
-                    })
-                  : []
-                streamHandle = await providerAdapter.agentStream({
-                  ...streamOpts,
-                  tools: policyTools,
-                  responseSchema,
-                  toolMeta: { requestId: context.contextId }, // Use contextId as requestId
-                  onToolStart: eventHandlers.onToolStart,
-                  onToolEnd: eventHandlers.onToolEnd,
-                  onToolError: eventHandlers.onToolError
-                })
-              } else {
-                // Use regular chatStream (no tools, no structured output)
-                streamHandle = await providerAdapter.chatStream(streamOpts)
-              }
+              const policyTools = (tools && tools.length)
+                ? wrapToolsWithPolicy(tools, {
+                    // Disable dedupe for fsReadLines/fsReadFile to ensure RAW text is returned (no cached JSON stubs)
+                    dedupeReadLines: false,
+                    maxReadLinesPerFile: 1,
+                    dedupeReadFile: false,
+                    maxReadFilePerFile: 1,
+                  })
+                : []
+              streamHandle = await providerAdapter.agentStream({
+                ...streamOpts,
+                tools: policyTools,
+                responseSchema,
+                toolMeta: { requestId: context.contextId }, // Use contextId as requestId
+                onToolStart: eventHandlers.onToolStart,
+                onToolEnd: eventHandlers.onToolEnd,
+                onToolError: eventHandlers.onToolError
+              })
             },
             {
               max: 3,
               maxWaitMs: 60000,
               onRateLimitWait: ({ attempt, waitMs, reason }) => {
-                console.log(`[LLMService] Rate limit retry wait: ${waitMs}ms (attempt ${attempt})`)
+
 
                 // Emit event to UI
                 flowAPI.emitExecutionEvent({
@@ -639,7 +803,7 @@ class LLMService {
           // Check if this was a rate limit error and update tracker
           const rateLimitInfo = parseRateLimitError(e)
           if (rateLimitInfo.isRateLimit) {
-            console.log(`[LLMService] Learning from rate limit error:`, rateLimitInfo)
+
             rateLimitTracker.updateFromError(provider as any, model, e, rateLimitInfo)
           }
 
@@ -649,7 +813,7 @@ class LLMService {
       })
     } catch (e: any) {
       const errorMessage = e.message || String(e)
-      console.error(`[LLMService] Error during chat:`, errorMessage)
+
 
       // Treat cancellations/terminations as non-errors for UI event emission
       const isCancellation = /\b(cancel|canceled|cancelled|abort|aborted|terminate|terminated|stop|stopped)\b/i.test(errorMessage)
@@ -657,7 +821,7 @@ class LLMService {
         // Send error event to UI only for real errors
         eventHandlers.onError(errorMessage)
       } else {
-        console.log('[LLMService] Cancellation detected, suppressing error event')
+
       }
 
       return {
@@ -679,20 +843,10 @@ class LLMService {
         messageHistory: [...updatedContext.messageHistory, { role: 'assistant', content: response }]
       }
 
-      console.log(`[LLMService] Added assistant response to context:`, {
-        provider,
-        model,
-        messageHistoryLength: finalContext.messageHistory.length,
-        lastMessage: finalContext.messageHistory[finalContext.messageHistory.length - 1]
-      })
+
     }
 
-    console.log(`[LLMService] Returning from chat():`, {
-      provider,
-      model,
-      responseLength: response.length,
-      messageHistoryLength: finalContext.messageHistory.length
-    })
+
 
     return {
       text: response,

@@ -190,12 +190,6 @@ export async function applyFileEditsInternal(
   return { ok: true, applied, results, dryRun: !!opts.dryRun, verification, fileEditsPreview }
 }
 
-/**
- * Build the edits schema prompt for LLM
- */
-function buildEditsSchemaPrompt(): string {
-  return `You are a code editor agent. Propose edits strictly as JSON.\n\nReturn ONLY a JSON object with this shape (no prose, no markdown fences):\n{\n  "edits": [\n    { "type": "replaceOnce", "path": "relative/path/from/workspace.ext", "oldText": "...", "newText": "..." },\n    { "type": "insertAfterLine", "path": "relative/path/from/workspace.ext", "line": 42, "text": "..." },\n    { "type": "replaceRange", "path": "relative/path/from/workspace.ext", "start": 120, "end": 140, "text": "..." }\n  ]\n}\nRules:\n- Paths are relative to the workspace root.\n- Use smallest, precise edits.\n- Do not include explanations.`
-}
 
 /**
  * Extract JSON object from LLM output
@@ -294,6 +288,9 @@ export function registerEditsHandlers(ipcMain: IpcMain): void {
     }
 
     let buffer = ''
+    if (!provider.agentStream) {
+      return { ok: false, error: 'Provider does not support agentStream' }
+    }
     await provider.agentStream({
       apiKey: key,
       model,

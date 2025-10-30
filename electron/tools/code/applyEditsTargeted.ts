@@ -5,8 +5,8 @@ import { verifyTypecheck as tsVerify } from '../../refactors/ts'
 import fs from 'node:fs/promises'
 
 export const applyEditsTargetedTool: AgentTool = {
-  name: 'code.apply_edits_targeted',
-  description: 'Apply targeted edits with AST-first rewrites (ast-grep) and optional text edits. Prefer this over bulk reads for discovery. languages:\u00a0\u201cauto\u201d targets all registered parsers (JS/TS/TSX/JSX/HTML/CSS + Python/Go/Java/C/CPP/C#/PHP/Ruby/Kotlin/Swift when installed). Supports dryRun and ranges-only. Workflow: search → expand minimal region → draft edits with dryRun:true (or rangesOnly) → verify → finalize.',
+  name: 'codeApplyEditsTargeted',
+  description: 'Apply targeted edits with AST-first rewrites (ast-grep) and optional text edits. Best for structural changes; supports dryRun and rangesOnly. Workflow: search → expand minimal region → dryRun edits → verify → finalize.',
   parameters: {
     type: 'object',
     properties: {

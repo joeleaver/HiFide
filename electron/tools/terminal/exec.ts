@@ -5,7 +5,7 @@ import { useMainStore } from '../../store/index'
 import path from 'node:path'
 
 export const terminalExecTool: AgentTool = {
-  name: 'terminal.exec',
+  name: 'terminalExec',
   description: 'Execute a command in the persistent terminal session (visible in UI). Auto-creates session if needed. Output streams to the visible terminal panel.',
   parameters: {
     type: 'object',

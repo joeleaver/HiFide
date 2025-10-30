@@ -57,23 +57,24 @@ export function createTestTool(name: string = 'test_tool'): AgentTool {
  * Get API key for testing
  * Reads from environment variable or throws helpful error
  */
-export function getTestApiKey(provider: 'anthropic' | 'openai' | 'gemini'): string {
-  const envVars = {
+export function getTestApiKey(provider: 'anthropic' | 'openai' | 'gemini' | 'fireworks'): string {
+  const envVars: Record<string, string> = {
     anthropic: 'ANTHROPIC_API_KEY',
     openai: 'OPENAI_API_KEY',
-    gemini: 'GEMINI_API_KEY'
+    gemini: 'GEMINI_API_KEY',
+    fireworks: 'FIREWORKS_API_KEY'
   }
-  
+
   const envVar = envVars[provider]
   const apiKey = process.env[envVar]
-  
+
   if (!apiKey && getTestMode() !== 'replay') {
     throw new Error(
       `Missing API key for ${provider}.\n` +
       `Set ${envVar} environment variable or run tests in replay mode (TEST_MODE=replay).`
     )
   }
-  
+
   return apiKey || 'mock-api-key-for-replay'
 }
 
@@ -88,12 +89,12 @@ export function createMockProvider(
   
   return {
     id: 'mock',
-    
-    async chatStream({ onChunk, onDone, onError, onTokenUsage }) {
+
+    async agentStream({ onChunk, onDone, onError, onTokenUsage, tools }) {
       try {
         const response = responses[responseIndex % responses.length]
         responseIndex++
-        
+
         // Simulate streaming by chunking the response
         const chunkSize = 10
         for (let i = 0; i < response.length; i += chunkSize) {
@@ -101,7 +102,7 @@ export function createMockProvider(
           onChunk(chunk)
           await new Promise(resolve => setTimeout(resolve, 10))
         }
-        
+
         // Simulate token usage
         if (onTokenUsage) {
           onTokenUsage({
@@ -110,26 +111,13 @@ export function createMockProvider(
             totalTokens: 10 + response.length / 4
           })
         }
-        
+
         onDone()
       } catch (e: any) {
         onError(e.message)
       }
-      
+
       return { cancel: () => {} }
-    },
-    
-    async agentStream({ onChunk, onDone, onError, onTokenUsage, tools }) {
-      // For mock, just use chatStream behavior
-      return this.chatStream!({ 
-        apiKey: 'mock',
-        model: 'mock',
-        messages: [],
-        onChunk, 
-        onDone, 
-        onError, 
-        onTokenUsage 
-      })
     }
   }
 }

@@ -3,7 +3,7 @@ import { resolveWithinWorkspace } from '../utils'
 import fs from 'node:fs/promises'
 
 export const removeTool: AgentTool = {
-  name: 'fs.remove',
+  name: 'fsRemove',
   description: 'Remove a file or directory from the workspace (recursive/force by default). USE WITH CARE.',
   parameters: {
     type: 'object',

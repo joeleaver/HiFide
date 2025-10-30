@@ -9,9 +9,9 @@ import { astGrepRewrite } from '../astGrep'
  * - callee: "myFn", newCallee: "yourFn"
  */
 export const replaceCallTool: AgentTool = {
-  name: 'code.replace_call',
+  name: 'codeReplaceCall',
   description:
-    'Replace function/method calls while preserving arguments using ast-grep. Prefer this for refactors instead of raw text replace. Works with dotted callees like console.log.',
+    'Replace function/method calls while preserving arguments using ast-grep. Prefer for refactors over text replace; supports dotted callees like console.log.',
   parameters: {
     type: 'object',
     properties: {

@@ -5,7 +5,7 @@ import { getKbIndexer } from '../../core/state'
 
 export const knowledgeBaseSearchTool: AgentTool = {
   name: 'knowledgeBaseSearch',
-  description: 'Search the project Knowledge Base (single source of truth for documentation). Use this to retrieve and reference docs. If information is missing, prefer creating or updating an entry with knowledgeBaseStore instead of writing files.',
+  description: 'Search the project Knowledge Base for documentation. If information is missing, create or update entries with knowledgeBaseStore instead of writing files.',
   parameters: {
     type: 'object',
     properties: {

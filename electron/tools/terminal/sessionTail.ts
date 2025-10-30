@@ -2,7 +2,7 @@ import type { AgentTool } from '../../providers/provider'
 import { redactOutput } from '../utils'
 
 export const sessionTailTool: AgentTool = {
-  name: 'terminal.session_tail',
+  name: 'terminalSessionTail',
   description: 'Return the last part of the live buffer (small tail only) to inspect recent output without flooding tokens.',
   parameters: {
     type: 'object',

@@ -1,4 +1,6 @@
 import OpenAI from 'openai'
+import { logProviderHttp } from './provider'
+
 import type { ProviderAdapter, StreamHandle, ChatMessage, AgentTool } from './provider'
 import { validateJson } from './jsonschema'
 import { withRetries } from './retry'
@@ -22,9 +24,12 @@ const toHeaderMap = (h: any): Record<string, string> => {
   return map
 }
 
-// Helper to map our ChatMessage[] to Responses API input format
-function toResponsesInput(messages: ChatMessage[]) {
-  return messages.map((m) => ({ role: m.role as any, content: m.content }))
+// Helper to split system instructions (Responses API uses top-level 'instructions')
+function splitInstructions(messages: ChatMessage[]) {
+  const sys = (messages || []).filter(m => m.role === 'system').map(m => m.content).filter(Boolean)
+  const instructions = sys.length ? sys.join('\n\n') : undefined
+  const input = (messages || []).filter(m => m.role !== 'system').map((m) => ({ role: m.role as any, content: m.content }))
+  return { instructions, input }
 }
 
 // Note: We no longer maintain session state for conversation chaining.
@@ -34,122 +39,6 @@ function toResponsesInput(messages: ChatMessage[]) {
 
 export const OpenAIProvider: ProviderAdapter = {
   id: 'openai',
-
-  // Plain chat (Responses API). We use non-stream + chunked emit for reliability; can be upgraded to true streaming.
-  async chatStream({ apiKey, model, messages, temperature, reasoningEffort, emit: _emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
-    const client = new OpenAI({ apiKey })
-
-    const holder: { stream?: any; cancelled?: boolean } = {}
-
-    ;(async () => {
-      let completed = false
-      try {
-        // Stateless: just send the messages, no session chaining
-        const isReasoningModel = /(o3|gpt-5|codex)/i.test(String(model || ''))
-        const requestOpts: any = {
-          model,
-          input: toResponsesInput(messages || []),
-        }
-        if (isReasoningModel && reasoningEffort) {
-          requestOpts.reasoning = { effort: reasoningEffort }
-        }
-        if (!isReasoningModel && typeof temperature === 'number') {
-          requestOpts.temperature = temperature
-        }
-        const stream: any = await withRetries(() => Promise.resolve(client.responses.stream(requestOpts)))
-        holder.stream = stream
-        try {
-          // Generic streaming loop: consume deltas as they arrive
-          for await (const evt of stream) {
-            try {
-              const type = evt?.type || ''
-              let text: string | null = null
-
-              if (typeof evt?.delta === 'string') {
-                text = evt.delta
-              } else if (typeof (evt as any)?.text === 'string') {
-                text = (evt as any).text
-              } else if (type?.includes('output_text') && typeof (evt as any)?.text === 'string') {
-                text = (evt as any).text
-              }
-
-              if (text) {
-                onChunk(text)
-              }
-            } catch (e: any) {
-              const error = e?.message || String(e)
-
-              onError(error)
-            }
-          }
-
-          // Extract token usage from final response
-          try {
-            const finalResponse = await stream.finalResponse()
-            if (finalResponse?.usage) {
-              const usage = {
-                inputTokens: finalResponse.usage.input_tokens || 0,
-                outputTokens: finalResponse.usage.output_tokens || 0,
-                totalTokens: finalResponse.usage.total_tokens || 0,
-              }
-              if (onTokenUsage) onTokenUsage(usage)
-            }
-          } catch (e) {
-            // Token usage extraction failed, continue anyway
-            console.error('[OpenAIProvider] Error extracting token usage:', e)
-          }
-          // Update rate limit tracker based on response headers, if available
-          try {
-            const hdrs = (stream as any)?.response?.headers
-            if (hdrs) {
-              rateLimitTracker.updateFromHeaders('openai', model as any, toHeaderMap(hdrs))
-            }
-          } catch {}
-
-          // Mark as completed and call onDone
-          completed = true
-          onDone()
-        } catch (e: any) {
-          if (e?.name === 'AbortError') return
-          const error = e?.message || String(e)
-          console.error('[OpenAIProvider] Error in stream iteration:', error)
-          onError(error)
-        }
-      } catch (e: any) {
-        if (e?.name === 'AbortError') return
-        const error = e?.message || String(e)
-        console.error('[OpenAIProvider] Error in chatStream:', error)
-        onError(error)
-      } finally {
-        // CRITICAL: Ensure onDone is always called if not already called
-        // This prevents the promise from hanging indefinitely
-        if (!completed) {
-          try {
-            console.warn('[OpenAIProvider] chatStream completed without explicit onDone call, calling now')
-            onDone()
-          } catch (e) {
-            console.error('[OpenAIProvider] Error calling onDone in finally:', e)
-          }
-        }
-      }
-    })().catch((e: any) => {
-      // Handle any errors that occur after chatStream returns
-      // This prevents unhandled promise rejections
-      console.error('[OpenAIProvider] Unhandled error in chatStream:', e)
-      try {
-        const error = e?.message || String(e)
-        onError(error)
-      } catch {}
-    })
-
-    return {
-      cancel: () => {
-        holder.cancelled = true
-        try { holder.stream?.controller?.abort?.() } catch {}
-        try { holder.stream?.close?.() } catch {}
-      },
-    }
-  },
 
   // Agent loop with tool-calling via Responses API
   async agentStream({ apiKey, model, messages, temperature, reasoningEffort, tools, responseSchema, emit: _emit, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
@@ -195,7 +84,8 @@ export const OpenAIProvider: ProviderAdapter = {
 
     // Responses API uses a different format than Chat Completions
     // Input can be: { role, content } OR { type, call_id, output } for function results
-    let conv: Array<any> = (messages || [])
+    const { instructions, input: initialInput } = splitInstructions(messages || [])
+    let conv: Array<any> = (initialInput || [])
       .map((m) => ({ role: m.role, content: m.content || '' }))
       .filter(m => m.content !== '') // Remove messages with empty content
 
@@ -212,7 +102,6 @@ export const OpenAIProvider: ProviderAdapter = {
 
     // Helper to prune conversation when agent requests it
     const pruneConversation = (summary: any) => {
-      const systemMsgs = (messages || []).filter(m => m.role === 'system')
       const recent = conv.slice(-5) // Keep last 5 messages
 
       const summaryMsg = {
@@ -220,8 +109,8 @@ export const OpenAIProvider: ProviderAdapter = {
         content: formatSummary(summary),
       }
 
-      // Rebuild conversation: system + summary + recent
-      conv = [...systemMsgs.map(m => ({ role: m.role, content: m.content })), summaryMsg, ...recent]
+      // Rebuild conversation: summary + recent (system stays in top-level instructions)
+      conv = [summaryMsg, ...recent]
     }
 
     const run = async () => {
@@ -234,15 +123,19 @@ export const OpenAIProvider: ProviderAdapter = {
           // Start a streaming turn; stream user-visible text as it comes, while accumulating any tool calls
           let useResponseFormat = !!responseSchema
           const mkOpts = (strict: boolean) => {
-            const isReasoningModel = /(o3|gpt-5|codex)/i.test(String(model || ''))
+            const isReasoningCapable = /(o3|gpt-5)/i.test(String(model || ''))
+            const isO3OrCodex = /(o3|codex)/i.test(String(model || ''))
             const opts: any = {
               model,
               input: conv as any,
             }
-            if (isReasoningModel && reasoningEffort) {
+            if (instructions) {
+              opts.instructions = instructions
+            }
+            if (isReasoningCapable && reasoningEffort) {
               opts.reasoning = { effort: reasoningEffort }
             }
-            if (!isReasoningModel && typeof temperature === 'number') {
+            if (typeof temperature === 'number' && !isO3OrCodex) {
               opts.temperature = temperature
             }
             // Only add tools if we have valid tools
@@ -268,49 +161,153 @@ export const OpenAIProvider: ProviderAdapter = {
           try {
             const opts = mkOpts(useResponseFormat)
             // Stateless: no session chaining
-            stream = await withRetries(() => Promise.resolve(client.responses.stream(opts)))
+            try {
+              // Exact request (env-gated)
+              logProviderHttp({ provider: 'openai', method: 'POST', url: 'https://api.openai.com/v1/responses', headers: { Authorization: `Bearer ${apiKey}` }, body: opts })
+              stream = await withRetries(() => Promise.resolve(client.responses.stream(opts)))
+            } catch (err: any) {
+              const msg = String(err?.message || err)
+              if (/Unsupported parameter/i.test(msg) && /temperature/i.test(msg)) {
+                try { delete (opts as any).temperature } catch {}
+                stream = await withRetries(() => Promise.resolve(client.responses.stream(opts)))
+              } else {
+                throw err
+              }
+            }
             holder.abort = () => { try { stream?.controller?.abort?.() } catch {} }
           } catch (err: any) {
             const msg = err?.message || ''
             if (useResponseFormat && (err?.status === 400 || /response_format|text\.format|json_schema|unsupported/i.test(msg))) {
               useResponseFormat = false
+              // Exact request (env-gated)
+              logProviderHttp({ provider: 'openai', method: 'POST', url: 'https://api.openai.com/v1/responses', headers: { Authorization: `Bearer ${apiKey}` }, body: mkOpts(false) })
               stream = await withRetries(() => Promise.resolve(client.responses.stream(mkOpts(false))))
             } else {
               throw err
             }
           }
 
-          // Buffer text chunks for this streamed turn. We'll decide after finalResponse
-          // whether to emit to chat (only when there are NO tool calls in this turn).
-          let turnBuffer = ''
+          // Track streaming tool calls (single-request handshake if SDK supports it)
+          const pendingArgs: Map<string, { name: string; buf: string }> = new Map()
+          let streamedToolActivity = false
+          const canSubmitToolOutputs = typeof (stream as any)?.submitToolOutputs === 'function'
+
+          // Fallback path: if submitToolOutputs fails (e.g., 400 No tool call found),
+          // push function_call + function_call_output into conv and abort the stream to retry via legacy path.
+          let abortEarly = false
+          const fallbackSubmit = (callId?: string, name?: string, argsObj?: any, output?: string) => {
+            try {
+              if (callId && name) {
+                conv.push({ type: 'function_call', call_id: callId, name, arguments: argsObj || {} })
+                conv.push({ type: 'function_call_output', call_id: callId, output: output ?? JSON.stringify({ error: 'Unknown tool error' }) })
+                streamedToolActivity = false // ensure legacy path will process on next turn
+              }
+            } catch {}
+            try { (stream as any)?.controller?.abort?.() } catch {}
+            abortEarly = true
+          }
+
+          // Track which output items are active (messages vs tool calls) by output_index/id
+          const activeItems = new Map<string, { type: string; role?: string }>()
+
           for await (const evt of stream) {
             try {
               const t = String(evt?.type || '')
-              // Skip streaming tool/function argument deltas to chat; they will be handled via onToolStart/onToolEnd
-              const isToolArgDelta = t.includes('function_call') || t.includes('tool') || t.includes('arguments')
 
-              if (!isToolArgDelta) {
-                let textToAdd = ''
+              // Output items lifecycle — do not print here; just track
+              if (t === 'response.output_item.added') {
+                const item = (evt as any)?.item
+                const id = String((item?.id || (evt as any)?.id || ''))
+                if (id) activeItems.set(id, { type: String(item?.type || ''), role: (item as any)?.role })
+                continue
+              }
+              if (t === 'response.output_item.done') {
+                const item = (evt as any)?.item
+                const id = String((item?.id || (evt as any)?.id || ''))
+                if (id) activeItems.delete(id)
+                continue
+              }
 
-                // Check different fields in priority order, but only use ONE per event
-
-                // Use if-else to ensure we only take one field
-                if (typeof (evt as any)?.delta === 'string' && (evt as any).delta) {
-                  textToAdd = (evt as any).delta
-                } else if (t.includes('output_text') && typeof (evt as any)?.text === 'string' && (evt as any).text) {
-                  textToAdd = (evt as any).text
-                } else if (typeof (evt as any)?.text === 'string' && (evt as any).text) {
-                  textToAdd = (evt as any).text
-                }
-
-                // Add text if we got any
-                if (textToAdd) {
-                  // Skip if this would create a duplicate (text equals entire buffer so far)
-                  if (textToAdd === turnBuffer) {
-                  } else {
-                    turnBuffer += textToAdd
+              // Function tool call argument streaming
+              if (canSubmitToolOutputs && t === 'response.function_call.arguments.delta') {
+                const callId = (evt as any)?.call_id || (evt as any)?.id || (evt as any)?.item?.id
+                const name = (evt as any)?.name || (evt as any)?.function?.name || (evt as any)?.item?.name
+                const delta = typeof (evt as any)?.delta === 'string' ? (evt as any).delta : (typeof (evt as any)?.arguments === 'string' ? (evt as any).arguments : '')
+                if (callId) {
+                  if (!pendingArgs.has(callId)) {
+                    pendingArgs.set(callId, { name: String(name || ''), buf: '' })
+                    try { onToolStart?.({ callId, name: toolMap.get(String(name || ''))?.name || String(name || '') }) } catch {}
                   }
+                  const rec = pendingArgs.get(callId)!
+                  rec.buf += (delta || '')
+                  streamedToolActivity = true
+                  continue
                 }
+              }
+
+              if (canSubmitToolOutputs && t === 'response.function_call.completed') {
+                const callId = (evt as any)?.call_id || (evt as any)?.id || (evt as any)?.item?.id
+                const nameSafe = String((evt as any)?.name || (evt as any)?.function?.name || (evt as any)?.item?.name || '')
+                const rec = callId ? pendingArgs.get(callId) : undefined
+                const name = rec?.name || nameSafe
+                let argsObj: any = {}
+                try {
+                  const raw = rec?.buf ?? ((evt as any)?.arguments ?? '')
+                  if (typeof raw === 'string' && raw.trim()) {
+                    argsObj = JSON.parse(raw)
+                  }
+                } catch {}
+
+                const tool = toolMap.get(name)
+                if (!tool) {
+                  streamedToolActivity = true
+                  try { await (stream as any).submitToolOutputs?.([{ call_id: callId, output: JSON.stringify({ error: `Tool ${name} not found` }) }]) } catch (e) { fallbackSubmit(callId, name, argsObj, JSON.stringify({ error: `Tool ${name} not found` })) }
+                  if (callId) pendingArgs.delete(callId)
+                  continue
+                }
+
+                const schema = (tool as any)?.parameters
+                const v = validateJson(schema, argsObj)
+                if (!v.ok) {
+                  streamedToolActivity = true
+                  try { await (stream as any).submitToolOutputs?.([{ call_id: callId, output: JSON.stringify({ error: `Validation error: ${v.errors || 'invalid input'}` }) }]) } catch (e) { fallbackSubmit(callId, name, argsObj, JSON.stringify({ error: `Validation error: ${v.errors || 'invalid input'}` })) }
+                  if (callId) pendingArgs.delete(callId)
+                  continue
+                }
+
+                let result: any
+                try {
+                  result = await Promise.resolve(tool.run(argsObj, toolMeta))
+                  try { onToolEnd?.({ callId, name: tool?.name || name, result }) } catch {}
+                } catch (err: any) {
+                  const errMsg = err?.message || String(err)
+                  try { onToolError?.({ callId, name: tool?.name || name, error: errMsg }) } catch {}
+                  streamedToolActivity = true
+                  try { await (stream as any).submitToolOutputs?.([{ call_id: callId, output: JSON.stringify({ error: errMsg }) }]) } catch (e) { fallbackSubmit(callId, name, argsObj, JSON.stringify({ error: errMsg })) }
+                  if (callId) pendingArgs.delete(callId)
+                  continue
+                }
+
+                // Format output (no minification/compression; return raw result)
+                const output: string = typeof result === 'string' ? result : JSON.stringify(result)
+
+                streamedToolActivity = true
+                try { await (stream as any).submitToolOutputs?.([{ call_id: callId, output }]) } catch (e) { fallbackSubmit(callId, name, argsObj, output) }
+                if (callId) pendingArgs.delete(callId)
+                continue
+              }
+
+              // Strictly print only output text stream events
+              if (t === 'response.output_text.delta') {
+                const delta = (evt as any)?.delta
+                if (typeof delta === 'string' && delta) {
+                  try { onChunk(delta) } catch (e) { try { onError(String(e)) } catch {} }
+                }
+                continue
+              }
+              if (t === 'response.output_text.done') {
+                // no-op; end of text streaming for current item
+                continue
               }
             } catch (e: any) {
               const error = e?.message || String(e)
@@ -319,7 +316,16 @@ export const OpenAIProvider: ProviderAdapter = {
           }
 
           // After stream completes, get the final response with complete output array
-          const finalResponse = await stream.finalResponse()
+          let finalResponse: any
+          try {
+            finalResponse = await stream.finalResponse()
+          } catch (e) {
+            if (abortEarly) {
+              finalResponse = { output: [] }
+            } else {
+              throw e
+            }
+          }
           // Update rate limit tracker from headers on streamed agent turn
           try {
             const hdrs = (stream as any)?.response?.headers || (finalResponse as any)?.response?.headers
@@ -330,8 +336,9 @@ export const OpenAIProvider: ProviderAdapter = {
 
 
           // Extract function calls from the output array and add them to conversation
+          // If we already handled tool calls via streaming submitToolOutputs, skip this legacy path
           const toolCalls: Array<{ id: string; name: string; arguments: any }> = []
-          if (Array.isArray(finalResponse?.output)) {
+          if (!streamedToolActivity && Array.isArray(finalResponse?.output)) {
             for (const item of finalResponse.output) {
 
               if (item.type === 'function_call') {
@@ -419,10 +426,7 @@ export const OpenAIProvider: ProviderAdapter = {
                 if (perTurnToolCache.has(dedupeKey)) {
                   result = perTurnToolCache.get(dedupeKey)
                 } else {
-                  // Prefer raw code blocks for read_lines to help LLM comprehension
-                if (originalName === 'fs.read_lines' && args && args.includeLineNumbers !== false) {
-                  args.includeLineNumbers = false
-                }
+
                 result = await Promise.race([
                     Promise.resolve(tool.run(args, toolMeta)),
                     new Promise((_, reject) => setTimeout(() => reject(new Error(`Tool '${originalName}' timed out after ${timeoutMs}ms`)), timeoutMs))
@@ -439,94 +443,9 @@ export const OpenAIProvider: ProviderAdapter = {
                   pruneSummary = result._meta.summary
                 }
 
-                // For fs.read_file and fs.read_lines, return RAW text with no minification/JSON
-                let output: string
-                if (originalName === 'fs.read_file') {
-                  if (result && result.ok === false) {
-                    output = `Error: ${String(result?.error || 'Unknown error')}`
-                  } else if (typeof result?.content === 'string') {
-                    output = result.content
-                  } else {
-                    output = ''
-                  }
-                } else if (originalName === 'fs.read_lines') {
-                  if (result && result.ok === false) {
-                    output = `Error: ${String(result?.error || 'Unknown error')}`
-                  } else if (typeof result?.text === 'string') {
-                    output = result.text
-                  } else if (Array.isArray(result?.lines)) {
-                    const eol = (result?.eol === 'crlf') ? '\r\n' : '\n'
-                    output = result.lines.map((l: any) => (l?.text ?? '')).join(eol)
-                  } else {
-                    output = ''
-                  }
-                } else if (originalName === 'workspace.search' && (args as any)?.action === 'expand') {
-                  const d: any = result && (result as any).data ? (result as any).data : result
-                  output = typeof d?.preview === 'string' ? d.preview : (typeof d?.data?.preview === 'string' ? d.data.preview : '')
-                } else if (originalName === 'workspace.jump') {
-                  const d: any = result && (result as any).data ? (result as any).data : result
-                  output = typeof d?.preview === 'string' ? d.preview : (typeof d?.data?.preview === 'string' ? d.data.preview : '')
-                } else if (originalName === 'text.grep') {
-                  if (result && (result as any).ok === false) {
-                    output = `Error: ${String((result as any)?.error || 'Unknown error')}`
-                  } else {
-                    const d: any = result && (result as any).data ? (result as any).data : result
-                    const m = Array.isArray(d?.matches) && d.matches.length ? d.matches[0] : null
-                    if (m) {
-                      const before = Array.isArray(m.before) ? m.before : []
-                      const after = Array.isArray(m.after) ? m.after : []
-                      const lines = [...before, (m.line ?? ''), ...after]
-                      output = lines.join('\n')
-                    } else {
-                      output = ''
-                    }
-                  }
-                } else if (originalName === 'code.search_ast') {
-                  if (result && (result as any).ok === false) {
-                    output = `Error: ${String((result as any)?.error || 'Unknown error')}`
-                  } else {
-                    const d: any = result && (result as any).data ? (result as any).data : result
-                    const m = Array.isArray(d?.matches) && d.matches.length ? d.matches[0] : null
-                    output = m ? String(m.snippet || m.text || '') : ''
-                  }
-                } else if (originalName === 'index.search') {
-                  if (result && (result as any).ok === false) {
-                    output = `Error: ${String((result as any)?.error || 'Unknown error')}`
-                  } else {
-                    const d: any = result && (result as any).data ? (result as any).data : result
-                    const chunks = Array.isArray(d?.chunks) ? d.chunks : (Array.isArray(d?.data?.chunks) ? d.data.chunks : [])
-                    const c0 = chunks && chunks.length ? chunks[0] : null
-                    output = c0 && typeof c0.text === 'string' ? c0.text : ''
-                  }
-                } else if (originalName === 'terminal.session_tail') {
-                  if (result && (result as any).ok === false) {
-                    output = `Error: ${String((result as any)?.error || 'Unknown error')}`
-                  } else {
-                    const d: any = result && (result as any).data ? (result as any).data : result
-                    output = typeof d?.tail === 'string' ? d.tail : (typeof d?.data?.tail === 'string' ? d.data.tail : '')
-                  }
-                } else if (originalName === 'terminal.session_search_output') {
-                  if (result && (result as any).ok === false) {
-                    output = `Error: ${String((result as any)?.error || 'Unknown error')}`
-                  } else {
-                    const d: any = result && (result as any).data ? (result as any).data : result
-                    const h0 = Array.isArray(d?.hits) ? d.hits[0] : (Array.isArray(d?.data?.hits) ? d.data.hits[0] : null)
-                    output = h0 ? String(h0.snippet || '') : ''
-                  }
-                } else if (originalName === 'kb.search') {
-                  if (result && (result as any).ok === false) {
-                    output = `Error: ${String((result as any)?.error || 'Unknown error')}`
-                  } else {
-                    const d: any = result && (result as any).data ? (result as any).data : result
-                    const r0 = Array.isArray(d?.results) ? d.results[0] : (Array.isArray(d?.data?.results) ? d.data.results[0] : null)
-                    output = r0 ? String(r0.excerpt || '') : ''
-                  }
-                } else {
-                  // Minify heavy tool results before adding to conversation
-                  const { minifyToolResult } = await import('./toolResultMinify')
-                  const compact = minifyToolResult(originalName, result)
-                  output = typeof compact === 'string' ? compact : JSON.stringify(compact)
-                }
+                // Format tool result (no special fsReadFile/fsReadLines handling)
+                // Return raw tool result (no minification/compaction)
+                const output: string = typeof result === 'string' ? result : JSON.stringify(result)
                 conv.push({
                   type: 'function_call_output',
                   call_id: tc.id,
@@ -556,16 +475,6 @@ export const OpenAIProvider: ProviderAdapter = {
             continue
           }
 
-          // No tool calls in this streamed turn -> emit buffered assistant text now
-          if (turnBuffer) {
-            try {
-              onChunk(turnBuffer)
-            } catch (e: any) {
-              const error = e?.message || String(e)
-              onError(error)
-              return
-            }
-          }
           // Extract token usage from final response
           try {
             if (finalResponse?.usage) {
@@ -580,7 +489,7 @@ export const OpenAIProvider: ProviderAdapter = {
               }
             }
           } catch (e) {
-            console.error('[OpenAI agentStream] Error extracting token usage:', e)
+            // Token usage extraction failed
           }
 
           // Done - ALWAYS call onDone() to resolve promise
@@ -600,13 +509,12 @@ export const OpenAIProvider: ProviderAdapter = {
       }
 
       // If we exit the loop without returning (iteration limit or cancelled), call onDone
-      console.log('[OpenAI agentStream] Loop exited normally (iteration limit or cancelled)')
+      // Loop exited normally (iteration limit or cancelled)
       onDone()
     }
 
     // Wait for run() to complete before returning
     await run().catch((e: any) => {
-      console.error('[OpenAIProvider] Error in agentStream run():', e)
       try {
         const msg = e?.message || ''
         if (e?.name === 'AbortError' || /cancel/i.test(msg)) {

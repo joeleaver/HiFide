@@ -1676,6 +1676,11 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     if (!requestId || requestId !== get().feRequestId) return
     if (!text || !nodeId) return
 
+
+    if (process.env.HF_FLOW_DEBUG === '1') {
+      try { console.log('[FlowUI] chunk received', { requestId, nodeId, len: text.length }) } catch {}
+    }
+
     // Append text chunk to the node's execution box
     const node = get().feNodes.find(n => n.id === nodeId)
     if (!node) return
@@ -1697,6 +1702,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   feHandleToolStart: (requestId: string, toolName: string, nodeId?: string, toolArgs?: any, callId?: string, provider?: string, model?: string) => {
     if (!requestId || requestId !== get().feRequestId) return
     if (!nodeId) return
+
+    console.log('[FlowUI] tool_start received', { requestId, nodeId, toolName, callId, provider, model })
 
     const activeTools = new Set(get().feActiveTools)
     activeTools.add(toolName)
@@ -1726,15 +1733,16 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
     if (toolArgs) {
       const normalizedToolName = toolName.replace(/\./g, '_')
+      const toolKey = normalizedToolName.replace(/[_.-]/g, '').toLowerCase()
 
       if (normalizedToolName === 'fs_read_file' || normalizedToolName === 'fs_write_file' ||
-          normalizedToolName === 'fs_read_dir' || normalizedToolName === 'fs_create_dir') {
+          normalizedToolName === 'fs_read_dir' || normalizedToolName === 'fs_create_dir' || toolKey === 'fsreadfile' || toolKey === 'fswritefile' || toolKey === 'fsreaddir' || toolKey === 'fscreatedir') {
         const path = toolArgs.path || toolArgs.file_path || toolArgs.dir_path
         if (path) {
           badgeMetadata = { filePath: path }
         }
       } else if (normalizedToolName === 'index_search') {
-      } else if (normalizedToolName === 'fs_read_lines') {
+      } else if (normalizedToolName === 'fs_read_lines' || toolKey === 'fsreadlines') {
         const path = toolArgs.path
         const mode = String(toolArgs.mode || 'range')
         let lineRange: string | undefined
@@ -1767,7 +1775,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             fullParams: toolArgs
           }
         }
-      } else if (normalizedToolName === 'code_search_ast') {
+      } else if (normalizedToolName === 'code_search_ast' || toolKey === 'codesearchast') {
         const pattern = toolArgs.pattern
         if (pattern) {
           const languages = toolArgs.languages && Array.isArray(toolArgs.languages) && toolArgs.languages.length
@@ -1796,7 +1804,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           }
 
         }
-      } else if (normalizedToolName === 'workspace_search') {
+      } else if (toolKey === 'workspacesearch') {
         // Compact text-only rendering of inputs; no schema change, only UI formatting
         // Prefer queries[] if provided; otherwise, support a simple '|' delimited query string for display only
         const termsRaw: string[] = Array.isArray(toolArgs.queries) && toolArgs.queries.length
@@ -1853,7 +1861,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             }
           }))
         }
-      } else if (normalizedToolName === 'workspace_jump') {
+      } else if (toolKey === 'workspacejump') {
         const target = String(toolArgs.target || '').trim()
         if (target) {
           badgeMetadata = {
@@ -1931,7 +1939,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             }
           }))
         }
-      } else if (normalizedToolName === 'workspace_map') {
+      } else if (normalizedToolName === 'workspace_map' || toolKey === 'workspacemap') {
         const maxPerSection = typeof toolArgs.maxPerSection === 'number' ? toolArgs.maxPerSection : undefined
         badgeMetadata = {
           query: maxPerSection ? `maxPerSection=${maxPerSection}` : 'project map',
@@ -1985,6 +1993,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     activeTools.delete(toolName)
     __queueFeActiveTools(set, get, activeTools)
 
+    console.log('[FlowUI] tool_end received', { requestId, nodeId, toolName, callId })
+
     // Record event (buffered)
     __queueFeEvent(set, get, {
       requestId,
@@ -1997,9 +2007,10 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     const state = store.getState() as any
     if (callId && nodeId && state.updateBadgeInNodeExecution) {
       const normalizedToolName = toolName.replace(/\./g, '_')
+      const toolKey = normalizedToolName.replace(/[_.-]/g, '').toLowerCase()
 
       // Handle index.search results
-      if (normalizedToolName === 'index_search' && result && Array.isArray(result.chunks) && result.chunks.length) {
+      if ((normalizedToolName === 'index_search' || toolKey === 'indexsearch') && result && Array.isArray(result.chunks) && result.chunks.length) {
         // Store search results in unified cache using callId as key
         get().registerToolResult({ key: callId, data: result.chunks })
 
@@ -2022,7 +2033,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       }
 
       // Handle workspace.search results
-      if (normalizedToolName === 'workspace_search' && result?.ok && result.data) {
+      if (toolKey === 'workspacesearch' && result?.ok && result.data) {
         const resultData = result.data
         const resultCount = resultData.results?.length || 0
 
@@ -2101,7 +2112,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         return
       }
       // Handle workspace.jump results
-      if (normalizedToolName === 'workspace_jump' && result?.ok) {
+      if ((normalizedToolName === 'workspace_jump' || toolKey === 'workspacejump') && result?.ok) {
         const resultData = result.data || {}
         // Store full result in unified cache
         get().registerToolResult({ key: callId, data: resultData })
@@ -2129,7 +2140,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         return
       }
       // Handle workspace.map results
-      if (normalizedToolName === 'workspace_map' && result?.ok) {
+      if ((normalizedToolName === 'workspace_map' || toolKey === 'workspacemap') && result?.ok) {
         const resultData = result.data || {}
         // Store full result in unified cache
         get().registerToolResult({ key: callId, data: resultData })
@@ -2154,7 +2165,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         return
       }
       // Handle fs.read_lines results
-      if (normalizedToolName === 'fs_read_lines' && result) {
+      if ((normalizedToolName === 'fs_read_lines' || toolKey === 'fsreadlines') && result) {
         // Store full result in unified cache using callId as key
         get().registerToolResult({ key: callId, data: result })
 
@@ -2174,7 +2185,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       }
 
       // Handle code.search_ast results
-      if (normalizedToolName === 'code_search_ast' && result?.ok) {
+      if ((normalizedToolName === 'code_search_ast' || toolKey === 'codesearchast') && result?.ok) {
         const matchCount = result.matches?.length || 0
 
         // Store full result in unified cache
@@ -2201,20 +2212,37 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       // Prefer pointer-based interactive payload to avoid large store payloads
       let interactive: any = undefined
       if (result && Array.isArray(result.fileEditsPreview) && result.fileEditsPreview.length) {
-        // Compute total line additions/removals for summary pills
+        // Compute total line additions/removals for summary pills using LCS (robust, line-based)
         const compute = (before?: string, after?: string) => {
           const a = (before ?? '').split(/\r?\n/)
           const b = (after ?? '').split(/\r?\n/)
-          let i = 0, j = 0, added = 0, removed = 0
-          while (i < a.length && j < b.length) {
-            if (a[i] === b[j]) { i++; j++; continue }
-            if (i + 1 < a.length && a[i + 1] === b[j]) { removed++; i++; continue }
-            if (j + 1 < b.length && a[i] === b[j + 1]) { added++; j++; continue }
-            removed++; added++; i++; j++
+          const n = a.length
+          const m = b.length
+          if (n === 0 && m === 0) return { added: 0, removed: 0 }
+
+          // Use O(n*m) time, O(m) memory dynamic programming for LCS length
+          // Falls back to a quick heuristic if extremely large to avoid perf issues
+          const LIMIT = 1_000_000 // ~1e6 cell ops
+          if (n * m > LIMIT) {
+            // Heuristic fallback (fast): count tails at first mismatch
+            let i = 0, j = 0
+            while (i < n && j < m && a[i] === b[j]) { i++; j++ }
+            return { added: (m - j), removed: (n - i) }
           }
-          if (i < a.length) removed += (a.length - i)
-          if (j < b.length) added += (b.length - j)
-          return { added, removed }
+
+          let prev = new Uint32Array(m + 1)
+          let curr = new Uint32Array(m + 1)
+          for (let i = 1; i <= n; i++) {
+            const ai = a[i - 1]
+            for (let j = 1; j <= m; j++) {
+              curr[j] = ai === b[j - 1] ? (prev[j - 1] + 1) : (prev[j] > curr[j - 1] ? prev[j] : curr[j - 1])
+            }
+            // swap
+            const tmp = prev; prev = curr; curr = tmp
+            curr.fill(0)
+          }
+          const lcs = prev[m]
+          return { added: m - lcs, removed: n - lcs }
         }
         let totAdded = 0, totRemoved = 0
         for (const f of result.fileEditsPreview) {
@@ -2266,6 +2294,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     const activeTools = new Set(get().feActiveTools)
     activeTools.delete(toolName)
     __queueFeActiveTools(set, get, activeTools)
+
+    console.log('[FlowUI] tool_error received', { requestId, nodeId, toolName, callId, error })
 
     // Record event (buffered)
     __queueFeEvent(set, get, {

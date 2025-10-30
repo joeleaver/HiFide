@@ -3,7 +3,7 @@ import { resolveWithinWorkspace } from '../utils'
 import fs from 'node:fs/promises'
 
 export const createDirTool: AgentTool = {
-  name: 'fs.create_dir',
+  name: 'fsCreateDir',
   description: 'Create a directory inside the workspace (recursive by default)',
   parameters: {
     type: 'object',

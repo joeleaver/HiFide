@@ -3,7 +3,7 @@ import { resolveWithinWorkspace } from '../utils'
 import fs from 'node:fs/promises'
 
 export const truncateFileTool: AgentTool = {
-  name: 'fs.truncate_file',
+  name: 'fsTruncateFile',
   description: 'Truncate a file to zero length (optionally create if missing).',
   parameters: {
     type: 'object',

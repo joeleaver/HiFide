@@ -202,7 +202,7 @@ export async function astGrepSearch(opts: AstGrepSearchOptions): Promise<AstGrep
   const include = (opts.includeGlobs && opts.includeGlobs.length ? opts.includeGlobs : ['**/*'])
   const exclude = [
     'node_modules/**', 'dist/**', 'dist-electron/**', 'release/**', '.git/**',
-    '.hifide-public/**', '.hifide_public/**',
+    '.hifide-public/**', '.hifide_public/**', '.hifide-private/**', '.hifide_private/**',
     ...(opts.excludeGlobs || [])
   ]
   const maxMatches = Math.max(1, opts.maxMatches ?? 500)

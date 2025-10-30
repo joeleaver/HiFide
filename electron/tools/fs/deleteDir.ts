@@ -3,7 +3,7 @@ import { resolveWithinWorkspace } from '../utils'
 import fs from 'node:fs/promises'
 
 export const deleteDirTool: AgentTool = {
-  name: 'fs.delete_dir',
+  name: 'fsDeleteDir',
   description: 'Delete a directory from the workspace (recursive, force by default). USE WITH CARE.',
   parameters: {
     type: 'object',

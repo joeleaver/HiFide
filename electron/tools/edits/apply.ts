@@ -2,8 +2,8 @@ import type { AgentTool } from '../../providers/provider'
 import { applyFileEditsInternal } from '../utils'
 
 export const applyEditsTool: AgentTool = {
-  name: 'edits.apply',
-  description: 'Apply a list of precise edits to files. Use this when you know exactly what to change. Prefer small, surgical diffs. If uncertain, consider code.apply_edits_targeted with a dry-run preview first.',
+  name: 'editsApply',
+  description: 'Apply precise text edits to files. Use when you know the exact change; keep diffs small. If uncertain, try codeApplyEditsTargeted with dryRun first.',
   parameters: {
     type: 'object',
     properties: {

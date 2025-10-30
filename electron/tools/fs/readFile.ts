@@ -9,8 +9,8 @@ import { resolveWithinWorkspace } from '../utils'
 import fs from 'node:fs/promises'
 
 export const readFileTool: AgentTool = {
-  name: 'fs.read_file',
-  description: 'Read a UTF-8 text file from the workspace. Use sparingly: prefer workspace.search to locate exact regions and then proceed to code.apply_edits_targeted or edits.apply. Avoid repeatedly reading many files without making edits or forming a concrete patch.',
+  name: 'fsReadFile',
+  description: 'Read a UTF-8 text file. Prefer workspaceSearch + fsReadLines for targeted reads; avoid bulk file reads without a concrete change plan.',
   parameters: {
     type: 'object',
     properties: { path: { type: 'string', description: 'Workspace-relative path' } },
@@ -21,9 +21,11 @@ export const readFileTool: AgentTool = {
     try {
       const abs = resolveWithinWorkspace(rel)
       const content = await fs.readFile(abs, 'utf-8')
-      return { ok: true, content }
+      // Always return raw text
+      return content
     } catch (e: any) {
-      return { ok: false, error: e?.message || String(e) }
+      // Return error as plain string for consistency
+      return `Error: ${e?.message || String(e)}`
     }
   },
 }

@@ -3,7 +3,7 @@ import { useMainStore } from '../../store/index'
 import path from 'node:path'
 
 export const sessionRestartTool: AgentTool = {
-  name: 'terminal.session_restart',
+  name: 'terminalSessionRestart',
   description: 'Restart the presented terminal session (kills and recreates).',
   parameters: { type: 'object', properties: { shell: { type: 'string' }, cwd: { type: 'string' }, cols: { type: 'integer' }, rows: { type: 'integer' } }, additionalProperties: false },
   run: async (args: { shell?: string; cwd?: string; cols?: number; rows?: number }, meta?: { requestId?: string }) => {

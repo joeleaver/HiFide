@@ -31,10 +31,6 @@ jest.mock('../../../../providers/rate-limit-tracker', () => ({
 jest.mock('../../../../core/state', () => {
   const MockProvider: ProviderAdapter = {
     id: 'mock',
-    async chatStream({ onChunk, onDone, onError }) {
-      try { onChunk('[mock-chat]'); onDone() } catch (e: any) { onError(e.message || String(e)) }
-      return { cancel: () => {} }
-    },
     async agentStream({ tools, onChunk, onDone, onError, onToolStart, onToolEnd, toolMeta }) {
       try {
         const tool = tools?.[0]
@@ -87,78 +83,83 @@ describe('fs.read_lines (real)', () => {
     return arr.join('\n') + '\n'
   }
 
-  test('head default returns 250 lines', async () => {
+  test('head default returns ~250 lines (raw text)', async () => {
     await fs.writeFile(path.join(tmp, 'a.txt'), makeFile(1000), 'utf-8')
     const flow = createMockFlowAPI()
     const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
     const tool = wrapWithArgs(readLinesTool, { path: 'a.txt', mode: 'head' })
     const res = await llmRequestNode(flow as any, ctx as any, 'use tool', createMockNodeInputs({ tools: [tool] }) as any, createTestConfig())
     const parsed = JSON.parse(String(res.data))
-    expect(parsed.tool).toBe('fs.read_lines')
-    expect(parsed.result.ok).toBe(true)
-    expect(parsed.result.lineCount).toBe(250)
+    expect(parsed.tool).toBe('fsReadLines')
+    expect(typeof parsed.result).toBe('string')
+    // Verify first and last expected line markers appear
+    expect(parsed.result).toContain('Line 1')
+    expect(parsed.result).toContain('Line 250')
   })
 
-  test('range 101..120 returns 20 lines', async () => {
+  test('range 101..120 returns raw text for those lines', async () => {
     await fs.writeFile(path.join(tmp, 'b.txt'), makeFile(300), 'utf-8')
     const flow = createMockFlowAPI()
     const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
     const tool = wrapWithArgs(readLinesTool, { path: 'b.txt', mode: 'range', startLine: 101, endLine: 120 })
     const res = await llmRequestNode(flow as any, ctx as any, 'use tool', createMockNodeInputs({ tools: [tool] }) as any, createTestConfig())
     const parsed = JSON.parse(String(res.data))
-    expect(parsed.result.ok).toBe(true)
-    expect(parsed.result.lineCount).toBe(20)
-    expect(parsed.result.startLine).toBe(101)
-    expect(parsed.result.endLine).toBe(120)
+    expect(typeof parsed.result).toBe('string')
+    expect(parsed.result).toContain('Line 101')
+    expect(parsed.result).toContain('Line 120')
   })
 
-  test('tail 10 returns last 10 lines', async () => {
+  test('tail 10 returns raw text (last 10 lines)', async () => {
     await fs.writeFile(path.join(tmp, 'c.txt'), makeFile(50), 'utf-8')
     const flow = createMockFlowAPI()
     const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
     const tool = wrapWithArgs(readLinesTool, { path: 'c.txt', mode: 'tail', tailLines: 10 })
     const res = await llmRequestNode(flow as any, ctx as any, 'use tool', createMockNodeInputs({ tools: [tool] }) as any, createTestConfig())
     const parsed = JSON.parse(String(res.data))
-    expect(parsed.result.ok).toBe(true)
-    expect(parsed.result.lineCount).toBe(10)
+    expect(typeof parsed.result).toBe('string')
+    expect(parsed.result).toContain('Line 41')
+    expect(parsed.result).toContain('Line 50')
   })
 
-  test('regex finds lines with context', async () => {
+  test('regex returns first match block with context as raw text', async () => {
     await fs.writeFile(path.join(tmp, 'd.txt'), makeFile(120), 'utf-8')
     const flow = createMockFlowAPI()
     const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
     const tool = wrapWithArgs(readLinesTool, { path: 'd.txt', mode: 'regex', pattern: 'Line 4\\d', contextBefore: 1, contextAfter: 1, maxMatches: 3 })
     const res = await llmRequestNode(flow as any, ctx as any, 'use tool', createMockNodeInputs({ tools: [tool] }) as any, createTestConfig())
     const parsed = JSON.parse(String(res.data))
-    expect(parsed.result.ok).toBe(true)
-    expect(Array.isArray(parsed.result.matches)).toBe(true)
-    expect(parsed.result.matches.length).toBeGreaterThan(0)
+    expect(typeof parsed.result).toBe('string')
+    // Expect a block containing a 4x match with context lines around it
+    expect(parsed.result).toMatch(/Line 3\d/) // before context
+    expect(parsed.result).toMatch(/Line 4\d/) // core match
+    expect(parsed.result).toMatch(/Line 5\d/) // after context
   })
 
-  test('around mode returns window around focus line', async () => {
+  test('around mode returns raw text window around focus line', async () => {
     await fs.writeFile(path.join(tmp, 'e.txt'), makeFile(200), 'utf-8')
     const flow = createMockFlowAPI()
     const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
     const tool = wrapWithArgs(readLinesTool, { path: 'e.txt', mode: 'around', focusLine: 50, beforeLines: 2, afterLines: 2 })
     const res = await llmRequestNode(flow as any, ctx as any, 'use tool', createMockNodeInputs({ tools: [tool] }) as any, createTestConfig())
     const parsed = JSON.parse(String(res.data))
-    expect(parsed.result.ok).toBe(true)
-    expect(parsed.result.lineCount).toBe(5)
-    expect(parsed.result.startLine).toBe(48)
-    expect(parsed.result.endLine).toBe(52)
+    expect(typeof parsed.result).toBe('string')
+    expect(parsed.result).toContain('Line 48')
+    expect(parsed.result).toContain('Line 49')
+    expect(parsed.result).toContain('Line 50')
+    expect(parsed.result).toContain('Line 51')
+    expect(parsed.result).toContain('Line 52')
   })
 
-  test('around mode with window convenience param sets symmetric window', async () => {
+  test('around mode window param sets symmetric raw text window', async () => {
     await fs.writeFile(path.join(tmp, 'f.txt'), makeFile(300), 'utf-8')
     const flow = createMockFlowAPI()
     const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
     const tool = wrapWithArgs(readLinesTool, { path: 'f.txt', mode: 'around', focusLine: 100, window: 3 })
     const res = await llmRequestNode(flow as any, ctx as any, 'use tool', createMockNodeInputs({ tools: [tool] }) as any, createTestConfig())
     const parsed = JSON.parse(String(res.data))
-    expect(parsed.result.ok).toBe(true)
-    expect(parsed.result.lineCount).toBe(7)
-    expect(parsed.result.startLine).toBe(97)
-    expect(parsed.result.endLine).toBe(103)
+    expect(typeof parsed.result).toBe('string')
+    expect(parsed.result).toContain('Line 97')
+    expect(parsed.result).toContain('Line 103')
   })
 })
 

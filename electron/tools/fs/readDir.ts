@@ -10,8 +10,8 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 export const readDirTool: AgentTool = {
-  name: 'fs.read_dir',
-  description: 'List directory entries (name, isDirectory, path)',
+  name: 'fsReadDir',
+  description: 'List directory entries (name, isDirectory, path). Use for quick structure checks; to locate code, prefer workspaceSearch.',
   parameters: {
     type: 'object',
     properties: { path: { type: 'string', description: 'Workspace-relative path' } },

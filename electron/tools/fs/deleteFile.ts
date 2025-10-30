@@ -3,7 +3,7 @@ import { resolveWithinWorkspace } from '../utils'
 import fs from 'node:fs/promises'
 
 export const deleteFileTool: AgentTool = {
-  name: 'fs.delete_file',
+  name: 'fsDeleteFile',
   description: 'Delete a file from the workspace. If force=true, succeeds when the file is missing.',
   parameters: {
     type: 'object',

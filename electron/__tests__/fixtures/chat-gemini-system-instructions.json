@@ -10,12 +10,12 @@
       },
       {
         "role": "assistant",
-        "content": "Ahoy there, matey! What brings ye to me ol' ship today? Are ye lookin' fer treasure, or just a bit o' pirate cheer? Speak yer mind, and let's see what we can do, savvy?\n"
+        "content": "Ahoy there, matey! What brings ye to me ol' ship today? Be ye lookin' for treasure, a hearty tale, or somethin' else entirely? Spill yer guts, and let's see what we can do for ye!\n"
       }
     ],
-    "currentOutput": "Ahoy there, matey! What brings ye to me ol' ship today? Are ye lookin' fer treasure, or just a bit o' pirate cheer? Speak yer mind, and let's see what we can do, savvy?\n",
-    "sessionId": "test-session-1760550057675"
+    "currentOutput": "",
+    "sessionId": "test-session-1761768195111"
   },
-  "data": "Ahoy there, matey! What brings ye to me ol' ship today? Are ye lookin' fer treasure, or just a bit o' pirate cheer? Speak yer mind, and let's see what we can do, savvy?\n",
+  "data": "Ahoy there, matey! What brings ye to me ol' ship today? Be ye lookin' for treasure, a hearty tale, or somethin' else entirely? Spill yer guts, and let's see what we can do for ye!\n",
   "status": "success"
 }

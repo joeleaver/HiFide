@@ -31,6 +31,7 @@ import { truncateDirTool } from './fs/truncateDir'
 
 // Edits tools
 import { applyEditsTool } from './edits/apply'
+import { applyPatchTool } from './edits/applyPatch'
 
 // Index tools
 import { indexSearchTool } from './index/search'
@@ -89,6 +90,7 @@ export const agentTools: AgentTool[] = [
 
   // Edits tools
   applyEditsTool,
+  applyPatchTool,
 
   // Workspace (preferred discovery tools)
   searchWorkspaceTool,

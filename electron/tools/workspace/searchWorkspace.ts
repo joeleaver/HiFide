@@ -285,11 +285,22 @@ async function safeStatMtimeMs(abs: string): Promise<number> {
 }
 
 function clampPreview(text: string, maxLines: number): string {
-  const lines = (text || '').split(/\r?\n/)
-  if (lines.length <= maxLines) return text
-  const head = lines.slice(0, Math.max(1, Math.floor(maxLines/2)))
-  const tail = lines.slice(-Math.max(1, Math.ceil(maxLines/2)))
-  return head.join('\n') + '\n...\n' + tail.join('\n')
+  const s = String(text || '')
+  const MAX_CHARS = Math.max(512, Math.min(4000, maxLines * 160))
+  if (s.length > MAX_CHARS) {
+    const half = Math.floor(MAX_CHARS / 2)
+    return s.slice(0, half) + '\n...\n' + s.slice(-half)
+  }
+  const lines = s.split(/\r?\n/)
+  if (lines.length <= maxLines) return s
+  const head = lines.slice(0, Math.max(1, Math.floor(maxLines / 2)))
+  const tail = lines.slice(-Math.max(1, Math.ceil(maxLines / 2)))
+  const joined = head.join('\n') + '\n...\n' + tail.join('\n')
+  if (joined.length > MAX_CHARS) {
+    const h = Math.floor(MAX_CHARS / 2)
+    return joined.slice(0, h) + '\n...\n' + joined.slice(-h)
+  }
+  return joined
 }
 
 
@@ -347,7 +358,7 @@ function isExactBasenameMatch(pth: string, matched: Set<string>): boolean {
 
 // ---- Auto-refresh preflight ----------------------------------------------------------
 
-const defaultExcludes = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.cache', 'coverage', '.turbo', '.yarn', '.pnpm-store', 'out', '.idea', '.vscode', '.hifide-public', '.hifide_public'])
+const defaultExcludes = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.cache', 'coverage', '.turbo', '.yarn', '.pnpm-store', 'out', '.idea', '.vscode', '.hifide-public', '.hifide_public', '.hifide-private', '.hifide_private'])
 async function countWorkspaceFiles(root: string): Promise<number> {
   async function walk(dir: string): Promise<number> {
     let entries: any[] = []
@@ -580,8 +591,8 @@ export function computeAutoBudget(numTerms: number, provided?: number): number {
 
 
 export const searchWorkspaceTool: AgentTool = {
-  name: 'workspace.search',
-  description: 'Preferred entry point for workspace code discovery. Accepts natural-language or literal queries (mode="auto" runs semantic+grep+AST). Returns compact hits with handles. You can pass multiple queries via queries[] to batch in parallel. After results, select a handle and call again with action="expand" to fetch the full code region. Avoid repeating "search" unless changing filters. The tool dedupes identical queries for ~20s and returns bestHandle + topHandles to guide expansion. Example: "zustand store definition", "openai provider adapter", or "where do we create PTY?" After a couple of expand calls, switch to code.apply_edits_targeted or edits.apply to make minimal changes instead of scanning more files.',
+  name: 'workspaceSearch',
+  description: 'Unified workspace code search (semantic + ripgrep + AST). Start here to locate code: accepts natural-language or exact text and returns ranked hits with compact snippets and handles. Then call with action="expand" + a handle to fetch the full region; after a couple of expands, switch to codeApplyEditsTargeted or editsApply to change code.',
   parameters: {
     type: 'object',
     properties: {
@@ -613,14 +624,14 @@ export const searchWorkspaceTool: AgentTool = {
 
     // Handle expand action fast-path
     if (args.action === 'expand' && args.handle) {
-      const exp = await expandFromHandle(args.handle, { extraBefore: 25, extraAfter: 25, clampTo: args?.filters?.maxSnippetLines || 150 })
+      const exp = await expandFromHandle(args.handle, { extraBefore: 25, extraAfter: 25, clampTo: (args?.filters?.maxSnippetLines ?? 60) })
       if (!exp.ok) return { ok: false, error: (exp as any).error }
       const elapsedMs = Date.now() - t0
       const pathOut = String((exp as any).path || '').replace(/\\/g, '/')
       const linesOut = { start: (exp as any).startLine, end: (exp as any).endLine }
       const content = (exp as any).preview
       const results = [{ type: 'EXPANDED', path: pathOut, lines: linesOut, content }]
-      return { ok: true, data: { path: pathOut, lines: linesOut, preview: content, results, count: results.length, summary: [`Expanded 1 snippet from ${pathOut}:${linesOut.start}-${linesOut.end}`], meta: { elapsedMs } } }
+      return { ok: true, data: { path: pathOut, lines: linesOut, preview: content, results, count: results.length, summary: [`Expanded 1 snippet from ${pathOut}:${linesOut.start}-${linesOut.end}`], meta: { elapsedMs }, usedParams: { action: 'expand', handle: args.handle, filters: { maxSnippetLines: (args?.filters?.maxSnippetLines ?? 60) } } } }
     }
 
     const rawTerms = (Array.isArray(args.queries) && args.queries.length ? args.queries : [args.query || ''])
@@ -631,7 +642,7 @@ export const searchWorkspaceTool: AgentTool = {
 
     const filters = normalizeFilters(args.filters)
     const include = filters.pathsInclude
-    const exclude = [ ...(filters.pathsExclude || []), '.hifide-public/**', '.hifide_public/**' ]
+    const exclude = [ ...(filters.pathsExclude || []), '.hifide-public/**', '.hifide_public/**', '.hifide-private/**', '.hifide_private/**' ]
     const languages = filters.languages
     let maxResults = filters.maxResults
     const maxSnippetLines = filters.maxSnippetLines
@@ -664,7 +675,7 @@ export const searchWorkspaceTool: AgentTool = {
     const cached = wsCacheGet(cacheKey)
     if (cached) {
       const elapsedMs = Date.now() - t0
-      return { ok: true, data: { ...cached, meta: { ...(cached.meta||{}), elapsedMs, cached: true } } }
+      return { ok: true, data: { ...cached, meta: { ...(cached.meta||{}), elapsedMs, cached: true }, usedParams: { mode: String(args.mode || 'auto'), queries: terms, filters } } }
     }
 
 	    // Auto-maintenance (non-blocking): opportunistically refresh semantic index when stale
@@ -852,12 +863,32 @@ export const searchWorkspaceTool: AgentTool = {
           || trimmed[0]
     }
 
-    const payload = { ...out, topHandles, bestHandle: best ? { handle: best.handle, path: best.path, lines: best.lines } : undefined }
+    const payload = { ...out, topHandles, bestHandle: best ? { handle: best.handle, path: best.path, lines: best.lines } : undefined, usedParams: { mode: String(args.mode || 'auto'), queries: terms, filters } }
+
+    // Heuristic: if previews are large, hint pruning to provider to compress earlier context
+    try {
+      const totalChars = Array.isArray(payload.results) ? payload.results.reduce((acc: number, r: any) => acc + (r?.preview?.length || 0), 0) : 0
+      const needsPrune = totalChars > 8000 || (filters.maxSnippetLines >= 60) || (Array.isArray(payload.results) && payload.results.length > 20)
+      if (needsPrune) {
+        (payload as any)._meta = (payload as any)._meta || {}
+        ;(payload as any)._meta.trigger_pruning = true
+        ;(payload as any)._meta.summary = {
+          key_findings: [
+            `Workspace search returned ${Array.isArray(payload.results) ? payload.results.length : 0} results for: ${terms.join(' | ')}`
+          ],
+          files_examined: Array.isArray(payload.results) ? payload.results.slice(0, 5).map((r: any) => `${r.path}:${r.lines?.start ?? '?'}-${r.lines?.end ?? '?'}`) : [],
+          next_steps: [
+            'Use workspaceSearch action="expand" on one handle at a time to fetch more context as needed.'
+          ],
+          timestamp: Date.now()
+        }
+      }
+    } catch {}
 
     // Save to cache
     try { wsCacheSet(cacheKey, payload) } catch {}
 
-    return { ok: true, data: payload }
+    return { ok: true, data: payload, _meta: (payload as any)._meta }
   }
 }
 

@@ -3,7 +3,7 @@ import { resolveWithinWorkspace } from '../utils'
 import fs from 'node:fs/promises'
 
 export const copyTool: AgentTool = {
-  name: 'fs.copy',
+  name: 'fsCopy',
   description: 'Copy a file or directory within the workspace',
   parameters: {
     type: 'object',

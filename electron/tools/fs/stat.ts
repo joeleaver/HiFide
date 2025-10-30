@@ -3,7 +3,7 @@ import { resolveWithinWorkspace } from '../utils'
 import fs from 'node:fs/promises'
 
 export const statTool: AgentTool = {
-  name: 'fs.stat',
+  name: 'fsStat',
   description: 'Get basic stat info for a workspace-relative path',
   parameters: {
     type: 'object',

@@ -179,6 +179,7 @@ export type Session = {
   // Token usage and costs
   tokenUsage: {
     byProvider: Record<string, TokenUsage>
+    byProviderAndModel: Record<string, Record<string, TokenUsage>>  // provider -> model -> usage
     total: TokenUsage
   }
   costs: {

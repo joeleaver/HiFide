@@ -37,6 +37,10 @@ function ToolBadgeContainer({ badge, children }: ToolBadgeContainerProps) {
     badge.status === 'success' ? '#10b981' :   // Green
     '#6b7280'  // Gray fallback
 
+  // WorkspaceSearch header params (reactive)
+  const searchKey = badge.contentType === 'workspace-search' ? (badge as any)?.interactive?.data?.key : undefined
+  const wsUsedParams = useAppStore((s) => (searchKey ? (s as any).feLoadedToolResults?.[searchKey]?.usedParams : undefined))
+
   // Load diff data when expanded (for diff badges)
   useEffect(() => {
     if (!isExpanded) return
@@ -169,6 +173,21 @@ function ToolBadgeContainer({ badge, children }: ToolBadgeContainerProps) {
             >
               "{badge.metadata.query}"
             </Text>
+          )}
+
+          {/* WorkspaceSearch quick params (header pills) */}
+          {badge.contentType === 'workspace-search' && searchKey && (
+            <>
+              {wsUsedParams?.action && (
+                <Badge size="xs" variant="light" color="grape">{wsUsedParams.action}</Badge>
+              )}
+              {typeof wsUsedParams?.filters?.maxResults === 'number' && (
+                <Text size="xs" c="dimmed">k={wsUsedParams.filters.maxResults}</Text>
+              )}
+              {typeof wsUsedParams?.filters?.maxSnippetLines === 'number' && (
+                <Text size="xs" c="dimmed">lines={wsUsedParams.filters.maxSnippetLines}</Text>
+              )}
+            </>
           )}
 
           {/* Duration */}

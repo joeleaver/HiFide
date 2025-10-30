@@ -2,7 +2,7 @@ import type { AgentTool } from '../../providers/provider'
 import { getIndexer } from '../../core/state'
 
 export const indexSearchTool: AgentTool = {
-  name: 'index.search',
+  name: 'indexSearch',
   description: 'Vector search the repository index for relevant code context',
   parameters: {
     type: 'object',

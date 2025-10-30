@@ -2,6 +2,8 @@ import { GoogleGenAI } from '@google/genai'
 import { formatSummary } from '../agent/types'
 
 import type { ProviderAdapter, StreamHandle } from './provider'
+import { logProviderHttp } from './provider'
+
 import { validateJson } from './jsonschema'
 import { withRetries } from './retry'
 
@@ -70,159 +72,6 @@ function stripAdditionalProperties(schema: any): any {
 
 export const GeminiProvider: ProviderAdapter = {
   id: 'gemini',
-  async chatStream({ apiKey, model, systemInstruction, contents, temperature, emit: _emit, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
-
-    const ai = new GoogleGenAI({ apiKey })
-
-    // Messages are already formatted by llm-service
-    // systemInstruction: string
-    // contents: Array<{role: string, parts: Array<{text: string}>}>
-
-
-    const holder: { abort?: () => void } = {}
-
-    ;(async () => {
-      let completed = false
-      try {
-        // Stateless: always use generateContentStream with full message history
-        const res: any = await withRetries(() => ai.models.generateContentStream({
-          model,
-          contents: contents || [],
-          config: {
-            systemInstruction: systemInstruction || undefined,
-            ...(typeof temperature === 'number' ? { temperature } : {}),
-          },
-        }) as any)
-        holder.abort = () => { try { res?.controller?.abort?.() } catch {} }
-
-        try {
-          for await (const chunk of res) {
-            try {
-              const t = chunk?.text
-              if (t) {
-                const text = String(t)
-                onChunk(text)
-              }
-            } catch (e: any) {
-              const error = e?.message || String(e)
-              onError(error)
-            }
-          }
-        } catch (e: any) {
-          // Stream iteration failed (e.g., parse error)
-          const error = e?.message || String(e)
-          onError(error)
-        }
-
-        // Extract token usage from response
-        try {
-          const usage = res?.usageMetadata
-          if (usage) {
-            const cachedTokens = usage.cachedContentTokenCount || 0
-            const tokenUsage = {
-              inputTokens: usage.promptTokenCount || 0,
-              outputTokens: usage.candidatesTokenCount || 0,
-              totalTokens: usage.totalTokenCount || 0,
-              cachedTokens,
-            }
-
-            if (onTokenUsage) onTokenUsage(tokenUsage)
-
-            // Log cache hits
-            if (cachedTokens > 0) {
-            }
-          }
-        } catch (e) {
-          // Token usage extraction failed, continue anyway
-          console.error('[GeminiProvider] Error extracting token usage:', e)
-        }
-
-        // Mark as completed and call onDone
-        completed = true
-        onDone()
-      } catch (e: any) {
-        // Fallback: if streaming is not supported for this model/API version, try non-stream generateContent
-        if (e?.name === 'AbortError') return
-        try {
-          const res: any = await withRetries(() => ai.models.generateContent({
-            model,
-            contents: contents || [],
-            config: {
-              systemInstruction: systemInstruction || undefined,
-              ...(typeof temperature === 'number' ? { temperature } : {}),
-            },
-          }) as any)
-          const text = res?.text
-          if (text) {
-            const textStr = String(text)
-            onChunk(textStr)
-          }
-
-          // Extract token usage from non-streaming response
-          try {
-          // Update rate limit tracker from headers if available (non-stream fallback)
-          try {
-            const hdrs = (res as any)?.response?.headers || (res as any)?.raw?.response?.headers
-            if (hdrs) {
-              rateLimitTracker.updateFromHeaders('gemini', model as any, toHeaderMap(hdrs))
-            }
-          } catch {}
-
-            const usage = res?.usageMetadata
-            if (usage) {
-              const cachedTokens = usage.cachedContentTokenCount || 0
-
-              const tokenUsage = {
-                inputTokens: usage.promptTokenCount || 0,
-                outputTokens: usage.candidatesTokenCount || 0,
-                totalTokens: usage.totalTokenCount || 0,
-                cachedTokens,
-              }
-
-              if (onTokenUsage) onTokenUsage(tokenUsage)
-
-              // Log cache hits
-              if (cachedTokens > 0) {
-              }
-            }
-          } catch (e) {
-            // Token usage extraction failed, continue anyway
-            console.error('[GeminiProvider] Error extracting token usage in fallback:', e)
-          }
-
-          // Mark as completed and call onDone
-          completed = true
-          onDone()
-        } catch (e2: any) {
-          const error = e2?.message || String(e2)
-          console.error('[GeminiProvider] Error in fallback path:', error)
-          onError(error)
-        }
-      } finally {
-        // CRITICAL: Ensure onDone is always called if not already called
-        // This prevents the promise from hanging indefinitely
-        if (!completed) {
-          try {
-            console.warn('[GeminiProvider] chatStream completed without explicit onDone call, calling now')
-            onDone()
-          } catch (e) {
-            console.error('[GeminiProvider] Error calling onDone in finally:', e)
-          }
-        }
-      }
-    })().catch((e: any) => {
-      console.error('[GeminiProvider] Unhandled error in chatStream:', e)
-      try {
-        const error = e?.message || String(e)
-        onError(error)
-      } catch {}
-    })
-
-    return {
-      cancel: () => { try { holder.abort?.() } catch {} },
-    }
-  },
-
   // Agent streaming with Gemini function calling
   async agentStream({ apiKey, model, systemInstruction, contents, temperature, tools, responseSchema: _responseSchema, toolMeta, emit: _emit, onChunk, onDone, onError, onTokenUsage, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const ai = new GoogleGenAI({ apiKey })
@@ -285,6 +134,8 @@ export const GeminiProvider: ProviderAdapter = {
           }
 
           // Stream a model turn and capture any functionCalls while streaming using new SDK
+          // Exact request (env-gated)
+          logProviderHttp({ provider: 'gemini', method: 'POST', url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent`, headers: { 'x-goog-api-key': apiKey }, body: { model, contents: contentsArray, config } })
           const streamRes: any = await withRetries(() => ai.models.generateContentStream({
             model,
             contents: contentsArray,
@@ -383,10 +234,11 @@ export const GeminiProvider: ProviderAdapter = {
                 // Notify tool start
                 try { onToolStart?.({ callId, name, arguments: args }) } catch {}
 
+                // Normalize tool name for robust matching
+                const cname = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+
                 // Prefer raw code blocks for read_lines to help LLM comprehension
-                if (name === 'fs.read_lines' && args && args.includeLineNumbers !== false) {
-                  args.includeLineNumbers = false
-                }
+
                 const result = await Promise.resolve(tool?.run(args, toolMeta))
 
                 // Notify tool end (full result to UI)
@@ -396,99 +248,10 @@ export const GeminiProvider: ProviderAdapter = {
                   shouldPrune = true
                   pruneData = result._meta.summary
                 }
-                // For fs.read_file and fs.read_lines, return RAW text with no minification/JSON
-                if (name === 'fs.read_file') {
-                  const contentStr = (result && result.ok === false)
-                    ? `Error: ${String(result?.error || 'Unknown error')}`
-                    : (typeof result?.content === 'string' ? result.content : '')
-                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
-                } else if (name === 'fs.read_lines') {
-                  let contentStr = ''
-                  if (result && result.ok === false) {
-                    contentStr = `Error: ${String(result?.error || 'Unknown error')}`
-                  } else if (typeof result?.text === 'string') {
-                    contentStr = result.text
-                  } else if (Array.isArray(result?.lines)) {
-                    const eol = (result?.eol === 'crlf') ? '\r\n' : '\n'
-                    contentStr = result.lines.map((l: any) => (l?.text ?? '')).join(eol)
-                  }
-                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
-                } else if (name === 'workspace.search' && (args as any)?.action === 'expand') {
-                  const d: any = result && (result as any).data ? (result as any).data : result
-                  const contentStr = typeof d?.preview === 'string' ? d.preview : (typeof d?.data?.preview === 'string' ? d.data.preview : '')
-                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
-                } else if (name === 'workspace.jump') {
-                  const d: any = result && (result as any).data ? (result as any).data : result
-                  const contentStr = typeof d?.preview === 'string' ? d.preview : (typeof d?.data?.preview === 'string' ? d.data.preview : '')
-                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
-                } else if (name === 'text.grep') {
-                  let contentStr = ''
-                  if (result && (result as any).ok === false) {
-                    contentStr = `Error: ${String((result as any)?.error || 'Unknown error')}`
-                  } else {
-                    const d: any = result && (result as any).data ? (result as any).data : result
-                    const m = Array.isArray(d?.matches) && d.matches.length ? d.matches[0] : null
-                    if (m) {
-                      const before = Array.isArray(m.before) ? m.before : []
-                      const after = Array.isArray(m.after) ? m.after : []
-                      const lines = [...before, (m.line ?? ''), ...after]
-                      contentStr = lines.join('\n')
-                    }
-                  }
-                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
-                } else if (name === 'code.search_ast') {
-                  let contentStr = ''
-                  if (result && (result as any).ok === false) {
-                    contentStr = `Error: ${String((result as any)?.error || 'Unknown error')}`
-                  } else {
-                    const d: any = result && (result as any).data ? (result as any).data : result
-                    const m = Array.isArray(d?.matches) && d.matches.length ? d.matches[0] : null
-                    contentStr = m ? String(m.snippet || m.text || '') : ''
-                  }
-                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
-                } else if (name === 'index.search') {
-                  let contentStr = ''
-                  if (result && (result as any).ok === false) {
-                    contentStr = `Error: ${String((result as any)?.error || 'Unknown error')}`
-                  } else {
-                    const d: any = result && (result as any).data ? (result as any).data : result
-                    const chunks = Array.isArray(d?.chunks) ? d.chunks : (Array.isArray(d?.data?.chunks) ? d.data.chunks : [])
-                    const c0 = chunks && chunks.length ? chunks[0] : null
-                    contentStr = c0 && typeof c0.text === 'string' ? c0.text : ''
-                  }
-                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
-                } else if (name === 'terminal.session_tail') {
-                  const d: any = result && (result as any).data ? (result as any).data : result
-                  const contentStr = (result && (result as any).ok === false)
-                    ? `Error: ${String((result as any)?.error || 'Unknown error')}`
-                    : (typeof d?.tail === 'string' ? d.tail : (typeof d?.data?.tail === 'string' ? d.data.tail : ''))
-                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
-                } else if (name === 'terminal.session_search_output') {
-                  let contentStr = ''
-                  if (result && (result as any).ok === false) {
-                    contentStr = `Error: ${String((result as any)?.error || 'Unknown error')}`
-                  } else {
-                    const d: any = result && (result as any).data ? (result as any).data : result
-                    const h0 = Array.isArray(d?.hits) ? d.hits[0] : (Array.isArray(d?.data?.hits) ? d.data.hits[0] : null)
-                    contentStr = h0 ? String(h0.snippet || '') : ''
-                  }
-                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
-                } else if (name === 'kb.search') {
-                  let contentStr = ''
-                  if (result && (result as any).ok === false) {
-                    contentStr = `Error: ${String((result as any)?.error || 'Unknown error')}`
-                  } else {
-                    const d: any = result && (result as any).data ? (result as any).data : result
-                    const r0 = Array.isArray(d?.results) ? d.results[0] : (Array.isArray(d?.data?.results) ? d.data.results[0] : null)
-                    contentStr = r0 ? String(r0.excerpt || '') : ''
-                  }
-                  toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
-                } else {
-                  // Minify heavy tool results before adding to conversation
-                  const { minifyToolResult } = await import('./toolResultMinify')
-                  const compact = minifyToolResult(name, result)
-                  toolResponses.push({ functionResponse: { name, response: { content: typeof compact === 'string' ? compact : JSON.stringify(compact) } } })
-                }
+                // Format tool output (no special fsReadFile/fsReadLines handling)
+                // Return raw tool result (no minification/compaction)
+                const contentStr = typeof result === 'string' ? result : JSON.stringify(result)
+                toolResponses.push({ functionResponse: { name, response: { content: contentStr } } })
               } catch (e: any) {
                 // Notify tool error
                 try { onToolError?.({ callId, name, error: e?.message || String(e) }) } catch {}
@@ -549,7 +312,7 @@ export const GeminiProvider: ProviderAdapter = {
     }
 
     run().catch((e: any) => {
-      console.error('[GeminiProvider] Unhandled error in agentStream run():', e)
+      // Unhandled error in agentStream run()
       try {
         const msg = e?.message || ''
         if (e?.name === 'AbortError' || /cancel/i.test(msg)) {

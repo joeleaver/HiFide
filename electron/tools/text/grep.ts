@@ -220,8 +220,8 @@ async function tryRipgrepSearch({ root, pattern, includeGlobs, excludeGlobs, opt
 }
 
 export const grepTool: AgentTool = {
-  name: 'text.grep',
-  description: 'Low-level text/regex search. Prefer workspace.search first; use this only for exact regex or specialty cases. Read-only and workspace-scoped.',
+  name: 'textGrep',
+  description: 'Low-level text/regex search across files. Prefer workspaceSearch first; use only for exact regex or specialty cases. Read-only and workspace-scoped.',
   parameters: {
     type: 'object',
     properties: {
@@ -276,7 +276,7 @@ export const grepTool: AgentTool = {
       'node_modules/**','dist/**','dist-electron/**','release/**','.git/**',
       'coverage/**','.next/**','out/**','build/**','.turbo/**','.cache/**','target/**','vendor/**','.pnpm-store/**',
       '.venv/**','venv/**','.idea/**',
-      '.hifide-public/**','.hifide_public/**'
+      '.hifide-public/**','.hifide_public/**','.hifide-private/**','.hifide_private/**'
     ].concat(options.exclude || [])
 
     // Build full .gitignore semantics filter if available

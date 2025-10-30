@@ -8,7 +8,7 @@ import type { AgentTool } from '../../providers/provider'
 import { getOrCreateSession } from '../../session/agentSessions'
 
 export const summarizeProgressTool: AgentTool = {
-  name: 'agent.summarize_progress',
+  name: 'agentSummarizeProgress',
   description: 'Summarize what you have learned so far to compress context. Use this when you notice the conversation getting long (>10 tool calls) or before reading many more files.',
   parameters: {
     type: 'object',

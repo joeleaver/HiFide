@@ -1,0 +1,43 @@
+{
+  "events": [
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "\n",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768200653
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "Hello",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768200653
+    },
+    {
+      "type": "usage",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "totalTokens": 57
+      },
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768200679
+    },
+    {
+      "type": "done",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768200679
+    }
+  ]
+}

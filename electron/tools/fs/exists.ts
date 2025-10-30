@@ -3,7 +3,7 @@ import { resolveWithinWorkspace } from '../utils'
 import fs from 'node:fs/promises'
 
 export const existsTool: AgentTool = {
-  name: 'fs.exists',
+  name: 'fsExists',
   description: 'Check if a workspace-relative path exists',
   parameters: {
     type: 'object',

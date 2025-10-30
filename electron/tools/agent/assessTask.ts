@@ -10,7 +10,7 @@ import type { TaskType } from '../../agent/types'
 import { calculateBudget } from '../../agent/types'
 
 export const assessTaskTool: AgentTool = {
-  name: 'agent.assess_task',
+  name: 'agentAssessTask',
   description: 'Analyze the user request to determine scope and plan your approach. Call this FIRST before taking other actions to understand your resource budget.',
   parameters: {
     type: 'object',

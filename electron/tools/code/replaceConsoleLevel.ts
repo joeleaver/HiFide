@@ -5,8 +5,8 @@ import { astGrepRewrite } from '../astGrep'
  * High-level wrapper: change console.* level while preserving arguments.
  */
 export const replaceConsoleLevelTool: AgentTool = {
-  name: 'code.replace_console_level',
-  description: 'Change console.<level>(...) to another level while preserving arguments. E.g., log -> debug.',
+  name: 'codeReplaceConsoleLevel',
+  description: 'Change console.<level>(...) to another level while preserving arguments. Use for logging hygiene; for general call renames use codeReplaceCall.',
   parameters: {
     type: 'object',
     properties: {

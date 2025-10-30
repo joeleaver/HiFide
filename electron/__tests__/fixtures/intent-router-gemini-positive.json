@@ -1,21 +1,19 @@
 {
   "context": {
+    "contextId": "test-context-1761768194328",
     "provider": "gemini",
     "model": "gemini-2.0-flash-exp",
     "systemInstructions": "You are a helpful assistant.",
-    "messageHistory": [],
-    "currentOutput": "",
-    "sessionId": "test-session-1760553297920"
+    "messageHistory": []
   },
   "data": "This is amazing! I love it!",
   "status": "success",
   "positive-context": {
+    "contextId": "test-context-1761768194328",
     "provider": "gemini",
     "model": "gemini-2.0-flash-exp",
     "systemInstructions": "You are a helpful assistant.",
-    "messageHistory": [],
-    "currentOutput": "",
-    "sessionId": "test-session-1760553297920"
+    "messageHistory": []
   },
   "positive-data": "This is amazing! I love it!"
 }

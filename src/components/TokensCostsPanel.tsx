@@ -33,6 +33,8 @@ export default function TokensCostsPanel() {
 
   const total = currentSession?.tokenUsage.total || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
   const byProvider = currentSession?.tokenUsage.byProvider || {}
+  const byProviderAndModelTokens = (currentSession?.tokenUsage as any)?.byProviderAndModel || {}
+
   const costs = currentSession?.costs || { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }
   const { totalCost, byProviderAndModel } = costs
   const hasUsage = total.totalTokens > 0
@@ -65,13 +67,13 @@ export default function TokensCostsPanel() {
                 <Text size="xs">
                   <span style={{ color: '#4fc3f7' }}>{total.inputTokens.toLocaleString()}</span>
                   <span style={{ color: '#666' }}> in</span>
-                  {total.cachedTokens && total.cachedTokens > 0 && (
+                  {total.cachedTokens && total.cachedTokens > 0 ? (
                     <>
                       <span style={{ color: '#666' }}> (</span>
                       <span style={{ color: '#ffa726' }}>💾 {total.cachedTokens.toLocaleString()} cached</span>
                       <span style={{ color: '#666' }}>)</span>
                     </>
-                  )}
+                  ) : null}
                   <span style={{ color: '#666' }}> + </span>
                   <span style={{ color: '#81c784' }}>{total.outputTokens.toLocaleString()}</span>
                   <span style={{ color: '#666' }}> out</span>
@@ -118,6 +120,7 @@ export default function TokensCostsPanel() {
                       {Object.entries(models).map(([model, cost]) => {
                         // Get token usage for this provider/model combination
                         const providerUsage = byProvider[provider]
+                        const perModelUsage = (byProviderAndModelTokens as any)?.[provider]?.[model]
 
                         return (
                           <div key={`${provider}-${model}`} style={{ marginBottom: '6px' }}>
@@ -127,7 +130,11 @@ export default function TokensCostsPanel() {
                             <Group gap="xs" ml="md">
                               <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Tokens:</Text>
                               <Text size="xs" c="dimmed">
-                                {providerUsage ? providerUsage.totalTokens.toLocaleString() : '—'}
+                                {perModelUsage
+                                  ? perModelUsage.totalTokens.toLocaleString()
+                                  : providerUsage
+                                  ? providerUsage.totalTokens.toLocaleString()
+                                  : '—'}
                               </Text>
                             </Group>
                             <Group gap="xs" ml="md">

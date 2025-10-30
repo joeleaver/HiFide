@@ -9,7 +9,7 @@ import { getOrCreateSession } from '../../session/agentSessions'
 import { getResourceRecommendation } from '../../agent/types'
 
 export const checkResourcesTool: AgentTool = {
-  name: 'agent.check_resources',
+  name: 'agentCheckResources',
   description: 'Check your current token usage and remaining budget. Use this periodically to stay aware of resource constraints.',
   parameters: {
     type: 'object',

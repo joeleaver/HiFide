@@ -3,7 +3,7 @@ import { resolveWithinWorkspace } from '../utils'
 import fs from 'node:fs/promises'
 
 export const appendFileTool: AgentTool = {
-  name: 'fs.append_file',
+  name: 'fsAppendFile',
   description: 'Append UTF-8 text to a file in the workspace (creates file if missing)',
   parameters: {
     type: 'object',

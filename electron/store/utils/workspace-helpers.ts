@@ -172,13 +172,15 @@ Be concise and specific to this repository.`
 
       let out = ''
       try {
-        await provider.chatStream({
+        await provider.agentStream({
           apiKey: sel.key,
           model,
           messages: [
             { role: 'system', content: prompt },
             { role: 'user', content: user },
           ],
+          tools: [],
+          toolMeta: {},
           onChunk: (t) => { out += t },
           onDone: () => {},
           onError: (_e) => {},

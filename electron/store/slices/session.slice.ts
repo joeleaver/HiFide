@@ -343,6 +343,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       flowDebugLogs: [],  // Initialize empty flow debug logs
       tokenUsage: {
         byProvider: {},
+        byProviderAndModel: {},
         total: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       },
       costs: {
@@ -614,10 +615,33 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 
         const newTotalCost = sess.costs.totalCost + (cost?.totalCost || 0)
 
+        // Derive per-provider+model usage map (backward compatible with older sessions)
+        const prevByProvModel = (sess.tokenUsage as any).byProviderAndModel || {}
+        const prevProvModels = prevByProvModel[provider] || {}
+        const prevModelUsage = prevProvModels[model] || {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          cachedTokens: 0,
+        }
+        const newProviderModelUsage = {
+          inputTokens: prevModelUsage.inputTokens + usage.inputTokens,
+          outputTokens: prevModelUsage.outputTokens + usage.outputTokens,
+          totalTokens: prevModelUsage.totalTokens + usage.totalTokens,
+          cachedTokens: (prevModelUsage.cachedTokens || 0) + (usage.cachedTokens || 0),
+        }
+
         return {
           ...sess,
           tokenUsage: {
             byProvider: { ...sess.tokenUsage.byProvider, [provider]: newProviderUsage },
+            byProviderAndModel: {
+              ...prevByProvModel,
+              [provider]: {
+                ...prevProvModels,
+                [model]: newProviderModelUsage,
+              },
+            },
             total: newTotal,
           },
           costs: {
@@ -935,8 +959,11 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 
         // Debounce flush (100ms - fast enough for smooth streaming, slow enough to batch)
         const existingTimeout = flushTimeouts.get(nodeId)
-        if (existingTimeout) clearTimeout(existingTimeout)
-        flushTimeouts.set(nodeId, setTimeout(() => flush(nodeId), 100))
+        // Throttle: if a flush is already scheduled, don't reschedule on every chunk.
+        // This ensures we flush at most every 100ms even under continuous streaming.
+        if (!existingTimeout) {
+          flushTimeouts.set(nodeId, setTimeout(() => flush(nodeId), 100))
+        }
       } else {
         // Badges are added immediately (flush any pending text first)
         const textBuffer = textBuffers.get(nodeId)

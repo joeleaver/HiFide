@@ -26,15 +26,6 @@ jest.mock('../../../../core/state', () => {
   // Minimal tool-calling mock provider
   const MockProvider: ProviderAdapter = {
     id: 'mock',
-    async chatStream({ onChunk, onDone, onError }) {
-      try {
-        onChunk('[mock-chat]')
-        onDone()
-      } catch (e: any) {
-        onError(e.message || String(e))
-      }
-      return { cancel: () => {} }
-    },
     async agentStream({ tools, onChunk, onDone, onError, onToolStart, onToolEnd, toolMeta }) {
       try {
         const tool = tools?.[0]

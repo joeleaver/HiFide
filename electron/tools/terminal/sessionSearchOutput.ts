@@ -1,7 +1,7 @@
 import type { AgentTool } from '../../providers/provider'
 
 export const sessionSearchOutputTool: AgentTool = {
-  name: 'terminal.session_search_output',
+  name: 'terminalSessionSearchOutput',
   description: 'Search the session\'s captured command outputs and/or live buffer for a substring; returns compact snippets.',
   parameters: {
     type: 'object',

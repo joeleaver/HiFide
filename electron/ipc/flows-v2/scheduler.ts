@@ -820,9 +820,12 @@ export class FlowScheduler {
       // Allow 'usage' so tokens can be recorded; 'done' is harmless if duplicate
     }
 
-    // Only log tool events for debugging
+    // Tool event debug log (FlowAPI layer -> before store handling)
     if (event.type === 'tool_start' || event.type === 'tool_end' || event.type === 'tool_error') {
-      console.log(`[ExecutionEvent] ${event.nodeId} [${event.executionId}]: ${event.type}`)
+      const t = event.tool
+      const name = t?.toolName
+      const callId = t?.toolCallId
+      console.log(`[FlowAPI] Tool event ${event.type} node=${event.nodeId} exec=${event.executionId} name=${name} callId=${callId} provider=${event.provider} model=${event.model}`)
       console.log(util.inspect(event, { depth: null, colors: false, maxArrayLength: 200 }))
     }
 
@@ -831,6 +834,10 @@ export class FlowScheduler {
     switch (event.type) {
       case 'chunk':
         if (event.chunk) {
+          if (process.env.HF_FLOW_DEBUG === '1') {
+            const brief = (event.chunk || '').slice(0, 60).replace(/\n/g, '\\n')
+            console.log(`[FlowAPI] chunk node=${event.nodeId} exec=${event.executionId} len=${event.chunk.length} brief=${brief}`)
+          }
           store.feHandleChunk(this.requestId, event.chunk, event.nodeId, event.provider, event.model)
         }
         break

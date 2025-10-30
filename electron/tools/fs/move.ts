@@ -3,7 +3,7 @@ import { resolveWithinWorkspace } from '../utils'
 import fs from 'node:fs/promises'
 
 export const moveTool: AgentTool = {
-  name: 'fs.move',
+  name: 'fsMove',
   description: 'Move/rename a file or directory within the workspace',
   parameters: {
     type: 'object',

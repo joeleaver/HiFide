@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 export const truncateDirTool: AgentTool = {
-  name: 'fs.truncate_dir',
+  name: 'fsTruncateDir',
   description: 'Empty a directory without deleting the directory itself (recursive remove of contents).',
   parameters: {
     type: 'object',

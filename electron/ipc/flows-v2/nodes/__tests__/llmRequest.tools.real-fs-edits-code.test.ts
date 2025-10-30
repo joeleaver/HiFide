@@ -24,10 +24,6 @@ jest.mock('../../../../core/state', () => {
   // Minimal tool-calling mock provider that forwards to the provided tool
   const MockProvider: ProviderAdapter = {
     id: 'mock',
-    async chatStream({ onChunk, onDone, onError }) {
-      try { onChunk('[mock-chat]'); onDone() } catch (e: any) { onError(e.message || String(e)) }
-      return { cancel: () => {} }
-    },
     async agentStream({ tools, onChunk, onDone, onError, onToolStart, onToolEnd, toolMeta }) {
       try {
         const tool = tools?.[0]
@@ -110,7 +106,7 @@ describe('LLM Request Node - real behavior (fs.*, edits.apply, code.*)', () => {
     try { await fs.rm(tmp, { recursive: true, force: true }) } catch {}
   })
 
-  test('fs.read_file returns actual file content', async () => {
+  test('fsReadFile returns raw file content (string)', async () => {
     await fs.writeFile(path.join(tmp, 'foo.txt'), 'hello', 'utf-8')
 
     const flow = createMockFlowAPI()
@@ -120,8 +116,8 @@ describe('LLM Request Node - real behavior (fs.*, edits.apply, code.*)', () => {
     const result = await llmRequestNode(flow as any, ctx as any, 'read foo.txt', createMockNodeInputs({ tools: [tool] }) as any, createTestConfig())
     expect(result.status).toBe('success')
     const parsed = parseResult(result)
-    expect(parsed.result.ok).toBe(true)
-    expect(parsed.result.content).toBe('hello')
+    expect(typeof parsed.result).toBe('string')
+    expect(parsed.result).toBe('hello')
   })
 
   test('fs.write_file writes file; fs.exists/stat/append/read reflect changes', async () => {

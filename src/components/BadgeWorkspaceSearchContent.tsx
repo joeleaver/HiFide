@@ -65,21 +65,23 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
     )
   }
 
-  // Extract queries and normalize filters (prefer shallow params, but fall back to fullParams when store.queries is empty)
+  // Extract queries and normalize filters (prefer shallow params, but fall back to fullParams and usedParams)
   const pStore: any = paramsFromStore as any
   const pFull: any = fullParams || {}
+  const pUsed: any = (results as any).usedParams || {}
 
-  // Prefer non-empty queries[] from store; otherwise fall back to single query or queries[] from full params
+  // Prefer non-empty queries[] from store; otherwise fall back to single query or queries[] from full/used params
   const queriesRawStore: any[] = Array.isArray(pStore?.queries) ? pStore.queries : []
   const queriesRawFull: any[] = Array.isArray(pFull?.queries) ? pFull.queries : (pFull?.query ? [pFull.query] : [])
-  const queriesRaw: any[] = (queriesRawStore && queriesRawStore.length > 0) ? queriesRawStore : queriesRawFull
+  const queriesRawUsed: any[] = Array.isArray(pUsed?.queries) ? pUsed.queries : (pUsed?.query ? [pUsed.query] : [])
+  const queriesRaw: any[] = (queriesRawStore && queriesRawStore.length > 0) ? queriesRawStore : (queriesRawFull && queriesRawFull.length > 0 ? queriesRawFull : queriesRawUsed)
 
   const isMaxDepthToken = (s: any) => typeof s === 'string' && s.startsWith('[Max Depth Exceeded')
   const queries = queriesRaw.map((s: any) => String(s || '')).filter(Boolean).filter((s: string) => !isMaxDepthToken(s))
 
-  // Merge filter/mode from store first (sanitized), then fall back to full params
-  const mode = pStore?.mode || pFull?.mode || 'auto'
-  const f = pStore?.filters || pFull?.filters || {}
+  // Merge filter/mode from store first (sanitized), then fall back to full params, then usedParams (normalized defaults)
+  const mode = pStore?.mode || pFull?.mode || pUsed?.mode || 'auto'
+  const f = pStore?.filters || pFull?.filters || pUsed?.filters || {}
   const languages: string[] = (Array.isArray(f.languages)
     ? f.languages.map((s: any) => String(s))
     : (typeof f.languages === 'string' ? [String(f.languages)] : [])).filter((s: string) => !isMaxDepthToken(s))
@@ -89,6 +91,9 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
   const pathsExclude: string[] = (Array.isArray(f.pathsExclude)
     ? f.pathsExclude.map((s: any) => String(s))
     : []).filter((s: string) => !isMaxDepthToken(s))
+  const k = typeof f.maxResults === 'number' ? f.maxResults : undefined
+  const linesClamp = typeof f.maxSnippetLines === 'number' ? f.maxSnippetLines : undefined
+  const action = pUsed?.action
 
   return (
     <Stack gap={12}>
@@ -108,6 +113,25 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
             <Text size="xs" c="dimmed" fw={500}>Mode:</Text>
             <Badge size="xs" variant="light" color="blue">{mode}</Badge>
           </Group>
+          {k !== undefined && (
+            <Group gap={6}>
+              <Text size="xs" c="dimmed" fw={500}>Max results:</Text>
+              <Text size="xs" c="gray.3">{k}</Text>
+            </Group>
+          )}
+          {linesClamp !== undefined && (
+            <Group gap={6}>
+              <Text size="xs" c="dimmed" fw={500}>Snippet lines:</Text>
+              <Text size="xs" c="gray.3">{linesClamp}</Text>
+            </Group>
+          )}
+          {action && (
+            <Group gap={6}>
+              <Text size="xs" c="dimmed" fw={500}>Action:</Text>
+              <Badge size="xs" variant="light" color="grape">{action}</Badge>
+            </Group>
+          )}
+
           {languages.length > 0 && (
             <Group gap={6}>
               <Text size="xs" c="dimmed" fw={500}>Languages:</Text>

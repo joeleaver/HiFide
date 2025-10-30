@@ -21,7 +21,7 @@ import { registerAllHandlers } from './ipc/registry'
 import { buildMenu } from './ipc/menu'
 
 // Provider setup
-import { OpenAIProvider } from './providers/openai'
+
 import { AnthropicProvider } from './providers/anthropic'
 import { GeminiProvider } from './providers/gemini'
 
@@ -106,7 +106,7 @@ process.on('unhandledRejection', (reason: any) => {
 
 
 // Initialize provider adapters
-providers.openai = OpenAIProvider as any
+
 providers.anthropic = AnthropicProvider as any
 providers.gemini = GeminiProvider as any
 

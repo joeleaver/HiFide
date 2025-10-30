@@ -1,5 +1,5 @@
 /**
- * fs.read_lines tool
+ * fsReadLines tool
  *
  * Read a small slice of a text file (by head/tail/range) or search with regex,
  * without loading the whole file. Enforces workspace-root sandboxing and strict limits.
@@ -10,7 +10,7 @@ import { resolveWithinWorkspace } from '../utils'
 import fs from 'node:fs/promises'
 import fssync from 'node:fs'
 import readline from 'node:readline'
-import { createHash } from 'node:crypto'
+
 
 
 // Limits
@@ -139,9 +139,10 @@ async function readTail(abs: string, encoding: BufferEncoding, lines: number, ma
     if (Date.now() > deadline) break
   }
   await fd.close().catch(() => {})
-  const parts = buf.split(/\n/)
+  let parts = buf.split(/\n/)
+  if (parts.length && parts[parts.length - 1] === '') parts.pop()
   const tail = parts.slice(-lines)
-  return { lines: tail, truncated: parts.length - 1 > lines }
+  return { lines: tail, truncated: (parts.length) > lines }
 }
 
 function validateFlags(flags?: string): string {
@@ -160,54 +161,39 @@ async function readRegex(abs: string, encoding: BufferEncoding, opts: { pattern:
   const after = clamp(opts.contextAfter ?? 2, 0, 20)
   const maxMatches = clamp(opts.maxMatches ?? 25, 1, 100)
 
+  // Load file into memory for reliable context extraction (files are small by budget)
+  const full = await fs.readFile(abs, encoding)
+  const allLines = full.split(/\r?\n/)
+  const startIdx = Math.max(0, (opts.start ? opts.start - 1 : 0))
+  const endIdx = Math.min(allLines.length - 1, (opts.end ? opts.end - 1 : allLines.length - 1))
+
   const matches: any[] = []
-  const window: string[] = []
-  let idx = 0
   let bytes = 0
-  const timer = setTimeout(() => { try { rl.close() } catch {} }, opts.timeoutMs)
-  const { rl, stream } = createLineReader(abs, encoding)
-  try {
-    for await (const line of rl) {
-      idx++
-      if (opts.start && idx < opts.start) continue
-      if (opts.end && idx > opts.end) break
-
-      // Maintain before-context window
-      window.push(line)
-      if (window.length > before + 1) window.shift()
-
-      const m = line.match(re)
-      bytes += Buffer.byteLength(line + '\n', encoding)
-      if (m) {
-        const ctxBefore = window.slice(0, Math.max(0, window.length - 1))
-        const ctxAfter: string[] = []
-        // Pull after-context by peeking next lines from rl - not supported directly; instead
-        // we will read them synchronously from rl by awaiting 'line' events.
-        // Simpler approach: read up to `after` lines manually from the stream iterator.
-        for (let i = 0; i < after; i++) {
-          const it = await rl[Symbol.asyncIterator]().next()
-          if (it.done) break
-          const nextLine = it.value as string
-          idx++
-          ctxAfter.push(nextLine)
-          bytes += Buffer.byteLength(nextLine + '\n', encoding)
-        }
-        matches.push({ line: idx - ctxAfter.length, text: line, groups: m.slice(1), contextBefore: ctxBefore.map((t, k) => ({ line: idx - ctxAfter.length - (ctxBefore.length - k), text: t })), contextAfter: ctxAfter.map((t, j) => ({ line: idx - ctxAfter.length + j + 1, text: t })) })
-        if (matches.length >= maxMatches) break
-      }
-      if (bytes > opts.maxBytes) break
+  for (let i = startIdx; i <= endIdx; i++) {
+    const line = allLines[i]
+    const m = line.match(re)
+    bytes += Buffer.byteLength(line + '\n', encoding)
+    if (m) {
+      const ctxStart = Math.max(startIdx, i - before)
+      const ctxEnd = Math.min(endIdx, i + after)
+      const ctxBefore = allLines.slice(ctxStart, i)
+      const ctxAfter = allLines.slice(i + 1, ctxEnd + 1)
+      matches.push({
+        line: i + 1,
+        text: line,
+        groups: m.slice(1),
+        contextBefore: ctxBefore.map((t, k) => ({ line: i - (ctxBefore.length - k) + 1, text: t })),
+        contextAfter: ctxAfter.map((t, j) => ({ line: i + j + 2, text: t }))
+      })
     }
-  } finally {
-    clearTimeout(timer)
-    rl.close()
-    stream.destroy()
+    if (bytes > opts.maxBytes) break
   }
   return { matches, truncated: matches.length >= maxMatches || bytes > opts.maxBytes }
 }
 
 export const readLinesTool: AgentTool = {
-  name: 'fs.read_lines',
-  description: 'Read specific lines (head/tail/range/around) or regex matches from a UTF-8/UTF-16LE text file in the workspace. Also accepts a handle from workspace.search to target a precise range.',
+  name: 'fsReadLines',
+  description: 'Read specific lines (head/tail/range/around) or regex matches from a UTF-8/UTF-16LE text file in the workspace. Also accepts a handle from workspaceSearch to target a precise range.',
   parameters: {
     type: 'object',
     properties: {
@@ -223,7 +209,7 @@ export const readLinesTool: AgentTool = {
       beforeLines: { type: 'integer', minimum: 0, maximum: MAX_LINES, default: 10 },
       afterLines: { type: 'integer', minimum: 0, maximum: MAX_LINES, default: 10 },
       window: { type: 'integer', minimum: 0, maximum: MAX_LINES, description: 'Convenience: sets beforeLines and afterLines to this value when mode=around' },
-      includeLineNumbers: { type: 'boolean', default: true },
+
       normalizeEol: { type: 'boolean', default: true },
       expandImports: { type: 'boolean', default: false, description: 'When true (range/around mode), extend the start upward to include contiguous import/export lines.' },
       maxBytes: { type: 'integer', minimum: 1024, maximum: 1048576, default: DEFAULT_MAX_BYTES },
@@ -277,41 +263,23 @@ export const readLinesTool: AgentTool = {
 
       // Normalize params
       const mode: Mode = input.mode || 'range'
-      const includeNums = input.includeLineNumbers !== false
       const maxBytes = clamp(Number(input.maxBytes ?? DEFAULT_MAX_BYTES), 1024, 1024*1024)
       const timeoutMs = DEFAULT_TIMEOUT_MS
-
-      // Helper to attach common metadata and digests
-      const fileDigest = `${st.size}:${Math.floor(st.mtimeMs || 0)}`
-      const withMeta = (payload: any, textForDigest?: string) => {
-        const out: any = { ok: true, path: rel, encoding, eol, fileDigest, ...payload }
-        if (typeof textForDigest === 'string') {
-          try {
-            out.digest = createHash('sha1').update(textForDigest, encoding).digest('hex')
-          } catch {}
-        }
-        return out
-      }
 
       if (mode === 'head') {
         const n = clamp(Number(input.headLines ?? DEFAULT_LINES), 1, MAX_LINES)
         const result = await readHead(abs, encoding, n, maxBytes, timeoutMs)
-        const startLine = 1
-        const endLine = startLine + result.lines.length - 1
-        const textOut = result.lines.join(eolStr)
-        return withMeta({ truncated: result.truncated, startLine, endLine, lineCount: result.lines.length, ...(includeNums ? { lines: result.lines.map((t: string, i: number) => ({ line: i+1, text: t })) } : { text: textOut }) }, textOut)
+        return result.lines.join(eolStr)
       }
 
       if (mode === 'tail') {
         const n = clamp(Number(input.tailLines ?? DEFAULT_LINES), 1, MAX_LINES)
         const r = await readTail(abs, encoding, n, maxBytes, timeoutMs)
-        const textOut = r.lines.join(eolStr)
-        // start line unknown without full scan; return -1 in numbered mode
-        return withMeta({ truncated: r.truncated, lineCount: r.lines.length, ...(includeNums ? { lines: r.lines.map((t: string) => ({ line: -1, text: t })) } : { text: textOut }) }, textOut)
+        return r.lines.join(eolStr)
       }
 
       if (mode === 'regex') {
-        if (!input.pattern || typeof input.pattern !== 'string') return { ok: false, error: 'pattern required' }
+        if (!input.pattern || typeof input.pattern !== 'string') return ''
         const r = await readRegex(abs, encoding, {
           pattern: input.pattern,
           flags: input.flags,
@@ -323,7 +291,21 @@ export const readLinesTool: AgentTool = {
           start: input.scanStartLine,
           end: input.scanEndLine,
         })
-        return { ok: true, path: rel, encoding, eol, fileDigest, truncated: r.truncated, matches: r.matches }
+        const ms = Array.isArray(r.matches) ? r.matches : []
+        if (!ms.length) return ''
+        // Build a single contiguous window covering all matched blocks with their contexts
+        let start = Number.MAX_SAFE_INTEGER
+        let end = -1
+        for (const m of ms as any[]) {
+          const cb = Array.isArray(m?.contextBefore) ? m.contextBefore.length : 0
+          const ca = Array.isArray(m?.contextAfter) ? m.contextAfter.length : 0
+          const s = Math.max(1, Number(m?.line || 1) - cb)
+          const e = Math.max(s, Number(m?.line || 1) + ca)
+          if (s < start) start = s
+          if (e > end) end = e
+        }
+        const r2 = await readRange(abs, encoding, start, end, maxBytes, timeoutMs)
+        return r2.lines.join(eolStr)
       }
 
       if (mode === 'around') {
@@ -356,10 +338,7 @@ export const readLinesTool: AgentTool = {
         }
 
         const r = await readRange(abs, encoding, start, end, maxBytes, timeoutMs)
-        const startLine = start
-        const endLine = start + r.lines.length - 1
-        const textOut = r.lines.join(eolStr)
-        return withMeta({ truncated: r.truncated, startLine, endLine, lineCount: r.lines.length, ...(includeNums ? { lines: r.lines.map((t: string, i: number) => ({ line: start + i, text: t })) } : { text: textOut }) }, textOut)
+        return r.lines.join(eolStr)
       }
 
       // range (default)
@@ -380,12 +359,9 @@ export const readLinesTool: AgentTool = {
       }
 
       const r = await readRange(abs, encoding, start, end, maxBytes, timeoutMs)
-      const startLine = start
-      const endLine = start + r.lines.length - 1
-      const textOut = r.lines.join(eolStr)
-      return withMeta({ truncated: r.truncated, startLine, endLine, lineCount: r.lines.length, ...(includeNums ? { lines: r.lines.map((t: string, i: number) => ({ line: start + i, text: t })) } : { text: textOut }) }, textOut)
+      return r.lines.join(eolStr)
     } catch (e: any) {
-      return { ok: false, error: e?.message || String(e) }
+      return `Error: ${e?.message || String(e)}`
     }
   }
 }

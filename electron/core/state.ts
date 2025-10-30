@@ -14,6 +14,10 @@ import { OpenAIProvider } from '../providers/openai'
 import { AnthropicProvider } from '../providers/anthropic'
 import { GeminiProvider } from '../providers/gemini'
 import { FireworksProvider } from '../providers/fireworks'
+import { FireworksAiSdkProvider } from '../providers-ai-sdk/fireworks'
+
+import { OpenAiSdkProvider } from '../providers-ai-sdk/openai'
+
 import type { ProviderAdapter } from '../providers/provider'
 
 /**
@@ -130,11 +134,23 @@ export const providerCapabilities: Record<string, Record<string, boolean>> = {
 /**
  * Provider adapters registry
  */
+const USE_AI_SDK_OPENAI = !(
+  process.env.HF_USE_LEGACY_OPENAI === '1' ||
+  process.env.HF_DISABLE_AI_SDK === '1' ||
+  process.env.HF_DISABLE_AI_SDK_OPENAI === '1'
+)
+
+const USE_AI_SDK_FIREWORKS = !(
+  process.env.HF_USE_LEGACY_FIREWORKS === '1' ||
+  process.env.HF_DISABLE_AI_SDK === '1' ||
+  process.env.HF_DISABLE_AI_SDK_FIREWORKS === '1'
+)
+
 export const providers: Record<string, ProviderAdapter> = {
-  openai: OpenAIProvider,
+  openai: USE_AI_SDK_OPENAI ? OpenAiSdkProvider : OpenAIProvider,
   anthropic: AnthropicProvider,
   gemini: GeminiProvider,
-  fireworks: FireworksProvider,
+  fireworks: USE_AI_SDK_FIREWORKS ? FireworksAiSdkProvider : FireworksProvider,
 }
 
 /**

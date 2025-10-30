@@ -7,20 +7,27 @@ import { useUiStore } from '../store/ui'
 function computeLineDelta(before?: string, after?: string): { added: number; removed: number } {
   const a = (before ?? '').split(/\r?\n/)
   const b = (after ?? '').split(/\r?\n/)
-  let i = 0, j = 0
-  let added = 0, removed = 0
-  while (i < a.length && j < b.length) {
-    if (a[i] === b[j]) { i++; j++; continue }
-    // Heuristics: lookahead by 1 for inserts/deletes
-    if (i + 1 < a.length && a[i + 1] === b[j]) { removed++; i++; continue }
-    if (j + 1 < b.length && a[i] === b[j + 1]) { added++; j++; continue }
-    // Treat as change => one removed and one added
-    removed++; added++; i++; j++
+  const n = a.length
+  const m = b.length
+  if (n === 0 && m === 0) return { added: 0, removed: 0 }
+  const LIMIT = 1_000_000
+  if (n * m > LIMIT) {
+    let i = 0, j = 0
+    while (i < n && j < m && a[i] === b[j]) { i++; j++ }
+    return { added: (m - j), removed: (n - i) }
   }
-  // Remaining tails
-  if (i < a.length) removed += (a.length - i)
-  if (j < b.length) added += (b.length - j)
-  return { added, removed }
+  let prev = new Uint32Array(m + 1)
+  let curr = new Uint32Array(m + 1)
+  for (let i = 1; i <= n; i++) {
+    const ai = a[i - 1]
+    for (let j = 1; j <= m; j++) {
+      curr[j] = ai === b[j - 1] ? (prev[j - 1] + 1) : (prev[j] > curr[j - 1] ? prev[j] : curr[j - 1])
+    }
+    const tmp = prev; prev = curr; curr = tmp
+    curr.fill(0)
+  }
+  const lcs = prev[m]
+  return { added: m - lcs, removed: n - lcs }
 }
 
 function SafeDiff({ before, after, path }: { before?: string; after?: string; path: string }) {

@@ -4,7 +4,7 @@ import { createItem, normalizeMarkdown } from '../../store/utils/knowledgeBase'
 
 export const knowledgeBaseStoreTool: AgentTool = {
   name: 'knowledgeBaseStore',
-  description: 'Single source of truth for project documentation. Use this tool to create or update Knowledge Base entries. Do not write markdown files or other docs directly; always persist via this tool. Use the files parameter to associate related workspace files.',
+  description: 'Create or update Knowledge Base entries (single source of truth). Do not write markdown files directly; persist via this tool and associate related workspace files as needed.',
   parameters: {
     type: 'object',
     properties: {

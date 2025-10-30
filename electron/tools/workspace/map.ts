@@ -36,8 +36,8 @@ async function listFiles(root: string, patterns: string[], ignore: string[]): Pr
 }
 
 export const workspaceMapTool: AgentTool = {
-  name: 'workspace.map',
-  description: 'Return a compact project map (enriched by default): core directories, key files, and high-signal landmarks found via ripgrep. Light-weight and time-budgeted; no heavy indexing required.',
+  name: 'workspaceMap',
+  description: 'Compact project map: core directories, key files, and ripgrep landmarks under a small time budget. Use for quick orientation; not a substitute for workspaceSearch.',
   parameters: {
     type: 'object',
     properties: {
@@ -232,7 +232,7 @@ export const workspaceMapTool: AgentTool = {
 
 
 
-    // Curated example queries for workspace.search or workspace.jump
+    // Curated example queries for workspaceSearch or workspaceJump
     const exampleQueries = [
       'starmap initialization file',
       'zustand store definition',

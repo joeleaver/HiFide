@@ -19,9 +19,8 @@ async function getWorkspaceRoot(): Promise<string> {
 }
 
 export const jumpWorkspaceTool: AgentTool = {
-  name: 'workspace.jump',
-  description:
-    'Directly jump to a file by exact path, fuzzy filename, or natural-language description. If an exact path exists, returns a handle and optional preview immediately. Otherwise reuses workspace.search to pick a best handle and optionally expands it.',
+  name: 'workspaceJump',
+  description: 'Jump directly to a file by exact path, fuzzy filename, or natural-language description. If the path exists, returns a handle (and optional preview). Otherwise calls workspaceSearch to pick the best handle; set expand=true to include preview.',
   parameters: {
     type: 'object',
     properties: {

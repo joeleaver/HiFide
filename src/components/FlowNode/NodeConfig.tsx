@@ -89,7 +89,7 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
           {/* Sampling & reasoning controls (visible only when global provider & model are selected) */}
           {selectedProvider && selectedModel ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {!(selectedProvider === 'openai' && /(o3|gpt-5|codex)/i.test(String(selectedModel))) && (
+              {!(selectedProvider === 'openai' && /(o3|codex)/i.test(String(selectedModel))) && (
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
                   <span style={{ fontSize: 10, color: '#888', width: 90 }}>Temperature:</span>
                   <input
@@ -118,7 +118,7 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
               )}
 
               {/* OpenAI reasoning effort (o3 family) */}
-              {selectedProvider === 'openai' && /(o3|gpt-5|codex)/i.test(String(selectedModel)) && (
+              {selectedProvider === 'openai' && /(o3|gpt-5)/i.test(String(selectedModel)) && (
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
                   <span style={{ fontSize: 10, color: '#888', width: 90 }}>Reasoning effort:</span>
                   <select
@@ -266,7 +266,7 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
             {/* Sampling & reasoning controls (visible only when provider & model are selected) */}
             {config.provider && config.model ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
-                {!(config.provider === 'openai' && /(o3|gpt-5|codex)/i.test(String(config.model))) && (
+                {!(config.provider === 'openai' && /(o3|codex)/i.test(String(config.model))) && (
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
                     <span style={{ fontSize: 10, color: '#888', width: 90 }}>Temperature:</span>
                     <input
@@ -295,7 +295,7 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
                 )}
 
                 {/* OpenAI reasoning effort (o3 family) */}
-                {config.provider === 'openai' && /(o3|gpt-5|codex)/i.test(String(config.model)) && (
+                {config.provider === 'openai' && /(o3|gpt-5)/i.test(String(config.model)) && (
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
                     <span style={{ fontSize: 10, color: '#888', width: 90 }}>Reasoning effort:</span>
                     <select
@@ -559,7 +559,7 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
                     {/* Override sampling & reasoning controls */}
                     {(config.overrideProvider && config.overrideModel) && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
-                        {!(config.overrideProvider === 'openai' && /(o3|gpt-5|codex)/i.test(String(config.overrideModel))) && (
+                        {!(config.overrideProvider === 'openai' && /(o3|codex)/i.test(String(config.overrideModel))) && (
                           <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
                             <span style={{ fontSize: 10, color: '#888', width: 90 }}>Temperature:</span>
                             <input
@@ -587,7 +587,7 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
                           </label>
                         )}
 
-                        {config.overrideProvider === 'openai' && /(o3|gpt-5|codex)/i.test(String(config.overrideModel)) && (
+                        {config.overrideProvider === 'openai' && /(o3|gpt-5)/i.test(String(config.overrideModel)) && (
                           <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
                             <span style={{ fontSize: 10, color: '#888', width: 90 }}>Reasoning effort:</span>
                             <select

@@ -1,0 +1,358 @@
+{
+  "events": [
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "\n",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209771
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "<",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209771
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "invoke",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209790
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": ">\n",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209801
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "<",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209819
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "parameter",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209848
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": " name",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209858
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "=\"",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209858
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "tool",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209859
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "_name",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209880
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "\">",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209904
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "get",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209904
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "_weather",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209905
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "</",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209905
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "parameter",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209905
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": ">\n",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209928
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "<",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209928
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "parameter",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209976
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": " name",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209976
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "=\"",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209976
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "parameters",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209976
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "\">",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209976
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "{\"",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209976
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "location",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209994
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "\":",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209994
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": " \"",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209994
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "San",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768209994
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": " Francisco",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768210648
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": ",",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768210648
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": " CA",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768210648
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "\"",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768210653
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "}</",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768210663
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "parameter",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768210663
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": ">\n",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768210663
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "</",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768210663
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": "invoke",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768210689
+    },
+    {
+      "type": "chunk",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "chunk": ">",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768210700
+    },
+    {
+      "type": "usage",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "totalTokens": 962
+      },
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768210737
+    },
+    {
+      "type": "done",
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/glm-4p6",
+      "executionId": "test-exec-123",
+      "nodeId": "test-node-456",
+      "timestamp": 1761768210737
+    }
+  ]
+}

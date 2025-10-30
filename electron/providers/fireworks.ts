@@ -1,9 +1,13 @@
 import OpenAI from 'openai'
+import { logProviderHttp, shouldLogProviderHttp } from './provider'
+
 import type { ProviderAdapter, StreamHandle, ChatMessage, AgentTool } from './provider'
 import { validateJson } from './jsonschema'
 import { withRetries } from './retry'
 import { formatSummary } from '../agent/types'
+
 import { rateLimitTracker } from './rate-limit-tracker'
+import { createCallbackEventEmitters } from '../ipc/flows-v2/execution-events'
 
 // Normalize various header shapes into a simple lower-cased map
 const toHeaderMap = (h: any): Record<string, string> => {
@@ -21,111 +25,36 @@ const toHeaderMap = (h: any): Record<string, string> => {
   return map
 }
 
-// Helper to map our ChatMessage[] to Responses API input format
-function toResponsesInput(messages: ChatMessage[]) {
-  return (messages || []).map((m) => ({ role: m.role as any, content: m.content }))
+// Helper to split system instructions (Responses API uses top-level 'instructions')
+function splitInstructions(messages: ChatMessage[]) {
+  const sys = (messages || []).filter(m => m.role === 'system').map(m => m.content).filter(Boolean)
+  const instructions = sys.length ? sys.join('\n\n') : undefined
+  const input = (messages || []).filter(m => m.role !== 'system').map((m) => ({ role: m.role as any, content: m.content }))
+  return { instructions, input }
 }
+
+// Note: We no longer maintain session state for conversation chaining.
+// The scheduler manages all conversation history and passes full message arrays.
+// This makes providers stateless and simplifies context management.
+
 
 export const FireworksProvider: ProviderAdapter = {
   id: 'fireworks',
 
-  // Plain chat via Responses API with streaming chunks (match OpenAI provider)
-  async chatStream({ apiKey, model, messages, temperature, onChunk, onDone, onError, onTokenUsage }): Promise<StreamHandle> {
-    const client = new OpenAI({ apiKey, baseURL: 'https://api.fireworks.ai/inference/v1' })
-
-    const holder: { stream?: any; cancelled?: boolean } = {}
-
-    ;(async () => {
-      let completed = false
-      try {
-        const stream: any = await withRetries(() => Promise.resolve(client.responses.stream({
-          model,
-          input: toResponsesInput(messages || []),
-          ...(typeof temperature === 'number' ? { temperature } : {}),
-        })))
-        holder.stream = stream
-        try {
-          for await (const evt of stream) {
-            try {
-              const type = (evt as any)?.type || ''
-              let text: string | null = null
-              if (typeof (evt as any)?.delta === 'string') {
-                text = (evt as any).delta
-              } else if (typeof (evt as any)?.text === 'string') {
-                text = (evt as any).text
-              } else if (type?.includes('output_text') && typeof (evt as any)?.text === 'string') {
-                text = (evt as any).text
-              }
-              if (text) onChunk(text)
-            } catch (e: any) {
-              const error = e?.message || String(e)
-              onError(error)
-            }
-          }
-          // Extract token usage from final response
-          try {
-            const finalResponse = await stream.finalResponse()
-            if (finalResponse?.usage) {
-              const usage = {
-                inputTokens: finalResponse.usage.input_tokens || 0,
-                outputTokens: finalResponse.usage.output_tokens || 0,
-                totalTokens: finalResponse.usage.total_tokens || 0,
-              }
-              if (onTokenUsage) onTokenUsage(usage)
-            }
-          } catch (e) {
-            // Ignore token usage extraction failure
-          }
-          // Update rate limit tracker based on response headers, if available
-          try {
-            const hdrs = (stream as any)?.response?.headers
-            if (hdrs) {
-              rateLimitTracker.updateFromHeaders('fireworks' as any, model as any, toHeaderMap(hdrs))
-            }
-          } catch {}
-
-          completed = true
-          onDone()
-        } catch (e: any) {
-          if (e?.name === 'AbortError') return
-          const error = e?.message || String(e)
-          onError(error)
-        }
-      } catch (e: any) {
-        if (e?.name === 'AbortError') return
-        const error = e?.message || String(e)
-        onError(error)
-      } finally {
-        if (!completed) {
-          try { onDone() } catch {}
-        }
-      }
-    })().catch((e: any) => {
-      try { onError(e?.message || String(e)) } catch {}
-    })
-
-    return {
-      cancel: () => {
-        holder.cancelled = true
-        try { holder.stream?.controller?.abort?.() } catch {}
-        try { holder.stream?.close?.() } catch {}
-      }
-    }
-  },
-
-  // Agent loop with tool-calling using Chat Completions API (Fireworks supports tools here)
-  async agentStream({ apiKey, model, messages, temperature, tools, emit: _emit, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError: _onToolError }): Promise<StreamHandle> {
+  // Agent loop with tool-calling via Responses API
+  async agentStream({ apiKey, model, messages, temperature, reasoningEffort, tools, responseSchema, emit: _emit, onChunk, onDone, onError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const client = new OpenAI({ apiKey, baseURL: 'https://api.fireworks.ai/inference/v1' })
 
     const holder: { abort?: () => void } = {}
 
     // Validate tools array
     if (!Array.isArray(tools)) {
-      onError('Tools must be an array')
+      const error = 'Tools must be an array'
+      try { onError(error) } catch {}
       return { cancel: () => {} }
     }
 
-    // Sanitize tool names and build Chat Completions tools (nested function)
+    // Map internal tools to Fireworks Responses tool format (sanitize names)
     const toolMap = new Map<string, AgentTool>()
     const usedNames = new Set<string>()
     const toSafeName = (name: string) => {
@@ -137,330 +66,656 @@ export const FireworksProvider: ProviderAdapter = {
       return safe
     }
 
-    const ccTools: any[] = tools
-      .filter(t => t && t.name)
+    const fwTools: any[] = tools
+      .filter(t => t && t.name) // Filter out invalid tools
       .map((t) => {
         const safeName = toSafeName(t.name)
         toolMap.set(safeName, t)
-        toolMap.set(t.name, t)
+        // Responses API uses flat structure: { type: "function", name, description, parameters }
+        // NOT nested like Chat Completions: { type: "function", function: { name, ... } }
         return {
           type: 'function',
-          function: {
-            name: safeName,
-            description: t.description || undefined,
-            parameters: t.parameters || { type: 'object', properties: {} }
-          }
+          name: safeName,
+          description: t.description || undefined,
+          parameters: t.parameters || { type: 'object', properties: {} },
         }
       })
 
-    // Build Chat Completions message history from ChatMessage[]
-    const toCCMsgs = (msgs: ChatMessage[]) => (msgs || []).map((m) => ({ role: m.role, content: m.content || '' }))
-    const ccMsgs: any[] = toCCMsgs(messages || [])
+    // Debug logging
+    const DEBUG_HTTP = shouldLogProviderHttp()
+    const DEBUG_FULL = process.env.HF_LOG_LLM_FULL === '1'
+    const __streamEvents: any[] | undefined = DEBUG_FULL ? [] : undefined
+
+    // Responses API uses a different format than Chat Completions
+    // Input can be: { role, content } OR { type, call_id, output } for function results
+    const { instructions, input: initialInput } = splitInstructions(messages || [])
+    let conv: Array<any> = (initialInput || [])
+      .map((m) => ({ role: m.role, content: m.content || '' }))
+      .filter(m => m.content !== '') // Remove messages with empty content
 
     let cancelled = false
     let iteration = 0
-    // Accumulate usage across the entire agent loop; emit once at the very end
-    let cumInputTokens = 0
-    let cumOutputTokens = 0
-    let cumTotalTokens = 0
+    let cumulativeTokens = 0
+    // Bridge legacy callbacks to unified execution events if emit() is provided
+    const emitters = _emit ? createCallbackEventEmitters(_emit, 'fireworks', String(model)) : null
+    const emitChunk = (text: string) => { try { onChunk(text) } catch {} ; try { emitters?.onChunk(text) } catch {} }
+    const emitDone = () => { try { onDone() } catch {} ; try { emitters?.onDone() } catch {} }
+    const emitError = (err: string) => { try { onError(err) } catch {} ; try { emitters?.onError(err) } catch {} }
+    const emitUsage = (usage: any) => { try { onTokenUsage?.(usage) } catch {} ; try { emitters?.onTokenUsage(usage) } catch {} }
+    const emitToolStart = (ev: { callId?: string; name: string; arguments?: any }) => { try { onToolStart?.(ev) } catch {} ; try { emitters?.onToolStart(ev) } catch {} }
+    const emitToolEnd = (ev: { callId?: string; name: string; result?: any }) => { try { onToolEnd?.(ev) } catch {} ; try { emitters?.onToolEnd(ev) } catch {} }
+    const emitToolError = (ev: { callId?: string; name: string; error: string }) => { try { onToolError?.(ev) } catch {} ; try { emitters?.onToolError(ev) } catch {} }
+
+
+    // Helper to check cancellation and throw if cancelled
+    const checkCancelled = () => {
+      if (cancelled) {
+        throw new Error('Agent stream cancelled')
+      }
+    }
+
+    // Helper to prune conversation when agent requests it
+    const pruneConversation = (summary: any) => {
+      const recent = conv.slice(-5) // Keep last 5 messages
+
+      const summaryMsg = {
+        role: 'user' as const,
+        content: formatSummary(summary),
+      }
+
+      // Rebuild conversation: summary + recent (system stays in top-level instructions)
+      conv = [summaryMsg, ...recent]
+    }
 
 
     const run = async () => {
       try {
-        while (!cancelled && iteration < 200) {
-          iteration++
+        while (!cancelled && iteration < 200) { // Hard limit of 200 iterations as safety (allows complex multi-file operations)
+          // Check for cancellation at the start of each iteration
+          checkCancelled()
 
-          // Streaming chat.completions call with optional tools
-          const ac = new AbortController()
-          holder.abort = () => { try { ac.abort() } catch {} }
+          iteration++
+          // Start a streaming turn; stream user-visible text as it comes, while accumulating any tool calls
+          let useResponseFormat = !!responseSchema
+          const mkOpts = (strict: boolean) => {
+            const opts: any = {
+              model,
+              input: conv as any,
+            }
+            if (instructions) {
+              opts.instructions = instructions
+            }
+            // Note: Fireworks may not support reasoningEffort yet, but we include it for future compatibility
+            if (reasoningEffort) {
+              opts.reasoning = { effort: reasoningEffort }
+            }
+            if (typeof temperature === 'number') {
+              opts.temperature = temperature
+            }
+            // Only add tools if we have valid tools
+            if (fwTools.length > 0) {
+              opts.tools = fwTools
+              // Default to auto tool choice
+              let choice: any = 'auto'
+              const requested = (toolMeta as any)?.toolChoice
+              if (requested) {
+                const req = String(requested)
+                if (req === 'none' || req === 'auto' || req === 'required') {
+                  choice = req
+                } else {
+                  // Treat as specific tool name; map to sanitized name if we have it
+                  const nameSafe = toSafeName(req)
+                  // Fireworks Responses likely accepts { type: 'function', name }
+                  choice = { type: 'function', name: nameSafe }
+                }
+              }
+              opts.tool_choice = choice
+            }
+            // Add response format if requested (Responses API uses text.format, not response_format)
+            if (strict && responseSchema) {
+              opts.text = {
+                format: {
+                  type: 'json_schema',
+                  name: responseSchema.name,
+                  strict: responseSchema.strict,
+                  schema: responseSchema.schema
+                }
+              }
+            }
+            return opts
+          }
 
           let stream: any
           try {
-            stream = await withRetries(() => Promise.resolve(
-              client.chat.completions.create(
-                {
-                  model,
-                  messages: ccMsgs as any,
-                  tools: ccTools.length ? ccTools : undefined,
-                  tool_choice: ccTools.length ? 'auto' : undefined,
-                  temperature: (typeof temperature === 'number' ? temperature : 0.2),
-                  stream: true,
-                  // Ask for usage in the stream if provider supports it
-                  stream_options: { include_usage: true } as any
-                },
-                { signal: ac.signal }
-              )
-            ))
+            const opts = mkOpts(useResponseFormat)
+            // Stateless: no session chaining
+            try {
+              // Exact request (env-gated)
+              logProviderHttp({ provider: 'fireworks', method: 'POST', url: 'https://api.fireworks.ai/inference/v1/responses', headers: { Authorization: `Bearer ${apiKey}` }, body: opts })
+              stream = await withRetries(() => Promise.resolve(client.responses.stream(opts)))
+            } catch (err: any) {
+              const msg = String(err?.message || err)
+              // Tolerate model-specific unsupported params by stripping and retrying once
+              let retried = false
+              if (/Unsupported parameter/i.test(msg)) {
+                if (/temperature/i.test(msg)) { try { delete (opts as any).temperature } catch {} ; retried = true }
+                if (/reasoning/i.test(msg) || /effort/i.test(msg)) { try { delete (opts as any).reasoning } catch {} ; retried = true }
+                if (/tool_choice/i.test(msg)) { try { delete (opts as any).tool_choice } catch {} ; retried = true }
+                // Some models may not support tools at all
+                if (/tools/i.test(msg)) { try { delete (opts as any).tools; delete (opts as any).tool_choice } catch {} ; retried = true }
+              }
+              if (retried) {
+                stream = await withRetries(() => Promise.resolve(client.responses.stream(opts)))
+              } else {
+                throw err
+              }
+            }
+            holder.abort = () => { try { stream?.controller?.abort?.() } catch {} }
           } catch (err: any) {
-            // Fallback if Fireworks doesn't support stream_options/include_usage
-            stream = await withRetries(() => Promise.resolve(
-              client.chat.completions.create(
-                {
-                  model,
-                  messages: ccMsgs as any,
-                  tools: ccTools.length ? ccTools : undefined,
-                  tool_choice: ccTools.length ? 'auto' : undefined,
-                  temperature: (typeof temperature === 'number' ? temperature : 0.2),
-                  stream: true
-                },
-                { signal: ac.signal }
-              )
-            ))
+            const msg = err?.message || ''
+            if (useResponseFormat && (err?.status === 400 || /response_format|text\.format|json_schema|unsupported/i.test(msg))) {
+              useResponseFormat = false
+              // Exact request (env-gated)
+              logProviderHttp({ provider: 'fireworks', method: 'POST', url: 'https://api.fireworks.ai/inference/v1/responses', headers: { Authorization: `Bearer ${apiKey}` }, body: mkOpts(false) })
+              stream = await withRetries(() => Promise.resolve(client.responses.stream(mkOpts(false))))
+            } else {
+              throw err
+            }
           }
 
-          // Accumulate assistant text and tool call deltas for this turn
-          let turnBuffer = ''
-          const toolAcc = new Map<number, { id: string; name: string; args: string }>()
-          let lastUsage: any = null
+          // Track streaming tool calls (single-request handshake if SDK supports it)
+          const pendingArgs: Map<string, { name: string; buf: string }> = new Map()
+          let streamedToolActivity = false
+          const canSubmitToolOutputs = typeof (stream as any)?.submitToolOutputs === 'function'
 
-          for await (const chunk of stream) {
+          // Track which output items are active (messages vs tool calls) by output_index/id
+          const activeItems = new Map<string, { type: string; role?: string }>()
+
+          for await (const evt of stream) {
             try {
-              // Capture usage if provider streams it
-              const chunkUsage = (chunk as any)?.usage
-              if (chunkUsage) lastUsage = chunkUsage
-
-              const choice = (chunk as any)?.choices?.[0] || {}
-              const delta = choice.delta || {}
-              if (typeof delta.content === 'string') {
-                turnBuffer += delta.content
+              const t = String(evt?.type || '')
+              // Capture raw SSE events for full HTTP body reconstruction when enabled
+              if (DEBUG_FULL && __streamEvents) {
+                try {
+                  __streamEvents.push(JSON.parse(JSON.stringify(evt)))
+                } catch {
+                  __streamEvents.push({ type: t })
+                }
               }
-              const tcs = Array.isArray(delta.tool_calls) ? delta.tool_calls : []
-              for (const tc of tcs) {
-                const idx = typeof tc.index === 'number' ? tc.index : 0
-                if (!toolAcc.has(idx)) toolAcc.set(idx, { id: '', name: '', args: '' })
-                const acc = toolAcc.get(idx)!
-                if (tc.id) acc.id = tc.id
-                const fn = tc.function || {}
-                if (typeof fn.name === 'string') acc.name = (acc.name || '') + fn.name
-                if (typeof fn.arguments === 'string') acc.args += fn.arguments
+
+              // Output items lifecycle — do not print here; just track
+              if (t === 'response.output_item.added') {
+                const item = (evt as any)?.item
+                const id = String((item?.id || (evt as any)?.id || ''))
+                if (id) activeItems.set(id, { type: String(item?.type || ''), role: (item as any)?.role })
+                continue
+              }
+              if (t === 'response.output_item.done') {
+                const item = (evt as any)?.item
+                const id = String((item?.id || (evt as any)?.id || ''))
+                if (id) activeItems.delete(id)
+                continue
+              }
+
+              // Function tool call argument streaming
+              if (canSubmitToolOutputs && t === 'response.function_call.arguments.delta') {
+                const callId = (evt as any)?.call_id || (evt as any)?.id || (evt as any)?.item?.id
+                const name = (evt as any)?.name || (evt as any)?.function?.name || (evt as any)?.item?.name
+                const delta = typeof (evt as any)?.delta === 'string' ? (evt as any).delta : (typeof (evt as any)?.arguments === 'string' ? (evt as any).arguments : '')
+                if (callId) {
+                  if (!pendingArgs.has(callId)) {
+                    pendingArgs.set(callId, { name: String(name || ''), buf: '' })
+                    try { emitToolStart({ callId, name: toolMap.get(String(name || ''))?.name || String(name || '') }) } catch {}
+                  }
+                  const rec = pendingArgs.get(callId)!
+                  rec.buf += (delta || '')
+                  streamedToolActivity = true
+                  continue
+                }
+              }
+
+              if (canSubmitToolOutputs && t === 'response.function_call.completed') {
+                const callId = (evt as any)?.call_id || (evt as any)?.id || (evt as any)?.item?.id
+                const nameSafe = String((evt as any)?.name || (evt as any)?.function?.name || (evt as any)?.item?.name || '')
+                const rec = callId ? pendingArgs.get(callId) : undefined
+                const name = rec?.name || nameSafe
+                let argsObj: any = {}
+                try {
+                  const raw = rec?.buf ?? ((evt as any)?.arguments ?? '')
+                  if (typeof raw === 'string' && raw.trim()) {
+                    argsObj = JSON.parse(raw)
+                  }
+                } catch {}
+
+                const tool = toolMap.get(name)
+                if (!tool) {
+                  streamedToolActivity = true
+                  try { await (stream as any).submitToolOutputs?.([{ call_id: callId, output: JSON.stringify({ error: `Tool ${name} not found` }) }]) } catch {}
+                  if (callId) pendingArgs.delete(callId)
+                  continue
+                }
+
+                const schema = (tool as any)?.parameters
+                const v = validateJson(schema, argsObj)
+                if (!v.ok) {
+                  streamedToolActivity = true
+                  try { await (stream as any).submitToolOutputs?.([{ call_id: callId, output: JSON.stringify({ error: `Validation error: ${v.errors || 'invalid input'}` }) }]) } catch {}
+                  if (callId) pendingArgs.delete(callId)
+                  continue
+                }
+
+                let result: any
+                try {
+                  result = await Promise.resolve(tool.run(argsObj, toolMeta))
+                  try { emitToolEnd({ callId, name: tool?.name || name, result }) } catch {}
+                } catch (err: any) {
+                  const errMsg = err?.message || String(err)
+                  try { emitToolError({ callId, name: tool?.name || name, error: errMsg }) } catch {}
+                  streamedToolActivity = true
+                  try { await (stream as any).submitToolOutputs?.([{ call_id: callId, output: JSON.stringify({ error: errMsg }) }]) } catch {}
+                  if (callId) pendingArgs.delete(callId)
+                  continue
+                }
+
+                // Format output (raw for read_file/lines; otherwise minified JSON)
+                let output: string = ''
+                try {
+                  const originalName = tool?.name || name
+                  const cname = String(originalName || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+                  if (cname === 'workspacesearch' && (args as any)?.action === 'expand') {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    output = typeof d?.preview === 'string' ? d.preview : (typeof d?.data?.preview === 'string' ? d.data.preview : '')
+                  } else if (cname === 'workspacejump') {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    output = typeof d?.preview === 'string' ? d.preview : (typeof d?.data?.preview === 'string' ? d.data.preview : '')
+                  } else if (cname === 'textgrep') {
+                    if (result && (result as any).ok === false) {
+                      output = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                    } else {
+                      const d: any = result && (result as any).data ? (result as any).data : result
+                      const m = Array.isArray(d?.matches) && d.matches.length ? d.matches[0] : null
+                      if (m) {
+                        const before = Array.isArray(m.before) ? m.before : []
+                        const after = Array.isArray(m.after) ? m.after : []
+                        const lines = [...before, (m.line ?? ''), ...after]
+                        output = lines.join('\n')
+                      } else {
+                        output = ''
+                      }
+                    }
+                  } else if (cname === 'codesearchast' || cname === 'astgrepsearch' || cname === 'codeastgrep' || cname === 'astgrep') {
+                    if (result && (result as any).ok === false) {
+                      output = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                    } else {
+                      const d: any = result && (result as any).data ? (result as any).data : result
+                      const m = Array.isArray(d?.matches) && d.matches.length ? d.matches[0] : null
+                      output = m ? String(m.snippet || m.text || '') : ''
+                    }
+                  } else if (cname === 'indexsearch') {
+                    if (result && (result as any).ok === false) {
+                      output = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                    } else {
+                      const d: any = result && (result as any).data ? (result as any).data : result
+                      const chunks = Array.isArray(d?.chunks) ? d.chunks : (Array.isArray(d?.data?.chunks) ? d.data.chunks : [])
+                      const c0 = chunks && chunks.length ? chunks[0] : null
+                      output = c0 && typeof c0.text === 'string' ? c0.text : ''
+                    }
+                  } else if (cname === 'terminalsessiontail') {
+                    if (result && (result as any).ok === false) {
+                      output = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                    } else {
+                      const d: any = result && (result as any).data ? (result as any).data : result
+                      output = typeof d?.tail === 'string' ? d.tail : (typeof d?.data?.tail === 'string' ? d.data.tail : '')
+                    }
+                  } else if (cname === 'terminalsessionsearchoutput') {
+                    if (result && (result as any).ok === false) {
+                      output = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                    } else {
+                      const d: any = result && (result as any).data ? (result as any).data : result
+                      const h0 = Array.isArray(d?.hits) ? d.hits[0] : (Array.isArray(d?.data?.hits) ? d.data.hits[0] : null)
+                      output = h0 ? String(h0.snippet || '') : ''
+                    }
+                  } else if (cname === 'knowledgebasesearch' || cname === 'kbsearch') {
+                    if (result && (result as any).ok === false) {
+                      output = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                    } else {
+                      const d: any = result && (result as any).data ? (result as any).data : result
+                      const r0 = Array.isArray(d?.results) ? d.results[0] : (Array.isArray(d?.data?.results) ? d.data.results[0] : null)
+                      output = r0 ? String(r0.excerpt || '') : ''
+                    }
+                  } else {
+                    output = typeof result === 'string' ? result : JSON.stringify(result)
+                  }
+                } catch {
+                  output = typeof result === 'string' ? result : JSON.stringify(result)
+                }
+
+                streamedToolActivity = true
+                try { await (stream as any).submitToolOutputs?.([{ call_id: callId, output }]) } catch {}
+                if (callId) pendingArgs.delete(callId)
+                continue
+              }
+
+              // Strictly print only output text stream events
+              if (t === 'response.output_text.delta') {
+                const delta = (evt as any)?.delta
+                if (typeof delta === 'string' && delta) {
+                  // Log raw chunk output exactly as received from Fireworks
+                  try { console.log('[Fireworks] raw output_text.delta:', delta) } catch {}
+                  try { emitChunk(delta) } catch (e) { try { emitError(String(e)) } catch {} }
+                }
+                continue
+              }
+              if (t === 'response.output_text.done') {
+                // no-op; end of text streaming for current item
+                continue
               }
             } catch (e: any) {
-              onError(e?.message || String(e))
+              const error = e?.message || String(e)
+              emitError(error)
             }
           }
 
-          // Update rate limit tracker from headers if available
-          let headerMap: Record<string, string> | null = null
+          // After stream completes, get the final response with complete output array
+          const finalResponse = await stream.finalResponse()
+
+          // Log entire HTTP response: headers + final payload (safe extract)
           try {
-            const hdrs = (stream as any)?.response?.headers
+            const hdrs = (stream as any)?.response?.headers || (finalResponse as any)?.response?.headers
+            const headersMap = hdrs ? toHeaderMap(hdrs) : undefined
+            if (DEBUG_HTTP) {
+              logProviderHttp({
+                provider: 'fireworks',
+                method: 'POST',
+                url: 'https://api.fireworks.ai/inference/v1/responses',
+                headers: headersMap,
+                body: finalResponse,
+                note: 'Response'
+              })
+            }
+            // Always print a concise version to console for quick inspection
+            try { if (headersMap) console.log('[Fireworks] HTTP response headers:', headersMap) } catch {}
+            try {
+              const safeFinal: any = {
+                id: (finalResponse as any)?.id,
+                usage: (finalResponse as any)?.usage,
+                output: (finalResponse as any)?.output
+              }
+              console.log('[Fireworks] HTTP finalResponse (safe extract):', JSON.stringify(safeFinal, null, 2))
+            } catch {}
+            // If full logging is requested, dump all SSE events captured during streaming
+            if (DEBUG_FULL && __streamEvents && __streamEvents.length) {
+              console.log(`[Fireworks] HTTP stream SSE events (${__streamEvents.length})`) // summary
+              for (const ev of __streamEvents) {
+                try { console.log('[Fireworks] SSE event:', JSON.stringify(ev)) } catch { console.log('[Fireworks] SSE event type:', String((ev as any)?.type || '')) }
+              }
+            }
+            // Update rate limit tracker from headers on streamed agent turn
             if (hdrs) {
-              headerMap = toHeaderMap(hdrs)
-              rateLimitTracker.updateFromHeaders('fireworks' as any, model as any, headerMap)
+              rateLimitTracker.updateFromHeaders('fireworks' as any, model as any, toHeaderMap(hdrs))
             }
           } catch {}
 
-          // Accumulate token usage for this turn (from streamed usage or headers). Do not emit yet.
-          try {
-            let turnInputTokens = 0, turnOutputTokens = 0, turnTotalTokens = 0
-            if (lastUsage) {
-              // Prefer OpenAI-style names if present
-              if (typeof lastUsage.prompt_tokens === 'number') turnInputTokens = lastUsage.prompt_tokens
-              if (typeof lastUsage.completion_tokens === 'number') turnOutputTokens = lastUsage.completion_tokens
-              if (typeof lastUsage.total_tokens === 'number') turnTotalTokens = lastUsage.total_tokens
-              if (!turnTotalTokens) turnTotalTokens = turnInputTokens + turnOutputTokens
-            } else if (headerMap) {
-              const it = parseInt(headerMap['x-fireworks-usage-input-tokens'] || headerMap['x-fireworks-input-tokens'] || '')
-              const ot = parseInt(headerMap['x-fireworks-usage-output-tokens'] || headerMap['x-fireworks-output-tokens'] || '')
-              const tt = parseInt(headerMap['x-fireworks-usage-total-tokens'] || headerMap['x-fireworks-total-tokens'] || '')
-              if (!isNaN(it)) turnInputTokens = it
-              if (!isNaN(ot)) turnOutputTokens = ot
-              if (!isNaN(tt)) turnTotalTokens = tt
-              if (!turnTotalTokens) turnTotalTokens = (isNaN(it) ? 0 : it) + (isNaN(ot) ? 0 : ot)
-            }
-            cumInputTokens += turnInputTokens
-            cumOutputTokens += turnOutputTokens
-            cumTotalTokens += turnTotalTokens
-          } catch {}
 
-          // Finalize tool calls from accumulated deltas
-          const toolCalls = Array.from(toolAcc.values())
-            .filter(tc => (tc.id || tc.name || tc.args))
-            .map(tc => {
-              let argsObj: any = {}
-              if (tc.args) { try { argsObj = JSON.parse(tc.args) } catch { try { argsObj = JSON.parse(tc.args.replace(/'/g, '"')) } catch {} } }
-              // Use sanitized name if present
-              const safe = toSafeName(tc.name || '')
-              const nameToUse = toolMap.has(safe) ? safe : (toolMap.has(tc.name) ? tc.name : safe)
-              return { id: tc.id || `call_${Math.random().toString(36).slice(2)}`, name: nameToUse, arguments: argsObj }
-            })
+          // Extract function calls from the output array and add them to conversation
+          // If we already handled tool calls via streaming submitToolOutputs, skip this legacy path
+          const toolCalls: Array<{ id: string; name: string; arguments: any }> = []
+          if (!streamedToolActivity && Array.isArray(finalResponse?.output)) {
+            for (const item of finalResponse.output) {
+
+              if (item.type === 'function_call') {
+                // Add the function call to the conversation input
+                conv.push({
+                  type: 'function_call',
+                  call_id: item.call_id,
+                  name: item.name,
+                  arguments: item.arguments
+                })
+
+                // Also track it for execution
+                toolCalls.push({
+                  id: item.call_id,
+                  name: item.name,
+                  arguments: typeof item.arguments === 'string' ? JSON.parse(item.arguments) : item.arguments
+                })
+              }
+            }
+          }
+
 
           if (toolCalls.length > 0) {
-            // Add assistant message with tool_calls to conversation
-            const assistantMsg: any = {
-              role: 'assistant',
-              content: turnBuffer || '',
-              tool_calls: toolCalls.map(tc => ({ id: tc.id, type: 'function', function: { name: tc.name, arguments: JSON.stringify(tc.arguments || {}) } }))
-            }
-            ccMsgs.push(assistantMsg)
-
-            // Execute tools sequentially, push tool outputs, then continue the loop
+            // Execute tool calls sequentially to avoid rate limits
             let shouldPrune = false
             let pruneSummary: any = null
-            const perTurnToolCache = new Map<string, any>()
+
+            // Per-turn dedupe: reuse identical tool results within this streamed turn
+            const perTurnToolCache: Map<string, any> = new Map()
 
             for (const tc of toolCalls) {
-              const tool = toolMap.get(tc.name)
-              if (!tool) {
-                ccMsgs.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ error: `Tool ${tc.name} not found` }) })
-                continue
-              }
-              const args = tc.arguments || {}
-              const v = validateJson(tool.parameters, args)
-              if (!v.ok) {
-                ccMsgs.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ error: `Validation error: ${v.errors || 'invalid input'}` }) })
-                continue
-              }
+              // Check for cancellation before executing each tool
+              checkCancelled()
 
-              try { onToolStart?.({ callId: tc.id, name: tool.name, arguments: args }) } catch {}
-
-              const dedupeKey = `${tool.name}:${JSON.stringify(args)}`
-              let result: any
-              if (perTurnToolCache.has(dedupeKey)) {
-                result = perTurnToolCache.get(dedupeKey)
-              } else {
-                // Prefer raw code blocks for read_lines to help LLM comprehension
-                if (tool.name === 'fs.read_lines' && args && args.includeLineNumbers !== false) {
-                  (args as any).includeLineNumbers = false
+              const name = tc.name
+              let tool: any = null
+              try {
+                tool = toolMap.get(name)
+                if (!tool) {
+                  conv.push({
+                    type: 'function_call_output',
+                    call_id: tc.id,
+                    output: JSON.stringify({ error: `Tool ${name} not found` })
+                  })
+                  continue
                 }
+                const args = typeof (tc as any).arguments === 'string' ? (JSON.parse((tc as any).arguments || '{}') || {}) : ((tc as any).arguments || {})
+                const schema = (tool as any)?.parameters
+                const v = validateJson(schema, args)
+                if (!v.ok) {
+                  conv.push({
+                    type: 'function_call_output',
+                    call_id: tc.id,
+                    output: JSON.stringify({ error: `Validation error: ${v.errors || 'invalid input'}` })
+                  })
+                  continue
+                }
+
+                // Generate tool execution ID
+                // Use original tool name for events (not sanitized name)
+                const originalName = tool?.name || String(name)
+                const dedupeKey = `${originalName}:${JSON.stringify(args)}`
+                // Notify start
+                try { emitToolStart({ callId: tc.id, name: originalName, arguments: args }) } catch {}
+
+                // Execute tool with a defensive timeout (prevents hangs) and per-turn dedupe
+                // Do not undercut tools that implement their own internal budget (e.g., workspace.search)
+                // Heuristic: derive a minimum from the number of queries, and allow a provided hint to increase it
+                const provided = (args && args.filters && typeof args.filters.timeBudgetMs === 'number') ? args.filters.timeBudgetMs : undefined
+                const qCount = Array.isArray((args as any)?.queries) ? (args as any).queries.length : ((args as any)?.query ? 1 : 0)
+                const estAuto = Math.min(30000, 10000 + Math.max(0, qCount - 1) * 1500) // mirrors tool's computeAutoBudget base/perTerm/cap
+                const baseDefault = 15000
+                const timeoutMs = Math.max(
+                  5000, // never below 5s
+                  Math.min(
+                    30000, // hard cap
+                    Math.max(
+                      baseDefault,
+                      provided ? (provided + 2000) : baseDefault, // give tools a little overhead beyond hint
+                      estAuto + 1000 // leave breathing room beyond internal budget
+                    )
+                  )
+                )
+                let result: any
+                if (perTurnToolCache.has(dedupeKey)) {
+                  result = perTurnToolCache.get(dedupeKey)
+                } else {
+                  // Prefer raw code blocks for read_lines to help LLM comprehension
+
                 result = await Promise.race([
-                  Promise.resolve(tool.run(args, toolMeta)),
-                  new Promise((_, reject) => setTimeout(() => reject(new Error(`Tool '${tool.name}' timed out after 15000ms`)), 15000))
-                ])
-                perTurnToolCache.set(dedupeKey, result)
-              }
-
-              try { onToolEnd?.({ callId: tc.id, name: tool.name, result }) } catch {}
-
-              if (result?._meta?.trigger_pruning) { shouldPrune = true; pruneSummary = result._meta.summary }
-
-              // For fs.read_file and fs.read_lines, return RAW text with no minification/JSON
-              if (tool.name === 'fs.read_file') {
-                const contentStr = (result && result.ok === false)
-                  ? `Error: ${String(result?.error || 'Unknown error')}`
-                  : (typeof result?.content === 'string' ? result.content : '')
-                ccMsgs.push({ role: 'tool', tool_call_id: tc.id, content: contentStr })
-              } else if (tool.name === 'fs.read_lines') {
-                let contentStr = ''
-                if (result && result.ok === false) {
-                  contentStr = `Error: ${String(result?.error || 'Unknown error')}`
-                } else if (typeof result?.text === 'string') {
-                  contentStr = result.text
-                } else if (Array.isArray(result?.lines)) {
-                  const eol = (result?.eol === 'crlf') ? '\r\n' : '\n'
-                  contentStr = result.lines.map((l: any) => (l?.text ?? '')).join(eol)
+                    Promise.resolve(tool.run(args, toolMeta)),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error(`Tool '${originalName}' timed out after ${timeoutMs}ms`)), timeoutMs))
+                  ])
+                  perTurnToolCache.set(dedupeKey, result)
                 }
-                ccMsgs.push({ role: 'tool', tool_call_id: tc.id, content: contentStr })
-              } else if (tool.name === 'workspace.search' && (args as any)?.action === 'expand') {
-                const d: any = result && (result as any).data ? (result as any).data : result
-                const output = typeof d?.preview === 'string' ? d.preview : (typeof d?.data?.preview === 'string' ? d.data.preview : '')
-                ccMsgs.push({ role: 'tool', tool_call_id: tc.id, content: output })
-              } else if (tool.name === 'workspace.jump') {
-                const d: any = result && (result as any).data ? (result as any).data : result
-                const output = typeof d?.preview === 'string' ? d.preview : (typeof d?.data?.preview === 'string' ? d.data.preview : '')
-                ccMsgs.push({ role: 'tool', tool_call_id: tc.id, content: output })
-              } else if (tool.name === 'text.grep') {
-                let output = ''
-                if (result && (result as any).ok === false) {
-                  output = `Error: ${String((result as any)?.error || 'Unknown error')}`
-                } else {
+
+                // Notify end (full result to UI)
+                try { emitToolEnd({ callId: tc.id, name: originalName, result }) } catch {}
+
+                // Check if tool requested pruning
+                if (result?._meta?.trigger_pruning) {
+                  shouldPrune = true
+                  pruneSummary = result._meta.summary
+                }
+
+                // For fs.read_file and fs.read_lines, return RAW text with no minification/JSON
+                let output: string
+                const cname = String(originalName || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+
+                if (cname === 'workspacesearch' && (args as any)?.action === 'expand') {
                   const d: any = result && (result as any).data ? (result as any).data : result
-                  const m = Array.isArray(d?.matches) && d.matches.length ? d.matches[0] : null
-                  if (m) {
-                    const before = Array.isArray(m.before) ? m.before : []
-                    const after = Array.isArray(m.after) ? m.after : []
-                    const lines = [...before, (m.line ?? ''), ...after]
-                    output = lines.join('\n')
+                  output = typeof d?.preview === 'string' ? d.preview : (typeof d?.data?.preview === 'string' ? d.data.preview : '')
+                } else if (cname === 'workspacejump') {
+                  const d: any = result && (result as any).data ? (result as any).data : result
+                  output = typeof d?.preview === 'string' ? d.preview : (typeof d?.data?.preview === 'string' ? d.data.preview : '')
+                } else if (cname === 'textgrep') {
+                  if (result && (result as any).ok === false) {
+                    output = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    const m = Array.isArray(d?.matches) && d.matches.length ? d.matches[0] : null
+                    if (m) {
+                      const before = Array.isArray(m.before) ? m.before : []
+                      const after = Array.isArray(m.after) ? m.after : []
+                      const lines = [...before, (m.line ?? ''), ...after]
+                      output = lines.join('\n')
+                    } else {
+                      output = ''
+                    }
                   }
-                }
-                ccMsgs.push({ role: 'tool', tool_call_id: tc.id, content: output })
-              } else if (tool.name === 'code.search_ast') {
-                let output = ''
-                if (result && (result as any).ok === false) {
-                  output = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                } else if (cname === 'codesearchast' || cname === 'astgrepsearch' || cname === 'codeastgrep' || cname === 'astgrep') {
+                  if (result && (result as any).ok === false) {
+                    output = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    const m = Array.isArray(d?.matches) && d.matches.length ? d.matches[0] : null
+                    output = m ? String(m.snippet || m.text || '') : ''
+                  }
+                } else if (cname === 'indexsearch') {
+                  if (result && (result as any).ok === false) {
+                    output = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    const chunks = Array.isArray(d?.chunks) ? d.chunks : (Array.isArray(d?.data?.chunks) ? d.data.chunks : [])
+                    const c0 = chunks && chunks.length ? chunks[0] : null
+                    output = c0 && typeof c0.text === 'string' ? c0.text : ''
+                  }
+                } else if (cname === 'terminalsessiontail') {
+                  if (result && (result as any).ok === false) {
+                    output = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    output = typeof d?.tail === 'string' ? d.tail : (typeof d?.data?.tail === 'string' ? d.data.tail : '')
+                  }
+                } else if (cname === 'terminalsessionsearchoutput') {
+                  if (result && (result as any).ok === false) {
+                    output = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    const h0 = Array.isArray(d?.hits) ? d.hits[0] : (Array.isArray(d?.data?.hits) ? d.data.hits[0] : null)
+                    output = h0 ? String(h0.snippet || '') : ''
+                  }
+                } else if (cname === 'knowledgebasesearch' || cname === 'kbsearch') {
+                  if (result && (result as any).ok === false) {
+                    output = `Error: ${String((result as any)?.error || 'Unknown error')}`
+                  } else {
+                    const d: any = result && (result as any).data ? (result as any).data : result
+                    const r0 = Array.isArray(d?.results) ? d.results[0] : (Array.isArray(d?.data?.results) ? d.data.results[0] : null)
+                    output = r0 ? String(r0.excerpt || '') : ''
+                  }
                 } else {
-                  const d: any = result && (result as any).data ? (result as any).data : result
-                  const m = Array.isArray(d?.matches) && d.matches.length ? d.matches[0] : null
-                  output = m ? String(m.snippet || m.text || '') : ''
+                  // Standard minification for all other tools including fsRead* now returning strings
+                  output = typeof result === 'string' ? result : JSON.stringify(result)
                 }
-                ccMsgs.push({ role: 'tool', tool_call_id: tc.id, content: output })
-              } else if (tool.name === 'index.search') {
-                let output = ''
-                if (result && (result as any).ok === false) {
-                  output = `Error: ${String((result as any)?.error || 'Unknown error')}`
-                } else {
-                  const d: any = result && (result as any).data ? (result as any).data : result
-                  const chunks = Array.isArray(d?.chunks) ? d.chunks : (Array.isArray(d?.data?.chunks) ? d.data.chunks : [])
-                  const c0 = chunks && chunks.length ? chunks[0] : null
-                  output = c0 && typeof c0.text === 'string' ? c0.text : ''
+                conv.push({
+                  type: 'function_call_output',
+                  call_id: tc.id,
+                  output
+                })
+              } catch (e: any) {
+                // Check if this is a cancellation error
+                if (e?.message?.includes('cancelled')) {
+                  throw e
                 }
-                ccMsgs.push({ role: 'tool', tool_call_id: tc.id, content: output })
-              } else if (tool.name === 'terminal.session_tail') {
-                const d: any = result && (result as any).data ? (result as any).data : result
-                const output = (result && (result as any).ok === false)
-                  ? `Error: ${String((result as any)?.error || 'Unknown error')}`
-                  : (typeof d?.tail === 'string' ? d.tail : (typeof d?.data?.tail === 'string' ? d.data.tail : ''))
-                ccMsgs.push({ role: 'tool', tool_call_id: tc.id, content: output })
-              } else if (tool.name === 'terminal.session_search_output') {
-                let output = ''
-                if (result && (result as any).ok === false) {
-                  output = `Error: ${String((result as any)?.error || 'Unknown error')}`
-                } else {
-                  const d: any = result && (result as any).data ? (result as any).data : result
-                  const h0 = Array.isArray(d?.hits) ? d.hits[0] : (Array.isArray(d?.data?.hits) ? d.data.hits[0] : null)
-                  output = h0 ? String(h0.snippet || '') : ''
-                }
-                ccMsgs.push({ role: 'tool', tool_call_id: tc.id, content: output })
-              } else if (tool.name === 'kb.search') {
-                let output = ''
-                if (result && (result as any).ok === false) {
-                  output = `Error: ${String((result as any)?.error || 'Unknown error')}`
-                } else {
-                  const d: any = result && (result as any).data ? (result as any).data : result
-                  const r0 = Array.isArray(d?.results) ? d.results[0] : (Array.isArray(d?.data?.results) ? d.data.results[0] : null)
-                  output = r0 ? String(r0.excerpt || '') : ''
-                }
-                ccMsgs.push({ role: 'tool', tool_call_id: tc.id, content: output })
-              } else {
-                const { minifyToolResult } = await import('./toolResultMinify')
-                const compact = minifyToolResult(tool.name, result)
-                const output = typeof compact === 'string' ? compact : JSON.stringify(compact)
-                ccMsgs.push({ role: 'tool', tool_call_id: tc.id, content: output })
+                // Notify error
+                try { emitToolError({ callId: tc.id, name: (tool?.name || String(name)), error: e?.message || String(e) }) } catch {}
+                conv.push({
+                  type: 'function_call_output',
+                  call_id: tc.id,
+                  output: JSON.stringify({ error: e?.message || String(e) })
+                })
               }
             }
 
-            // Optional: prune conversation
+            // Prune conversation if requested
             if (shouldPrune && pruneSummary) {
-              const sys = (messages || []).filter(m => m.role === 'system').map(m => ({ role: m.role, content: m.content }))
-              const recent = ccMsgs.slice(-5)
-              ccMsgs.length = 0
-              ccMsgs.push(...sys, { role: 'user', content: formatSummary(pruneSummary) }, ...recent)
+              pruneConversation(pruneSummary)
             }
 
-            // Continue to the next assistant turn
+            // Continue loop to request next streamed assistant turn
             continue
           }
 
-          // No tool calls -> emit buffered assistant text now and finish
-          if (turnBuffer) onChunk(turnBuffer)
+          // Extract token usage from final response
           try {
-            if (onTokenUsage) {
-              onTokenUsage({ inputTokens: cumInputTokens, outputTokens: cumOutputTokens, totalTokens: cumTotalTokens })
+            if (finalResponse?.usage) {
+              const usage = {
+                inputTokens: finalResponse.usage.input_tokens || 0,
+                outputTokens: finalResponse.usage.output_tokens || 0,
+                totalTokens: finalResponse.usage.total_tokens || 0,
+              }
+              cumulativeTokens += usage.totalTokens
+              emitUsage(usage)
             }
-          } catch {}
-          onDone()
+          } catch (e) {
+            // Token usage extraction failed
+          }
+
+          // Done - ALWAYS call onDone() to resolve promise
+          emitDone()
           return
         }
       } catch (e: any) {
         const msg = e?.message || ''
-        if (e?.name === 'AbortError' || /cancel/i.test(msg)) { try { onDone() } catch {}; return }
-        onError(msg || String(e))
+        if (e?.name === 'AbortError' || /cancel/i.test(msg)) {
+          // Treat cooperative cancellation as a normal stop
+          try { emitDone() } catch {}
+          return
+        }
+        const error = msg || String(e)
+        emitError(error)
+        return
       }
+
+      // If we exit the loop without returning (iteration limit or cancelled), call onDone
+      // Loop exited normally (iteration limit or cancelled)
+      emitDone()
     }
 
-    await run().catch((e: any) => { try { onError(e?.message || String(e)) } catch {} })
+    // Wait for run() to complete before returning
+    await run().catch((e: any) => {
+      try {
+        const msg = e?.message || ''
+        if (e?.name === 'AbortError' || /cancel/i.test(msg)) {
+          // Swallow cancellation and signal done to resolve promise
+          try { emitDone() } catch {}
+          return
+        }
+        const error = msg || String(e)
+        emitError(error)
+      } catch {}
+    })
 
     return { cancel: () => { cancelled = true; try { holder.abort?.() } catch {} } }
-  },
+  }
 }
 
 
