@@ -329,7 +329,7 @@ export interface FlowEditorSlice {
 
   // Flow event handlers - called by scheduler to update UI state
   feHandleNodeStart: (requestId: string, nodeId: string) => void
-  feHandleNodeEnd: (requestId: string, nodeId: string, durationMs?: number) => void
+  feHandleNodeEnd: (requestId: string, nodeId: string, executionId?: string, durationMs?: number) => void
   feUpdateMainFlowContext: (context: MainFlowContext) => void
   feHandleIO: (requestId: string, nodeId: string, data: string) => void
   feHandleChunk: (requestId: string, text: string, nodeId?: string, provider?: string, model?: string) => void
@@ -337,8 +337,10 @@ export interface FlowEditorSlice {
   feHandleToolEnd: (requestId: string, toolName: string, callId?: string, nodeId?: string, result?: any) => void
   feHandleToolError: (requestId: string, toolName: string, error: string, callId?: string, nodeId?: string) => void
   feHandleIntentDetected: (requestId: string, nodeId: string, intent: string, provider?: string, model?: string) => void
-  feHandleTokenUsage: (requestId: string, provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }) => void
+  feHandleTokenUsage: (requestId: string, provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }, nodeId?: string, executionId?: string) => void
   feHandleRateLimitWait: (requestId: string, nodeId: string, attempt: number, waitMs: number, reason?: string, provider?: string, model?: string) => void
+  feHandleUsageBreakdown: (requestId: string, nodeId: string, provider: string, model: string, breakdown: any, executionId?: string) => void
+
   feHandleWaitingForInput: (requestId: string, nodeId: string) => void
   feHandleDone: (requestId: string) => void
   feHandleError: (requestId: string, error: string, nodeId?: string, provider?: string, model?: string) => void
@@ -977,6 +979,19 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     // Store actions run in main process - call flow execution directly
     const { cancelFlow } = await import('../../ipc/flows-v2/index.js')
     await cancelFlow(id)
+
+    // Proactively finalize usage on manual stop
+    ;(() => {
+      const st = store.getState() as any
+      if (st.finalizeRequestUsage) {
+        try {
+          st.finalizeRequestUsage({ requestId: id })
+        } catch (e) {
+          console.warn('[flow] finalizeRequestUsage failed:', e)
+        }
+      }
+    })()
+
     set({ feStatus: 'stopped' })
   },
 
@@ -1592,9 +1607,12 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       nodeId,
       timestamp: Date.now(),
     })
+
+    // Note: we no longer reset lastRequestTokenUsage globally here.
+    // Token cost for the node will be taken only if it matches this nodeId/executionId.
   },
 
-  feHandleNodeEnd: (requestId: string, nodeId: string, durationMs?: number) => {
+  feHandleNodeEnd: (requestId: string, nodeId: string, executionId?: string, durationMs?: number) => {
     if (!requestId || requestId !== get().feRequestId) return
     // Compute cost for LLM Request node
     const node = get().feNodes.find(n => n.id === nodeId)
@@ -1605,9 +1623,10 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     if (isLlmRequest) {
       const state = store.getState() as any
 
-      // Use actual token usage from lastRequestTokenUsage if available
-      if (state.lastRequestTokenUsage && state.lastRequestTokenUsage.cost) {
-        tokenCost = state.lastRequestTokenUsage.cost
+      // Use actual token usage from lastRequestTokenUsage only if it matches this node execution
+      const lr = state.lastRequestTokenUsage
+      if (lr && lr.cost && lr.nodeId === nodeId && lr.executionId === executionId) {
+        tokenCost = lr.cost
       }
     }
 
@@ -1618,6 +1637,11 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         nodeId,
         cost: tokenCost || undefined
       })
+    }
+
+    // Finalize per-node token usage into session totals
+    if (isLlmRequest && executionId && state.finalizeNodeUsage) {
+      state.finalizeNodeUsage({ requestId, nodeId, executionId })
     }
 
     // Update node execution state (buffered)
@@ -1743,12 +1767,24 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         }
       } else if (normalizedToolName === 'index_search') {
       } else if (normalizedToolName === 'fs_read_lines' || toolKey === 'fsreadlines') {
-        const path = toolArgs.path
+        // Derive file path and line range for fs.read_lines
+        let filePath: string | undefined = toolArgs.path
+        let handleObj: any | undefined
+        if (!filePath && typeof toolArgs.handle === 'string') {
+          try {
+            const parsed = JSON.parse(Buffer.from(String(toolArgs.handle), 'base64').toString('utf-8'))
+            if (parsed && typeof parsed.p === 'string') {
+              filePath = parsed.p
+              handleObj = parsed
+            }
+          } catch {}
+        }
+
         const mode = String(toolArgs.mode || 'range')
         let lineRange: string | undefined
         if (mode === 'range') {
-          const s = Number(toolArgs.startLine)
-          const e = Number(toolArgs.endLine)
+          const s = Number(toolArgs.startLine ?? handleObj?.s)
+          const e = Number(toolArgs.endLine ?? handleObj?.e)
           if (s && e) lineRange = `L${s}-${e}`
           else if (s) lineRange = `L${s}`
         } else if (mode === 'head') {
@@ -1766,14 +1802,31 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         } else if (mode === 'regex') {
           lineRange = 'regex'
         }
-        badgeMetadata = { filePath: path, ...(lineRange ? { lineRange } : {}), fullParams: toolArgs }
 
-        const query = toolArgs.query
-        if (query) {
-          badgeMetadata = {
-            query: String(query).slice(0, 100),
-            fullParams: toolArgs
+        // Populate metadata without overwriting file/range with unrelated keys
+        badgeMetadata = { ...(filePath ? { filePath } : {}), ...(lineRange ? { lineRange } : {}), fullParams: toolArgs }
+
+        // Store shallow params for later header reconstruction at tool_end (covers cases where tool_start lacked args)
+        if (callId) {
+          const sanitizedParams: any = {
+            ...(filePath ? { path: filePath } : {}),
+            ...(typeof toolArgs.handle === 'string' ? { handle: String(toolArgs.handle) } : {}),
+            mode,
+            ...(toolArgs.startLine !== undefined || (handleObj && handleObj.s !== undefined) ? { startLine: Number(toolArgs.startLine ?? handleObj?.s) } : {}),
+            ...(toolArgs.endLine !== undefined || (handleObj && handleObj.e !== undefined) ? { endLine: Number(toolArgs.endLine ?? handleObj?.e) } : {}),
+            ...(toolArgs.headLines !== undefined ? { headLines: Number(toolArgs.headLines) } : {}),
+            ...(toolArgs.tailLines !== undefined ? { tailLines: Number(toolArgs.tailLines) } : {}),
+            ...(toolArgs.focusLine !== undefined ? { focusLine: Number(toolArgs.focusLine) } : {}),
+            ...(toolArgs.window !== undefined ? { window: Number(toolArgs.window) } : {}),
+            ...(toolArgs.beforeLines !== undefined ? { beforeLines: Number(toolArgs.beforeLines) } : {}),
+            ...(toolArgs.afterLines !== undefined ? { afterLines: Number(toolArgs.afterLines) } : {}),
           }
+          set((state) => ({
+            feToolParamsByKey: {
+              ...(state as any).feToolParamsByKey,
+              [callId]: sanitizedParams
+            }
+          }))
         }
       } else if (normalizedToolName === 'code_search_ast' || toolKey === 'codesearchast') {
         const pattern = toolArgs.pattern
@@ -1953,6 +2006,24 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             }
           }))
         }
+      } else if (normalizedToolName === 'agentAssessTask' || normalizedToolName === 'agent_assess_task' || toolKey === 'agentassesstask') {
+        const t = typeof (toolArgs as any).task_type === 'string' ? String((toolArgs as any).task_type) : (typeof (toolArgs as any).taskType === 'string' ? String((toolArgs as any).taskType) : '')
+        badgeLabel = t ? `Assess Task — ${t}` : 'Assess Task'
+        badgeMetadata = { ...(t ? { taskType: t } : {}), fullParams: toolArgs }
+        if (callId) {
+          const sanitizedParams: any = {
+            ...(t ? { task_type: t } : {}),
+            ...(typeof (toolArgs as any).estimated_files === 'number' ? { estimated_files: Number((toolArgs as any).estimated_files) } : {}),
+            ...(typeof (toolArgs as any).estimated_iterations === 'number' ? { estimated_iterations: Number((toolArgs as any).estimated_iterations) } : {}),
+            ...(typeof (toolArgs as any).strategy === 'string' ? { strategy: String((toolArgs as any).strategy) } : {}),
+          }
+          set((state) => ({
+            feToolParamsByKey: {
+              ...(state as any).feToolParamsByKey,
+              [callId]: sanitizedParams
+            }
+          }))
+        }
       }
     }
 
@@ -2032,6 +2103,25 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         return
       }
 
+      // Minimal workspace.search result path (UI cached by provider)
+      if (toolKey === 'workspacesearch' && result && (result as any).previewKey) {
+        const count = Number((result as any).previewCount || 0)
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId: callId,
+          updates: {
+            status: 'success',
+            color: 'green',
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'workspace-search' as const,
+            metadata: { resultCount: count },
+            interactive: { type: 'workspace-search', data: { key: callId, count } }
+          }
+        })
+        return
+      }
+
       // Handle workspace.search results
       if (toolKey === 'workspacesearch' && result?.ok && result.data) {
         const resultData = result.data
@@ -2039,6 +2129,19 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
         // Store full result in unified cache
         get().registerToolResult({ key: callId, data: resultData })
+
+        // Derive a stable header query from usedParams when start args were unavailable
+        const used = (resultData && (resultData as any).usedParams) || {}
+        const termsArr: string[] = Array.isArray(used.queries) && used.queries.length
+          ? used.queries.map((q: any) => String(q || '').trim()).filter(Boolean)
+          : (typeof used.query === 'string' && used.query.trim().length ? [String(used.query).trim()] : [])
+        let headerQuery: string | undefined
+        if (termsArr.length) {
+          const shown = termsArr.slice(0, 2)
+          const suffix = termsArr.length > 2 ? ` +${termsArr.length - 2}` : ''
+          const mode = used.mode ? ` [${String(used.mode)}]` : ''
+          headerQuery = shown.join(' | ') + suffix + mode
+        }
 
         state.updateBadgeInNodeExecution({
           nodeId,
@@ -2051,8 +2154,39 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             contentType: 'workspace-search' as const,
             metadata: {
               resultCount,
+              ...(headerQuery ? { query: headerQuery } : {})
             },
             interactive: { type: 'workspace-search', data: { key: callId, count: resultCount } }
+          }
+        })
+        return
+      }
+
+      // Handle agentAssessTask results
+      if ((normalizedToolName === 'agentAssessTask' || normalizedToolName === 'agent_assess_task' || toolKey === 'agentassesstask') && result) {
+        // Store full result (ok, assessment, guidance) in unified cache
+        get().registerToolResult({ key: callId, data: result })
+
+        const assessment = (result as any)?.assessment || {}
+        const taskType = typeof assessment.task_type === 'string' ? assessment.task_type : (typeof ((get() as any).feToolParamsByKey?.[callId || '']?.task_type) === 'string' ? (get() as any).feToolParamsByKey?.[callId || '']?.task_type : undefined)
+        const tokenBudget = typeof assessment.token_budget === 'number' ? assessment.token_budget : undefined
+        const maxIterations = typeof assessment.max_iterations === 'number' ? assessment.max_iterations : undefined
+
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId: callId,
+          updates: {
+            status: 'success',
+            color: 'green',
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'agent-assess' as const,
+            metadata: {
+              ...(taskType ? { taskType } : {}),
+              ...(tokenBudget !== undefined ? { tokenBudget } : {}),
+              ...(maxIterations !== undefined ? { maxIterations } : {}),
+            },
+            interactive: { type: 'agent-assess', data: { key: callId } }
           }
         })
         return
@@ -2169,6 +2303,46 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         // Store full result in unified cache using callId as key
         get().registerToolResult({ key: callId, data: result })
 
+        // Reconstruct file path and line range for header if missing from start
+        const saved = ((get() as any).feToolParamsByKey || {})[callId || ''] || {}
+        const used = (result && typeof result === 'object' && (result as any).usedParams) ? (result as any).usedParams : {}
+
+        // File path from saved, result.path, or decoded handle (saved or used)
+        let filePath: string | undefined = typeof saved.path === 'string' ? saved.path : undefined
+        if (!filePath && typeof (result as any)?.path === 'string') filePath = String((result as any).path)
+        if (!filePath && typeof used.path === 'string') filePath = String(used.path)
+        const handleStr: string | undefined = (typeof saved.handle === 'string' ? saved.handle : (typeof used.handle === 'string' ? used.handle : undefined))
+        if (!filePath && handleStr) {
+          try {
+            const parsed = JSON.parse(Buffer.from(handleStr, 'base64').toString('utf-8'))
+            if (parsed && typeof parsed.p === 'string') filePath = parsed.p
+          } catch {}
+        }
+
+        // Compute display range from params (prefer saved, fallback to used, then result.start/end)
+        const smode = String(saved.mode || used.mode || 'range')
+        let lineRange: string | undefined
+        if (smode === 'range') {
+          const s = Number(saved.startLine ?? used.startLine ?? (result as any)?.startLine)
+          const e = Number(saved.endLine ?? used.endLine ?? (result as any)?.endLine)
+          if (s && e) lineRange = `L${s}-${e}`
+          else if (s) lineRange = `L${s}`
+        } else if (smode === 'head') {
+          const n = Number(saved.headLines ?? used.headLines)
+          lineRange = n ? `head:${n}` : 'head'
+        } else if (smode === 'tail') {
+          const n = Number(saved.tailLines ?? used.tailLines)
+          lineRange = n ? `tail:${n}` : 'tail'
+        } else if (smode === 'around') {
+          const L = Number(saved.focusLine ?? used.focusLine)
+          const win = Number((saved.window ?? used.window) ?? Math.max(Number((saved.beforeLines ?? used.beforeLines) || 0), Number((saved.afterLines ?? used.afterLines) || 0)))
+          if (L && win) lineRange = `L${L} ±${win}`
+          else if (L) lineRange = `L${L}`
+          else lineRange = 'around'
+        } else if (smode === 'regex') {
+          lineRange = 'regex'
+        }
+
         state.updateBadgeInNodeExecution({
           nodeId,
           badgeId: callId,
@@ -2178,6 +2352,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             expandable: true,
             defaultExpanded: false,
             contentType: 'read-lines' as const,
+            metadata: { ...(filePath ? { filePath } : {}), ...(lineRange ? { lineRange } : {}) },
             interactive: { type: 'read-lines', data: { key: callId } }
           }
         })
@@ -2211,6 +2386,71 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
       // Prefer pointer-based interactive payload to avoid large store payloads
       let interactive: any = undefined
+      // Minimal edits result path (UI cached by provider)
+      if (result && (result as any).previewKey && (toolKey === 'applyedits' || toolKey === 'codeapplyeditstargeted' || toolKey === 'applypatch')) {
+        const filesChanged = Number((result as any).previewCount || 0)
+        // Try to compute line deltas and file path from cached UI payload for header/title
+        let addedLines = 0
+        let removedLines = 0
+        let singleFilePath: string | undefined = undefined
+        try {
+          const previews = (__feToolResultCache as any)?.get?.(callId) || []
+          if (Array.isArray(previews) && previews.length) {
+            if (previews.length === 1 && typeof previews[0]?.path === 'string') {
+              singleFilePath = String(previews[0].path)
+            }
+            const compute = (before?: string, after?: string) => {
+              const a = (before ?? '').split(/\r?\n/)
+              const b = (after ?? '').split(/\r?\n/)
+              const n = a.length
+              const m = b.length
+              if (n === 0 && m === 0) return { added: 0, removed: 0 }
+              const LIMIT = 1_000_000
+              if (n * m > LIMIT) {
+                let i = 0, j = 0
+                while (i < n && j < m && a[i] === b[j]) { i++; j++ }
+                return { added: (m - j), removed: (n - i) }
+              }
+              let prev = new Uint32Array(m + 1)
+              let curr = new Uint32Array(m + 1)
+              for (let i = 1; i <= n; i++) {
+                const ai = a[i - 1]
+                for (let j = 1; j <= m; j++) {
+                  curr[j] = ai === b[j - 1] ? (prev[j - 1] + 1) : (prev[j] > curr[j - 1] ? prev[j] : curr[j - 1])
+                }
+                const tmp = prev; prev = curr; curr = tmp
+                curr.fill(0)
+              }
+              const lcs = prev[m]
+              return { added: m - lcs, removed: n - lcs }
+            }
+            for (const f of previews) {
+              const { added, removed } = compute(f.before, f.after)
+              addedLines += added
+              removedLines += removed
+            }
+          }
+        } catch {}
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId: callId,
+          updates: {
+            status: 'success',
+            color: 'green',
+            filesChanged,
+            ...(addedLines || removedLines ? { addedLines, removedLines } : {}),
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'diff' as const,
+            metadata: {
+              fileCount: filesChanged,
+              ...(singleFilePath ? { filePath: singleFilePath } : {})
+            },
+            interactive: { type: 'diff', data: { key: callId, count: filesChanged } }
+          }
+        })
+        return
+      }
       if (result && Array.isArray(result.fileEditsPreview) && result.fileEditsPreview.length) {
         // Compute total line additions/removals for summary pills using LCS (robust, line-based)
         const compute = (before?: string, after?: string) => {
@@ -2362,7 +2602,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feHandleTokenUsage: (requestId: string, provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }) => {
+  feHandleTokenUsage: (requestId: string, provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }, nodeId?: string, executionId?: string) => {
     if (!requestId || requestId !== get().feRequestId) return
     if (provider && model && usage) {
       const state = store.getState() as any
@@ -2374,12 +2614,13 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         provider,
         model,
         usage,
+        nodeId,
         timestamp: Date.now(),
       })
 
-      if (state.recordTokenUsage) {
-        // Call with object parameter as expected by the function signature
-        state.recordTokenUsage({ provider, model, usage })
+      if (state.recordTokenUsage && nodeId && executionId) {
+        // Accumulate per-node execution usage; show cumulative in LAST REQUEST
+        state.recordTokenUsage({ requestId, nodeId, executionId, provider, model, usage })
       }
 
       // Capture the session at event time to avoid cross-session updates
@@ -2432,6 +2673,55 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           }
         }
       }, 0)
+
+    }
+
+  },
+
+
+  feHandleUsageBreakdown: (requestId: string, nodeId: string, provider: string, model: string, breakdown: any, executionId?: string) => {
+    if (!requestId || requestId !== get().feRequestId) return
+    if (!nodeId || !breakdown) return
+
+    // Cache the breakdown for on-demand loading by the badge UI
+    const key = `usage:${requestId}:${nodeId}:${executionId || '0'}`
+    get().registerToolResult?.({ key, data: breakdown })
+
+    const node = get().feNodes.find(n => n.id === nodeId)
+    if (!node) return
+
+    const state = store.getState() as any
+    if (state.appendToNodeExecution) {
+      state.appendToNodeExecution({
+        nodeId,
+        nodeLabel: node.data?.label || node.data?.nodeType || 'Node',
+        nodeKind: node.data?.nodeType || 'unknown',
+        provider,
+        model,
+        content: {
+          type: 'badge',
+          badge: {
+            id: `usage-${Date.now()}`,
+            type: 'tool',
+            label: 'Usage',
+            icon: '📊',
+            color: 'grape',
+            variant: 'light',
+            status: 'success',
+            timestamp: Date.now(),
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'usage-breakdown',
+            interactive: { type: 'usage-breakdown', data: { key } },
+            metadata: {
+              inputTokens: breakdown?.totals?.inputTokens,
+              outputTokens: breakdown?.totals?.outputTokens,
+              totalTokens: breakdown?.totals?.totalTokens,
+              estimated: !!breakdown?.estimated
+            }
+          }
+        }
+      })
     }
   },
 
@@ -2565,6 +2855,18 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       timestamp: Date.now(),
     })
 
+    // Finalize accumulated request usage into session totals
+    ;(() => {
+      const state2 = store.getState() as any
+      if (state2.finalizeRequestUsage) {
+        try {
+          state2.finalizeRequestUsage({ requestId })
+        } catch (e) {
+          console.warn('[flow] finalizeRequestUsage failed:', e)
+        }
+      }
+    })()
+
     // Clear flow state from session
     const state = store.getState() as any
     const currentSession = state.sessions?.find((s: any) => s.id === state.currentId)
@@ -2634,6 +2936,18 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       error,
       timestamp: Date.now(),
     })
+
+    // Finalize accumulated request usage into session totals on error/interruption
+    ;(() => {
+      const state2 = store.getState() as any
+      if (state2.finalizeRequestUsage) {
+        try {
+          state2.finalizeRequestUsage({ requestId })
+        } catch (e) {
+          console.warn('[flow] finalizeRequestUsage failed:', e)
+        }
+      }
+    })()
 
     // Clear flow state from session
     const state = store.getState() as any

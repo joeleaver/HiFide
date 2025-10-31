@@ -9,6 +9,7 @@ import { BrowserWindow } from 'electron'
 import { FlowScheduler } from './scheduler'
 import { flowEvents, emitFlowEvent } from './events'
 import type { FlowExecutionArgs } from './types'
+import { useMainStore } from '../../store'
 
 // Active flow schedulers
 const activeFlows = new Map<string, FlowScheduler>()
@@ -183,10 +184,12 @@ export function registerFlowHandlersV2(ipcMain: IpcMain): void {
   ipcMain.handle('flows:getTools', async () => {
     try {
       const allTools = (globalThis as any).__agentTools || []
-      // Return simplified tool info for UI (name and description only)
+      const getCategory = useMainStore.getState().getToolCategory
+      // Return tool info for UI including category for grouping
       return allTools.map((tool: any) => ({
         name: tool.name,
-        description: tool.description || ''
+        description: tool.description || '',
+        category: typeof getCategory === 'function' ? getCategory(tool.name) : 'other'
       }))
     } catch (error: any) {
       console.error('[flows:getTools] Error getting tools:', error)

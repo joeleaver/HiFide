@@ -3,6 +3,8 @@ import { resolveWithinWorkspace, atomicWrite } from '../utils'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
+import { randomUUID } from 'node:crypto'
+
 // Minimal unified-diff parser and applier to emulate the popular CLI `apply_patch`
 // Supports common git-style patches with: "diff --git ...", ---/+++ headers, and @@ hunks
 // Handles new files (--- /dev/null) and deleted files (newPath = /dev/null or 'deleted file mode')
@@ -191,7 +193,7 @@ function applyHunksToContent(original: string, hunks: Hunk[]): { ok: boolean; co
 
 export const applyPatchTool: AgentTool = {
   name: 'applyPatch',
-  description: 'Apply a unified-diff patch (git-style). Accepts raw patch, fenced diff, or *** Begin/End Patch markers. Use dryRun to preview; for small, precise changes prefer editsApply or codeApplyEditsTargeted.',
+  description: 'Apply a unified-diff patch (git-style). Accepts raw patch, fenced diff, or *** Begin/End Patch markers. Use dryRun to preview; for small, precise changes prefer applyEdits or codeApplyEditsTargeted.',
   parameters: {
     type: 'object',
     properties: {
@@ -285,6 +287,24 @@ export const applyPatchTool: AgentTool = {
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
     }
+  },
+  toModelResult: (raw: any) => {
+    if (raw?.fileEditsPreview && Array.isArray(raw.fileEditsPreview)) {
+      const previewKey = randomUUID()
+      return {
+        minimal: {
+          ok: !!raw.ok,
+          applied: raw.applied ?? 0,
+          results: Array.isArray(raw.results) ? raw.results : [],
+          dryRun: !!raw.dryRun,
+          previewKey,
+          previewCount: raw.fileEditsPreview.length
+        },
+        ui: raw.fileEditsPreview,
+        previewKey
+      }
+    }
+    return { minimal: raw }
   }
 }
 

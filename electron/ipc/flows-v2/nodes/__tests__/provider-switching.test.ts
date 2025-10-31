@@ -13,7 +13,7 @@ import { withFixture, getTestMode } from '../../../../__tests__/utils/fixtures'
 jest.mock('../../../../core/state', () => ({
   providers: {
     anthropic: require('../../../../providers/anthropic').AnthropicProvider,
-    openai: require('../../../../providers/openai').OpenAIProvider,
+    openai: require('../../../../providers-ai-sdk/openai').OpenAiSdkProvider,
     gemini: require('../../../../providers/gemini').GeminiProvider,
   },
   getProviderKey: jest.fn(async (provider: string) => {

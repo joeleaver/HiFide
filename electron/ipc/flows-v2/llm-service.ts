@@ -27,6 +27,13 @@ import { createCallbackEventEmitters } from './execution-events'
 import { rateLimitTracker } from '../../providers/rate-limit-tracker'
 import { parseRateLimitError, sleep, withRetries } from '../../providers/retry'
 
+import { DEFAULT_PRICING } from '../../data/defaultPricing'
+import { encoding_for_model, get_encoding } from '@dqbd/tiktoken'
+
+import { UiPayloadCache } from '../../core/uiPayloadCache'
+
+const DEBUG_USAGE = process.env.HF_DEBUG_USAGE === '1' || process.env.HF_DEBUG_TOKENS === '1'
+
 // Lightweight token estimators used as a last-resort when a stream is cancelled
 // and the provider does not return final usage. This avoids adding heavyweight
 // tokenizer deps and keeps cancellation graceful with best-effort stats.
@@ -614,14 +621,145 @@ class LLMService {
 
     const eventHandlers = createCallbackEventEmitters(emit, provider, model)
 
+
+    // Track tool I/O sizes for usage breakdown (estimated tokens)
+    let __toolArgsTokensOut = 0
+    let __toolResultsTokensIn = 0
+    let __toolCallsOutCount = 0
+    let __toolArgsTokensByTool: Record<string, number> = {}
+    let __toolResultsTokensByTool: Record<string, number> = {}
+    let __toolCallsByTool: Record<string, number> = {}
+
+    const toolKey = (name?: string) => String(name || '').trim()
+
+
+    // Usage breakdown capture (OpenAI path)
+    // Reusable OpenAI tokenizer for this request (freed after breakdown emission)
+    let __openaiEncoder: any | null = null
+
+    function getOpenAIEncoderForModel(m: string) {
+      if (__openaiEncoder) return __openaiEncoder
+      try {
+        __openaiEncoder = encoding_for_model(m as any)
+      } catch {
+        try {
+          const useO200k = /(^o\d|o\d|gpt-4o|gpt-4\.1)/i.test(m)
+          __openaiEncoder = get_encoding(useO200k ? 'o200k_base' : 'cl100k_base')
+        } catch {}
+      }
+      return __openaiEncoder
+    }
+
+    function openaiCountTokens(text: string | undefined | null): number {
+      if (!text) return 0
+      try {
+        const enc = getOpenAIEncoderForModel(model)
+        if (!enc) return estimateTokensFromText(text)
+        return enc.encode(typeof text === 'string' ? text : String(text)).length
+      } catch {
+        return estimateTokensFromText(text)
+      }
+    }
+
+    let __bdSystemText: string | undefined
+    let __bdMessages: any[] | undefined
+
+
+    const onToolStartWrapped = (ev: { callId?: string; name: string; arguments?: any }) => {
+      try {
+        __toolCallsOutCount++
+        const key = toolKey(ev?.name)
+        __toolCallsByTool[key] = ( __toolCallsByTool[key] || 0 ) + 1
+        if (ev && ev.arguments != null) {
+          const s = typeof ev.arguments === 'string' ? ev.arguments : JSON.stringify(ev.arguments)
+          const t = (provider === 'openai' ? openaiCountTokens(s) : estimateTokensFromText(s))
+          __toolArgsTokensOut += t
+          __toolArgsTokensByTool[key] = ( __toolArgsTokensByTool[key] || 0 ) + t
+        }
+      } catch {}
+      eventHandlers.onToolStart(ev)
+    }
+    const onToolEndWrapped = (ev: { callId?: string; name: string; result?: any }) => {
+      try {
+        const key = toolKey(ev?.name)
+        if (ev && (ev as any).result != null) {
+          const s = typeof (ev as any).result === 'string' ? (ev as any).result : JSON.stringify((ev as any).result)
+          const t = (provider === 'openai' ? openaiCountTokens(s) : estimateTokensFromText(s))
+          __toolResultsTokensIn += t
+          __toolResultsTokensByTool[key] = ( __toolResultsTokensByTool[key] || 0 ) + t
+
+          // Resolve heavy UI payload via previewKey and register for UI rendering
+          const callId = ev?.callId
+          const pk = (ev as any)?.result?.previewKey
+          if (callId && pk) {
+            const data = UiPayloadCache.take(pk)
+            if (typeof data !== 'undefined') {
+              try { flowAPI.store.getState().registerToolResult({ key: callId, data }) } catch {}
+            }
+          }
+        }
+      } catch {}
+      eventHandlers.onToolEnd(ev as any)
+    }
+
     // Track latest usage (if provider reports it) and maintain a best-effort fallback
     let lastReportedUsage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number } | null = null
+    // Accumulate deltas across all steps so we can report accurate totals in usage_breakdown
+    let accumulatedUsage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number } = { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
     let usageEmitted = false
     const emitUsage = eventHandlers.onTokenUsage
     const onTokenUsageWrapped = (u: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number }) => {
+      const prev = lastReportedUsage
+      // Determine cumulative by totalTokens only; providers may report non-monotonic input/output per step
+      const currTotal = (u?.totalTokens ?? ((u?.inputTokens || 0) + (u?.outputTokens || 0)))
+      const prevTotal = (prev?.totalTokens ?? ((prev?.inputTokens || 0) + (prev?.outputTokens || 0)))
+      const isCumulative = !!prev && currTotal >= prevTotal
+
+      let delta = u
+      if (prev && isCumulative) {
+        const dTotal = Math.max(0, currTotal - prevTotal)
+        const dIn = Math.max(0, (u.inputTokens || 0) - (prev.inputTokens || 0))
+        // Assign remainder to output; clamp to non-negative
+        const dOut = Math.max(0, dTotal - dIn)
+        delta = {
+          inputTokens: dIn,
+          outputTokens: dOut,
+          totalTokens: Math.max(0, dIn + dOut),
+          cachedTokens: Math.max(0, (u.cachedTokens || 0) - (prev.cachedTokens || 0))
+        }
+      }
+
+      if (DEBUG_USAGE) {
+        try {
+          console.log('[usage:onTokenUsageWrapped]', {
+            mode: isCumulative ? 'cumulative->delta' : 'per-step',
+            raw: u,
+            prev,
+            delta
+          })
+        } catch {}
+      }
+
+      // Accumulate deltas so we can compute accurate totals later
+      accumulatedUsage = {
+        inputTokens: (accumulatedUsage.inputTokens || 0) + (delta.inputTokens || 0),
+        outputTokens: (accumulatedUsage.outputTokens || 0) + (delta.outputTokens || 0),
+        totalTokens: (accumulatedUsage.totalTokens || 0) + (delta.totalTokens || 0),
+        cachedTokens: (accumulatedUsage.cachedTokens || 0) + (delta.cachedTokens || 0)
+      }
+
       lastReportedUsage = u
-      usageEmitted = true
-      emitUsage(u)
+
+      // Only emit non-zero deltas to avoid double-counting
+      if (
+        (delta.inputTokens || 0) > 0 ||
+        (delta.outputTokens || 0) > 0 ||
+        (delta.totalTokens || 0) > 0 ||
+        (delta.cachedTokens || 0) > 0
+      ) {
+        usageEmitted = true
+        emitUsage(delta)
+      }
     }
 
     // Pre-compute an approximate input token count as a fallback
@@ -744,6 +882,9 @@ class LLMService {
               ...(systemText ? { instructions: systemText } : {}),
               messages: systemText ? nonSystemMessages : formattedMessages
             }
+            // Capture for usage breakdown
+            __bdSystemText = systemText
+            __bdMessages = (systemText ? nonSystemMessages : formattedMessages) as any[]
           }
 
           // Single streaming path: agentStream (tools may be empty)
@@ -774,8 +915,8 @@ class LLMService {
                 tools: policyTools,
                 responseSchema,
                 toolMeta: { requestId: context.contextId }, // Use contextId as requestId
-                onToolStart: eventHandlers.onToolStart,
-                onToolEnd: eventHandlers.onToolEnd,
+                onToolStart: onToolStartWrapped,
+                onToolEnd: onToolEndWrapped,
                 onToolError: eventHandlers.onToolError
               })
             },
@@ -824,11 +965,111 @@ class LLMService {
 
       }
 
+
       return {
         text: '',
         updatedContext,
         error: errorMessage
       }
+    }
+
+    // Emit usage breakdown (OpenAI only for now) using precise tokenizer when available
+    try {
+      if (provider === 'openai') {
+        const enc = getOpenAIEncoderForModel(model)
+        const hasEnc = !!enc
+
+        const instructionsTokens = openaiCountTokens(__bdSystemText)
+        let userMsgTokens = 0
+        let assistantMsgTokens = 0
+        if (Array.isArray(__bdMessages)) {
+          for (const m of __bdMessages) {
+            const role = (m && (m as any).role) || ''
+            const content = (m && (m as any).content) ?? ''
+            const t = openaiCountTokens(typeof content === 'string' ? content : String(content))
+            if (role === 'user') userMsgTokens += t
+            else if (role === 'assistant') assistantMsgTokens += t
+          }
+        }
+        const toolDefinitionsTokens = openaiCountTokens(JSON.stringify(tools || []))
+        const responseFormatTokens = openaiCountTokens(JSON.stringify(responseSchema || null))
+        const toolCallResultsTokens = __toolResultsTokensIn
+        const assistantTextTokens = openaiCountTokens(response)
+        const toolCallsTokens = __toolArgsTokensOut
+
+        const calcInput = instructionsTokens + userMsgTokens + assistantMsgTokens + toolDefinitionsTokens + responseFormatTokens + toolCallResultsTokens
+        const calcOutput = assistantTextTokens + toolCallsTokens
+
+        const reported = lastReportedUsage as any
+        const acc = accumulatedUsage
+        const hasAccum = (acc && ((acc.inputTokens || 0) > 0 || (acc.outputTokens || 0) > 0 || (acc.totalTokens || 0) > 0))
+        const totals = hasAccum
+          ? {
+              inputTokens: (acc.inputTokens ?? calcInput),
+              outputTokens: (acc.outputTokens ?? calcOutput),
+              totalTokens: (acc.totalTokens ?? ((acc.inputTokens ?? calcInput) + (acc.outputTokens ?? calcOutput))),
+              cachedInputTokens: Math.max(0, acc.cachedTokens || 0)
+            }
+          : (reported
+            ? {
+                inputTokens: (reported.inputTokens ?? calcInput),
+                outputTokens: (reported.outputTokens ?? calcOutput),
+                totalTokens: (reported.totalTokens ?? ((reported.inputTokens ?? calcInput) + (reported.outputTokens ?? calcOutput))),
+                cachedInputTokens: Math.max(0, reported.cachedTokens || reported.cachedInputTokens || 0)
+              }
+            : { inputTokens: calcInput, outputTokens: calcOutput, totalTokens: calcInput + calcOutput, cachedInputTokens: 0 })
+
+        // Cost estimate
+        let costEstimate: number | undefined
+        try {
+          const rate = (DEFAULT_PRICING?.openai as any)?.[model]
+          if (rate) {
+            costEstimate = (totals.inputTokens / 1_000_000) * rate.inputCostPer1M + (totals.outputTokens / 1_000_000) * rate.outputCostPer1M
+          }
+        } catch {}
+
+        flowAPI.emitExecutionEvent({
+          type: 'usage_breakdown',
+          provider,
+          model,
+          usageBreakdown: {
+            input: {
+              instructions: instructionsTokens,
+              userMessages: userMsgTokens,
+              assistantMessages: assistantMsgTokens,
+              toolDefinitions: toolDefinitionsTokens,
+              responseFormat: responseFormatTokens,
+              toolCallResults: toolCallResultsTokens
+            },
+            output: {
+              assistantText: assistantTextTokens,
+              toolCalls: toolCallsTokens
+            },
+            totals: { ...totals, costEstimate },
+            estimated: !hasEnc,
+            tools: Object.fromEntries(
+              Array.from(
+                new Set([
+                  ...Object.keys(__toolArgsTokensByTool || {}),
+                  ...Object.keys(__toolResultsTokensByTool || {})
+                ])
+              ).map((k) => [
+                k,
+                {
+                  calls: __toolCallsByTool[k] || 0,
+                  inputResults: __toolResultsTokensByTool[k] || 0,
+                  outputArgs: __toolArgsTokensByTool[k] || 0
+                }
+              ])
+            )
+          }
+        })
+
+        // Free encoder resources
+        if (__openaiEncoder) { try { __openaiEncoder.free() } catch {} __openaiEncoder = null }
+      }
+    } catch (e) {
+      console.warn('[LLM] failed to emit usage_breakdown', e)
     }
 
     // 7. Add assistant response to context (unless skipHistory)

@@ -90,7 +90,7 @@ declare global {
         list: () => Promise<{ ok: boolean; flows?: Array<{ id: string; label: string; location: 'builtin'|'workspace'; path: string }>; error?: string }>;
         load: (idOrPath: string) => Promise<{ ok: boolean; def?: any; error?: string }>;
         save: (id: string, def: any) => Promise<{ ok: boolean; path?: string; error?: string }>;
-        getTools: () => Promise<Array<{ name: string; description: string }>>;
+        getTools: () => Promise<Array<{ name: string; description: string; category?: string }>>;
       };
       flowExec?: {
         run: (args: { requestId: string; flowId?: string; flowDef?: any; input?: string; model?: string; provider?: string; sessionId?: string; policy?: { redactor?: { enabled?: boolean; rules?: string[] }; budgetGuard?: { maxUSD?: number; blockOnExceed?: boolean }; errorDetection?: { enabled?: boolean; blockOnFlag?: boolean; patterns?: string[] }; pricing?: { inputCostPer1M?: number; outputCostPer1M?: number } } }) => Promise<{ ok: boolean }>;

@@ -21,7 +21,7 @@ import { registerAllHandlers } from './ipc/registry'
 import { buildMenu } from './ipc/menu'
 
 // Provider setup
-import { OpenAIProvider } from './providers/openai'
+import { OpenAiSdkProvider } from './providers-ai-sdk/openai'
 import { AnthropicProvider } from './providers/anthropic'
 import { GeminiProvider } from './providers/gemini'
 import type { AgentTool } from './providers/provider'
@@ -42,7 +42,7 @@ const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
 
 // Initialize provider adapters (register constructors)
-providers.openai = OpenAIProvider as any
+providers.openai = OpenAiSdkProvider as any
 // ----------------------------------------------------------------------------
 // Helper functions used by agent tools (ported from legacy main.ts)
 // ----------------------------------------------------------------------------

@@ -36,6 +36,7 @@
     "@ast-grep/lang-ruby": "^0.0.4",
     "@ast-grep/lang-swift": "^0.0.5",
     "@ast-grep/napi": "^0.39.6",
+    "@dqbd/tiktoken": "^1.0.22",
     "@emotion/react": "^11.14.0",
     "@google/genai": "^1.25.0",
     "@mantine/core": "^8.3.3",

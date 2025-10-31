@@ -23,6 +23,10 @@ export interface AgentTool {
   // Executes the tool with already-validated input
   // Second parameter is optional metadata (e.g., requestId for session tracking)
   run: (input: any, meta?: { requestId?: string; [key: string]: any }) => Promise<any> | any
+  // Optional: convert full tool result into minimal model payload + UI payload
+  // Providers will call this to reduce tokens by returning only minimal data to the model
+  // and caching heavy UI payloads keyed by previewKey.
+  toModelResult?: (raw: any) => { minimal: any; ui?: any; previewKey?: string } | { minimal: any }
 }
 
 export interface ProviderAdapter {

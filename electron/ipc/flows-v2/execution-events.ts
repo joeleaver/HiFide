@@ -40,6 +40,38 @@ export interface UsageEventData {
 }
 
 /**
+ * Detailed usage breakdown event data
+ */
+export interface UsageBreakdownEventData {
+  input: {
+    instructions?: number
+    userMessages?: number
+    assistantMessages?: number
+    toolDefinitions?: number
+    responseFormat?: number
+    toolCallResults?: number
+  }
+  output: {
+    assistantText?: number
+    toolCalls?: number
+  }
+  // Optional per-tool breakdown
+  tools?: Record<string, {
+    calls?: number
+    inputResults?: number // tokens from tool results sent back to model (input side)
+    outputArgs?: number   // tokens from arguments sent to tool (output side)
+  }>
+  totals: {
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+    costEstimate?: number
+  }
+  estimated: boolean
+}
+
+
+/**
  * Rate limit wait event data
  */
 export interface RateLimitWaitEventData {
@@ -63,12 +95,13 @@ export interface ExecutionEvent {
   model: string            // 'claude-haiku-4-5-20251001', etc.
 
   // Event type and data
-  type: 'chunk' | 'tool_start' | 'tool_end' | 'tool_error' | 'usage' | 'done' | 'error' | 'rate_limit_wait'
+  type: 'chunk' | 'tool_start' | 'tool_end' | 'tool_error' | 'usage' | 'usage_breakdown' | 'done' | 'error' | 'rate_limit_wait'
 
   // Event-specific data (only one will be populated based on type)
   chunk?: string
   tool?: ToolEventData
   usage?: UsageEventData
+  usageBreakdown?: UsageBreakdownEventData
   error?: string
   rateLimitWait?: RateLimitWaitEventData
 }

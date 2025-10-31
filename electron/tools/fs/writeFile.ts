@@ -9,7 +9,7 @@ import { resolveWithinWorkspace, atomicWrite } from '../utils'
 
 export const writeFileTool: AgentTool = {
   name: 'fsWriteFile',
-  description: 'Write a UTF-8 text file atomically in the workspace. Use for new files or full rewrites; for surgical changes to existing files, prefer editsApply or codeApplyEditsTargeted.',
+  description: 'Write a UTF-8 text file atomically in the workspace. Use for new files or full rewrites; for surgical changes to existing files, prefer applyEdits or codeApplyEditsTargeted.',
   parameters: {
     type: 'object',
     properties: {

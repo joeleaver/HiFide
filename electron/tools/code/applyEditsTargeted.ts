@@ -4,6 +4,8 @@ import { astGrepRewrite } from '../astGrep'
 import { verifyTypecheck as tsVerify } from '../../refactors/ts'
 import fs from 'node:fs/promises'
 
+import { randomUUID } from 'node:crypto'
+
 export const applyEditsTargetedTool: AgentTool = {
   name: 'codeApplyEditsTargeted',
   description: 'Apply targeted edits with AST-first rewrites (ast-grep) and optional text edits. Best for structural changes; supports dryRun and rangesOnly. Workflow: search → expand minimal region → dryRun edits → verify → finalize.',
@@ -356,6 +358,25 @@ export const applyEditsTargetedTool: AgentTool = {
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
     }
+  },
+  toModelResult: (raw: any) => {
+    if (raw?.fileEditsPreview && Array.isArray(raw.fileEditsPreview)) {
+      const previewKey = randomUUID()
+      return {
+        minimal: {
+          ok: !!raw.ok,
+          applied: raw.applied ?? 0,
+          results: Array.isArray(raw.results) ? raw.results : [],
+          dryRun: !!raw.dryRun,
+          rangesOnly: !!raw.rangesOnly,
+          previewKey,
+          previewCount: raw.fileEditsPreview.length
+        },
+        ui: raw.fileEditsPreview,
+        previewKey
+      }
+    }
+    return { minimal: raw }
   },
 }
 

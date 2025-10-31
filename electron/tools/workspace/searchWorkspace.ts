@@ -9,6 +9,8 @@ import { grepTool } from '../text/grep'
 import { astGrepSearch } from '../../tools/astGrep'
 import { getIndexer } from '../../core/state'
 
+import { randomUUID } from 'node:crypto'
+
 // Lightweight in-memory cache to dedupe repeated, identical searches within short windows
 // Keyed by workspace root + normalized args; capped size with TTL to avoid leaks
 const __wsSearchCache: Map<string, { ts: number; data: any }> = new Map()
@@ -592,7 +594,7 @@ export function computeAutoBudget(numTerms: number, provided?: number): number {
 
 export const searchWorkspaceTool: AgentTool = {
   name: 'workspaceSearch',
-  description: 'Unified workspace code search (semantic + ripgrep + AST). Start here to locate code: accepts natural-language or exact text and returns ranked hits with compact snippets and handles. Then call with action="expand" + a handle to fetch the full region; after a couple of expands, switch to codeApplyEditsTargeted or editsApply to change code.',
+  description: 'Unified workspace code search (semantic + ripgrep + AST). Start here to locate code: accepts natural-language or exact text and returns ranked hits with compact snippets and handles. Then call with action="expand" + a handle to fetch the full region; after a couple of expands, switch to codeApplyEditsTargeted or applyEdits to change code.',
   parameters: {
     type: 'object',
     properties: {
@@ -889,6 +891,21 @@ export const searchWorkspaceTool: AgentTool = {
     try { wsCacheSet(cacheKey, payload) } catch {}
 
     return { ok: true, data: payload, _meta: (payload as any)._meta }
+  },
+  toModelResult: (raw: any) => {
+    if (raw?.ok && raw?.data) {
+      const previewKey = randomUUID()
+      const resultData = raw.data
+      const resultCount = Array.isArray(resultData?.results)
+        ? resultData.results.length
+        : (typeof resultData?.count === 'number' ? resultData.count : 0)
+      return {
+        minimal: { ok: true, previewKey, previewCount: resultCount },
+        ui: resultData,
+        previewKey
+      }
+    }
+    return { minimal: raw }
   }
 }
 

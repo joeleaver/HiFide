@@ -1,6 +1,6 @@
 /**
  * Shared constants for the application store (Main Process)
- * 
+ *
  * This file contains all constant values used across store slices.
  * Note: Main process uses electron-store, not localStorage
  */
@@ -26,25 +26,25 @@ export const LS_KEYS = {
   AGENT_TERMINAL_PANEL_HEIGHT: 'hifide:agentTerminalPanelHeight',
   EXPLORER_TERMINAL_PANEL_OPEN: 'hifide:explorerTerminalPanelOpen',
   EXPLORER_TERMINAL_PANEL_HEIGHT: 'hifide:explorerTerminalPanelHeight',
-  
+
   // Workspace
   WORKSPACE_ROOT: 'hifide:workspaceRoot',
   RECENT_FOLDERS: 'hifide:recentFolders',
-  
+
   // Provider/Model
   SELECTED_MODEL: 'hifide:selectedModel',
   SELECTED_PROVIDER: 'hifide:selectedProvider',
   AUTO_RETRY: 'hifide:autoRetry',
   DEFAULT_MODELS: 'hifide:defaultModels',
-  
+
   // Settings
 
   PRICING_CONFIG: 'hifide:pricingConfig',
   RATE_LIMIT_CONFIG: 'hifide:rateLimitConfig',
-  
+
   // Session
   CURRENT_SESSION_ID: 'hifide:currentSessionId',
-  
+
   // Legacy (for migration)
   APP_STATE: 'hifide:app',
 } as const
@@ -70,16 +70,16 @@ export const DEFAULTS = {
   AGENT_TERMINAL_PANEL_HEIGHT: 300,
   EXPLORER_TERMINAL_PANEL_OPEN: false,
   EXPLORER_TERMINAL_PANEL_HEIGHT: 300,
-  
+
   // Provider/Model
   SELECTED_PROVIDER: 'openai',
   SELECTED_MODEL: 'gpt-4o',
   AUTO_RETRY: false,
-  
+
   // Settings
 
   AUTO_ENFORCE_EDITS_SCHEMA: false,
-  
+
   // Terminal
   TERMINAL_COLS: 80,
   TERMINAL_ROWS: 24,
@@ -98,3 +98,7 @@ export const MAX_SESSIONS = 100
 export const TERMINAL_COLS = 80
 export const TERMINAL_ROWS = 24
 
+
+
+// Agent step limit for tool-calling loops (AI SDK stopWhen). Override via env HF_AGENT_MAX_STEPS.
+export const AGENT_MAX_STEPS = Math.max(1, Number(process.env.HF_AGENT_MAX_STEPS || 200))

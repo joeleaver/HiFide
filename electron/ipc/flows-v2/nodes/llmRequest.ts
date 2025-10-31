@@ -102,15 +102,44 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
     }
   }
 
-  // Apply override if enabled
-  if ((config.overrideEnabled as boolean) && config.overrideProvider && config.overrideModel) {
-    // Update provider/model first
+  // Apply override if enabled (provider and/or model)
+  if (config.overrideEnabled as boolean) {
+    const requestedProvider = (config.overrideProvider as string | undefined) || undefined
+    let requestedModel = (config.overrideModel as string | undefined) || undefined
+
+    // If provider is overridden but model is not, pick a sane default from store
+    if (requestedProvider && !requestedModel) {
+      try {
+        const state: any = (flow as any).store
+        const preferred = state.defaultModels?.[requestedProvider]
+        const models = state.modelsByProvider?.[requestedProvider] || []
+        const hasPreferred = preferred && models.some((m: any) => m.value === preferred)
+        if (hasPreferred) {
+          requestedModel = preferred
+        } else if (models.length > 0) {
+          requestedModel = models[0].value
+        }
+      } catch {}
+    }
+
+    // Fallback: if still missing a model, keep current model to avoid null
+    if (requestedProvider && !requestedModel) {
+      try {
+        flow.log.warn('Override provider set without model and no default found; keeping current model (may be invalid for new provider)', {
+          requestedProvider,
+          currentModel: executionContext.model
+        })
+      } catch {}
+    }
+    const appliedProvider = requestedProvider || executionContext.provider
+    const appliedModel = requestedModel || executionContext.model
+
+    // Update provider/model and optional sampling/reasoning
     executionContext = flow.context.update(executionContext, {
-      provider: config.overrideProvider as string,
-      model: config.overrideModel as string
+      provider: appliedProvider,
+      model: appliedModel
     })
 
-    // Optional sampling + reasoning overrides scoped to this request
     const overrideTemperature = (config as any)?.overrideTemperature as number | undefined
     const overrideReasoningEffort = (config as any)?.overrideReasoningEffort as ('low'|'medium'|'high') | undefined
     if (typeof overrideTemperature === 'number' || overrideReasoningEffort) {
@@ -120,9 +149,11 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
       })
     }
 
-    flow.log.debug('Override enabled', {
-      provider: executionContext.provider,
-      model: executionContext.model,
+    flow.log.debug('Override resolved', {
+      requestedProvider,
+      requestedModel,
+      appliedProvider: executionContext.provider,
+      appliedModel: executionContext.model,
       temperature: (executionContext as any).temperature,
       reasoningEffort: (executionContext as any).reasoningEffort,
     })
@@ -141,7 +172,13 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
     message,
     tools,
     context: executionContext,
-    flowAPI: flow
+    flowAPI: flow,
+    ...(config.overrideEnabled && (config.overrideProvider || config.overrideModel)
+      ? {
+          ...(config.overrideProvider ? { overrideProvider: config.overrideProvider as string } : {}),
+          ...(config.overrideModel ? { overrideModel: config.overrideModel as string } : {}),
+        }
+      : {})
   })
 
   if (result.error) {

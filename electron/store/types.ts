@@ -40,7 +40,7 @@ export type Badge = {
 
   // Interactive badge data (future)
   interactive?: {
-    type: 'diff' | 'link' | 'action' | 'read-lines' | 'workspace-search' | 'workspace-jump' | 'workspace-map' | 'kb-search' | 'kb-store'
+    type: 'diff' | 'link' | 'action' | 'read-lines' | 'workspace-search' | 'workspace-jump' | 'workspace-map' | 'kb-search' | 'kb-store' | 'agent-assess' | 'usage-breakdown'
     data: any
   }
 
@@ -56,7 +56,7 @@ export type Badge = {
   // Expandable container support
   expandable?: boolean           // Whether this badge can be expanded
   defaultExpanded?: boolean      // Initial expansion state
-  contentType?: 'diff' | 'search' | 'workspace-search' | 'workspace-jump' | 'workspace-map' | 'ast-search' | 'read-lines' | 'kb-search' | 'kb-store' | 'json' | 'text' | 'custom'  // Type of expanded content
+  contentType?: 'diff' | 'search' | 'workspace-search' | 'workspace-jump' | 'workspace-map' | 'ast-search' | 'read-lines' | 'kb-search' | 'kb-store' | 'agent-assess' | 'usage-breakdown' | 'json' | 'text' | 'custom'  // Type of expanded content
 
   // Enhanced metadata for header display
   metadata?: {
@@ -187,6 +187,18 @@ export type Session = {
     totalCost: number
     currency: string
   }
+
+  // Log of finalized LLM requests for this session (per node execution)
+  requestsLog?: Array<{
+    timestamp: number
+    requestId: string
+    nodeId: string
+    executionId: string
+    provider: string
+    model: string
+    usage: TokenUsage
+    cost: TokenCost
+  }>
 
   // Provider-specific conversation metadata (optional)
   conversationState?: Record<string, {

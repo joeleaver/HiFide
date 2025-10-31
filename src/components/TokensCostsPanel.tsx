@@ -1,5 +1,5 @@
 import { ScrollArea, Text, Stack, Group } from '@mantine/core'
-import { useAppStore, useDispatch, selectSessions, selectCurrentId, selectLastRequestTokenUsage } from '../store'
+import { useAppStore, useDispatch, selectSessions, selectCurrentId } from '../store'
 import { useUiStore } from '../store/ui'
 import { useEffect } from 'react'
 import CollapsiblePanel from './CollapsiblePanel'
@@ -27,7 +27,6 @@ export default function TokensCostsPanel() {
 
   const sessions = useAppStore(selectSessions)
   const currentId = useAppStore(selectCurrentId)
-  const lastRequest = useAppStore(selectLastRequestTokenUsage)
 
   const currentSession = sessions.find((sess) => sess.id === currentId)
 
@@ -155,55 +154,52 @@ export default function TokensCostsPanel() {
               </div>
             )}
 
-            {/* Last Request */}
+            {/* Requests Table */}
             {(() => {
-              const lr = lastRequest
-              if (!lr) return null
-
-              const cost = lr.cost
-
+              const logs: any[] = (currentSession as any)?.requestsLog || []
+              if (!logs.length) return null
+              // Oldest first; also de-duplicate by (requestId,nodeId,executionId)
+              const asc = [...logs].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+              const seen = new Set<string>()
+              const rows = asc.filter((r) => {
+                const k = `${r.requestId}:${r.nodeId}:${r.executionId}`
+                if (seen.has(k)) return false
+                seen.add(k)
+                return true
+              })
               return (
                 <div>
-                  <Text size="xs" fw={600} c="orange" mb={4}>LAST REQUEST</Text>
-                  <Text size="xs" c="#888" mb={2}>
-                    {lr.provider} / {lr.model}
-                  </Text>
-                  <Group gap="xs" ml="md">
-                    <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Tokens:</Text>
-                    <Text size="xs">
-                      <span style={{ color: '#4fc3f7' }}>{lr.usage.inputTokens.toLocaleString()}</span>
-                      <span style={{ color: '#666' }}> in</span>
-                      {lr.usage.cachedTokens && lr.usage.cachedTokens > 0 && (
-                        <>
-                          <span style={{ color: '#666' }}> (</span>
-                          <span style={{ color: '#ffa726' }}>💾 {lr.usage.cachedTokens.toLocaleString()} cached</span>
-                          <span style={{ color: '#666' }}>)</span>
-                        </>
-                      )}
-                      <span style={{ color: '#666' }}> + </span>
-                      <span style={{ color: '#81c784' }}>{lr.usage.outputTokens.toLocaleString()}</span>
-                      <span style={{ color: '#666' }}> out</span>
-                      <span style={{ color: '#666' }}> = </span>
-                      <span style={{ color: '#ccc' }}>{lr.usage.totalTokens.toLocaleString()}</span>
-                    </Text>
-                  </Group>
-                  <Group gap="xs" ml="md">
-                    <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Cost:</Text>
-                    {cost ? (
-                      <Text size="xs">
-                        <span style={{ color: '#4ade80' }}>${Number(cost.totalCost ?? 0).toFixed(4)}</span>
-                        {cost.savings && cost.savings > 0 && (
-                          <span style={{ color: '#66bb6a', marginLeft: 8 }}>
-                            (saved ${Number(cost.savings ?? 0).toFixed(4)} · {Math.round(cost.savingsPercent ?? 0)}%)
-                          </span>
-                        )}
-                      </Text>
-                    ) : (
-                      <Text size="xs" c="dimmed" fs="italic">
-                        Unknown (no pricing configured)
-                      </Text>
-                    )}
-                  </Group>
+                  <Text size="xs" fw={600} c="orange" mb={4}>REQUESTS (THIS SESSION)</Text>
+                  <div style={{ overflowX: 'auto', fontSize: '12px' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid #333' }}>
+                          <th style={{ textAlign: 'left', padding: '4px 8px' }}>Provider / Model</th>
+                          <th style={{ textAlign: 'right', padding: '4px 8px' }}>Input</th>
+                          <th style={{ textAlign: 'right', padding: '4px 8px' }}>Cost</th>
+                          <th style={{ textAlign: 'right', padding: '4px 8px' }}>Output</th>
+                          <th style={{ textAlign: 'right', padding: '4px 8px' }}>Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((r, idx) => {
+                          const input = r?.usage?.inputTokens ?? 0
+                          const output = r?.usage?.outputTokens ?? 0
+                          const inputCost = r?.cost?.inputCost ?? 0
+                          const outputCost = r?.cost?.outputCost ?? 0
+                          return (
+                            <tr key={`${r.requestId}:${r.nodeId}:${r.executionId}:${idx}`} style={{ borderBottom: '1px solid #222' }}>
+                              <td style={{ padding: '4px 8px', color: '#888' }}>{r.provider} / {r.model}</td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right', color: '#4fc3f7' }}>{Number(input).toLocaleString()}</td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right', color: '#4ade80' }}>${Number(inputCost).toFixed(4)}</td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right', color: '#81c784' }}>{Number(output).toLocaleString()}</td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right', color: '#4ade80' }}>${Number(outputCost).toFixed(4)}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )
             })()}

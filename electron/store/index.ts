@@ -23,6 +23,7 @@ import { createExplorerSlice, type ExplorerSlice } from './slices/explorer.slice
 import { createIndexingSlice, type IndexingSlice } from './slices/indexing.slice'
 import { createProviderSlice, type ProviderSlice } from './slices/provider.slice'
 import { createSettingsSlice, type SettingsSlice } from './slices/settings.slice'
+import { createToolsSlice, type ToolsSlice } from './slices/tools.slice'
 // NOTE: Terminal slice is renderer-only (uses xterm which is browser-specific)
 import type { TerminalSlice } from './slices/terminal.slice'
 import { createSessionSlice, type SessionSlice } from './slices/session.slice'
@@ -43,6 +44,7 @@ export type AppStore = ViewSlice &
   IndexingSlice &
   ProviderSlice &
   SettingsSlice &
+  ToolsSlice &
   TerminalSlice &
   SessionSlice &
   FlowEditorSlice &
@@ -76,6 +78,7 @@ export const useMainStore = create<AppStore>()(
         // Complex Slices
         ...createProviderSlice(set, get, store),
         ...createSettingsSlice(set, get, store),
+        ...createToolsSlice(set, get, store),
         // NOTE: Terminal slice - state management works in main, xterm operations are renderer-only
         agentTerminalTabs: [],
         agentActiveTerminal: null,

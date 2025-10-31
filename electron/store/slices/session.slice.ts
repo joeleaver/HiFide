@@ -25,6 +25,8 @@ import { loadAllSessions, sessionSaver, deleteSessionFromDisk } from '../utils/s
 import { loadWorkspaceSettings, saveWorkspaceSettings } from '../../ipc/workspace'
 
 // ============================================================================
+const DEBUG_USAGE = process.env.HF_DEBUG_USAGE === '1' || process.env.HF_DEBUG_TOKENS === '1'
+
 // Helper Functions
 // ============================================================================
 
@@ -53,7 +55,8 @@ export interface SessionSlice {
   doneByRequestId: Record<string, boolean>
 
   // Token Usage State
-  lastRequestTokenUsage: { provider: string; model: string; usage: TokenUsage; cost: TokenCost | null } | null
+  inFlightUsageByKey: Record<string, { requestId: string; nodeId: string; executionId: string; provider: string; model: string; usage: TokenUsage }>
+  lastRequestTokenUsage: { requestId: string; nodeId: string; executionId: string; provider: string; model: string; usage: TokenUsage; cost: TokenCost | null } | null
   lastRequestSavings: { provider: string; model: string; approxTokensAvoided: number } | null
 
   // Activity State
@@ -108,7 +111,9 @@ export interface SessionSlice {
 
 
   // Token Usage Actions
-  recordTokenUsage: (params: { provider: string; model: string; usage: TokenUsage }) => void
+  recordTokenUsage: (params: { requestId: string; nodeId: string; executionId: string; provider: string; model: string; usage: TokenUsage }) => void
+  finalizeNodeUsage: (params: { requestId: string; nodeId: string; executionId: string }) => void
+  finalizeRequestUsage: (params: { requestId: string }) => void
 
   // Flow Debug Log Actions
   addFlowDebugLog: (log: Omit<NonNullable<Session['flowDebugLogs']>[number], 'timestamp'>) => void
@@ -148,6 +153,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
   llmIpcSubscribed: false,
   doneByRequestId: {},
 
+  inFlightUsageByKey: {},
   lastRequestTokenUsage: null,
   lastRequestSavings: null,
 
@@ -351,6 +357,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
         totalCost: 0,
         currency: 'USD',
       },
+      requestsLog: [],
     }
 
     // Clear all agent terminals when creating a new session (from terminal slice)
@@ -559,76 +566,149 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 
 
   // Token Usage Actions
-  recordTokenUsage: ({ provider, model, usage }: { provider: string; model: string; usage: TokenUsage }) => {
-    // Calculate cost for this usage (from settings slice)
+  recordTokenUsage: ({ requestId, nodeId, executionId, provider, model, usage }: { requestId: string; nodeId: string; executionId: string; provider: string; model: string; usage: TokenUsage }) => {
     const state = get() as any
-    const cost = state.calculateCost ? state.calculateCost(provider, model, usage) : null
 
     set((s) => {
+      const inFlight: Record<string, { requestId: string; nodeId: string; executionId: string; provider: string; model: string; usage: TokenUsage }> = (s as any).inFlightUsageByKey || {}
+      const key = `${requestId}:${nodeId}:${executionId}`
+      const prev = inFlight[key]?.usage || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
+
+      // Safety net: providers report cumulative usage per-step (running total).
+      // Determine cumulative by totalTokens only; input/output may be non-monotonic between steps.
+      const currTotal = (usage.totalTokens ?? ((usage.inputTokens || 0) + (usage.outputTokens || 0)))
+      const prevTotal = (prev.totalTokens ?? ((prev.inputTokens || 0) + (prev.outputTokens || 0)))
+      const looksCumulative = currTotal >= prevTotal
+
+      const delta: TokenUsage = looksCumulative
+        ? (() => {
+            const dTotal = Math.max(0, currTotal - prevTotal)
+            const dIn = Math.max(0, (usage.inputTokens || 0) - (prev.inputTokens || 0))
+            const dOut = Math.max(0, dTotal - dIn)
+            return {
+              inputTokens: dIn,
+              outputTokens: dOut,
+              totalTokens: Math.max(0, dIn + dOut),
+              cachedTokens: Math.max(0, (usage.cachedTokens || 0) - (prev.cachedTokens || 0)),
+            }
+          })()
+        : {
+            inputTokens: Math.max(0, usage.inputTokens || 0),
+            outputTokens: Math.max(0, usage.outputTokens || 0),
+            totalTokens: Math.max(0, usage.totalTokens ?? ((usage.inputTokens || 0) + (usage.outputTokens || 0))),
+            cachedTokens: Math.max(0, usage.cachedTokens || 0),
+          }
+
+      const cumUsage: TokenUsage = {
+        inputTokens: (prev.inputTokens || 0) + (delta.inputTokens || 0),
+        outputTokens: (prev.outputTokens || 0) + (delta.outputTokens || 0),
+        totalTokens: (prev.totalTokens || 0) + (delta.totalTokens || 0),
+        cachedTokens: (prev.cachedTokens || 0) + (delta.cachedTokens || 0),
+      }
+
+      const entry = { requestId, nodeId, executionId, provider, model, usage: cumUsage }
+      const newMap = { ...inFlight, [key]: entry }
+      const cost = state.calculateCost ? state.calculateCost(provider, model, cumUsage) : null
+
+      if (DEBUG_USAGE) {
+        try {
+          console.log('[usage:recordTokenUsage]', {
+            requestId,
+            nodeId,
+            executionId,
+            provider,
+            model,
+            mode: looksCumulative ? 'snapshot->delta' : 'delta',
+            received: usage,
+            delta,
+            cumulative: cumUsage,
+            cost
+          })
+        } catch {}
+      }
+
+      return {
+        inFlightUsageByKey: newMap,
+        lastRequestTokenUsage: { requestId, nodeId, executionId, provider, model, usage: cumUsage, cost },
+        currentRequestId: requestId,
+      }
+    })
+
+    // Persist latest cumulative usage for UI; totals added on finalization
+    get().saveCurrentSession()
+  },
+
+  finalizeNodeUsage: ({ requestId, nodeId, executionId }: { requestId: string; nodeId: string; executionId: string }) => {
+    const state = get() as any
+
+    set((s) => {
+      const accMap: Record<string, { requestId: string; nodeId: string; executionId: string; provider: string; model: string; usage: TokenUsage }> = (s as any).inFlightUsageByKey || {}
+      const key = `${requestId}:${nodeId}:${executionId}`
+      const acc = accMap[key]
+      if (!acc) return {}
+
       if (!s.currentId) {
-        return { lastRequestTokenUsage: { provider, model, usage, cost } }
+        const { [key]: _, ...rest } = accMap
+        return { inFlightUsageByKey: rest }
+      }
+
+      const { provider, model, usage } = acc
+      const cost = state.calculateCost ? state.calculateCost(provider, model, usage) : null
+
+      if (DEBUG_USAGE) {
+        try {
+          console.log('[usage:finalizeNodeUsage]', { requestId, nodeId, executionId, provider, model, final: usage, cost })
+        } catch {}
       }
 
       const sessions = s.sessions.map((sess) => {
         if (sess.id !== s.currentId) return sess
 
-        // Update provider-specific usage
-        const providerUsage = sess.tokenUsage.byProvider[provider] || {
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-          cachedTokens: 0,
-        }
-
+        const providerUsage = sess.tokenUsage.byProvider[provider] || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
         const newProviderUsage = {
-          inputTokens: providerUsage.inputTokens + usage.inputTokens,
-          outputTokens: providerUsage.outputTokens + usage.outputTokens,
-          totalTokens: providerUsage.totalTokens + usage.totalTokens,
+          inputTokens: providerUsage.inputTokens + (usage.inputTokens || 0),
+          outputTokens: providerUsage.outputTokens + (usage.outputTokens || 0),
+          totalTokens: providerUsage.totalTokens + (usage.totalTokens || 0),
           cachedTokens: (providerUsage.cachedTokens || 0) + (usage.cachedTokens || 0),
         }
 
-        // Update total usage
         const newTotal = {
-          inputTokens: sess.tokenUsage.total.inputTokens + usage.inputTokens,
-          outputTokens: sess.tokenUsage.total.outputTokens + usage.outputTokens,
-          totalTokens: sess.tokenUsage.total.totalTokens + usage.totalTokens,
+          inputTokens: sess.tokenUsage.total.inputTokens + (usage.inputTokens || 0),
+          outputTokens: sess.tokenUsage.total.outputTokens + (usage.outputTokens || 0),
+          totalTokens: sess.tokenUsage.total.totalTokens + (usage.totalTokens || 0),
           cachedTokens: (sess.tokenUsage.total.cachedTokens || 0) + (usage.cachedTokens || 0),
         }
 
-        // Update costs
-        const providerCosts = sess.costs.byProviderAndModel[provider] || {}
-        const modelCost = providerCosts[model] || {
-          inputCost: 0,
-          outputCost: 0,
-          totalCost: 0,
-          currency: 'USD',
-        }
-
-        const newModelCost = cost
-          ? {
-              inputCost: modelCost.inputCost + cost.inputCost,
-              outputCost: modelCost.outputCost + cost.outputCost,
-              totalCost: modelCost.totalCost + cost.totalCost,
-              currency: 'USD',
-            }
-          : modelCost
-
-        const newTotalCost = sess.costs.totalCost + (cost?.totalCost || 0)
-
-        // Derive per-provider+model usage map (backward compatible with older sessions)
         const prevByProvModel = (sess.tokenUsage as any).byProviderAndModel || {}
         const prevProvModels = prevByProvModel[provider] || {}
-        const prevModelUsage = prevProvModels[model] || {
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-          cachedTokens: 0,
-        }
+        const prevModelUsage = prevProvModels[model] || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
         const newProviderModelUsage = {
-          inputTokens: prevModelUsage.inputTokens + usage.inputTokens,
-          outputTokens: prevModelUsage.outputTokens + usage.outputTokens,
-          totalTokens: prevModelUsage.totalTokens + usage.totalTokens,
+          inputTokens: prevModelUsage.inputTokens + (usage.inputTokens || 0),
+          outputTokens: prevModelUsage.outputTokens + (usage.outputTokens || 0),
+          totalTokens: prevModelUsage.totalTokens + (usage.totalTokens || 0),
           cachedTokens: (prevModelUsage.cachedTokens || 0) + (usage.cachedTokens || 0),
+        }
+
+        const providerCosts = sess.costs.byProviderAndModel[provider] || {}
+        const modelCost = providerCosts[model] || { inputCost: 0, outputCost: 0, totalCost: 0, currency: 'USD' }
+        const newModelCost = cost ? {
+          inputCost: modelCost.inputCost + (cost.inputCost || 0),
+          outputCost: modelCost.outputCost + (cost.outputCost || 0),
+          totalCost: modelCost.totalCost + (cost.totalCost || 0),
+          currency: 'USD',
+        } : modelCost
+        const newTotalCost = sess.costs.totalCost + (cost?.totalCost || 0)
+
+        const reqLog = sess.requestsLog || []
+        const logEntry = {
+          timestamp: Date.now(),
+          requestId,
+          nodeId,
+          executionId,
+          provider,
+          model,
+          usage,
+          cost: cost || { inputCost: 0, outputCost: 0, totalCost: 0, currency: 'USD' }
         }
 
         return {
@@ -637,32 +717,123 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
             byProvider: { ...sess.tokenUsage.byProvider, [provider]: newProviderUsage },
             byProviderAndModel: {
               ...prevByProvModel,
-              [provider]: {
-                ...prevProvModels,
-                [model]: newProviderModelUsage,
-              },
+              [provider]: { ...prevProvModels, [model]: newProviderModelUsage },
             },
             total: newTotal,
           },
           costs: {
             byProviderAndModel: {
               ...sess.costs.byProviderAndModel,
-              [provider]: {
-                ...providerCosts,
-                [model]: newModelCost,
-              },
+              [provider]: { ...providerCosts, [model]: newModelCost },
             },
             totalCost: newTotalCost,
             currency: 'USD',
           },
+          requestsLog: [...reqLog, logEntry],
           updatedAt: Date.now(),
         }
       })
 
-      return { sessions, lastRequestTokenUsage: { provider, model, usage, cost } }
+      const { [key]: _, ...rest } = accMap
+      return { sessions, inFlightUsageByKey: rest }
     })
 
-    // Save after recording token usage
+    get().saveCurrentSession()
+  },
+
+  finalizeRequestUsage: ({ requestId }: { requestId: string }) => {
+    const state = get() as any
+
+    set((s) => {
+      const accMap: Record<string, { requestId: string; nodeId: string; executionId: string; provider: string; model: string; usage: TokenUsage }> = (s as any).inFlightUsageByKey || {}
+      const prefix = `${requestId}:`
+      const keys = Object.keys(accMap).filter(k => k.startsWith(prefix))
+      if (!keys.length) return {}
+
+      let sessions = s.sessions
+      for (const key of keys) {
+        const acc = accMap[key]
+        if (!acc) continue
+        if (!s.currentId) continue
+        const { provider, model, usage } = acc
+        const cost = state.calculateCost ? state.calculateCost(provider, model, usage) : null
+
+        if (DEBUG_USAGE) {
+          try { console.log('[usage:finalizeRequestUsage]', { requestId, key, provider, model, final: usage, cost }) } catch {}
+        }
+
+        sessions = sessions.map((sess) => {
+          if (sess.id !== s.currentId) return sess
+
+          const providerUsage = sess.tokenUsage.byProvider[provider] || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
+          const newProviderUsage = {
+            inputTokens: providerUsage.inputTokens + (usage.inputTokens || 0),
+            outputTokens: providerUsage.outputTokens + (usage.outputTokens || 0),
+            totalTokens: providerUsage.totalTokens + (usage.totalTokens || 0),
+            cachedTokens: (providerUsage.cachedTokens || 0) + (usage.cachedTokens || 0),
+          }
+
+          const newTotal = {
+            inputTokens: sess.tokenUsage.total.inputTokens + (usage.inputTokens || 0),
+            outputTokens: sess.tokenUsage.total.outputTokens + (usage.outputTokens || 0),
+            totalTokens: sess.tokenUsage.total.totalTokens + (usage.totalTokens || 0),
+            cachedTokens: (sess.tokenUsage.total.cachedTokens || 0) + (usage.cachedTokens || 0),
+          }
+
+          const prevByProvModel = (sess.tokenUsage as any).byProviderAndModel || {}
+          const prevProvModels = prevByProvModel[provider] || {}
+          const prevModelUsage = prevProvModels[model] || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
+          const newProviderModelUsage = {
+            inputTokens: prevModelUsage.inputTokens + (usage.inputTokens || 0),
+            outputTokens: prevModelUsage.outputTokens + (usage.outputTokens || 0),
+            totalTokens: prevModelUsage.totalTokens + (usage.totalTokens || 0),
+            cachedTokens: (prevModelUsage.cachedTokens || 0) + (usage.cachedTokens || 0),
+          }
+
+          const providerCosts = sess.costs.byProviderAndModel[provider] || {}
+          const modelCost = providerCosts[model] || { inputCost: 0, outputCost: 0, totalCost: 0, currency: 'USD' }
+          const newModelCost = cost ? {
+            inputCost: modelCost.inputCost + (cost.inputCost || 0),
+            outputCost: modelCost.outputCost + (cost.outputCost || 0),
+            totalCost: modelCost.totalCost + (cost.totalCost || 0),
+            currency: 'USD',
+          } : modelCost
+          const newTotalCost = sess.costs.totalCost + (cost?.totalCost || 0)
+
+          const reqLog = sess.requestsLog || []
+          const logEntry = {
+            timestamp: Date.now(),
+            requestId,
+            nodeId: acc.nodeId,
+            executionId: acc.executionId,
+            provider,
+            model,
+            usage,
+            cost: cost || { inputCost: 0, outputCost: 0, totalCost: 0, currency: 'USD' }
+          }
+
+          return {
+            ...sess,
+            tokenUsage: {
+              byProvider: { ...sess.tokenUsage.byProvider, [provider]: newProviderUsage },
+              byProviderAndModel: { ...prevByProvModel, [provider]: { ...prevProvModels, [model]: newProviderModelUsage } },
+              total: newTotal,
+            },
+            costs: {
+              byProviderAndModel: { ...sess.costs.byProviderAndModel, [provider]: { ...providerCosts, [model]: newModelCost } },
+              totalCost: newTotalCost,
+              currency: 'USD',
+            },
+            requestsLog: [...reqLog, logEntry],
+            updatedAt: Date.now(),
+          }
+        })
+      }
+
+      const rest = Object.fromEntries(Object.entries(accMap).filter(([k]) => !k.startsWith(prefix)))
+      return { sessions, inFlightUsageByKey: rest }
+    })
+
     get().saveCurrentSession()
   },
 

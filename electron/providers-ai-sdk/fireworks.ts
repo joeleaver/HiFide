@@ -1,6 +1,8 @@
 import { streamText, tool as aiTool, stepCountIs, jsonSchema } from 'ai'
 import { createFireworks } from '@ai-sdk/fireworks'
 import { z } from 'zod'
+import { UiPayloadCache } from '../core/uiPayloadCache'
+import { AGENT_MAX_STEPS } from '../store/utils/constants'
 
 import type { ProviderAdapter, StreamHandle, ChatMessage, AgentTool } from '../providers/provider'
 
@@ -8,7 +10,9 @@ function sanitizeName(name: string): string {
   let safe = (name || 'tool').replace(/[^a-zA-Z0-9_-]/g, '_')
   if (!safe) safe = 'tool'
   return safe
+
 }
+
 
 function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: string; [k: string]: any }) {
   const map: Record<string, any> = {}
@@ -16,6 +20,10 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
   for (const t of tools || []) {
     if (!t || !t.name || typeof t.run !== 'function') continue
     const safe = sanitizeName(t.name)
+    if (nameMap.has(safe) && nameMap.get(safe) !== t.name) {
+      const DEBUG = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
+      if (DEBUG) console.warn('[ai-sdk:fireworks] tool name collision after sanitize', { safe, a: nameMap.get(safe), b: t.name })
+    }
     nameMap.set(safe, t.name)
     // Prefer the tool's declared JSON Schema; fallback to permissive schema
     const inputSchema = t.parameters && typeof t.parameters === 'object' ? jsonSchema(t.parameters) : z.any()
@@ -23,7 +31,18 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
       description: t.description || undefined,
       inputSchema,
       execute: async (input: any) => {
-        return await t.run(input, meta)
+        const raw = await t.run(input, meta)
+        try {
+          const toModel = (t as any).toModelResult
+          if (typeof toModel === 'function') {
+            const res = await toModel(raw)
+            if (res && (res as any).ui && (res as any).previewKey) {
+              UiPayloadCache.put((res as any).previewKey, (res as any).ui)
+            }
+            return (res as any)?.minimal ?? raw
+          }
+        } catch {}
+        return raw
       }
     })
   }
@@ -33,7 +52,7 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
 export const FireworksAiSdkProvider: ProviderAdapter = {
   id: 'fireworks',
 
-  async agentStream({ apiKey, model, systemInstruction, system, messages, temperature, tools, responseSchema: _responseSchema, emit: _emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, instructions, systemInstruction, system, messages, temperature, tools, responseSchema: _responseSchema, emit: _emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const fw = createFireworks({ apiKey })
     const llm = fw(model)
 
@@ -49,8 +68,13 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
     // - Avoid duplication by removing system-role entries from messages when passing `system`
     const sysParts: string[] = []
 
-    // Top-level systemInstruction takes precedence if provided
-    if (typeof systemInstruction === 'string' && systemInstruction.trim()) {
+    // Top-level instructions (if provided via llm-service) take precedence
+    if (typeof instructions === 'string' && instructions.trim()) {
+      sysParts.push(instructions)
+    }
+
+    // Then systemInstruction
+    if (!sysParts.length && typeof systemInstruction === 'string' && systemInstruction.trim()) {
       sysParts.push(systemInstruction)
     }
 
@@ -97,7 +121,7 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
         toolChoice: Object.keys(aiTools).length ? 'auto' : 'none',
         temperature: typeof temperature === 'number' ? temperature : undefined,
         abortSignal: ac.signal,
-        stopWhen: stepCountIs(50),
+        stopWhen: stepCountIs(AGENT_MAX_STEPS),
         includeRawChunks: DEBUG,
         // Stream mapping (AI SDK v5 onChunk passes { chunk })
         onChunk({ chunk }: any) {
@@ -147,7 +171,8 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
                 const callId = chunk.toolCallId || chunk.id || ''
                 const safe = String(chunk.toolName || '')
                 const original = nameMap.get(safe) || safe
-                onToolEnd?.({ callId, name: original, result: (chunk as any).output })
+                const output = (chunk as any).output
+                onToolEnd?.({ callId, name: original, result: output })
                 break
               }
               case 'tool-error': {
@@ -180,7 +205,8 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
               const usage = {
                 inputTokens: Number(u.inputTokens ?? u.promptTokens ?? 0),
                 outputTokens: Number(u.outputTokens ?? u.completionTokens ?? 0),
-                totalTokens: Number(u.totalTokens ?? (Number(u.inputTokens ?? 0) + Number(u.outputTokens ?? 0)))
+                totalTokens: Number(u.totalTokens ?? (Number(u.inputTokens ?? 0) + Number(u.outputTokens ?? 0))),
+                cachedTokens: Number(u.cachedInputTokens ?? u.cachedTokens ?? 0)
               }
               onTokenUsage(usage)
             }

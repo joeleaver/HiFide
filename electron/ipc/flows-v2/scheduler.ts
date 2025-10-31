@@ -521,7 +521,7 @@ export class FlowScheduler {
 
       const durationMs = Date.now() - startTime
       // Reduced logging
-      store.feHandleNodeEnd(this.requestId, nodeId, durationMs)
+      store.feHandleNodeEnd(this.requestId, nodeId, executionId, durationMs)
 
       // Check for error status - do not hard-stop the flow here
       if (result.status === 'error') {
@@ -882,11 +882,36 @@ export class FlowScheduler {
 
       case 'usage':
         if (event.usage) {
-          store.feHandleTokenUsage(this.requestId, event.provider, event.model, {
-            inputTokens: event.usage.inputTokens,
-            outputTokens: event.usage.outputTokens,
-            totalTokens: event.usage.totalTokens
-          })
+          store.feHandleTokenUsage(
+            this.requestId,
+            event.provider,
+            event.model,
+            {
+              inputTokens: event.usage.inputTokens,
+              outputTokens: event.usage.outputTokens,
+              totalTokens: event.usage.totalTokens
+            },
+            event.nodeId,
+            (event as any).executionId
+          )
+        }
+        break
+
+
+      case 'usage_breakdown':
+        if ((event as any).usageBreakdown) {
+          try {
+            (store as any).feHandleUsageBreakdown?.(
+              this.requestId,
+              event.nodeId,
+              event.provider,
+              event.model,
+              (event as any).usageBreakdown,
+              (event as any).executionId
+            )
+          } catch (e) {
+            console.warn('[FlowAPI] feHandleUsageBreakdown failed:', e)
+          }
         }
         break
 

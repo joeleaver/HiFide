@@ -1,8 +1,10 @@
 import type { AgentTool } from '../../providers/provider'
 import { applyFileEditsInternal } from '../utils'
+import { randomUUID } from 'node:crypto'
+
 
 export const applyEditsTool: AgentTool = {
-  name: 'editsApply',
+  name: 'applyEdits',
   description: 'Apply precise text edits to files. Use when you know the exact change; keep diffs small. If uncertain, try codeApplyEditsTargeted with dryRun first.',
   parameters: {
     type: 'object',
@@ -33,6 +35,23 @@ export const applyEditsTool: AgentTool = {
   },
   run: async ({ edits }: { edits: any[] }) => {
     return await applyFileEditsInternal(edits, {})
+  },
+  toModelResult: (raw: any) => {
+    if (raw?.fileEditsPreview && Array.isArray(raw.fileEditsPreview)) {
+      const previewKey = randomUUID()
+      return {
+        minimal: {
+          ok: !!raw.ok,
+          applied: raw.applied ?? 0,
+          results: Array.isArray(raw.results) ? raw.results : [],
+          previewKey,
+          previewCount: raw.fileEditsPreview.length
+        },
+        ui: raw.fileEditsPreview,
+        previewKey
+      }
+    }
+    return { minimal: raw }
   },
 }
 

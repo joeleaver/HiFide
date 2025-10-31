@@ -19,6 +19,9 @@ import { BadgeAstSearchContent } from './components/BadgeAstSearchContent'
 import { BadgeReadLinesContent } from './components/BadgeReadLinesContent'
 import { BadgeWorkspaceJumpContent } from './components/BadgeWorkspaceJumpContent'
 import { BadgeWorkspaceMapContent } from './components/BadgeWorkspaceMapContent'
+import { BadgeAgentAssessTaskContent } from './components/BadgeAgentAssessTaskContent'
+
+import { BadgeUsageBreakdownContent } from './components/BadgeUsageBreakdownContent'
 
 import { NodeOutputBox } from './components/NodeOutputBox'
 import { FlowStatusIndicator } from './components/FlowStatusIndicator'
@@ -410,6 +413,18 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
                                   badgeId={badge.id}
                                   resultKey={badge.interactive.data.key}
                                   fullParams={badge.metadata?.fullParams}
+                                />
+                              )}
+                              {badge.contentType === 'agent-assess' && badge.interactive?.data?.key && (
+                                <BadgeAgentAssessTaskContent
+                                  badgeId={badge.id}
+                                  assessKey={badge.interactive.data.key}
+                                />
+                              )}
+                              {badge.contentType === 'usage-breakdown' && badge.interactive?.data?.key && (
+                                <BadgeUsageBreakdownContent
+                                  badgeId={badge.id}
+                                  usageKey={badge.interactive.data.key}
                                 />
                               )}
                               {badge.type === 'error' && (

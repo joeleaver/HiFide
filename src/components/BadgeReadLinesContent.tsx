@@ -29,7 +29,12 @@ export const BadgeReadLinesContent = memo(function BadgeReadLinesContent({ badge
   const contentInfo = useMemo(() => {
     if (!result) return { kind: 'none' as const, text: '' }
 
-    // If tool returned raw text
+    // If tool returned raw string directly
+    if (typeof result === 'string') {
+      return { kind: 'text' as const, text: result }
+    }
+
+    // If tool returned raw text field
     if (typeof result.text === 'string' && result.text.length >= 0) {
       return { kind: 'text' as const, text: result.text }
     }

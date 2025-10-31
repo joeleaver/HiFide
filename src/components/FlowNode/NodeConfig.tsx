@@ -506,7 +506,21 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
                 <Checkbox
                   label="Override provider/model"
                   checked={config.overrideEnabled || false}
-                  onChange={(e) => onConfigChange({ overrideEnabled: e.currentTarget.checked })}
+                  onChange={(e) => {
+                    const enabled = e.currentTarget.checked
+                    if (enabled) {
+                      const prov = (config.overrideProvider || selectedProvider || config.provider || 'openai') as string
+                      const providerModels = (modelsByProvider as any)[prov] || []
+                      let mdl = config.overrideModel as string | undefined
+                      if (!mdl) {
+                        const selectedIsValid = selectedModel && providerModels.some((m: any) => m.value === selectedModel)
+                        mdl = selectedIsValid ? (selectedModel as string) : (providerModels[0]?.value || '')
+                      }
+                      onConfigChange({ overrideEnabled: true, overrideProvider: prov, overrideModel: mdl })
+                    } else {
+                      onConfigChange({ overrideEnabled: false })
+                    }
+                  }}
                   size="xs"
                   styles={{
                     label: { fontSize: 10, color: '#cccccc', fontWeight: 600 },
@@ -519,7 +533,12 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
                       <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Provider:</span>
                       <select
                         value={config.overrideProvider || 'openai'}
-                        onChange={(e) => onConfigChange({ overrideProvider: e.target.value, overrideModel: '' })}
+                        onChange={(e) => {
+                          const newProvider = e.target.value
+                          const newProviderModels = (modelsByProvider as any)[newProvider] || []
+                          const firstModel = newProviderModels[0]?.value || ''
+                          onConfigChange({ overrideProvider: newProvider, overrideModel: firstModel })
+                        }}
                         className="nodrag"
                         style={{
                           padding: '4px 6px',
@@ -1039,7 +1058,7 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
 
 // Tools configuration component with grouped checkboxes
 function ToolsConfig({ config, onConfigChange }: { config: any; onConfigChange: (patch: any) => void }) {
-  const [availableTools, setAvailableTools] = useState<Array<{ name: string; description: string }>>([])
+  const [availableTools, setAvailableTools] = useState<Array<{ name: string; description: string; category?: string }>>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -1056,15 +1075,24 @@ function ToolsConfig({ config, onConfigChange }: { config: any; onConfigChange: 
     loadTools()
   }, [])
 
-  // Group tools by prefix (agent., fs., terminal., etc.)
+  // Group tools by category provided by main store (fallback to heuristics)
   const groupedTools = useMemo(() => {
-    const groups: Record<string, Array<{ name: string; description: string }>> = {}
+    const groups: Record<string, Array<{ name: string; description: string; category?: string }>> = {}
     availableTools.forEach(tool => {
-      const prefix = (tool.name === 'knowledgeBaseStore' || tool.name === 'knowledgeBaseSearch')
-        ? 'workspace'
-        : (tool.name.includes('.') ? tool.name.split('.')[0] : 'other')
-      if (!groups[prefix]) groups[prefix] = []
-      groups[prefix].push(tool)
+      const n = tool.name || ''
+      const lc = n.toLowerCase()
+      const cat = tool.category
+        || (n === 'knowledgeBaseStore' || n === 'knowledgeBaseSearch' ? 'workspace'
+        : n.startsWith('fs') ? 'fs'
+        : n.startsWith('agent') ? 'agent'
+        : n.startsWith('workspace') || n.startsWith('knowledgeBase') ? 'workspace'
+        : n.startsWith('terminal') || n.startsWith('session') ? 'terminal'
+        : lc.includes('applyedits') || lc.includes('patch') ? 'edits'
+        : lc.includes('grep') || lc.includes('search') ? 'index'
+        : lc.includes('ast') || n.startsWith('replace') ? 'code'
+        : 'other')
+      if (!groups[cat]) groups[cat] = []
+      groups[cat].push(tool)
     })
     return groups
   }, [availableTools])
