@@ -4,6 +4,8 @@ import type { PricingConfig } from '../types'
 import { initializeFlowProfiles, listFlowTemplates, loadFlowTemplate, saveFlowProfile, deleteFlowProfile, isSystemTemplate, loadSystemTemplates, type FlowTemplate, type FlowProfile } from '../../services/flowProfiles'
 import type { MainFlowContext } from '../../ipc/flows-v2/types'
 import { loadWorkspaceSettings, saveWorkspaceSettings } from '../../ipc/workspace'
+import { UiPayloadCache } from '../../core/uiPayloadCache'
+
 
 // Flow runtime event type (mirrors renderer usage)
 export type FlowEvent = {
@@ -453,6 +455,13 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   // Unified tool result cache (works for any tool)
   registerToolResult: ({ key, data }: { key: string; data: any }) => {
     __feToolResultCache.set(key, data)
+    // Also push into state immediately so badges render without waiting for a second load
+    set((state) => ({
+      feLoadedToolResults: {
+        ...(state.feLoadedToolResults || {}),
+        [key]: data,
+      },
+    }))
   },
   loadToolResult: ({ key }: { key: string }) => {
     const data = __feToolResultCache.get(key)
@@ -2106,6 +2115,19 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       // Minimal workspace.search result path (UI cached by provider)
       if (toolKey === 'workspacesearch' && result && (result as any).previewKey) {
         const count = Number((result as any).previewCount || 0)
+        // Try to enrich header with query/mode from start args if available
+        let headerQuery: string | undefined
+        try {
+          const saved = ((get() as any).feToolParamsByKey || {})[callId || ''] || {}
+          const qs: string[] = Array.isArray(saved?.queries) ? saved.queries : (saved?.query ? [saved.query] : [])
+          const terms = qs.map((q: any) => String(q || '').trim()).filter(Boolean)
+          if (terms.length) {
+            const shown = terms.slice(0, 2)
+            const suffix = terms.length > 2 ? ` +${terms.length - 2}` : ''
+            const mode = saved?.mode ? ` [${String(saved.mode)}]` : ''
+            headerQuery = shown.join(' | ') + suffix + mode
+          }
+        } catch {}
         state.updateBadgeInNodeExecution({
           nodeId,
           badgeId: callId,
@@ -2115,10 +2137,28 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             expandable: true,
             defaultExpanded: false,
             contentType: 'workspace-search' as const,
-            metadata: { resultCount: count },
-            interactive: { type: 'workspace-search', data: { key: callId, count } }
+            metadata: { resultCount: count, ...(headerQuery ? { query: headerQuery } : {}) },
+            interactive: { type: 'workspace-search', data: { key: callId, count, previewKey: (result as any)?.previewKey } }
           }
         })
+        // Fallback: resolve heavy UI payload here if provider/llm-service didn't register yet
+        try {
+          const pk = (result as any)?.previewKey
+          if (pk) {
+            const data = UiPayloadCache.peek(pk)
+            if (typeof data !== 'undefined') {
+              get().registerToolResult({ key: callId, data })
+            } else {
+              // Retry shortly in case provider caches UI payload just after this handler
+              setTimeout(() => {
+                const later = UiPayloadCache.peek(pk)
+                if (typeof later !== 'undefined') {
+                  try { get().registerToolResult({ key: callId, data: later }) } catch {}
+                }
+              }, 0)
+            }
+          }
+        } catch {}
         return
       }
 
@@ -2389,48 +2429,65 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       // Minimal edits result path (UI cached by provider)
       if (result && (result as any).previewKey && (toolKey === 'applyedits' || toolKey === 'codeapplyeditstargeted' || toolKey === 'applypatch')) {
         const filesChanged = Number((result as any).previewCount || 0)
-        // Try to compute line deltas and file path from cached UI payload for header/title
+
+        // Attempt to resolve previews immediately from UiPayloadCache (non-destructive)
+        const pk = (result as any).previewKey
+        let previews: any[] = []
+        try {
+          const fromUi = UiPayloadCache.peek(pk)
+          if (typeof fromUi !== 'undefined') {
+            previews = Array.isArray(fromUi) ? fromUi : []
+            if (previews.length) {
+              // Register into unified cache/state so expand works instantly
+              try { get().registerToolResult({ key: callId as string, data: previews }) } catch {}
+            }
+          } else {
+            // Fallback: see if provider already registered into the local cache
+            const inCache = (__feToolResultCache as any)?.get?.(callId)
+            if (Array.isArray(inCache)) previews = inCache
+          }
+        } catch {}
+
+        // Compute line deltas and single-file header if previews are available
         let addedLines = 0
         let removedLines = 0
         let singleFilePath: string | undefined = undefined
-        try {
-          const previews = (__feToolResultCache as any)?.get?.(callId) || []
-          if (Array.isArray(previews) && previews.length) {
-            if (previews.length === 1 && typeof previews[0]?.path === 'string') {
-              singleFilePath = String(previews[0].path)
-            }
-            const compute = (before?: string, after?: string) => {
-              const a = (before ?? '').split(/\r?\n/)
-              const b = (after ?? '').split(/\r?\n/)
-              const n = a.length
-              const m = b.length
-              if (n === 0 && m === 0) return { added: 0, removed: 0 }
-              const LIMIT = 1_000_000
-              if (n * m > LIMIT) {
-                let i = 0, j = 0
-                while (i < n && j < m && a[i] === b[j]) { i++; j++ }
-                return { added: (m - j), removed: (n - i) }
-              }
-              let prev = new Uint32Array(m + 1)
-              let curr = new Uint32Array(m + 1)
-              for (let i = 1; i <= n; i++) {
-                const ai = a[i - 1]
-                for (let j = 1; j <= m; j++) {
-                  curr[j] = ai === b[j - 1] ? (prev[j - 1] + 1) : (prev[j] > curr[j - 1] ? prev[j] : curr[j - 1])
-                }
-                const tmp = prev; prev = curr; curr = tmp
-                curr.fill(0)
-              }
-              const lcs = prev[m]
-              return { added: m - lcs, removed: n - lcs }
-            }
-            for (const f of previews) {
-              const { added, removed } = compute(f.before, f.after)
-              addedLines += added
-              removedLines += removed
-            }
+        const compute = (before?: string, after?: string) => {
+          const a = (before ?? '').split(/\r?\n/)
+          const b = (after ?? '').split(/\r?\n/)
+          const n = a.length
+          const m = b.length
+          if (n === 0 && m === 0) return { added: 0, removed: 0 }
+          const LIMIT = 1_000_000
+          if (n * m > LIMIT) {
+            let i = 0, j = 0
+            while (i < n && j < m && a[i] === b[j]) { i++; j++ }
+            return { added: (m - j), removed: (n - i) }
           }
-        } catch {}
+          let prev = new Uint32Array(m + 1)
+          let curr = new Uint32Array(m + 1)
+          for (let i = 1; i <= n; i++) {
+            const ai = a[i - 1]
+            for (let j = 1; j <= m; j++) {
+              curr[j] = ai === b[j - 1] ? (prev[j - 1] + 1) : (prev[j] > curr[j - 1] ? prev[j] : curr[j - 1])
+            }
+            const tmp = prev; prev = curr; curr = tmp
+            curr.fill(0)
+          }
+          const lcs = prev[m]
+          return { added: m - lcs, removed: n - lcs }
+        }
+        if (Array.isArray(previews) && previews.length) {
+          if (previews.length === 1 && typeof previews[0]?.path === 'string') {
+            singleFilePath = String(previews[0].path)
+          }
+          for (const f of previews) {
+            const { added, removed } = compute(f.before, f.after)
+            addedLines += added
+            removedLines += removed
+          }
+        }
+
         state.updateBadgeInNodeExecution({
           nodeId,
           badgeId: callId,
@@ -2449,6 +2506,40 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             interactive: { type: 'diff', data: { key: callId, count: filesChanged } }
           }
         })
+
+        // If previews weren't ready yet, schedule a microtask to register and patch header once available
+        if (!previews.length && pk) {
+          setTimeout(() => {
+            try {
+              const later = UiPayloadCache.peek(pk)
+              if (typeof later !== 'undefined' && Array.isArray(later) && later.length) {
+                try { get().registerToolResult({ key: callId as string, data: later }) } catch {}
+                // Patch header with filePath and line deltas if we can now compute them
+                let _added = 0, _removed = 0
+                let _filePath: string | undefined
+                if (later.length === 1 && typeof later[0]?.path === 'string') _filePath = String(later[0].path)
+                for (const f of later) {
+                  const { added, removed } = compute(f.before, f.after)
+                  _added += added; _removed += removed
+                }
+                const s = store.getState() as any
+                if (s.updateBadgeInNodeExecution && nodeId && callId) {
+                  s.updateBadgeInNodeExecution({
+                    nodeId,
+                    badgeId: callId,
+                    updates: {
+                      ...( (_added || _removed) ? { addedLines: _added, removedLines: _removed } : {}),
+                      metadata: {
+                        fileCount: filesChanged,
+                        ...( _filePath ? { filePath: _filePath } : {})
+                      }
+                    }
+                  })
+                }
+              }
+            } catch {}
+          }, 0)
+        }
         return
       }
       if (result && Array.isArray(result.fileEditsPreview) && result.fileEditsPreview.length) {

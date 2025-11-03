@@ -247,19 +247,19 @@ export const readLinesTool: AgentTool = {
         }
       }
       if (!rel) {
-        if (!input.path) return { ok: false, error: 'path or handle is required' }
+        if (!input.path) return 'Error: path or handle is required'
         rel = String(input.path)
       }
 
       const abs = resolveWithinWorkspace(rel)
       const st = await fs.stat(abs)
-      if (!st.isFile()) return { ok: false, error: 'Not a file' }
+      if (!st.isFile()) return 'Error: Not a file'
 
       const det = await detectEncodingAndBinary(abs)
       const encoding = det.encoding as BufferEncoding
       const eol = det.eol || 'unknown'
       const eolStr = eol === 'crlf' ? '\r\n' : '\n'
-      if (input.rejectIfBinary !== false && det.isBinary) return { ok: false, error: 'Binary file not supported' }
+      if (input.rejectIfBinary !== false && det.isBinary) return 'Error: Binary file not supported'
 
       // Normalize params
       const mode: Mode = input.mode || 'range'
@@ -269,35 +269,20 @@ export const readLinesTool: AgentTool = {
       if (mode === 'head') {
         const n = clamp(Number(input.headLines ?? DEFAULT_LINES), 1, MAX_LINES)
         const result = await readHead(abs, encoding, n, maxBytes, timeoutMs)
-        const text = result.lines.join(eolStr)
-        return {
-          text,
-          lineCount: result.lines.length,
-          truncated: result.truncated,
-          path: rel,
-          // For head, lines are from start of file
-          startLine: 1,
-          endLine: result.lines.length,
-          usedParams: { mode, headLines: n, path: rel }
-        }
+        const text = result.lines.join(input?.normalizeEol === false ? eolStr : '\n')
+        return text
       }
 
       if (mode === 'tail') {
         const n = clamp(Number(input.tailLines ?? DEFAULT_LINES), 1, MAX_LINES)
         const r = await readTail(abs, encoding, n, maxBytes, timeoutMs)
-        const text = r.lines.join(eolStr)
-        return {
-          text,
-          lineCount: r.lines.length,
-          truncated: r.truncated,
-          path: rel,
-          usedParams: { mode, tailLines: n, path: rel }
-        }
+        const text = r.lines.join(input?.normalizeEol === false ? eolStr : '\n')
+        return text
       }
 
       if (mode === 'regex') {
         const patt = typeof input.pattern === 'string' ? input.pattern : ''
-        if (!patt) return { text: '', path: rel, usedParams: { mode: 'regex', pattern: patt, flags: input.flags, path: rel } }
+        if (!patt) return ''
         const r = await readRegex(abs, encoding, {
           pattern: patt,
           flags: input.flags,
@@ -310,7 +295,7 @@ export const readLinesTool: AgentTool = {
           end: input.scanEndLine,
         })
         const ms = Array.isArray(r.matches) ? r.matches : []
-        if (!ms.length) return { text: '', path: rel, usedParams: { mode: 'regex', pattern: patt, flags: input.flags, path: rel } }
+        if (!ms.length) return ''
         // Build a single contiguous window covering all matched blocks with their contexts
         let start = Number.MAX_SAFE_INTEGER
         let end = -1
@@ -323,16 +308,8 @@ export const readLinesTool: AgentTool = {
           if (e > end) end = e
         }
         const r2 = await readRange(abs, encoding, start, end, maxBytes, timeoutMs)
-        const text = r2.lines.join(eolStr)
-        return {
-          text,
-          lineCount: r2.lines.length,
-          truncated: r2.truncated,
-          path: rel,
-          startLine: start,
-          endLine: end,
-          usedParams: { mode: 'regex', pattern: patt, flags: input.flags, path: rel }
-        }
+        const text = r2.lines.join(input?.normalizeEol === false ? eolStr : '\n')
+        return text
       }
 
       if (mode === 'around') {
@@ -365,16 +342,8 @@ export const readLinesTool: AgentTool = {
         }
 
         const r = await readRange(abs, encoding, start, end, maxBytes, timeoutMs)
-        const text = r.lines.join(eolStr)
-        return {
-          text,
-          lineCount: r.lines.length,
-          truncated: r.truncated,
-          path: rel,
-          startLine: start,
-          endLine: end,
-          usedParams: { mode: 'around', focusLine: focus, window: win, beforeLines: before, afterLines: after, path: rel }
-        }
+        const text = r.lines.join(input?.normalizeEol === false ? eolStr : '\n')
+        return text
       }
 
       // range (default)
@@ -395,16 +364,8 @@ export const readLinesTool: AgentTool = {
       }
 
       const r = await readRange(abs, encoding, start, end, maxBytes, timeoutMs)
-      const text = r.lines.join(eolStr)
-      return {
-        text,
-        lineCount: r.lines.length,
-        truncated: r.truncated,
-        path: rel,
-        startLine: start,
-        endLine: end,
-        usedParams: { mode: 'range', startLine: start, endLine: end, path: rel }
-      }
+      const text = r.lines.join(input?.normalizeEol === false ? eolStr : '\n')
+      return text
     } catch (e: any) {
       return `Error: ${e?.message || String(e)}`
     }

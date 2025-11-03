@@ -143,6 +143,53 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
               )}
             </div>
           ) : null}
+
+              {/* Gemini 2.5 thinking controls */}
+              {selectedProvider === 'gemini' && /2\.5/i.test(String(selectedModel)) && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+                    <input
+                      type="checkbox"
+                      checked={!!config.includeThoughts}
+                      onChange={(e) => {
+                        const checked = e.currentTarget.checked
+                        // When enabling, default budget to 2048 if unset
+                        if (checked && (config.thinkingBudget === undefined || config.thinkingBudget === null)) {
+                          onConfigChange({ includeThoughts: true, thinkingBudget: 2048 })
+                        } else {
+                          onConfigChange({ includeThoughts: checked })
+                        }
+                      }}
+                    />
+                    <span>Include thoughts</span>
+                  </label>
+                  {!!config.includeThoughts && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+                      <span style={{ fontSize: 10, color: '#888', width: 90 }}>Thinking budget:</span>
+                      <input
+                        type="number"
+                        min={-1}
+                        value={(config.thinkingBudget ?? 2048) as any}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10)
+                          onConfigChange({ thinkingBudget: Number.isFinite(v) ? v : undefined })
+                        }}
+                        placeholder="2048"
+                        style={{
+                          flex: 1,
+                          padding: '2px 4px',
+                          background: '#252526',
+                          color: '#cccccc',
+                          border: '1px solid #3e3e42',
+                          borderRadius: 3,
+                          fontSize: 10,
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+              )}
+
         </div>
       )}
 
@@ -320,6 +367,52 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
                 )}
               </div>
             ) : null}
+
+            {/* Gemini 2.5 thinking controls */}
+            {config.provider === 'gemini' && /2\.5/i.test(String(config.model)) && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!config.includeThoughts}
+                    onChange={(e) => {
+                      const checked = e.currentTarget.checked
+                      if (checked && (config.thinkingBudget === undefined || config.thinkingBudget === null)) {
+                        onConfigChange({ includeThoughts: true, thinkingBudget: 2048 })
+                      } else {
+                        onConfigChange({ includeThoughts: checked })
+                      }
+                    }}
+                  />
+                  <span>Include thoughts</span>
+                </label>
+                {!!config.includeThoughts && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+                    <span style={{ fontSize: 10, color: '#888', width: 90 }}>Thinking budget:</span>
+                    <input
+                      type="number"
+                      min={-1}
+                      value={(config.thinkingBudget ?? 2048) as any}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10)
+                        onConfigChange({ thinkingBudget: Number.isFinite(v) ? v : undefined })
+                      }}
+                      placeholder="2048"
+                      style={{
+                        flex: 1,
+                        padding: '2px 4px',
+                        background: '#252526',
+                        color: '#cccccc',
+                        border: '1px solid #3e3e42',
+                        borderRadius: 3,
+                        fontSize: 10,
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+            )}
+
 
         </div>
       )}

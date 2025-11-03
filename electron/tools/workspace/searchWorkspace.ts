@@ -899,8 +899,15 @@ export const searchWorkspaceTool: AgentTool = {
       const resultCount = Array.isArray(resultData?.results)
         ? resultData.results.length
         : (typeof resultData?.count === 'number' ? resultData.count : 0)
+      // Provide compact handles so the model can use action:"expand" without needing full UI payload
+      const topHandles = Array.isArray((resultData as any)?.topHandles)
+        ? (resultData as any).topHandles.map((h: any) => (h && typeof h.handle === 'string') ? h.handle : undefined).filter(Boolean).slice(0, 8)
+        : []
+      const bestHandle = (resultData as any)?.bestHandle && typeof (resultData as any).bestHandle.handle === 'string'
+        ? (resultData as any).bestHandle.handle
+        : (topHandles[0] || undefined)
       return {
-        minimal: { ok: true, previewKey, previewCount: resultCount },
+        minimal: { ok: true, previewKey, previewCount: resultCount, topHandles, bestHandle },
         ui: resultData,
         previewKey
       }

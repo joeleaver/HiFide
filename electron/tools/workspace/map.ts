@@ -83,7 +83,7 @@ export const workspaceMapTool: AgentTool = {
       'electron/main.ts','electron/core/app.ts','electron/core/window.ts',
       'electron/store/index.ts','electron/tools/index.ts',
       'electron/ipc/registry.ts','electron/ipc/pty.ts',
-      'electron/providers/openai.ts','electron/providers/anthropic.ts','electron/providers/gemini.ts'
+      'electron/providers-ai-sdk/openai.ts','electron/providers-ai-sdk/anthropic.ts','electron/providers/gemini.ts'
     ])
     const electronExisting = (await Promise.all(electronFiles.map(async (p) => {
       const abs = path.join(root, p)

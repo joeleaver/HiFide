@@ -53,6 +53,7 @@ export interface UsageBreakdownEventData {
   }
   output: {
     assistantText?: number
+    thoughts?: number
     toolCalls?: number
   }
   // Optional per-tool breakdown

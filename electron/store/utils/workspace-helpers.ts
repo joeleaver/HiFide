@@ -10,7 +10,7 @@ import fs from 'node:fs/promises'
 import { exec as execCb } from 'node:child_process'
 import { promisify } from 'node:util'
 import { providers, getProviderKey } from '../../core/state'
-import type { ProviderAdapter } from '../../types'
+import type { ProviderAdapter } from '../../providers/provider'
 
 const exec = promisify(execCb)
 
@@ -172,19 +172,44 @@ Be concise and specific to this repository.`
 
       let out = ''
       try {
-        await provider.agentStream({
-          apiKey: sel.key,
-          model,
-          messages: [
-            { role: 'system', content: prompt },
-            { role: 'user', content: user },
-          ],
-          tools: [],
-          toolMeta: {},
-          onChunk: (t) => { out += t },
-          onDone: () => {},
-          onError: (_e) => {},
-        })
+        if (sel.id === 'gemini') {
+          await provider.agentStream({
+            apiKey: sel.key,
+            model,
+            systemInstruction: prompt,
+            contents: [{ role: 'user', parts: [{ text: user }] }],
+            tools: [],
+            toolMeta: {},
+            onChunk: (t) => { out += t },
+            onDone: () => {},
+            onError: (_e) => {},
+          })
+        } else if (sel.id === 'anthropic') {
+          await provider.agentStream({
+            apiKey: sel.key,
+            model,
+            system: [{ type: 'text', text: prompt }],
+            messages: [{ role: 'user', content: user }],
+            tools: [],
+            toolMeta: {},
+            onChunk: (t) => { out += t },
+            onDone: () => {},
+            onError: (_e) => {},
+          })
+        } else {
+          // OpenAI / Fireworks (and similar) use top-level system and no system-role messages
+          await provider.agentStream({
+            apiKey: sel.key,
+            model,
+            system: prompt,
+            messages: [{ role: 'user', content: user }],
+            tools: [],
+            toolMeta: {},
+            onChunk: (t) => { out += t },
+            onDone: () => {},
+            onError: (_e) => {},
+          })
+        }
 
         // Try to parse JSON from out (strip code fences if present)
         const match = out.match(/\{[\s\S]*\}/)

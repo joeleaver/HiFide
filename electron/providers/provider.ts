@@ -41,10 +41,12 @@ export interface ProviderAdapter {
     // Sampling and reasoning controls
     temperature?: number
     reasoningEffort?: 'low' | 'medium' | 'high'
+    // Gemini thinking controls (2.5-series models)
+    includeThoughts?: boolean
+    thinkingBudget?: number
 
-    messages?: ChatMessage[]  // For OpenAI
-    instructions?: string  // For OpenAI Responses API (AI SDK)
-    system?: any  // For Anthropic
+    messages?: ChatMessage[]  // For OpenAI and Fireworks (no 'system' role)
+    system?: any  // For Anthropic (blocks) and OpenAI/Fireworks (string)
     contents?: any[]  // For Gemini
     systemInstruction?: string  // For Gemini
     tools: AgentTool[]

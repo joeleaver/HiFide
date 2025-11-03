@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { UiPayloadCache } from '../core/uiPayloadCache'
 import { AGENT_MAX_STEPS } from '../store/utils/constants'
 
-import type { ProviderAdapter, StreamHandle, ChatMessage, AgentTool } from '../providers/provider'
+import type { ProviderAdapter, StreamHandle, AgentTool } from '../providers/provider'
 
 function sanitizeName(name: string): string {
   let safe = (name || 'tool').replace(/[^a-zA-Z0-9_-]/g, '_')
@@ -52,7 +52,7 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
 export const OpenAiSdkProvider: ProviderAdapter = {
   id: 'openai',
 
-  async agentStream({ apiKey, model, instructions, systemInstruction, system, messages, temperature, tools, responseSchema: _responseSchema, emit: _emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, system, messages, temperature, tools, responseSchema: _responseSchema, emit: _emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const oai = createOpenAI({ apiKey })
     const llm = oai(model)
 
@@ -62,50 +62,9 @@ export const OpenAiSdkProvider: ProviderAdapter = {
 
     const ac = new AbortController()
 
-    // Normalize messages and system instructions for AI SDK
-    // - Accept systemInstruction (preferred) or system (string or Anthropic-style parts)
-    // - Collapse any system-role messages into a single system string
-    // - Avoid duplication by removing system-role entries from messages when passing `system`
-    const sysParts: string[] = []
-
-    // Top-level instructions take precedence
-    if (typeof instructions === 'string' && instructions.trim()) {
-      sysParts.push(instructions)
-    }
-
-    // Then systemInstruction
-    if (!sysParts.length && typeof systemInstruction === 'string' && systemInstruction.trim()) {
-      sysParts.push(systemInstruction)
-    }
-
-    // Support optional `system` param (string or array of text parts)
-    if (!sysParts.length && typeof system === 'string' && system.trim()) {
-      sysParts.push(system)
-    } else if (!sysParts.length && Array.isArray(system)) {
-      const texts = system
-        .map((p: any) => (typeof p?.text === 'string' ? p.text : undefined))
-        .filter(Boolean) as string[]
-      if (texts.length) sysParts.push(texts.join('\n\n'))
-    }
-
-    // Separate out system-role messages and user/assistant messages
-    const systemMsgs: string[] = []
-    const nonSystemMsgs = (messages || []).map((m: ChatMessage) => {
-      if (m.role === 'system') {
-        systemMsgs.push(typeof m.content === 'string' ? m.content : String(m.content))
-        return null as any
-      }
-      return { role: m.role as any, content: m.content }
-    }).filter(Boolean)
-
-    // If no explicit systemInstruction/system provided, fall back to system messages
-    if (!sysParts.length && systemMsgs.length) {
-      sysParts.push(systemMsgs.join('\n\n'))
-    }
-
-    const systemText: string | undefined = sysParts.length ? sysParts.join('\n\n') : undefined
-    // If we have a systemText, use non-system messages to avoid duplication; else keep original mapping
-    const msgs = systemText ? (nonSystemMsgs as any) : (messages || []).map((m: ChatMessage) => ({ role: m.role as any, content: m.content }))
+    // Expect system to be provided top-level (string) and messages without system-role
+    const systemText: string | undefined = typeof system === 'string' ? system : undefined
+    const msgs = (messages || []) as any
 
     const DEBUG = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
 

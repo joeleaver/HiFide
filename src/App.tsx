@@ -26,7 +26,7 @@ const menuHandlers = {
   },
   toggleTerminalPanel: () => {
     globalDispatch?.('setCurrentView', { view: 'explorer' })
-    const currentOpen = useAppStore.getState().windowState.explorerTerminalPanelOpen
+    const currentOpen = useAppStore.getState().windowState?.explorerTerminalPanelOpen ?? false
     globalDispatch?.('updateWindowState', { explorerTerminalPanelOpen: !currentOpen })
   },
   openFolder: async () => {

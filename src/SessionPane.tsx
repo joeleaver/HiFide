@@ -372,6 +372,7 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
                                   badgeId={badge.id}
                                   searchKey={badge.interactive.data.key}
                                   fullParams={badge.metadata?.fullParams}
+                                  previewKey={(badge as any)?.interactive?.data?.previewKey}
                                 />
                               )}
                               {badge.contentType === 'workspace-jump' && badge.interactive?.data?.key && (

@@ -59,6 +59,14 @@ export interface MainFlowContext {
   reasoningEffort?: 'low' | 'medium' | 'high'
 
   /**
+   * Gemini thinking controls (2.5-series models)
+   * includeThoughts: request thought summaries in the response
+   * thinkingBudget: approximate budget of thinking tokens (default to 2048 when includeThoughts is true if unset)
+   */
+  includeThoughts?: boolean
+  thinkingBudget?: number
+
+  /**
    * Conversation history for this context
    * Shared across all nodes using the same contextId.
    * Contains the full conversation between user and assistant.

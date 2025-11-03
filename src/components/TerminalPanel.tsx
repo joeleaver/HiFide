@@ -11,8 +11,12 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
   const tabs = useAppStore(context === 'agent' ? selectAgentTerminalTabs : selectExplorerTerminalTabs)
   const activeTab = useAppStore(context === 'agent' ? selectAgentActiveTerminal : selectExplorerActiveTerminal)
 
-  // Read from windowState (main store)
-  const height = useAppStore((s) => context === 'agent' ? s.windowState.agentTerminalPanelHeight : s.windowState.explorerTerminalPanelHeight)
+  // Read from windowState (main store) with hydration guard
+  const height = useAppStore((s) =>
+    context === 'agent'
+      ? (s.windowState?.agentTerminalPanelHeight ?? 300)
+      : (s.windowState?.explorerTerminalPanelHeight ?? 300)
+  )
 
   // Use dispatch for main store actions (tab management)
   const dispatch = useDispatch()

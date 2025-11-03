@@ -94,7 +94,7 @@ function previewText(val: any, max = 400): string {
 }
 
 function buildLoggablePayload(provider: string, streamOpts: any, extras?: { responseSchema?: any; tools?: AgentTool[] }) {
-  const { apiKey: _omitApiKey, messages, system, systemInstruction, contents, instructions, ...rest } = (streamOpts || {})
+  const { apiKey: _omitApiKey, messages, system, systemInstruction, contents, ...rest } = (streamOpts || {})
   const out: any = { provider, ...rest }
 
   if (provider === 'anthropic') {
@@ -109,11 +109,8 @@ function buildLoggablePayload(provider: string, streamOpts: any, extras?: { resp
       : undefined
   } else {
     // OpenAI and default ChatMessage[]
-    if (typeof instructions === 'string' && instructions) {
-      out.instructions = previewText(instructions, 200)
-    } else if (typeof system === 'string' && system) {
-      // Backward-compat if caller passed `system`
-      out.instructions = previewText(system, 200)
+    if (typeof system === 'string' && system) {
+      out.systemPreview = previewText(system, 200)
     }
     out.messages = Array.isArray(messages)
       ? messages.map((m: any, i: number) => ({ idx: i, role: m?.role, preview: previewText(m?.content, 200) }))
@@ -516,6 +513,16 @@ class LLMService {
     const provider = overrideProvider || context.provider
     const model = overrideModel || context.model
 
+
+    try {
+      flowAPI.log.debug('llmService.chat start', {
+        provider,
+        model,
+        hasTools: Array.isArray(tools) ? tools.length : (tools ? 'non-array' : 0),
+        messageLength: typeof message === 'string' ? message.length : undefined
+      })
+    } catch {}
+
     // 1. Get provider adapter
     const providerAdapter = providers[provider]
     if (!providerAdapter) {
@@ -632,7 +639,6 @@ class LLMService {
 
     const toolKey = (name?: string) => String(name || '').trim()
 
-
     // Usage breakdown capture (OpenAI path)
     // Reusable OpenAI tokenizer for this request (freed after breakdown emission)
     let __openaiEncoder: any | null = null
@@ -661,6 +667,19 @@ class LLMService {
       }
     }
 
+    // Generalized token counter: precise for OpenAI (tiktoken), estimated otherwise
+    function getTokenCounter(provider: string, model: string) {
+      if (provider === 'openai') {
+        const hasEnc = !!getOpenAIEncoderForModel(model)
+        return { count: openaiCountTokens, precise: hasEnc }
+      }
+      return { count: estimateTokensFromText, precise: false }
+    }
+
+
+    const __tokenCounter = getTokenCounter(provider, model)
+
+
     let __bdSystemText: string | undefined
     let __bdMessages: any[] | undefined
 
@@ -672,7 +691,7 @@ class LLMService {
         __toolCallsByTool[key] = ( __toolCallsByTool[key] || 0 ) + 1
         if (ev && ev.arguments != null) {
           const s = typeof ev.arguments === 'string' ? ev.arguments : JSON.stringify(ev.arguments)
-          const t = (provider === 'openai' ? openaiCountTokens(s) : estimateTokensFromText(s))
+          const t = __tokenCounter.count(s)
           __toolArgsTokensOut += t
           __toolArgsTokensByTool[key] = ( __toolArgsTokensByTool[key] || 0 ) + t
         }
@@ -684,7 +703,7 @@ class LLMService {
         const key = toolKey(ev?.name)
         if (ev && (ev as any).result != null) {
           const s = typeof (ev as any).result === 'string' ? (ev as any).result : JSON.stringify((ev as any).result)
-          const t = (provider === 'openai' ? openaiCountTokens(s) : estimateTokensFromText(s))
+          const t = __tokenCounter.count(s)
           __toolResultsTokensIn += t
           __toolResultsTokensByTool[key] = ( __toolResultsTokensByTool[key] || 0 ) + t
 
@@ -692,9 +711,18 @@ class LLMService {
           const callId = ev?.callId
           const pk = (ev as any)?.result?.previewKey
           if (callId && pk) {
-            const data = UiPayloadCache.take(pk)
+            // First try non-destructive read in case multiple consumers race
+            const data = UiPayloadCache.peek(pk)
             if (typeof data !== 'undefined') {
               try { flowAPI.store.getState().registerToolResult({ key: callId, data }) } catch {}
+            } else {
+              // Schedule a microtask to try again after providers finish caching
+              setTimeout(() => {
+                const later = UiPayloadCache.peek(pk)
+                if (typeof later !== 'undefined') {
+                  try { flowAPI.store.getState().registerToolResult({ key: callId, data: later }) } catch {}
+                }
+              }, 0)
             }
           }
         }
@@ -804,7 +832,7 @@ class LLMService {
               usageEmitted = true
               emitUsage(lastReportedUsage)
             } else if (!usageEmitted) {
-              const approxOutput = estimateTokensFromText(response)
+              const approxOutput = __tokenCounter.count(response)
               usageEmitted = true
               emitUsage({ inputTokens: approxInputTokens, outputTokens: approxOutput, totalTokens: approxInputTokens + approxOutput })
             }
@@ -826,6 +854,9 @@ class LLMService {
             // Sampling + reasoning controls (forwarded to providers when supported)
             ...(typeof updatedContext?.temperature === 'number' ? { temperature: updatedContext.temperature } : {}),
             ...(updatedContext?.reasoningEffort ? { reasoningEffort: updatedContext.reasoningEffort } : {}),
+            // Gemini thinking controls (2.5-series)
+            ...(updatedContext?.includeThoughts !== undefined ? { includeThoughts: updatedContext.includeThoughts } : {}),
+            ...(typeof (updatedContext as any)?.thinkingBudget === 'number' ? { thinkingBudget: (updatedContext as any).thinkingBudget } : {}),
             // Callbacks that providers call - these are wrapped to emit ExecutionEvents
             onChunk: (text: string) => {
               if (process.env.HF_FLOW_DEBUG === '1') {
@@ -877,9 +908,12 @@ class LLMService {
               }).filter(Boolean)
               if (sysParts.length) systemText = sysParts.join('\n\n')
             }
+
+	          try { flowAPI.log.debug('llmService.chat building stream options', { provider, model }) } catch {}
+
             streamOpts = {
               ...baseStreamOpts,
-              ...(systemText ? { instructions: systemText } : {}),
+              ...(systemText ? { system: systemText } : {}),
               messages: systemText ? nonSystemMessages : formattedMessages
             }
             // Capture for usage breakdown
@@ -905,9 +939,9 @@ class LLMService {
                 ? wrapToolsWithPolicy(tools, {
                     // Disable dedupe for fsReadLines/fsReadFile to ensure RAW text is returned (no cached JSON stubs)
                     dedupeReadLines: false,
-                    maxReadLinesPerFile: 1,
+                    // Remove re-read limits for fsReadLines so LLMs can read, edit, then re-read to verify
+
                     dedupeReadFile: false,
-                    maxReadFilePerFile: 1,
                   })
                 : []
               streamHandle = await providerAdapter.agentStream({
@@ -919,6 +953,9 @@ class LLMService {
                 onToolEnd: onToolEndWrapped,
                 onToolError: eventHandlers.onToolError
               })
+
+	            try { flowAPI.log.debug('llmService.chat agentStream started', { provider, model }) } catch {}
+
             },
             {
               max: 3,
@@ -973,101 +1010,102 @@ class LLMService {
       }
     }
 
-    // Emit usage breakdown (OpenAI only for now) using precise tokenizer when available
+    // Emit usage breakdown (general; precise when tokenizer available)
     try {
-      if (provider === 'openai') {
-        const enc = getOpenAIEncoderForModel(model)
-        const hasEnc = !!enc
+      const __count = __tokenCounter.count
+      const __precise = !!__tokenCounter.precise
 
-        const instructionsTokens = openaiCountTokens(__bdSystemText)
-        let userMsgTokens = 0
-        let assistantMsgTokens = 0
-        if (Array.isArray(__bdMessages)) {
-          for (const m of __bdMessages) {
-            const role = (m && (m as any).role) || ''
-            const content = (m && (m as any).content) ?? ''
-            const t = openaiCountTokens(typeof content === 'string' ? content : String(content))
-            if (role === 'user') userMsgTokens += t
-            else if (role === 'assistant') assistantMsgTokens += t
-          }
+      const instructionsTokens = __count(__bdSystemText)
+      let userMsgTokens = 0
+      let assistantMsgTokens = 0
+      if (Array.isArray(__bdMessages)) {
+        for (const m of __bdMessages) {
+          const role = (m && (m as any).role) || ''
+          const content = (m && (m as any).content) ?? ''
+          const t = __count(typeof content === 'string' ? content : String(content))
+          if (role === 'user') userMsgTokens += t
+          else if (role === 'assistant') assistantMsgTokens += t
         }
-        const toolDefinitionsTokens = openaiCountTokens(JSON.stringify(tools || []))
-        const responseFormatTokens = openaiCountTokens(JSON.stringify(responseSchema || null))
-        const toolCallResultsTokens = __toolResultsTokensIn
-        const assistantTextTokens = openaiCountTokens(response)
-        const toolCallsTokens = __toolArgsTokensOut
-
-        const calcInput = instructionsTokens + userMsgTokens + assistantMsgTokens + toolDefinitionsTokens + responseFormatTokens + toolCallResultsTokens
-        const calcOutput = assistantTextTokens + toolCallsTokens
-
-        const reported = lastReportedUsage as any
-        const acc = accumulatedUsage
-        const hasAccum = (acc && ((acc.inputTokens || 0) > 0 || (acc.outputTokens || 0) > 0 || (acc.totalTokens || 0) > 0))
-        const totals = hasAccum
-          ? {
-              inputTokens: (acc.inputTokens ?? calcInput),
-              outputTokens: (acc.outputTokens ?? calcOutput),
-              totalTokens: (acc.totalTokens ?? ((acc.inputTokens ?? calcInput) + (acc.outputTokens ?? calcOutput))),
-              cachedInputTokens: Math.max(0, acc.cachedTokens || 0)
-            }
-          : (reported
-            ? {
-                inputTokens: (reported.inputTokens ?? calcInput),
-                outputTokens: (reported.outputTokens ?? calcOutput),
-                totalTokens: (reported.totalTokens ?? ((reported.inputTokens ?? calcInput) + (reported.outputTokens ?? calcOutput))),
-                cachedInputTokens: Math.max(0, reported.cachedTokens || reported.cachedInputTokens || 0)
-              }
-            : { inputTokens: calcInput, outputTokens: calcOutput, totalTokens: calcInput + calcOutput, cachedInputTokens: 0 })
-
-        // Cost estimate
-        let costEstimate: number | undefined
-        try {
-          const rate = (DEFAULT_PRICING?.openai as any)?.[model]
-          if (rate) {
-            costEstimate = (totals.inputTokens / 1_000_000) * rate.inputCostPer1M + (totals.outputTokens / 1_000_000) * rate.outputCostPer1M
-          }
-        } catch {}
-
-        flowAPI.emitExecutionEvent({
-          type: 'usage_breakdown',
-          provider,
-          model,
-          usageBreakdown: {
-            input: {
-              instructions: instructionsTokens,
-              userMessages: userMsgTokens,
-              assistantMessages: assistantMsgTokens,
-              toolDefinitions: toolDefinitionsTokens,
-              responseFormat: responseFormatTokens,
-              toolCallResults: toolCallResultsTokens
-            },
-            output: {
-              assistantText: assistantTextTokens,
-              toolCalls: toolCallsTokens
-            },
-            totals: { ...totals, costEstimate },
-            estimated: !hasEnc,
-            tools: Object.fromEntries(
-              Array.from(
-                new Set([
-                  ...Object.keys(__toolArgsTokensByTool || {}),
-                  ...Object.keys(__toolResultsTokensByTool || {})
-                ])
-              ).map((k) => [
-                k,
-                {
-                  calls: __toolCallsByTool[k] || 0,
-                  inputResults: __toolResultsTokensByTool[k] || 0,
-                  outputArgs: __toolArgsTokensByTool[k] || 0
-                }
-              ])
-            )
-          }
-        })
-
-        // Free encoder resources
-        if (__openaiEncoder) { try { __openaiEncoder.free() } catch {} __openaiEncoder = null }
       }
+      const toolDefinitionsTokens = __count(JSON.stringify(tools || []))
+      const responseFormatTokens = __count(JSON.stringify(responseSchema || null))
+      const toolCallResultsTokens = __toolResultsTokensIn
+      const assistantTextTokens = __count(response)
+      const toolCallsTokens = __toolArgsTokensOut
+
+      const calcInput = instructionsTokens + userMsgTokens + assistantMsgTokens + toolDefinitionsTokens + responseFormatTokens + toolCallResultsTokens
+      const calcOutput = assistantTextTokens + toolCallsTokens
+
+      const reported = lastReportedUsage as any
+      const acc = accumulatedUsage
+      const hasAccum = (acc && ((acc.inputTokens || 0) > 0 || (acc.outputTokens || 0) > 0 || (acc.totalTokens || 0) > 0))
+      const totals = hasAccum
+        ? {
+            inputTokens: (acc.inputTokens ?? calcInput),
+            outputTokens: (acc.outputTokens ?? calcOutput),
+            totalTokens: (acc.totalTokens ?? ((acc.inputTokens ?? calcInput) + (acc.outputTokens ?? calcOutput))),
+            cachedInputTokens: Math.max(0, acc.cachedTokens || 0)
+          }
+        : (reported
+          ? {
+              inputTokens: (reported.inputTokens ?? calcInput),
+              outputTokens: (reported.outputTokens ?? calcOutput),
+              totalTokens: (reported.totalTokens ?? ((reported.inputTokens ?? calcInput) + (reported.outputTokens ?? calcOutput))),
+              cachedInputTokens: Math.max(0, reported.cachedTokens || reported.cachedInputTokens || 0)
+            }
+          : { inputTokens: calcInput, outputTokens: calcOutput, totalTokens: calcInput + calcOutput, cachedInputTokens: 0 })
+
+      // Cost estimate (provider-aware)
+      let costEstimate: number | undefined
+      try {
+        const rateTable: any = (DEFAULT_PRICING as any)[provider] || {}
+        const rate = rateTable?.[model]
+        if (rate) {
+          costEstimate = (totals.inputTokens / 1_000_000) * rate.inputCostPer1M + (totals.outputTokens / 1_000_000) * rate.outputCostPer1M
+        }
+      } catch {}
+
+      const thoughtsTokens = Math.max(0, Number(totals.outputTokens || 0) - (assistantTextTokens + toolCallsTokens))
+      flowAPI.emitExecutionEvent({
+        type: 'usage_breakdown',
+        provider,
+        model,
+        usageBreakdown: {
+          input: {
+            instructions: instructionsTokens,
+            userMessages: userMsgTokens,
+            assistantMessages: assistantMsgTokens,
+            toolDefinitions: toolDefinitionsTokens,
+            responseFormat: responseFormatTokens,
+            toolCallResults: toolCallResultsTokens
+          },
+          output: {
+            assistantText: assistantTextTokens,
+            thoughts: thoughtsTokens,
+            toolCalls: toolCallsTokens
+          },
+          totals: { ...totals, costEstimate },
+          estimated: !__precise,
+          tools: Object.fromEntries(
+            Array.from(
+              new Set([
+                ...Object.keys(__toolArgsTokensByTool || {}),
+                ...Object.keys(__toolResultsTokensByTool || {})
+              ])
+            ).map((k) => [
+              k,
+              {
+                calls: __toolCallsByTool[k] || 0,
+                inputResults: __toolResultsTokensByTool[k] || 0,
+                outputArgs: __toolArgsTokensByTool[k] || 0
+              }
+            ])
+          )
+        }
+      })
+
+      // Free encoder if allocated (OpenAI)
+      if (__openaiEncoder) { try { __openaiEncoder.free() } catch {} __openaiEncoder = null }
     } catch (e) {
       console.warn('[LLM] failed to emit usage_breakdown', e)
     }

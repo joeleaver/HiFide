@@ -35,10 +35,11 @@ export default function AgentView() {
   const fitTerminal = useTerminalStore((s) => s.fitTerminal)
 
   // Read persisted window state from main store (hydrate UI store on mount only)
-  const persistedFlowCanvasCollapsed = useAppStore((s) => s.windowState.flowCanvasCollapsed)
-  const persistedMetaPanelOpen = useAppStore((s) => s.windowState.metaPanelOpen)
-  const persistedSessionPanelWidth = useAppStore((s) => s.windowState.sessionPanelWidth)
-  const persistedMetaPanelWidth = useAppStore((s) => s.windowState.metaPanelWidth)
+  // Guard against initial zubridge hydration where windowState may be undefined
+  const persistedFlowCanvasCollapsed = useAppStore((s) => s.windowState?.flowCanvasCollapsed ?? false)
+  const persistedMetaPanelOpen = useAppStore((s) => s.windowState?.metaPanelOpen ?? false)
+  const persistedSessionPanelWidth = useAppStore((s) => s.windowState?.sessionPanelWidth ?? 400)
+  const persistedMetaPanelWidth = useAppStore((s) => s.windowState?.metaPanelWidth ?? 300)
 
   // Renderer-only UI state
   const metaPanelOpen = useUiStore((s) => s.metaPanelOpen)

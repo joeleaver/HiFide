@@ -31,6 +31,8 @@ export const newContextNode: NodeFunction = async (flow, _context, dataIn, _inpu
   const systemInstructions = (config.systemInstructions as string) || ''
   const temperature = (config as any)?.temperature as number | undefined
   const reasoningEffort = (config as any)?.reasoningEffort as ('low'|'medium'|'high') | undefined
+  const includeThoughts = !!(config as any)?.includeThoughts
+  const thinkingBudget = (config as any)?.thinkingBudget as number | undefined
 
   flow.log.info('Creating isolated context', {
     provider,
@@ -45,6 +47,8 @@ export const newContextNode: NodeFunction = async (flow, _context, dataIn, _inpu
     systemInstructions,
     ...(typeof temperature === 'number' ? { temperature } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
+    ...(includeThoughts === true ? { includeThoughts: true } : {}),
+    ...(typeof thinkingBudget === 'number' ? { thinkingBudget } : {}),
   })
 
   // Mark as isolated and set deterministic id for testability

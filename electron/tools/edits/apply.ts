@@ -1,40 +1,33 @@
 import type { AgentTool } from '../../providers/provider'
-import { applyFileEditsInternal } from '../utils'
+import { applyLineRangeEditsInternal } from '../utils'
 import { randomUUID } from 'node:crypto'
 
 
 export const applyEditsTool: AgentTool = {
   name: 'applyEdits',
-  description: 'Apply precise text edits to files. Use when you know the exact change; keep diffs small. If uncertain, try codeApplyEditsTargeted with dryRun first.',
+  description: 'Apply sequential, line-based edits to a single file. Provide 1-based startLine/endLine ranges in ascending order; tool normalizes line endings automatically.',
   parameters: {
     type: 'object',
     properties: {
+      path: { type: 'string', description: 'File path relative to workspace' },
       edits: {
         type: 'array',
-        description: 'List of edits to apply',
+        description: 'Sequential line ranges to replace (1-based, inclusive)',
         items: {
           type: 'object',
           properties: {
-            type: { type: 'string', enum: ['replaceOnce', 'insertAfterLine', 'replaceRange'], description: 'Type of edit' },
-            path: { type: 'string', description: 'File path relative to workspace' },
-            // For replaceOnce
-            oldText: { type: 'string', description: 'Text to find and replace (for replaceOnce)' },
-            newText: { type: 'string', description: 'Replacement text (for replaceOnce)' },
-            // For insertAfterLine
-            line: { type: 'integer', description: 'Line number to insert after (for insertAfterLine)' },
-            text: { type: 'string', description: 'Text to insert (for insertAfterLine or replaceRange)' },
-            // For replaceRange
-            start: { type: 'integer', description: 'Start character offset (for replaceRange)' },
-            end: { type: 'integer', description: 'End character offset (for replaceRange)' },
+            startLine: { type: 'integer' },
+            endLine: { type: 'integer' },
+            newText: { type: 'string' },
           },
-          required: ['type', 'path']
+          required: ['startLine', 'endLine', 'newText'],
         },
       },
     },
-    required: ['edits'],
+    required: ['path', 'edits'],
   },
-  run: async ({ edits }: { edits: any[] }) => {
-    return await applyFileEditsInternal(edits, {})
+  run: async ({ path, edits, dryRun }: { path: string; edits: Array<{ startLine: number; endLine: number; newText: string }>; dryRun?: boolean }) => {
+    return await applyLineRangeEditsInternal(path, edits, { dryRun })
   },
   toModelResult: (raw: any) => {
     if (raw?.fileEditsPreview && Array.isArray(raw.fileEditsPreview)) {

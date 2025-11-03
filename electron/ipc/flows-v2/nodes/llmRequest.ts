@@ -166,6 +166,20 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
 
   // Pull tools if connected (lazy evaluation)
   const tools = inputs.has('tools') ? await inputs.pull('tools') : undefined
+  try {
+    flow.log.debug('llmRequest: pulled tools', {
+      toolsCount: Array.isArray(tools) ? tools.length : (tools ? 'non-array' : 0),
+      toolNames: Array.isArray(tools) ? tools.map((t: any) => t?.name).filter(Boolean).slice(0, 12) : undefined
+    })
+  } catch {}
+  try {
+    flow.log.debug('llmRequest: about to call llmService.chat', {
+      provider: executionContext?.provider,
+      model: executionContext?.model,
+      messageLength: typeof message === 'string' ? message.length : undefined
+    })
+  } catch {}
+
 
   // Call LLM service - it handles everything!
   const result = await llmService.chat({
@@ -180,6 +194,13 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
         }
       : {})
   })
+  try {
+    flow.log.debug('llmRequest: llmService.chat returned', {
+      hasError: !!(result as any)?.error,
+      textLen: typeof (result as any)?.text === 'string' ? (result as any).text.length : undefined
+    })
+  } catch {}
+
 
   if (result.error) {
     flow.log.error('ERROR from LLM service', { error: result.error })

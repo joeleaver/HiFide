@@ -1,18 +1,16 @@
 import { streamText, tool as aiTool, stepCountIs, jsonSchema } from 'ai'
-import { createFireworks } from '@ai-sdk/fireworks'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { z } from 'zod'
 import { UiPayloadCache } from '../core/uiPayloadCache'
 import { AGENT_MAX_STEPS } from '../store/utils/constants'
 
-import type { ProviderAdapter, StreamHandle, AgentTool } from '../providers/provider'
+import type { ProviderAdapter, StreamHandle, AgentTool, ChatMessage } from '../providers/provider'
 
 function sanitizeName(name: string): string {
   let safe = (name || 'tool').replace(/[^a-zA-Z0-9_-]/g, '_')
   if (!safe) safe = 'tool'
   return safe
-
 }
-
 
 function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: string; [k: string]: any }) {
   const map: Record<string, any> = {}
@@ -22,7 +20,7 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
     const safe = sanitizeName(t.name)
     if (nameMap.has(safe) && nameMap.get(safe) !== t.name) {
       const DEBUG = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
-      if (DEBUG) console.warn('[ai-sdk:fireworks] tool name collision after sanitize', { safe, a: nameMap.get(safe), b: t.name })
+      if (DEBUG) console.warn('[ai-sdk:gemini] tool name collision after sanitize', { safe, a: nameMap.get(safe), b: t.name })
     }
     nameMap.set(safe, t.name)
     // Prefer the tool's declared JSON Schema; fallback to permissive schema
@@ -49,12 +47,24 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
   return { tools: map, nameMap }
 }
 
-export const FireworksAiSdkProvider: ProviderAdapter = {
-  id: 'fireworks',
+function contentsToMessages(contents: Array<{ role: string; parts: Array<{ text?: string }> }>): ChatMessage[] {
+  try {
+    return (contents || []).map((c) => {
+      const role = c?.role === 'model' ? 'assistant' : 'user'
+      const text = Array.isArray(c?.parts) ? c.parts.map((p) => (typeof p?.text === 'string' ? p.text : '')).filter(Boolean).join('\n') : ''
+      return { role: role as any, content: text }
+    })
+  } catch {
+    return []
+  }
+}
 
-  async agentStream({ apiKey, model, system, messages, temperature, tools, responseSchema: _responseSchema, emit: _emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
-    const fw = createFireworks({ apiKey })
-    const llm = fw(model)
+export const GeminiAiSdkProvider: ProviderAdapter = {
+  id: 'gemini',
+
+  async agentStream({ apiKey, model, systemInstruction, contents, temperature, includeThoughts, thinkingBudget, tools, responseSchema: _responseSchema, emit: _emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+    const google = createGoogleGenerativeAI({ apiKey })
+    const llm = google(model)
 
     const { tools: aiTools, nameMap } = buildAiSdkTools(tools, toolMeta)
 
@@ -62,16 +72,23 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
 
     const ac = new AbortController()
 
-    // Expect system to be provided top-level (string) and messages without system-role
-    const systemText: string | undefined = typeof system === 'string' ? system : undefined
-    const msgs = (messages || []) as any
+    const systemText: string | undefined = typeof systemInstruction === 'string' ? systemInstruction : undefined
+    const msgs = contentsToMessages((contents as any) || [])
 
     const DEBUG = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
 
     try {
       if (DEBUG) {
-        console.log('[ai-sdk:fireworks] streamText start', { model, msgs: msgs.length, tools: Object.keys(aiTools).length })
+        console.log('[ai-sdk:gemini] streamText start', { model, msgs: msgs.length, tools: Object.keys(aiTools).length })
       }
+      const supportsThinking = (id: string) => /2\.5/i.test(String(id))
+      const shouldThink = includeThoughts === true && supportsThinking(model)
+      const providerOptions = shouldThink ? (() => {
+        const raw = typeof thinkingBudget === 'number' ? thinkingBudget : 2048
+        const thinkingConfig: any = { includeThoughts: true }
+        if (raw !== -1) thinkingConfig.thinkingBudget = raw
+        return { google: { thinkingConfig } }
+      })() : undefined
       const result = streamText({
         model: llm,
         system: systemText,
@@ -82,12 +99,12 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
         abortSignal: ac.signal,
         stopWhen: stepCountIs(AGENT_MAX_STEPS),
         includeRawChunks: DEBUG,
-        // Stream mapping (AI SDK v5 onChunk passes { chunk })
+        providerOptions: providerOptions as any,
         onChunk({ chunk }: any) {
           try {
             if (DEBUG) {
               const brief = typeof (chunk as any).text === 'string' ? (chunk as any).text.slice(0, 40) : undefined
-              console.log('[ai-sdk:fireworks] onChunk', { type: chunk.type, tool: (chunk as any).toolName, brief })
+              console.log('[ai-sdk:gemini] onChunk', { type: chunk.type, tool: (chunk as any).toolName, brief })
             }
             switch (chunk.type) {
               case 'text-delta': {
@@ -101,19 +118,14 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
                   seenStarts.add(callId)
                   const safe = String(chunk.toolName || '')
                   const original = nameMap.get(safe) || safe
-                  onToolStart?.({ callId, name: original })
+                  const args = (chunk as any).input
+                  if (args !== undefined) onToolStart?.({ callId, name: original, arguments: args })
+                  else onToolStart?.({ callId, name: original })
                 }
                 break
               }
               case 'tool-input-delta': {
-                // We could surface arg deltas later; for now just ensure start is emitted
-                const callId = chunk.toolCallId || chunk.id || ''
-                if (callId && !seenStarts.has(callId)) {
-                  seenStarts.add(callId)
-                  const safe = String(chunk.toolName || '')
-                  const original = nameMap.get(safe) || safe
-                  onToolStart?.({ callId, name: original })
-                }
+                // We ignore deltas for now to avoid noisy partial-args starts
                 break
               }
               case 'tool-call': {
@@ -122,7 +134,8 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
                   seenStarts.add(callId)
                   const safe = String(chunk.toolName || '')
                   const original = nameMap.get(safe) || safe
-                  onToolStart?.({ callId, name: original, arguments: (chunk as any).input })
+                  const args = (chunk as any).input
+                  onToolStart?.({ callId, name: original, arguments: args })
                 }
                 break
               }
@@ -130,7 +143,26 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
                 const callId = chunk.toolCallId || chunk.id || ''
                 const safe = String(chunk.toolName || '')
                 const original = nameMap.get(safe) || safe
-                const output = (chunk as any).output
+                let output: any = (chunk as any).output
+                if (typeof output === 'undefined') {
+                  output = (chunk as any).result ?? (chunk as any).toolResult ?? (chunk as any).data
+                  if (typeof output === 'string') {
+                    try {
+                      const trimmed = output.trim()
+                      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                        output = JSON.parse(trimmed)
+                      }
+                    } catch {}
+                  }
+                }
+                if (output && typeof output === 'object') {
+                  const o: any = output
+                  if (o.type === 'json' && 'value' in o) {
+                    output = o.value
+                  } else if ('json' in o && o.json && typeof o.json === 'object') {
+                    output = o.json
+                  }
+                }
                 onToolEnd?.({ callId, name: original, result: output })
                 break
               }
@@ -157,15 +189,18 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
           try {
             if (DEBUG) {
               const calls = Array.isArray(step?.toolCalls) ? step.toolCalls.length : 0
-              console.log('[ai-sdk:fireworks] onStepFinish', { calls, finishReason: step?.finishReason, usage: step?.usage })
+              console.log('[ai-sdk:gemini] onStepFinish', { calls, finishReason: step?.finishReason, usage: step?.usage })
             }
             if (step?.usage && onTokenUsage) {
               const u: any = step.usage
+              const out = Number(u.outputTokens ?? u.candidatesTokens ?? u.completionTokens ?? 0)
+              const rt = Number(u.reasoningTokens ?? 0)
+              const inp = Number(u.inputTokens ?? u.promptTokens ?? 0)
               const usage = {
-                inputTokens: Number(u.inputTokens ?? u.promptTokens ?? 0),
-                outputTokens: Number(u.outputTokens ?? u.completionTokens ?? 0),
-                totalTokens: Number(u.totalTokens ?? (Number(u.inputTokens ?? 0) + Number(u.outputTokens ?? 0))),
-                cachedTokens: Number(u.cachedInputTokens ?? u.cachedTokens ?? 0)
+                inputTokens: inp,
+                outputTokens: out + rt,
+                totalTokens: Number(u.totalTokens ?? (inp + out + rt)),
+                cachedTokens: Number(u.cachedInputTokens ?? u.cachedTokens ?? u.cacheTokens ?? 0)
               }
               onTokenUsage(usage)
             }
@@ -173,25 +208,25 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
         },
         onFinish() {
           try {
-            if (DEBUG) console.log('[ai-sdk:fireworks] onFinish')
+            if (DEBUG) console.log('[ai-sdk:gemini] onFinish')
             onStreamDone?.()
           } catch {}
         },
         onError(ev: any) {
           const err = ev?.error ?? ev
           try {
-            if (DEBUG) console.error('[ai-sdk:fireworks] onError', err)
+            if (DEBUG) console.error('[ai-sdk:gemini] onError', err)
             onStreamError?.(String(err?.message || err))
           } catch {}
         }
-      })
+      } as any)
       // Ensure the stream is consumed so callbacks fire reliably
       result.consumeStream().catch((err: any) => {
-        if (DEBUG) console.error('[ai-sdk:fireworks] consumeStream error', err)
+        if (DEBUG) console.error('[ai-sdk:gemini] consumeStream error', err)
         try { onStreamError?.(String(err?.message || err)) } catch {}
       })
     } catch (err: any) {
-      if (DEBUG) console.error('[ai-sdk:fireworks] adapter exception', err)
+      if (DEBUG) console.error('[ai-sdk:gemini] adapter exception', err)
       try { onStreamError?.(String(err?.message || err)) } catch {}
     }
 

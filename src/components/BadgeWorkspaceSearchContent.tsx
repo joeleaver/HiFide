@@ -6,6 +6,7 @@ interface BadgeWorkspaceSearchContentProps {
   badgeId: string
   searchKey: string
   fullParams?: any
+  previewKey?: string
 }
 
 export type SearchResultHit = {
@@ -60,7 +61,7 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
   if (!results) {
     return (
       <Text size="sm" c="dimmed">
-        No results found
+        Loading results...
       </Text>
     )
   }

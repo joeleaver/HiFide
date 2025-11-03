@@ -12,9 +12,9 @@ import { withFixture, getTestMode } from '../../../../__tests__/utils/fixtures'
 // Mock the state module to provide API keys
 jest.mock('../../../../core/state', () => ({
   providers: {
-    anthropic: require('../../../../providers/anthropic').AnthropicProvider,
+    anthropic: require('../../../../providers-ai-sdk/anthropic').AnthropicAiSdkProvider,
     openai: require('../../../../providers-ai-sdk/openai').OpenAiSdkProvider,
-    gemini: require('../../../../providers/gemini').GeminiProvider,
+    gemini: require('../../../../providers-ai-sdk/gemini').GeminiAiSdkProvider,
   },
   getProviderKey: jest.fn(async (provider: string) => {
     return getTestApiKey(provider as any)

@@ -10,8 +10,8 @@ import Store from 'electron-store'
 import path from 'node:path'
 import type { PtySession, FlowHandle, StreamHandle } from '../types'
 import { Indexer } from '../indexing/indexer'
-import { AnthropicProvider } from '../providers/anthropic'
-import { GeminiProvider } from '../providers/gemini'
+import { AnthropicAiSdkProvider } from '../providers-ai-sdk/anthropic'
+import { GeminiAiSdkProvider } from '../providers-ai-sdk/gemini'
 import { FireworksAiSdkProvider } from '../providers-ai-sdk/fireworks'
 import { OpenAiSdkProvider } from '../providers-ai-sdk/openai'
 
@@ -133,8 +133,8 @@ export const providerCapabilities: Record<string, Record<string, boolean>> = {
  */
 export const providers: Record<string, ProviderAdapter> = {
   openai: OpenAiSdkProvider,
-  anthropic: AnthropicProvider,
-  gemini: GeminiProvider,
+  anthropic: AnthropicAiSdkProvider,
+  gemini: GeminiAiSdkProvider,
   fireworks: FireworksAiSdkProvider,
 }
 

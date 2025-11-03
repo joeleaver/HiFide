@@ -19,8 +19,9 @@ export default function StatusBar() {
   const currentView = useAppStore(selectCurrentView)
 
   // Flow Editor specific state - subscribe to primitives only to avoid ref churn
-  const nodesCount = useAppStore((s) => s.feNodes.length)
-  const edgesCount = useAppStore((s) => s.feEdges.length)
+  // Guard against initial zubridge hydration where these arrays may be undefined
+  const nodesCount = useAppStore((s) => (s.feNodes?.length ?? 0))
+  const edgesCount = useAppStore((s) => (s.feEdges?.length ?? 0))
   const feStatus = useAppStore((s) => s.feStatus)
 
   // Perf: trace rerenders without passing large objects

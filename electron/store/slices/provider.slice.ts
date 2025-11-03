@@ -228,11 +228,25 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
       } else if (provider === 'gemini') {
         const f: any = (globalThis as any).fetch
         if (!f) throw new Error('Fetch API unavailable')
-        const resp = await f(`https://generativelanguage.googleapis.com/v1/models?key=${encodeURIComponent(key)}`)
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-        const data = await resp.json()
-        const arr = Array.isArray(data.models) ? data.models : Array.isArray(data.data) ? data.data : []
-        const models = arr.map((m: any) => {
+        const base = 'https://generativelanguage.googleapis.com'
+        const urls = [
+          `${base}/v1beta/models?key=${encodeURIComponent(key)}`,
+          `${base}/v1/models?key=${encodeURIComponent(key)}`
+        ]
+        const all: any[] = []
+        for (const url of urls) {
+          try {
+            const resp = await f(url)
+            if (resp.ok) {
+              const data = await resp.json()
+              const arr = Array.isArray(data.models) ? data.models : Array.isArray(data.data) ? data.data : []
+              if (Array.isArray(arr)) all.push(...arr)
+            }
+          } catch {}
+        }
+        // Normalize, filter and dedupe
+        const seen = new Set<string>()
+        const models = all.map((m: any) => {
           const full = (m?.name || m?.model || '').toString()
           const id = full.startsWith('models/') ? full.split('/').pop() : full
           const supported: string[] = (m?.supportedGenerationMethods || m?.supported_generation_methods || [])
@@ -242,7 +256,10 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
           const hasGenerate = m.supported?.includes('generateContent')
           const isNotEmbedding = !/(embedding|vision)/i.test(id)
           const isNotImageGen = !/image-generation/i.test(id)
-          return hasGenerate && isNotEmbedding && isNotImageGen
+          if (!(hasGenerate && isNotEmbedding && isNotImageGen)) return false
+          if (seen.has(id)) return false
+          seen.add(id)
+          return true
         })
         list = models.map((m: any) => ({ value: m.id, label: m.label }))
       } else if (provider === 'fireworks') {

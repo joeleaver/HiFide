@@ -205,8 +205,8 @@ describe('LLM Request Node - real behavior (fs.*, edits.apply, code.*)', () => {
     const flow = createMockFlowAPI()
     const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
 
-    const edits = [{ type: 'replaceOnce', path: 'edit.txt', oldText: 'hello', newText: 'hi' }]
-    const tEdits = wrap(applyEditsTool, async () => applyEditsTool.run({ edits, verify: false } as any))
+    const editArgs = { path: 'edit.txt', edits: [{ startLine: 1, endLine: 1, newText: 'hi world' }] }
+    const tEdits = wrap(applyEditsTool, async () => applyEditsTool.run(editArgs as any))
 
     const res = await llmRequestNode(flow as any, ctx as any, 'apply edits', createMockNodeInputs({ tools: [tEdits] }) as any, createTestConfig())
     const parsed = parseResult(res)
@@ -214,6 +214,258 @@ describe('LLM Request Node - real behavior (fs.*, edits.apply, code.*)', () => {
     expect(parsed.result.applied).toBeGreaterThan(0)
     expect(await fs.readFile(path.join(tmp, 'edit.txt'), 'utf-8')).toBe('hi world')
   })
+
+  test('edits.apply preserves newline between replaced range and next line (LF)', async () => {
+    const p = path.join(tmp, 'newline-lf.txt')
+    await fs.writeFile(p, 'a\nb\nc\n', 'utf-8')
+    const flow = createMockFlowAPI()
+    const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
+    const tEdits = wrap(applyEditsTool, async () => applyEditsTool.run({ path: 'newline-lf.txt', edits: [{ startLine: 2, endLine: 2, newText: 'B' }] } as any))
+    await llmRequestNode(flow as any, ctx as any, 'apply edits', createMockNodeInputs({ tools: [tEdits] }) as any, createTestConfig())
+    const next = await fs.readFile(p, 'utf-8')
+    expect(next).toBe('a\nB\nc\n')
+  })
+
+  test('edits.apply preserves lack of final newline at EOF', async () => {
+    const p = path.join(tmp, 'noeof.txt')
+    await fs.writeFile(p, 'a\nb', 'utf-8') // no final newline
+    const flow = createMockFlowAPI()
+    const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
+    const tEdits = wrap(applyEditsTool, async () => applyEditsTool.run({ path: 'noeof.txt', edits: [{ startLine: 2, endLine: 2, newText: 'B' }] } as any))
+    await llmRequestNode(flow as any, ctx as any, 'apply edits', createMockNodeInputs({ tools: [tEdits] }) as any, createTestConfig())
+    const next = await fs.readFile(p, 'utf-8')
+    expect(next).toBe('a\nB') // still no final newline
+  })
+
+
+  test('edits.apply preserves CRLF style and boundary newline', async () => {
+    const p = path.join(tmp, 'newline-crlf.txt')
+    const content = 'a\r\nb\r\nc\r\n'
+    await fs.writeFile(p, content, 'utf-8')
+    const flow = createMockFlowAPI()
+    const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
+    const tEdits = wrap(applyEditsTool, async () => applyEditsTool.run({ path: 'newline-crlf.txt', edits: [{ startLine: 2, endLine: 2, newText: 'B' }] } as any))
+    await llmRequestNode(flow as any, ctx as any, 'apply edits', createMockNodeInputs({ tools: [tEdits] }) as any, createTestConfig())
+    const next = await fs.readFile(p, 'utf-8')
+    expect(next).toBe('a\r\nB\r\nc\r\n')
+  })
+
+  test('edits.apply multi-line replacement does not duplicate first line (LF)', async () => {
+    const p = path.join(tmp, 'zoom-lf.ts')
+    const original = [
+      'export const MAX_ZOOM = 20;',
+      'export const MIN_ZOOM = 0.02;',
+      'export const ZOOM_BREAKPOINTS = {',
+      '  CLUSTER: 0.02,',
+      '  PROJECT: 0.2,',
+      '  MODULE: 0.8,',
+      '  SYSTEM: 1.8,',
+      '};',
+      '',
+    ].join('\n')
+    await fs.writeFile(p, original, 'utf-8')
+    const flow = createMockFlowAPI()
+    const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
+    const replacement = [
+      'export const ZOOM_BREAKPOINTS = {',
+      '  CLUSTER: 0.05,',
+      '  SYSTEM: 1.5,',
+      '};',
+    ].join('\n')
+    const tEdits = wrap(applyEditsTool, async () => applyEditsTool.run({ path: 'zoom-lf.ts', edits: [{ startLine: 3, endLine: 8, newText: replacement }] } as any))
+    await llmRequestNode(flow as any, ctx as any, 'apply', createMockNodeInputs({ tools: [tEdits] }) as any, createTestConfig())
+    const next = await fs.readFile(p, 'utf-8')
+    const expected = [
+      'export const MAX_ZOOM = 20;',
+      'export const MIN_ZOOM = 0.02;',
+      'export const ZOOM_BREAKPOINTS = {',
+      '  CLUSTER: 0.05,',
+      '  SYSTEM: 1.5,',
+      '};',
+      '',
+    ].join('\n')
+    expect(next).toBe(expected)
+  })
+
+  test('edits.apply multi-line replacement does not duplicate first line (CRLF)', async () => {
+    const p = path.join(tmp, 'zoom-crlf.ts')
+    const original = [
+      'export const MAX_ZOOM = 20;',
+      'export const MIN_ZOOM = 0.02;',
+      'export const ZOOM_BREAKPOINTS = {',
+      '  CLUSTER: 0.02,',
+      '  PROJECT: 0.2,',
+      '  MODULE: 0.8,',
+      '  SYSTEM: 1.8,',
+      '};',
+      '',
+    ].join('\r\n')
+    await fs.writeFile(p, original, 'utf-8')
+    const flow = createMockFlowAPI()
+    const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
+    const replacement = [
+      'export const ZOOM_BREAKPOINTS = {',
+      '  CLUSTER: 0.05,',
+      '  SYSTEM: 1.5,',
+      '};',
+    ].join('\r\n')
+    const tEdits = wrap(applyEditsTool, async () => applyEditsTool.run({ path: 'zoom-crlf.ts', edits: [{ startLine: 3, endLine: 8, newText: replacement }] } as any))
+    await llmRequestNode(flow as any, ctx as any, 'apply', createMockNodeInputs({ tools: [tEdits] }) as any, createTestConfig())
+    const next = await fs.readFile(p, 'utf-8')
+    const expected = [
+      'export const MAX_ZOOM = 20;',
+      'export const MIN_ZOOM = 0.02;',
+      'export const ZOOM_BREAKPOINTS = {',
+      '  CLUSTER: 0.05,',
+      '  SYSTEM: 1.5,',
+      '};',
+      '',
+    ].join('\r\n')
+    expect(next).toBe(expected)
+  })
+
+  test('edits.apply multi-line replacement drops duplicated first line if header left outside range (LF)', async () => {
+    const p = path.join(tmp, 'zoom2-lf.ts')
+    const original = [
+      'export const MAX_ZOOM = 20;',
+      'export const MIN_ZOOM = 0.02;',
+      'export const ZOOM_BREAKPOINTS = {',
+      '  CLUSTER: 0.02,',
+      '  PROJECT: 0.2,',
+      '  MODULE: 0.8,',
+      '  SYSTEM: 1.8,',
+      '};',
+      '',
+    ].join('\n')
+    await fs.writeFile(p, original, 'utf-8')
+    const flow = createMockFlowAPI()
+    const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
+    const replacement = [
+      'export const ZOOM_BREAKPOINTS = {',
+      '  CLUSTER: 0.05,',
+      '  SYSTEM: 1.5,',
+      '};',
+    ].join('\n')
+    const tEdits = wrap(applyEditsTool, async () => applyEditsTool.run({ path: 'zoom2-lf.ts', edits: [{ startLine: 4, endLine: 8, newText: replacement }] } as any))
+    await llmRequestNode(flow as any, ctx as any, 'apply', createMockNodeInputs({ tools: [tEdits] }) as any, createTestConfig())
+    const next = await fs.readFile(p, 'utf-8')
+    const expected = [
+      'export const MAX_ZOOM = 20;',
+      'export const MIN_ZOOM = 0.02;',
+      'export const ZOOM_BREAKPOINTS = {',
+      '  CLUSTER: 0.05,',
+      '  SYSTEM: 1.5,',
+      '};',
+      '',
+    ].join('\n')
+    expect(next).toBe(expected)
+  })
+
+  test('edits.apply multi-line replacement drops duplicated first line if header left outside range (CRLF)', async () => {
+    const p = path.join(tmp, 'zoom2-crlf.ts')
+    const original = [
+      'export const MAX_ZOOM = 20;',
+      'export const MIN_ZOOM = 0.02;',
+      'export const ZOOM_BREAKPOINTS = {',
+      '  CLUSTER: 0.02,',
+      '  PROJECT: 0.2,',
+      '  MODULE: 0.8,',
+      '  SYSTEM: 1.8,',
+      '};',
+      '',
+    ].join('\r\n')
+    await fs.writeFile(p, original, 'utf-8')
+    const flow = createMockFlowAPI()
+    const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
+    const replacement = [
+      'export const ZOOM_BREAKPOINTS = {',
+      '  CLUSTER: 0.05,',
+      '  SYSTEM: 1.5,',
+      '};',
+    ].join('\r\n')
+    const tEdits = wrap(applyEditsTool, async () => applyEditsTool.run({ path: 'zoom2-crlf.ts', edits: [{ startLine: 4, endLine: 8, newText: replacement }] } as any))
+    await llmRequestNode(flow as any, ctx as any, 'apply', createMockNodeInputs({ tools: [tEdits] }) as any, createTestConfig())
+    const next = await fs.readFile(p, 'utf-8')
+    const expected = [
+      'export const MAX_ZOOM = 20;',
+      'export const MIN_ZOOM = 0.02;',
+      'export const ZOOM_BREAKPOINTS = {',
+      '  CLUSTER: 0.05,',
+      '  SYSTEM: 1.5,',
+      '};',
+      '',
+    ].join('\r\n')
+    expect(next).toBe(expected)
+  })
+
+
+  test('edits.apply supports two consecutive ranges at top-of-file (LF)', async () => {
+    const p = path.join(tmp, 'consec-lf.txt')
+    const original = ['L1','L2','L3','L4',''].join('\n')
+    await fs.writeFile(p, original, 'utf-8')
+    const flow = createMockFlowAPI()
+    const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
+    const edits = [
+      { startLine: 1, endLine: 2, newText: ['A1','A2'].join('\n') },
+      { startLine: 3, endLine: 4, newText: ['B3','B4'].join('\n') },
+    ]
+    const tEdits = wrap(applyEditsTool, async () => applyEditsTool.run({ path: 'consec-lf.txt', edits } as any))
+    await llmRequestNode(flow as any, ctx as any, 'apply', createMockNodeInputs({ tools: [tEdits] }) as any, createTestConfig())
+    const next = await fs.readFile(p, 'utf-8')
+    expect(next).toBe(['A1','A2','B3','B4',''].join('\n'))
+  })
+
+  test('edits.apply supports two consecutive ranges at top-of-file (CRLF)', async () => {
+    const p = path.join(tmp, 'consec-crlf.txt')
+    const original = ['L1','L2','L3','L4',''].join('\r\n')
+    await fs.writeFile(p, original, 'utf-8')
+    const flow = createMockFlowAPI()
+    const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
+    const edits = [
+      { startLine: 1, endLine: 2, newText: ['A1','A2'].join('\r\n') },
+      { startLine: 3, endLine: 4, newText: ['B3','B4'].join('\r\n') },
+    ]
+    const tEdits = wrap(applyEditsTool, async () => applyEditsTool.run({ path: 'consec-crlf.txt', edits } as any))
+    await llmRequestNode(flow as any, ctx as any, 'apply', createMockNodeInputs({ tools: [tEdits] }) as any, createTestConfig())
+    const next = await fs.readFile(p, 'utf-8')
+    expect(next).toBe(['A1','A2','B3','B4',''].join('\r\n'))
+  })
+
+  test('code.apply_edits_targeted replaceRange preserves boundary newline (LF)', async () => {
+    const p = path.join(tmp, 'range-boundary-lf.txt')
+    const original = ['A','B','C',''].join('\n')
+    await fs.writeFile(p, original, 'utf-8')
+    const flow = createMockFlowAPI()
+    const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
+    const sliceLen = ['A','B',''].join('\n').length // 'A\nB\n'
+    const t = wrap(applyEditsTargetedTool, async () => applyEditsTargetedTool.run({
+      textEdits: [{ type: 'replaceRange', path: 'range-boundary-lf.txt', start: 0, end: sliceLen, text: 'X' }],
+      verify: false
+    } as any))
+    await llmRequestNode(flow as any, ctx as any, 'apply range', createMockNodeInputs({ tools: [t] }) as any, createTestConfig())
+    const next = await fs.readFile(p, 'utf-8')
+    expect(next).toBe(['X','C',''].join('\n'))
+  })
+
+  test('code.apply_edits_targeted replaceRange preserves boundary newline (CRLF)', async () => {
+    const p = path.join(tmp, 'range-boundary-crlf.txt')
+    const original = ['A','B','C',''].join('\r\n')
+    await fs.writeFile(p, original, 'utf-8')
+    const flow = createMockFlowAPI()
+    const ctx = createMainFlowContext({ provider: 'mock', model: 'mock-001' })
+    const sliceLen = ['A','B',''].join('\r\n').length // 'A\r\nB\r\n'
+    const t = wrap(applyEditsTargetedTool, async () => applyEditsTargetedTool.run({
+      textEdits: [{ type: 'replaceRange', path: 'range-boundary-crlf.txt', start: 0, end: sliceLen, text: 'X' }],
+      verify: false
+    } as any))
+    await llmRequestNode(flow as any, ctx as any, 'apply range', createMockNodeInputs({ tools: [t] }) as any, createTestConfig())
+    const next = await fs.readFile(p, 'utf-8')
+    expect(next).toBe(['X','C',''].join('\r\n'))
+  })
+
+
+
+
 
   describe('code.* (conditional: requires @ast-grep/napi)', () => {
     const hasAstGrep: boolean = (() => { try { require.resolve('@ast-grep/napi'); return true } catch { return false } })()

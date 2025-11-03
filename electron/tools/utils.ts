@@ -83,3 +83,11 @@ export async function applyFileEditsInternal(editsArray: any[] = [], opts: { dry
   return (edits as any).applyFileEditsInternal(editsArray, opts)
 }
 
+/**
+ * Apply sequential, single-file line range edits via edits module
+ */
+export async function applyLineRangeEditsInternal(pathRel: string, ranges: Array<{ startLine: number; endLine: number; newText: string }>, opts: { dryRun?: boolean } = {}) {
+  return (edits as any).applyLineRangeEditsInternal(pathRel, ranges, opts)
+}
+
+

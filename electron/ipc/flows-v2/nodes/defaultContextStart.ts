@@ -133,6 +133,8 @@ export const defaultContextStartNode: NodeFunction = async (flow, context, _data
   const systemInstructions = (config as any)?.systemInstructions
   const temperature = (config as any)?.temperature as number | undefined
   const reasoningEffort = (config as any)?.reasoningEffort as ('low'|'medium'|'high') | undefined
+  const includeThoughts = !!(config as any)?.includeThoughts
+  const thinkingBudget = (config as any)?.thinkingBudget as number | undefined
 
   // Always override provider/model with global selection
   const provider = flow.store?.selectedProvider || 'openai'
@@ -151,6 +153,9 @@ export const defaultContextStartNode: NodeFunction = async (flow, context, _data
   if (systemInstructions) updates.systemInstructions = systemInstructions
   if (typeof temperature === 'number') (updates as any).temperature = temperature
   if (reasoningEffort) (updates as any).reasoningEffort = reasoningEffort
+  // Gemini thinking controls (passed through; provider adapter will gate)
+  if (includeThoughts === true) (updates as any).includeThoughts = true
+  if (typeof thinkingBudget === 'number') (updates as any).thinkingBudget = thinkingBudget
 
   const baseContext = Object.keys(updates).length
     ? flow.context.update(withProviderModel, updates)

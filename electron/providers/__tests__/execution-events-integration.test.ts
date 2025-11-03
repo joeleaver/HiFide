@@ -10,10 +10,10 @@
  * - TEST_MODE=live pnpm test (always makes real API calls)
  */
 
-import { AnthropicProvider } from '../anthropic'
-import { OpenAIProvider } from '../openai'
-import { GeminiProvider } from '../gemini'
-import { FireworksProvider } from '../fireworks'
+import { AnthropicAiSdkProvider as AnthropicProvider } from '../../providers-ai-sdk/anthropic'
+import { OpenAiSdkProvider as OpenAIProvider } from '../../providers-ai-sdk/openai'
+import { GeminiAiSdkProvider as GeminiProvider } from '../../providers-ai-sdk/gemini'
+import { FireworksAiSdkProvider as FireworksProvider } from '../../providers-ai-sdk/fireworks'
 import type { ExecutionEvent } from '../../ipc/flows-v2/execution-events'
 import { getTestApiKey } from '../../__tests__/utils/testHelpers'
 import { withFixture, getTestMode, fixtureExists } from '../../__tests__/utils/fixtures'
@@ -127,7 +127,7 @@ describe('Provider Execution Event Integration', () => {
           await provider.agentStream?.({
             apiKey,
             model: 'claude-3-5-haiku-20241022',
-            systemInstruction: 'You are a helpful assistant.',
+            system: [{ type: 'text', text: 'You are a helpful assistant.' }],
             messages: [{ role: 'user', content: 'What is the weather in San Francisco?' }],
             tools: [testTool],
             toolMeta: {},
@@ -197,7 +197,7 @@ describe('Provider Execution Event Integration', () => {
           await provider.agentStream({
             apiKey,
             model: 'accounts/fireworks/models/glm-4p6',
-            systemInstruction: 'You are a helpful assistant.',
+            system: 'You are a helpful assistant.',
             messages: [{ role: 'user', content: 'Say "Hello" and nothing else.' }],
             tools: [],
             toolMeta: {},
@@ -265,7 +265,7 @@ describe('Provider Execution Event Integration', () => {
           await provider.agentStream?.({
             apiKey,
             model: 'accounts/fireworks/models/glm-4p6',
-            systemInstruction: 'You are a helpful assistant. When tools are provided, you MUST call the relevant tool to answer the question instead of guessing.',
+            system: 'You are a helpful assistant. When tools are provided, you MUST call the relevant tool to answer the question instead of guessing.',
             messages: [{ role: 'user', content: 'What is the weather in San Francisco? Use the provided get_weather tool to answer; do not guess.' }],
             tools: [testTool],
             toolMeta: { toolChoice: 'required' },
@@ -322,7 +322,7 @@ describe('Provider Execution Event Integration', () => {
           await provider.agentStream({
             apiKey,
             model: 'gpt-4o-mini',
-            systemInstruction: 'You are a helpful assistant.',
+            system: 'You are a helpful assistant.',
             messages: [{ role: 'user', content: 'Say "Hello" and nothing else.' }],
             tools: [],
             toolMeta: {},
@@ -392,7 +392,7 @@ describe('Provider Execution Event Integration', () => {
           await provider.agentStream?.({
             apiKey,
             model: 'gpt-4o-mini',
-            systemInstruction: 'You are a helpful assistant.',
+            system: 'You are a helpful assistant.',
             messages: [{ role: 'user', content: 'What is the weather in San Francisco?' }],
             tools: [testTool],
             toolMeta: {},

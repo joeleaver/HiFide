@@ -19,6 +19,8 @@ export interface ContextAPI {
     systemInstructions?: string
     temperature?: number
     reasoningEffort?: 'low' | 'medium' | 'high'
+    includeThoughts?: boolean
+    thinkingBudget?: number
   }) => MainFlowContext
 
   /**
@@ -101,7 +103,7 @@ export interface ContextAPI {
  */
 export function createContextAPI(): ContextAPI {
   return {
-    create: ({ provider, model, systemInstructions, temperature, reasoningEffort }) => {
+    create: ({ provider, model, systemInstructions, temperature, reasoningEffort, includeThoughts, thinkingBudget }) => {
       return {
         contextId: crypto.randomUUID(),
         provider,
@@ -109,6 +111,8 @@ export function createContextAPI(): ContextAPI {
         systemInstructions: systemInstructions || '',
         ...(typeof temperature === 'number' ? { temperature } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(includeThoughts !== undefined ? { includeThoughts } : {}),
+        ...(typeof thinkingBudget === 'number' ? { thinkingBudget } : {}),
         messageHistory: []
       }
     },

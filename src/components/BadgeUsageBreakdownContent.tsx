@@ -36,6 +36,7 @@ export const BadgeUsageBreakdownContent = memo(function BadgeUsageBreakdownConte
     { label: 'Response format', value: input.responseFormat, section: 'Input' },
     { label: 'Tool call results', value: input.toolCallResults, section: 'Input' },
     { label: 'Assistant text', value: output.assistantText, section: 'Output' },
+    { label: 'Thoughts', value: output.thoughts, section: 'Output' },
     { label: 'Tool calls (args)', value: output.toolCalls, section: 'Output' },
   ]
 

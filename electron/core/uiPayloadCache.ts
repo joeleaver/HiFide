@@ -9,6 +9,16 @@ export const UiPayloadCache = {
   put(key: string, value: any) {
     try { _M.set(String(key), value) } catch {}
   },
+  // Non-destructive read; returns the value without removing it
+  peek<T = any>(key: string): T | undefined {
+    try {
+      const k = String(key)
+      return _M.get(k) as T | undefined
+    } catch {
+      return undefined
+    }
+  },
+  // Destructive read; removes the value after returning it
   take<T = any>(key: string): T | undefined {
     try {
       const k = String(key)

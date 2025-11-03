@@ -7,9 +7,9 @@ import CollapsiblePanel from './CollapsiblePanel'
 export default function TokensCostsPanel() {
   const dispatch = useDispatch()
 
-  // Read persisted state from main store
-  const persistedCollapsed = useAppStore((s) => s.windowState.tokensCostsCollapsed)
-  const persistedHeight = useAppStore((s) => s.windowState.tokensCostsHeight)
+  // Read persisted state from main store (guard for initial hydration)
+  const persistedCollapsed = useAppStore((s) => s.windowState?.tokensCostsCollapsed ?? false)
+  const persistedHeight = useAppStore((s) => s.windowState?.tokensCostsHeight ?? 250)
 
   // Use UI store for local state
   const collapsed = useUiStore((s) => s.tokensCostsCollapsed)
