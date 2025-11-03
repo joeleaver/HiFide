@@ -41,6 +41,7 @@ export default function StatusBar() {
       { value: 'anthropic', label: 'Anthropic' },
       { value: 'gemini', label: 'Gemini' },
       { value: 'fireworks', label: 'Fireworks' },
+      { value: 'xai', label: 'xAI' },
     ] as const
     const anyValidated = Object.values(providerValid || {}).some(Boolean)
     return anyValidated ? all.filter((p) => (providerValid as any)[p.value]) : all

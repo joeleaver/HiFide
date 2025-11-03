@@ -307,6 +307,7 @@ export type PricingConfig = {
   anthropic: ProviderPricing
   gemini: ProviderPricing
   fireworks: ProviderPricing
+  xai: ProviderPricing
   customRates?: boolean
 }
 
@@ -387,6 +388,7 @@ export type ApiKeys = {
   anthropic: string
   gemini: string
   fireworks: string
+  xai: string
 }
 
 // ============================================================================

@@ -39,6 +39,8 @@ export default function SettingsPane() {
   const geminiOptions = modelsByProvider.gemini || []
   const fireworksOptions = (modelsByProvider as any).fireworks || []
   const fireworksAllowed = useAppStore((s) => (s as any).fireworksAllowedModels || [])
+  const xaiOptions = (modelsByProvider as any).xai || []
+
 
   // Debug logging
 
@@ -148,6 +150,9 @@ export default function SettingsPane() {
       if ((localApiKeys as any).fireworks !== (settingsApiKeys as any).fireworks) {
         dispatch('setFireworksApiKey', (localApiKeys as any).fireworks)
       }
+      if ((localApiKeys as any).xai !== (settingsApiKeys as any).xai) {
+        dispatch('setXaiApiKey', (localApiKeys as any).xai)
+      }
 
       // First save (marks as saved, auto-persisted via Zustand middleware)
       await dispatch('saveSettingsApiKeys')
@@ -212,6 +217,14 @@ export default function SettingsPane() {
             value={(localApiKeys as any).fireworks || ''}
             onChange={(e) => setLocalApiKeys({ ...localApiKeys, fireworks: e.currentTarget.value })}
             rightSection={(providerValid as any).fireworks ? <Text size="xs" c="teal">✓</Text> : null}
+          />
+          <TextInput
+            label="xAI API Key"
+            placeholder="xai-..."
+            type="password"
+            value={(localApiKeys as any).xai || ''}
+            onChange={(e) => setLocalApiKeys({ ...localApiKeys, xai: e.currentTarget.value })}
+            rightSection={(providerValid as any).xai ? <Text size="xs" c="teal">✓</Text> : null}
           />
 
           {/* Fireworks Models Allowlist (only when Fireworks key is valid) */}
@@ -318,6 +331,15 @@ export default function SettingsPane() {
               description={fireworksOptions.length === 0 ? 'Populate allowlist or refresh models' : undefined}
             />
           )}
+          <Select
+            label="xAI Default Model"
+            placeholder="Select a model..."
+            data={xaiOptions}
+            value={(defaultModels as any)?.xai || null}
+            onChange={(v) => v && dispatch('setDefaultModel', { provider: 'xai', model: v })}
+            disabled={!(providerValid as any).xai || xaiOptions.length === 0}
+            description={!(providerValid as any).xai ? 'Add an xAI API key first' : xaiOptions.length === 0 ? 'Loading models...' : undefined}
+          />
         </Stack>
       </Stack>
 

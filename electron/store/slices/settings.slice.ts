@@ -42,6 +42,7 @@ export interface SettingsSlice {
   setAnthropicApiKey: (value: string) => void
   setGeminiApiKey: (value: string) => void
   setFireworksApiKey: (value: string) => void
+  setXaiApiKey: (value: string) => void
   loadSettingsApiKeys: () => Promise<void>
   saveSettingsApiKeys: () => Promise<void>
   validateApiKeys: () => Promise<{ ok: boolean; failures: string[] }>
@@ -53,7 +54,7 @@ export interface SettingsSlice {
   // Pricing Actions
   setPricingForModel: (params: { provider: string; model: string; pricing: ModelPricing }) => void
   resetPricingToDefaults: () => void
-  resetProviderPricing: (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks') => void
+  resetProviderPricing: (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai') => void
   calculateCost: (provider: string, model: string, usage: TokenUsage) => TokenCost | null
 }
 
@@ -68,6 +69,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
     anthropic: '',
     gemini: '',
     fireworks: '',
+    xai: '',
   },
   settingsSaving: false,
   settingsSaved: false,
@@ -115,6 +117,16 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
       settingsApiKeys: {
         ...state.settingsApiKeys,
         fireworks: value || '',
+      },
+      settingsSaved: false,
+    }))
+  },
+
+  setXaiApiKey: (value: string) => {
+    set((state) => ({
+      settingsApiKeys: {
+        ...state.settingsApiKeys,
+        xai: value || '',
       },
       settingsSaved: false,
     }))
@@ -244,6 +256,27 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
         }
       }
 
+      // Validate xAI
+      if ((keys as any).xai?.trim()) {
+        try {
+          const f: any = (globalThis as any).fetch
+          if (!f) {
+            failures.push('xAI: Fetch API unavailable')
+          } else {
+            const resp = await f('https://api.x.ai/v1/models', {
+              method: 'GET',
+              headers: { Authorization: `Bearer ${(keys as any).xai}` },
+            })
+            if (!resp.ok) {
+              const txt = await resp.text().catch(() => '')
+              failures.push(`xAI: HTTP ${resp.status}: ${txt.slice(0, 100)}`)
+            }
+          }
+        } catch (e: any) {
+          failures.push(`xAI: ${e?.message || String(e)}`)
+        }
+      }
+
       const result = failures.length > 0
         ? { ok: false, failures }
         : { ok: true, failures: [] }
@@ -256,11 +289,12 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
           anthropic: !!keys.anthropic?.trim() && !lc.some((f) => f.includes('anthropic')),
           gemini: !!keys.gemini?.trim() && !lc.some((f) => f.includes('gemini')),
           fireworks: !!keys.fireworks?.trim() && !lc.some((f) => f.includes('fireworks')),
+          xai: !!(keys as any).xai?.trim() && !lc.some((f) => f.includes('xai')),
         }
         const anyState: any = state as any
         anyState.setProvidersValid?.(map)
         // Clear startup banner if at least one provider is valid now
-        if (map.openai || map.anthropic || map.gemini || map.fireworks) {
+        if (map.openai || map.anthropic || map.gemini || map.fireworks || map.xai) {
           anyState.setStartupMessage?.(null)
         }
         // Fetch models for newly valid providers
@@ -310,20 +344,20 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
     set({ pricingConfig: DEFAULT_PRICING })
   },
   
-  resetProviderPricing: (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks') => {
+  resetProviderPricing: (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai') => {
     set((state) => {
       const newConfig = {
         ...state.pricingConfig,
-        [provider]: DEFAULT_PRICING[provider],
+        [provider]: DEFAULT_PRICING[provider as keyof typeof DEFAULT_PRICING],
       }
-      
+
       // Check if any provider still has custom rates
-      const hasCustomRates = (['openai', 'anthropic', 'gemini', 'fireworks'] as const).some(
+      const hasCustomRates = (['openai', 'anthropic', 'gemini', 'fireworks', 'xai'] as const).some(
         (p) =>
           p !== provider &&
-          JSON.stringify(newConfig[p]) !== JSON.stringify(DEFAULT_PRICING[p])
+          JSON.stringify((newConfig as any)[p]) !== JSON.stringify((DEFAULT_PRICING as any)[p])
       )
-      
+
       const finalConfig = {
         ...newConfig,
         customRates: hasCustomRates,

@@ -14,6 +14,7 @@ import { AnthropicAiSdkProvider } from '../providers-ai-sdk/anthropic'
 import { GeminiAiSdkProvider } from '../providers-ai-sdk/gemini'
 import { FireworksAiSdkProvider } from '../providers-ai-sdk/fireworks'
 import { OpenAiSdkProvider } from '../providers-ai-sdk/openai'
+import { XaiAiSdkProvider } from '../providers-ai-sdk/xai'
 
 import type { ProviderAdapter } from '../providers/provider'
 
@@ -73,9 +74,10 @@ export async function getProviderKey(provider: string): Promise<string | null> {
     if (provider === 'anthropic' && keys.anthropic?.trim()) return keys.anthropic
     if (provider === 'gemini' && keys.gemini?.trim()) return keys.gemini
     if (provider === 'fireworks' && (keys as any).fireworks?.trim()) return (keys as any).fireworks
+    if (provider === 'xai' && (keys as any).xai?.trim()) return (keys as any).xai
   }
 
-  // Fallback to legacy electron-store for migration
+  // Fallback to legacy electron-store for migration (no legacy for xai)
   const keyName = provider === 'anthropic' ? 'anthropic' : provider === 'gemini' ? 'gemini' : provider === 'fireworks' ? 'fireworks' : 'openai'
   const stored = legacySecureStore.get(keyName) as string | undefined
   if (stored) {
@@ -97,6 +99,7 @@ export async function getProviderKey(provider: string): Promise<string | null> {
     return env.GEMINI_API_KEY || env.GOOGLE_API_KEY || null
   }
   if (provider === 'fireworks' && env?.FIREWORKS_API_KEY) return env.FIREWORKS_API_KEY
+  if (provider === 'xai' && (env as any)?.XAI_API_KEY) return (env as any).XAI_API_KEY
 
   return null
 }
@@ -126,6 +129,7 @@ export const providerCapabilities: Record<string, Record<string, boolean>> = {
   anthropic: { tools: true, jsonSchema: false, vision: false, streaming: true },
   gemini: { tools: true, jsonSchema: true, vision: true, streaming: true },
   fireworks: { tools: true, jsonSchema: true, vision: false, streaming: true },
+  xai: { tools: true, jsonSchema: true, vision: false, streaming: true },
 }
 
 /**
@@ -136,6 +140,7 @@ export const providers: Record<string, ProviderAdapter> = {
   anthropic: AnthropicAiSdkProvider,
   gemini: GeminiAiSdkProvider,
   fireworks: FireworksAiSdkProvider,
+  xai: XaiAiSdkProvider,
 }
 
 /**

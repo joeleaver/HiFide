@@ -175,6 +175,35 @@ export default function PricingSettings() {
               </Accordion.Panel>
             </Accordion.Item>
           )}
+
+          {/* xAI */}
+          <Accordion.Item value="xai">
+            <Accordion.Control>
+              <Group justify="space-between" style={{ width: '100%', paddingRight: '16px' }}>
+                <Text size="sm" c="#cccccc">xAI Models</Text>
+                <Text
+                  size="xs"
+                  c="dimmed"
+                  style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    dispatch('resetProviderPricing', 'xai')
+                  }}
+                >
+                  Reset
+                </Text>
+              </Group>
+            </Accordion.Control>
+            <Accordion.Panel>
+              <PricingTable
+                provider="xai"
+                models={(modelsByProvider as any).xai || []}
+                pricing={(pricingConfig as any).xai}
+                defaultPricing={(defaultPricingConfig as any).xai}
+                onUpdate={(model, pricing) => dispatch('setPricingForModel', { provider: 'xai', model, pricing })}
+              />
+            </Accordion.Panel>
+          </Accordion.Item>
         </Accordion>
 
         <Stack gap="xs">

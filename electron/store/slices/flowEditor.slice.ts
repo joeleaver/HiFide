@@ -1769,10 +1769,20 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       const toolKey = normalizedToolName.replace(/[_.-]/g, '').toLowerCase()
 
       if (normalizedToolName === 'fs_read_file' || normalizedToolName === 'fs_write_file' ||
-          normalizedToolName === 'fs_read_dir' || normalizedToolName === 'fs_create_dir' || toolKey === 'fsreadfile' || toolKey === 'fswritefile' || toolKey === 'fsreaddir' || toolKey === 'fscreatedir') {
+          normalizedToolName === 'fs_append_file' || normalizedToolName === 'fs_delete_file' ||
+          normalizedToolName === 'fs_read_dir' || normalizedToolName === 'fs_create_dir' ||
+          toolKey === 'fsreadfile' || toolKey === 'fswritefile' || toolKey === 'fsappendfile' || toolKey === 'fsdeletefile' || toolKey === 'fsreaddir' || toolKey === 'fscreatedir') {
         const path = toolArgs.path || toolArgs.file_path || toolArgs.dir_path
         if (path) {
           badgeMetadata = { filePath: path }
+          if (callId) {
+            set((state) => ({
+              feToolParamsByKey: {
+                ...(state as any).feToolParamsByKey,
+                [callId]: { path: String(path) }
+              }
+            }))
+          }
         }
       } else if (normalizedToolName === 'index_search') {
       } else if (normalizedToolName === 'fs_read_lines' || toolKey === 'fsreadlines') {
@@ -2085,9 +2095,173 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
     // Update badge status to success
     const state = store.getState() as any
+
+    // Early: if a tool returned an error-like result via tool_end (instead of throwing tool_error), render a red error badge
+    try {
+      const normalizedToolNameEarly = toolName.replace(/\./g, '_')
+      const toolKeyEarly = normalizedToolNameEarly.replace(/[_.-]/g, '').toLowerCase()
+      const isFsToolEarly = normalizedToolNameEarly.startsWith('fs_') || toolKeyEarly.startsWith('fs')
+
+      let isErrorResultEarly = false
+      if (result && typeof result === 'object' && (result as any).ok === false) {
+        isErrorResultEarly = true
+      } else if (typeof result === 'string') {
+        const s = result.trim()
+        if (/^error\b/i.test(s)) isErrorResultEarly = true
+      }
+
+      if (isFsToolEarly && isErrorResultEarly) {
+        // Try to recover a file path for header
+        let filePath: string | undefined
+        try {
+          const saved = ((get() as any).feToolParamsByKey || {})[callId || ''] || {}
+          if (typeof saved.path === 'string' && saved.path) filePath = saved.path
+        } catch {}
+        if (!filePath) {
+          try {
+            const used = ((get() as any).feLastToolArgs || {})[toolKeyEarly || normalizedToolNameEarly] || {}
+            if (typeof used.path === 'string' && used.path) filePath = used.path
+            else if (typeof used.file_path === 'string' && used.file_path) filePath = used.file_path
+            else if (typeof used.dir_path === 'string' && used.dir_path) filePath = used.dir_path
+          } catch {}
+        }
+
+        const isFsSinglePathEarly = (
+          normalizedToolNameEarly === 'fs_write_file' || toolKeyEarly === 'fswritefile' ||
+          normalizedToolNameEarly === 'fs_append_file' || toolKeyEarly === 'fsappendfile' ||
+          normalizedToolNameEarly === 'fs_delete_file' || toolKeyEarly === 'fsdeletefile' ||
+          normalizedToolNameEarly === 'fs_read_file'  || toolKeyEarly === 'fsreadfile'  ||
+          normalizedToolNameEarly === 'fs_read_lines' || toolKeyEarly === 'fsreadlines'
+        )
+
+        if (callId && state.updateBadgeInNodeExecution) {
+          state.updateBadgeInNodeExecution({
+            nodeId,
+            badgeId: callId,
+            updates: {
+              status: 'error',
+              color: 'red',
+              ...(isFsSinglePathEarly && filePath ? { metadata: { filePath } } : {})
+            }
+          })
+        } else if (nodeId && state.appendToNodeExecution) {
+          const formatToolName = (name: string): string => {
+            const parts = name.split('.')
+            return parts.map(part => part.toLowerCase() === 'fs' ? 'FS' : (part.charAt(0).toUpperCase() + part.slice(1))).join('.')
+          }
+          state.appendToNodeExecution({
+            nodeId,
+            nodeLabel: get().feNodes.find(n => n.id === nodeId)?.data?.label || 'Node',
+            nodeKind: get().feNodes.find(n => n.id === nodeId)?.data?.nodeType || 'unknown',
+            content: {
+              type: 'badge',
+              badge: {
+                id: callId || `badge-${Date.now()}`,
+                type: 'tool' as const,
+                label: formatToolName(toolName),
+                icon: '\ud83d\udd27',
+                color: 'red',
+                variant: 'filled' as const,
+                status: 'error' as const,
+                timestamp: Date.now(),
+                ...(isFsSinglePathEarly && filePath ? { metadata: { filePath } } : {})
+              }
+            },
+            provider: state.selectedProvider,
+            model: state.selectedModel
+          })
+        }
+        return
+      }
+    } catch {}
+
     if (callId && nodeId && state.updateBadgeInNodeExecution) {
       const normalizedToolName = toolName.replace(/\./g, '_')
       const toolKey = normalizedToolName.replace(/[_.-]/g, '').toLowerCase()
+
+
+      // Detect error-like results from tools that return error payloads instead of throwing (common in some fs.* tools)
+      try {
+        const isFsTool = normalizedToolName.startsWith('fs_') || toolKey.startsWith('fs')
+        let isErrorResult = false
+
+
+        if (result && typeof result === 'object' && (result as any).ok === false) {
+          isErrorResult = true
+
+        } else if (typeof result === 'string') {
+          const s = result.trim()
+          if (/^error\b/i.test(s)) {
+            isErrorResult = true
+
+          }
+        }
+
+        if (isFsTool && isErrorResult) {
+          // Try to recover a file path for header
+          let filePath: string | undefined
+          try {
+            const saved = ((get() as any).feToolParamsByKey || {})[callId || ''] || {}
+            if (typeof saved.path === 'string' && saved.path) filePath = saved.path
+          } catch {}
+          if (!filePath) {
+            try {
+              const used = ((get() as any).feLastToolArgs || {})[toolKey || normalizedToolName] || {}
+              if (typeof used.path === 'string' && used.path) filePath = used.path
+              else if (typeof used.file_path === 'string' && used.file_path) filePath = used.file_path
+              else if (typeof used.dir_path === 'string' && used.dir_path) filePath = used.dir_path
+            } catch {}
+          }
+
+          const isFsSinglePath = (
+            normalizedToolName === 'fs_write_file' || toolKey === 'fswritefile' ||
+            normalizedToolName === 'fs_append_file' || toolKey === 'fsappendfile' ||
+            normalizedToolName === 'fs_delete_file' || toolKey === 'fsdeletefile' ||
+            normalizedToolName === 'fs_read_file'  || toolKey === 'fsreadfile'  ||
+            normalizedToolName === 'fs_read_lines' || toolKey === 'fsreadlines'
+          )
+
+          if (callId && state.updateBadgeInNodeExecution) {
+            state.updateBadgeInNodeExecution({
+              nodeId,
+              badgeId: callId,
+              updates: {
+                status: 'error',
+                color: 'red',
+                ...(isFsSinglePath && filePath ? { metadata: { filePath } } : {})
+              }
+            })
+          } else if (nodeId && state.appendToNodeExecution) {
+            // Append a fresh error badge if we never got tool_start (no callId)
+            const formatToolName = (name: string): string => {
+              const parts = name.split('.')
+              return parts.map(part => part.toLowerCase() === 'fs' ? 'FS' : (part.charAt(0).toUpperCase() + part.slice(1))).join('.')
+            }
+            state.appendToNodeExecution({
+              nodeId,
+              nodeLabel: get().feNodes.find(n => n.id === nodeId)?.data?.label || 'Node',
+              nodeKind: get().feNodes.find(n => n.id === nodeId)?.data?.nodeType || 'unknown',
+              content: {
+                type: 'badge',
+                badge: {
+                  id: callId || `badge-${Date.now()}`,
+                  type: 'tool' as const,
+                  label: formatToolName(toolName),
+                  icon: '🔧',
+                  color: 'red',
+                  variant: 'filled' as const,
+                  status: 'error' as const,
+                  timestamp: Date.now(),
+                  ...(isFsSinglePath && filePath ? { metadata: { filePath } } : {})
+                }
+              },
+              provider: state.selectedProvider,
+              model: state.selectedModel
+            })
+          }
+          return
+        }
+      } catch {}
 
       // Handle index.search results
       if ((normalizedToolName === 'index_search' || toolKey === 'indexsearch') && result && Array.isArray(result.chunks) && result.chunks.length) {
@@ -2338,6 +2512,35 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         })
         return
       }
+      // Handle fs.read_file results
+      if ((normalizedToolName === 'fs_read_file' || toolKey === 'fsreadfile') && typeof result !== 'undefined') {
+        // Store full result (string or object) in unified cache using callId as key
+        get().registerToolResult({ key: callId, data: result })
+
+        // Reconstruct file path for header from start params or result
+        const saved = ((get() as any).feToolParamsByKey || {})[callId || ''] || {}
+        const used = (result && typeof result === 'object' && (result as any).usedParams) ? (result as any).usedParams : {}
+        let filePath: string | undefined = typeof saved.path === 'string' ? saved.path : undefined
+        if (!filePath && typeof (result as any)?.path === 'string') filePath = String((result as any).path)
+        if (!filePath && typeof used.path === 'string') filePath = String(used.path)
+
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId: callId,
+          updates: {
+            status: 'success',
+            color: 'green',
+            expandable: true,
+            defaultExpanded: false,
+            // Reuse read-lines content renderer (it shows raw text or JSON)
+            contentType: 'read-lines' as const,
+            metadata: { ...(filePath ? { filePath } : {}) },
+            interactive: { type: 'read-lines', data: { key: callId } }
+          }
+        })
+        return
+      }
+
       // Handle fs.read_lines results
       if ((normalizedToolName === 'fs_read_lines' || toolKey === 'fsreadlines') && result) {
         // Store full result in unified cache using callId as key
@@ -2419,6 +2622,28 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
               resultCount: matchCount,
             },
             interactive: { type: 'ast-search', data: { key: callId, count: matchCount } }
+          }
+        })
+        return
+      }
+
+      // Handle fs.write_file / fs.append_file / fs.delete_file (ensure filename shown even if start args missing)
+      if ((normalizedToolName === 'fs_write_file' || toolKey === 'fswritefile' ||
+           normalizedToolName === 'fs_append_file' || toolKey === 'fsappendfile' ||
+           normalizedToolName === 'fs_delete_file' || toolKey === 'fsdeletefile') &&
+           result?.ok && !(result && Array.isArray((result as any).fileEditsPreview))) {
+        const saved = ((get() as any).feToolParamsByKey || {})[callId || ''] || {}
+        const used = ((get() as any).feLastToolArgs || {})[toolKey || normalizedToolName] || {}
+        const filePath = saved.path || saved.file_path || used.path || used.file_path || (result as any)?.path
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId: callId,
+          updates: {
+            status: 'success',
+            color: 'green',
+            metadata: {
+              ...(filePath ? { filePath } : {})
+            }
           }
         })
         return
@@ -2637,17 +2862,74 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       timestamp: Date.now(),
     })
 
-    // Update badge status to error
+    // Update badge status to error (and preserve filename when available)
     const state = store.getState() as any
-    if (callId && nodeId && state.updateBadgeInNodeExecution) {
-      state.updateBadgeInNodeExecution({
-        nodeId,
-        badgeId: callId,
-        updates: {
-          status: 'error',
-          color: 'red'
+    if (nodeId) {
+      const normalizedToolName = toolName.replace(/\./g, '_')
+      const toolKey = normalizedToolName.replace(/[_.-]/g, '').toLowerCase()
+
+      let filePath: string | undefined
+      // Try reconstructed params saved at tool_start
+      try {
+        const saved = ((get() as any).feToolParamsByKey || {})[callId || ''] || {}
+        if (typeof saved.path === 'string' && saved.path) filePath = saved.path
+      } catch {}
+
+      // As a fallback, some providers stash last args by tool; try to use them
+      if (!filePath) {
+        try {
+          const used = ((get() as any).feLastToolArgs || {})[toolKey || normalizedToolName] || {}
+          if (typeof used.path === 'string' && used.path) filePath = used.path
+          else if (typeof used.file_path === 'string' && used.file_path) filePath = used.file_path
+        } catch {}
+      }
+
+      // Only attach filePath for fs.* tools that operate on a single path
+      const isFsSinglePath = (
+        normalizedToolName === 'fs_write_file' || toolKey === 'fswritefile' ||
+        normalizedToolName === 'fs_append_file' || toolKey === 'fsappendfile' ||
+        normalizedToolName === 'fs_delete_file' || toolKey === 'fsdeletefile' ||
+        normalizedToolName === 'fs_read_file'  || toolKey === 'fsreadfile'  ||
+        normalizedToolName === 'fs_read_lines' || toolKey === 'fsreadlines'
+      )
+
+      if (callId && nodeId && state.updateBadgeInNodeExecution) {
+        state.updateBadgeInNodeExecution({
+          nodeId,
+          badgeId: callId,
+          updates: {
+            status: 'error',
+            color: 'red',
+            ...(isFsSinglePath && filePath ? { metadata: { filePath } } : {})
+          }
+        })
+      } else if (nodeId && state.appendToNodeExecution) {
+        const formatToolName = (name: string): string => {
+          const parts = name.split('.')
+          return parts.map(part => part.toLowerCase() === 'fs' ? 'FS' : (part.charAt(0).toUpperCase() + part.slice(1))).join('.')
         }
-      })
+        state.appendToNodeExecution({
+          nodeId,
+          nodeLabel: get().feNodes.find(n => n.id === nodeId)?.data?.label || 'Node',
+          nodeKind: get().feNodes.find(n => n.id === nodeId)?.data?.nodeType || 'unknown',
+          content: {
+            type: 'badge',
+            badge: {
+              id: callId || `badge-${Date.now()}`,
+              type: 'tool' as const,
+              label: formatToolName(toolName),
+              icon: '\ud83d\udd27',
+              color: 'red',
+              variant: 'filled' as const,
+              status: 'error' as const,
+              timestamp: Date.now(),
+              ...(isFsSinglePath && filePath ? { metadata: { filePath } } : {})
+            }
+          },
+          provider: state.selectedProvider,
+          model: state.selectedModel
+        })
+      }
     }
   },
 

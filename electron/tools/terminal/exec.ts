@@ -6,19 +6,21 @@ import path from 'node:path'
 
 export const terminalExecTool: AgentTool = {
   name: 'terminalExec',
-  description: 'Execute a command in the persistent terminal session (visible in UI). Auto-creates session if needed. Output streams to the visible terminal panel.',
+  description: 'Execute a command in the persistent terminal session (visible in UI). Auto-creates session if needed. Output streams to the visible terminal panel, and captured output is returned to the LLM (complete if quick; partial if long-running).',
   parameters: {
     type: 'object',
     properties: {
       command: { type: 'string', description: 'Shell command to execute' },
       cwd: { type: 'string', description: 'Optional working directory (workspace-relative or absolute). Only used when creating a new session.' },
-
+      timeoutMs: { type: 'integer', minimum: 500, maximum: 30000, default: 5000, description: 'Max time to wait for output capture before returning partial output' },
+      idleMs: { type: 'integer', minimum: 150, maximum: 2000, default: 300, description: 'Idle window (no new bytes) to consider command output quiescent' },
+      tailBytes: { type: 'integer', minimum: 500, maximum: 20000, default: 6000, description: 'Max bytes of output to include in tool result (tail of buffer)' }
     },
     required: ['command'],
     additionalProperties: false,
   },
   run: async (
-    args: { command: string; cwd?: string },
+    args: { command: string; cwd?: string; timeoutMs?: number; idleMs?: number; tailBytes?: number },
     meta?: { requestId?: string }
   ) => {
     const req = meta?.requestId
@@ -91,7 +93,38 @@ export const terminalExecTool: AgentTool = {
         } catch {}
       }
 
-      // Return session info along with execution confirmation
+      // Passive capture: wait briefly for output and return either complete or partial text
+      const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+      const timeoutMs = clamp(Number(args.timeoutMs ?? 5000), 500, 30000)
+      const idleMs = clamp(Number(args.idleMs ?? 300), 150, 2000)
+      const tailBytes = clamp(Number(args.tailBytes ?? 6000), 500, 20000)
+
+      const idx = rec.state.activeIndex
+      const capStart = Date.now()
+      let lastBytes = (idx != null && rec.state.commands[idx]) ? rec.state.commands[idx].bytes : 0
+      let lastChange = Date.now()
+
+      // Poll for activity until idle or timeout
+      while (Date.now() - capStart < timeoutMs) {
+        await new Promise((r) => setTimeout(r, 80))
+        const now = Date.now()
+        const bytes = (idx != null && rec.state.commands[idx]) ? rec.state.commands[idx].bytes : lastBytes
+        if (bytes !== lastBytes) {
+          lastBytes = bytes
+          lastChange = now
+        } else if (now - lastChange > idleMs) {
+          // Consider it quiescent
+          break
+        }
+      }
+
+      const raw = (idx != null && rec.state.commands[idx]) ? rec.state.commands[idx].data : String(rec.state.ring)
+      const text = raw.slice(-tailBytes)
+      const truncated = text.length < raw.length
+      const durationMs = Date.now() - capStart
+      const complete = Date.now() - lastChange > idleMs
+
+      // Return session info along with execution confirmation and captured output
       const state = rec.state
       const lastCmds = state.commands.slice(-5).map((c: any) => ({
         id: c.id,
@@ -109,9 +142,10 @@ export const terminalExecTool: AgentTool = {
         cwd: rec.cwd,
         commandCount: state.commands.length,
         lastCommands: lastCmds,
-        liveTail: state.ring.slice(-400)
+        liveTail: state.ring.slice(-400),
+        captured: { text, bytes: lastBytes, truncated, durationMs, complete }
       }
-      console.log('[terminal.exec] Returning result:', { ok: result.ok, sessionId: result.sessionId, commandCount: result.commandCount })
+      console.log('[terminal.exec] Returning result:', { ok: result.ok, sessionId: result.sessionId, commandCount: result.commandCount, complete })
       return result
     } catch (e: any) {
       console.error('[terminal.exec] Error executing command:', e)

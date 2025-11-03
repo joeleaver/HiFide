@@ -14,12 +14,22 @@ export const deleteFileTool: AgentTool = {
     required: ['path'],
     additionalProperties: false,
   },
-  run: async ({ path: rel, force = true }: { path: string; force?: boolean }) => {
+  run: async (input: any) => {
+    const rel = input?.path
+    const force: boolean = typeof input?.force === 'boolean' ? input.force : true
+
+    if (!rel || typeof rel !== 'string' || !rel.trim()) {
+      throw new Error('fsDeleteFile: missing required parameter "path" (workspace-relative file path)')
+    }
+
     const abs = resolveWithinWorkspace(rel)
-    try { await fs.unlink(abs) } catch (e: any) {
+    try {
+      await fs.unlink(abs)
+    } catch (e: any) {
       if (!force) throw e
     }
-    return { ok: true }
+
+    return { ok: true, path: rel }
   },
 }
 

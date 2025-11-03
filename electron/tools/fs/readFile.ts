@@ -18,13 +18,21 @@ export const readFileTool: AgentTool = {
     additionalProperties: false,
   },
   run: async (input: { path: string; normalizeEol?: boolean }) => {
+    const abs = resolveWithinWorkspace(input.path)
     try {
-      const abs = resolveWithinWorkspace(input.path)
       const content = await fs.readFile(abs, 'utf-8')
       const normalize = input?.normalizeEol !== false
-      return normalize ? content.replace(/\r\n/g, '\n').replace(/\r/g, '\n') : content
+      const text = normalize ? content.replace(/\r\n/g, '\n').replace(/\r/g, '\n') : content
+      const lineCount = text.split('\n').length
+      return {
+        path: input.path,
+        text,
+        lineCount,
+        usedParams: { path: input.path, normalizeEol: normalize }
+      }
     } catch (e: any) {
-      return `Error: ${e?.message || String(e)}`
+      const msg = e?.message ? String(e.message) : String(e)
+      throw new Error(`fsReadFile: ${msg}`)
     }
   },
 }

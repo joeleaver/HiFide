@@ -18,6 +18,7 @@ export type PricingConfig = {
   anthropic: ProviderPricing
   gemini: ProviderPricing
   fireworks: ProviderPricing
+  xai: ProviderPricing
   customRates: boolean  // Flag to indicate if user has customized rates
 }
 
@@ -202,6 +203,15 @@ export const DEFAULT_PRICING: PricingConfig = {
     'accounts/fireworks/models/glm-4p6': { inputCostPer1M: 0.55, outputCostPer1M: 2.19 },
     'accounts/fireworks/models/kimi-k2-instruct-0905': { inputCostPer1M: 0.60, outputCostPer1M: 2.50 },
     'accounts/fireworks/models/deepseek-v3p1-terminus': { inputCostPer1M: 0.56, outputCostPer1M: 1.68 },
+  },
+
+  // xAI
+  xai: {
+    // Default pricing per 1M tokens
+    'grok-code-fast-1': { inputCostPer1M: 0.20, outputCostPer1M: 1.50 },
+    'grok-4-fast-reasoning': { inputCostPer1M: 0.20, outputCostPer1M: 0.50 },
+    'grok-4-fast-non-reasoning': { inputCostPer1M: 0.20, outputCostPer1M: 0.50 },
+    'grok-4-0709': { inputCostPer1M: 3.00, outputCostPer1M: 15.00 },
   },
 
   customRates: false

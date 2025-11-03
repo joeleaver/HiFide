@@ -43,7 +43,7 @@ export interface ProviderSlice {
   setProviderValid: (params: { provider: string; valid: boolean }) => void
   setProvidersValid: (map: Record<string, boolean>) => void
   setModelsForProvider: (params: { provider: string; models: ModelOption[] }) => void
-  refreshModels: (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks') => Promise<void>
+  refreshModels: (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai') => Promise<void>
   refreshAllModels: () => Promise<void>
   setDefaultModel: (params: { provider: string; model: string }) => void
   pushRouteRecord: (record: RouteRecord) => void
@@ -70,12 +70,14 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
     anthropic: false,
     gemini: false,
     fireworks: false,
+    xai: false,
   },
   modelsByProvider: {
     openai: [],
     anthropic: [],
     gemini: [],
     fireworks: [],
+    xai: [],
   },
   defaultModels: {},
   routeHistory: [],
@@ -168,7 +170,7 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
     get().ensureProviderModelConsistency()
   },
 
-  refreshModels: async (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks') => {
+  refreshModels: async (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai') => {
     try {
       // Inline the models fetching logic directly here
       const key = await getProviderKey(provider)
@@ -268,9 +270,21 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
         const fwAllowed = ((get() as any).fireworksAllowedModels || []) as string[]
         const uniq = Array.from(new Set(fwAllowed.filter(Boolean)))
         list = uniq.map((id) => ({ value: id, label: id }))
+      } else if (provider === 'xai') {
+        const f: any = (globalThis as any).fetch
+        if (!f) throw new Error('Fetch API unavailable')
+        const resp = await f('https://api.x.ai/v1/models', {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${key}` },
+        })
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+        const data = await resp.json()
+        const arr = Array.isArray(data?.data) ? data.data : []
+        const ids: string[] = arr.map((m: any) => m?.id || m?.name).filter(Boolean)
+        const allowed = ids.filter((id) => /^grok-4/i.test(id) || id === 'grok-code-fast-1')
+        const uniq = Array.from(new Set(allowed))
+        list = uniq.map((id) => ({ value: id, label: id }))
       }
-
-
 
       set((state) => ({
         modelsByProvider: {
@@ -300,7 +314,7 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
   },
 
   refreshAllModels: async () => {
-    const providers: Array<'openai' | 'anthropic' | 'gemini' | 'fireworks'> = ['openai', 'anthropic', 'gemini', 'fireworks']
+    const providers: Array<'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai'> = ['openai', 'anthropic', 'gemini', 'fireworks', 'xai']
 
     for (const provider of providers) {
       try {
@@ -377,8 +391,8 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
 
     // Get list of valid providers, or all providers if none are validated yet
     const providerOptions = anyValidated
-      ? (['openai', 'anthropic', 'gemini', 'fireworks'] as const).filter((p) => validMap[p])
-      : (['openai', 'anthropic', 'gemini', 'fireworks'] as const)
+      ? (['openai', 'anthropic', 'gemini', 'fireworks', 'xai'] as const).filter((p) => validMap[p])
+      : (['openai', 'anthropic', 'gemini', 'fireworks', 'xai'] as const)
 
     let provider = state.selectedProvider
 
