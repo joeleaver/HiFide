@@ -1,5 +1,5 @@
 import type { AgentTool } from '../../providers/provider'
-import { redactOutput } from '../utils'
+import { redactOutput, sanitizeTerminalOutput } from '../utils'
 
 export const sessionTailTool: AgentTool = {
   name: 'terminalSessionTail',
@@ -27,8 +27,9 @@ export const sessionTailTool: AgentTool = {
     }
 
     const n = Math.max(100, Math.min(10000, args.maxBytes || 2000))
-    const tail = rec.state.ring.slice(-n)
-    const { redacted } = redactOutput(tail)
+    const tailRaw = rec.state.ring.slice(-n)
+    const tailSanitized = sanitizeTerminalOutput(tailRaw)
+    const { redacted } = redactOutput(tailSanitized)
     console.log('[terminal.session_tail] Returning tail:', { sessionId: sid, tailLength: redacted.length })
     return { ok: true, sessionId: sid, tail: redacted }
   }

@@ -1,8 +1,9 @@
 import { memo, useEffect, useRef } from 'react'
-import { Text } from '@mantine/core'
+import { Text, Button } from '@mantine/core'
 import { DiffEditor } from '@monaco-editor/react'
 
 import { useDispatch, useAppStore } from '../store'
+import { useUiStore } from '../store/ui'
 
 interface BadgeDiffContentProps {
   badgeId: string
@@ -51,6 +52,7 @@ const EMPTY_DIFF_LIST: DiffFile[] = []
  */
 export const BadgeDiffContent = memo(function BadgeDiffContent({ badgeId, diffKey }: BadgeDiffContentProps) {
   const dispatch = useDispatch()
+  const openDiffPreview = useUiStore((s) => s.openDiffPreview)
 
   // Load diff from cache into state
   useEffect(() => {
@@ -100,11 +102,23 @@ export const BadgeDiffContent = memo(function BadgeDiffContent({ badgeId, diffKe
             automaticLayout: true,
             scrollBeyondLastLine: false,
             lineNumbers: 'off',
-          }}
+            // Prefer focused hunks with small context
+
+            hideUnchangedRegions: { enabled: true, contextLineCount: 3 },
+
+            diffAlgorithm: 'advanced',
+          } as any}
           language={undefined}
           onMount={(ed) => { editorRef.current = ed }}
         />
       </div>
+      {Array.isArray(data) && data.length > 1 && (
+        <div style={{ marginTop: 8 }}>
+          <Button size="xs" variant="light" onClick={() => openDiffPreview(data as any)}>
+            Open all {data.length} files
+          </Button>
+        </div>
+      )}
     </div>
   )
 })

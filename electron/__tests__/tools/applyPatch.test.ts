@@ -34,10 +34,10 @@ describe('applyPatch tool', () => {
 `
 
     const result = await applyPatchTool.run({ patch, dryRun: false })
-    
+
     expect(result.ok).toBe(true)
     expect(result.applied).toBe(1)
-    
+
     const content = await fs.readFile(testFile, 'utf-8')
     expect(content).toBe('function hello() {\n  console.log("new")\n}\n')
   })
@@ -54,10 +54,10 @@ new file mode 100644
 `
 
     const result = await applyPatchTool.run({ patch, dryRun: false })
-    
+
     expect(result.ok).toBe(true)
     expect(result.applied).toBe(1)
-    
+
     const content = await fs.readFile(path.join(tmpDir, 'new.ts'), 'utf-8')
     expect(content).toBe('export function test() {\n  return 42\n}\n')
   })
@@ -75,13 +75,13 @@ new file mode 100644
 `
 
     const result = await applyPatchTool.run({ patch, dryRun: true })
-    
+
     expect(result.ok).toBe(true)
     expect(result.dryRun).toBe(true)
     expect(result.fileEditsPreview).toBeDefined()
     expect(result.fileEditsPreview.length).toBe(1)
     expect(result.fileEditsPreview[0].after).toContain('const x = 2')
-    
+
     // File should not be modified
     const content = await fs.readFile(testFile, 'utf-8')
     expect(content).toBe('const x = 1\n')
@@ -106,17 +106,20 @@ diff --git a/file2.ts b/file2.ts
 `
 
     const result = await applyPatchTool.run({ patch, dryRun: false })
-    
+
     expect(result.ok).toBe(true)
     expect(result.applied).toBe(2)
-    
+
     const content1 = await fs.readFile(path.join(tmpDir, 'file1.ts'), 'utf-8')
     const content2 = await fs.readFile(path.join(tmpDir, 'file2.ts'), 'utf-8')
     expect(content1).toBe('const a = 10\n')
     expect(content2).toBe('const b = 20\n')
   })
 
-  test('should reject patch with missing diff header', async () => {
+  test('should accept minimal patch without diff header', async () => {
+    const testFile = path.join(tmpDir, 'test.ts')
+    await fs.writeFile(testFile, 'old\n', 'utf-8')
+
     const patch = `--- a/test.ts
 +++ b/test.ts
 @@ -1 +1 @@
@@ -124,10 +127,13 @@ diff --git a/file2.ts b/file2.ts
 +new
 `
 
-    const result = await applyPatchTool.run({ patch, dryRun: true })
-    
-    expect(result.ok).toBe(false)
-    expect(result.error).toContain('No file diffs found')
+    const result = await applyPatchTool.run({ patch, dryRun: false })
+
+    expect(result.ok).toBe(true)
+    expect(result.applied).toBe(1)
+
+    const content = await fs.readFile(testFile, 'utf-8')
+    expect(content).toBe('new\n')
   })
 
   test('should handle context mismatch gracefully', async () => {
@@ -188,5 +194,23 @@ diff --git a/fenced.ts b/fenced.ts
     const content = await fs.readFile(path.join(tmpDir, 'fenced.ts'), 'utf-8')
     expect(content).toBe('const y = 2\n')
   })
-})
 
+  test('should accept udiff-simple with path inside fence (Gemini variant)', async () => {
+    const testFile = path.join(tmpDir, 'simp.ts')
+    await fs.writeFile(testFile, 'x\n', 'utf-8')
+
+    const patch = `\`\`\`diff filename=simp.ts
+simp.ts
+@@ -1 +1 @@
+-x
++y
+\`\`\``
+
+    const result = await applyPatchTool.run({ patch, dryRun: false })
+    expect(result.ok).toBe(true)
+    expect(result.applied).toBe(1)
+
+    const content = await fs.readFile(testFile, 'utf-8')
+    expect(content).toBe('y\n')
+  })
+})

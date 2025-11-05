@@ -84,6 +84,7 @@ export const XaiAiSdkProvider: ProviderAdapter = {
         messages: msgs as any,
         tools: Object.keys(aiTools).length ? aiTools : undefined,
         toolChoice: Object.keys(aiTools).length ? 'auto' : 'none',
+        parallelToolCalls: false,
         temperature: typeof temperature === 'number' ? temperature : undefined,
         // Note: do NOT forward reasoningEffort; xAI currently does not require it here
         abortSignal: ac.signal,
@@ -110,32 +111,28 @@ export const XaiAiSdkProvider: ProviderAdapter = {
               }
               case 'tool-input-start': {
                 const callId = chunk.toolCallId || chunk.id || ''
-                if (!seenStarts.has(callId)) {
-                  seenStarts.add(callId)
-                  const safe = String(chunk.toolName || '')
-                  const original = nameMap.get(safe) || safe
-                  onToolStart?.({ callId, name: original })
+                if (callId) {
+                  const args = (chunk as any).input
+                  if (args !== undefined) {
+                    const safe = String(chunk.toolName || '')
+                    const original = nameMap.get(safe) || safe
+                    onToolStart?.({ callId, name: original, arguments: args })
+                    seenStarts.add(callId)
+                  }
                 }
                 break
               }
               case 'tool-input-delta': {
-                // Ensure start emitted
-                const callId = chunk.toolCallId || chunk.id || ''
-                if (callId && !seenStarts.has(callId)) {
-                  seenStarts.add(callId)
-                  const safe = String(chunk.toolName || '')
-                  const original = nameMap.get(safe) || safe
-                  onToolStart?.({ callId, name: original })
-                }
+                // Ignore deltas; wait for 'tool-call' which includes full arguments.
                 break
               }
               case 'tool-call': {
                 const callId = chunk.toolCallId || chunk.id || ''
-                if (callId && !seenStarts.has(callId)) {
-                  seenStarts.add(callId)
+                if (callId) {
                   const safe = String(chunk.toolName || '')
                   const original = nameMap.get(safe) || safe
                   onToolStart?.({ callId, name: original, arguments: (chunk as any).input })
+                  seenStarts.add(callId)
                 }
                 break
               }

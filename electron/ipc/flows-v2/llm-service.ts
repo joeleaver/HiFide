@@ -859,15 +859,49 @@ class LLMService {
             ...(typeof (updatedContext as any)?.thinkingBudget === 'number' ? { thinkingBudget: (updatedContext as any).thinkingBudget } : {}),
             // Callbacks that providers call - these are wrapped to emit ExecutionEvents
             onChunk: (text: string) => {
+              if (!text) return
               if (process.env.HF_FLOW_DEBUG === '1') {
                 try { console.log(`[llm-service] onChunk node=${flowAPI.nodeId} provider=${provider}/${model} len=${text?.length}`) } catch {}
               }
-              // Skip duplicate final chunks (some providers send the full response as a final chunk)
-              if (text === response) {
+
+              // Robust de-dup/overlap handling for providers that resend accumulated text
+              // Cases handled:
+              // 1) Exact duplicate of full response → drop
+              // 2) Aggregated resend (chunk starts with previous response) → emit only the delta
+              // 3) Overlap resend (chunk repeats trailing suffix of response) → emit only the non-overlapping suffix
+
+              // 1) Exact duplicate of full response
+              if (text === response) return
+
+              // 2) Aggregated resend
+              if (response && text.startsWith(response)) {
+                const delta = text.slice(response.length)
+                if (!delta) return
+                response = text
+                eventHandlers.onChunk(delta)
                 return
               }
-              response += text
-              eventHandlers.onChunk(text)
+
+              // 3) Overlap resend
+              let delta = text
+              if (response) {
+                if (response.endsWith(text)) {
+                  // Entire chunk already present at the end → drop
+                  return
+                }
+                // Find the longest suffix of response that is a prefix of text
+                const maxOverlap = Math.min(response.length, text.length)
+                for (let k = maxOverlap; k > 0; k--) {
+                  if (response.slice(response.length - k) === text.slice(0, k)) {
+                    delta = text.slice(k)
+                    break
+                  }
+                }
+              }
+
+              if (!delta) return
+              response += delta
+              eventHandlers.onChunk(delta)
             },
             onDone: () => {
 

@@ -49,15 +49,16 @@ const DEFAULT_TOOL_CATEGORY_MAP: Record<string, ToolCategory> = {
   fsExists: 'fs',
   fsStat: 'fs',
   fsAppendFile: 'fs',
-  fsMove: 'fs',
-  fsCopy: 'fs',
-  fsRemove: 'fs',
-  fsTruncateFile: 'fs',
-  fsTruncateDir: 'fs',
+  kanbanGetBoard: 'workspace',
+  kanbanCreateTask: 'workspace',
+  kanbanUpdateTask: 'workspace',
+  kanbanDeleteTask: 'workspace',
+  kanbanMoveTask: 'workspace',
+  kanbanCreateEpic: 'workspace',
+  kanbanUpdateEpic: 'workspace',
+  kanbanDeleteEpic: 'workspace',
 
-  // Code editing
-  applyEdits: 'edits',
-  applyPatch: 'edits',
+  // Terminal
   codeApplyEditsTargeted: 'edits',
 
   // Workspace + Knowledge Base

@@ -78,6 +78,7 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
         messages: msgs as any,
         tools: Object.keys(aiTools).length ? aiTools : undefined,
         toolChoice: Object.keys(aiTools).length ? 'auto' : 'none',
+        parallelToolCalls: false,
         temperature: typeof temperature === 'number' ? temperature : undefined,
         abortSignal: ac.signal,
         stopWhen: stepCountIs(AGENT_MAX_STEPS),
@@ -97,32 +98,28 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
               }
               case 'tool-input-start': {
                 const callId = chunk.toolCallId || chunk.id || ''
-                if (!seenStarts.has(callId)) {
-                  seenStarts.add(callId)
-                  const safe = String(chunk.toolName || '')
-                  const original = nameMap.get(safe) || safe
-                  onToolStart?.({ callId, name: original })
+                if (callId) {
+                  const args = (chunk as any).input
+                  if (args !== undefined) {
+                    const safe = String(chunk.toolName || '')
+                    const original = nameMap.get(safe) || safe
+                    onToolStart?.({ callId, name: original, arguments: args })
+                    seenStarts.add(callId)
+                  }
                 }
                 break
               }
               case 'tool-input-delta': {
-                // We could surface arg deltas later; for now just ensure start is emitted
-                const callId = chunk.toolCallId || chunk.id || ''
-                if (callId && !seenStarts.has(callId)) {
-                  seenStarts.add(callId)
-                  const safe = String(chunk.toolName || '')
-                  const original = nameMap.get(safe) || safe
-                  onToolStart?.({ callId, name: original })
-                }
+                // Ignore deltas; wait for 'tool-call' which includes full arguments.
                 break
               }
               case 'tool-call': {
                 const callId = chunk.toolCallId || chunk.id || ''
-                if (callId && !seenStarts.has(callId)) {
-                  seenStarts.add(callId)
+                if (callId) {
                   const safe = String(chunk.toolName || '')
                   const original = nameMap.get(safe) || safe
                   onToolStart?.({ callId, name: original, arguments: (chunk as any).input })
+                  seenStarts.add(callId)
                 }
                 break
               }
@@ -184,7 +181,7 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
             onStreamError?.(String(err?.message || err))
           } catch {}
         }
-      })
+      } as any)
       // Ensure the stream is consumed so callbacks fire reliably
       result.consumeStream().catch((err: any) => {
         if (DEBUG) console.error('[ai-sdk:fireworks] consumeStream error', err)

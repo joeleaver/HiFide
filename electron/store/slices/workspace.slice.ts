@@ -1,38 +1,21 @@
 /**
  * Workspace Slice
  *
- * Manages workspace folder state and operations.
- *
- * Responsibilities:
- * - Track current workspace root
- * - Manage recent folders list
- * - Handle folder opening and switching
- * - Manage file watching
- * - Handle context refresh/bootstrap
- *
- * Dependencies:
- * - Session slice (for saving/loading sessions)
- * - Terminal slice (for clearing terminals)
- * - Explorer slice (for loading file tree)
- * - Indexing slice (for rebuilding index)
- * - App slice (for bootstrap state)
+ * Manages workspace selection, recent folders, and bootstrap helpers shared
+ * between the main and renderer processes.
  */
 
 import type { StateCreator } from 'zustand'
+import fs from 'node:fs/promises'
+import path from 'node:path'
+
 import type { RecentFolder, FileWatchEvent, ContextRefreshResult } from '../types'
 import { MAX_RECENT_FOLDERS } from '../utils/constants'
-import path from 'node:path'
-import fs from 'node:fs/promises'
-import { resetIndexer, getIndexer } from '../../core/state'
 import { bootstrapWorkspace } from '../utils/workspace-helpers'
 import { buildMenu } from '../../ipc/menu'
-
-// ============================================================================
-// Types
-// ============================================================================
+import { getIndexer, resetIndexer, startKanbanWatcher, stopKanbanWatcher } from '../../core/state'
 
 export interface WorkspaceSlice {
-  // State
   workspaceRoot: string | null
   recentFolders: RecentFolder[]
   fileWatchCleanup: (() => void) | null
@@ -40,23 +23,31 @@ export interface WorkspaceSlice {
   ctxRefreshing: boolean
   ctxResult: ContextRefreshResult | null
 
-  // Actions
   setWorkspaceRoot: (folder: string | null) => void
-  addRecentFolder: (path: string) => void
+  addRecentFolder: (folder: string) => void
   clearRecentFolders: () => void
-  // Centralized workspace bootstrap
   ensureWorkspaceReady: (params: { baseDir: string; preferAgent?: boolean; overwrite?: boolean }) => Promise<{ ok: boolean }>
-  openFolder: (folderPath: string) => Promise<{ ok: boolean; error?: string }>
   hasUnsavedChanges: () => boolean
-  refreshContext: () => Promise<void>
+  openFolder: (folderPath: string) => Promise<{ ok: boolean; error?: string }>
+  closeWorkspace: () => void
 }
 
-// ============================================================================
-// Slice Creator
-// ============================================================================
+type WorkspaceStore = WorkspaceSlice & {
+  idxLastRebuildAt?: number | undefined
+  appBootstrapping?: boolean
+  setStartupMessage?: (message: string | null) => void
+  saveCurrentSession?: () => Promise<void>
+  clearExplorer?: () => Promise<void>
+  loadExplorer?: (root: string) => Promise<void>
+}
 
-export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], WorkspaceSlice> = (set, get) => ({
-  // State - Initialized with defaults, persist middleware will restore saved values
+const RECENT_FOLDER_SCHEMA_VERSION = 1
+
+function normalizePath(folderPath: string): string {
+  return path.resolve(folderPath)
+}
+
+export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], WorkspaceSlice> = (set, get, store) => ({
   workspaceRoot: null,
   recentFolders: [],
   fileWatchCleanup: null,
@@ -64,314 +55,173 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
   ctxRefreshing: false,
   ctxResult: null,
 
-  // Actions
-  setWorkspaceRoot: (folder: string | null) => {
-    const prev = get().workspaceRoot
-    // When switching workspace, reset index gating telemetry so we rebuild once for the new root
-    if (prev !== folder) {
+  setWorkspaceRoot(folder) {
+    const state = store.getState() as WorkspaceStore
+    const previous = state.workspaceRoot
+
+    if (previous && previous !== folder) {
+      try {
+        stopKanbanWatcher()
+      } catch (error) {
+        console.error('[workspace] Failed to stop Kanban watcher:', error)
+      }
+    }
+
+    if (previous !== folder) {
       set({ workspaceRoot: folder, idxLastRebuildAt: undefined } as any)
     } else {
       set({ workspaceRoot: folder } as any)
     }
-    // Ensure tools resolve against the active workspace root
+
     try {
       if (folder) {
         process.env.HIFIDE_WORKSPACE_ROOT = folder
+        startKanbanWatcher(folder).catch((error) => {
+          console.error('[workspace] Failed to start Kanban watcher:', error)
+        })
+      } else {
+        stopKanbanWatcher()
       }
-    } catch {}
+    } catch (error) {
+      console.error('[workspace] Failed to sync workspace environment variable:', error)
+    }
   },
 
-  addRecentFolder: (path: string) => {
-    const state = get() as any
-    const existing = state.recentFolders || []
-
-    // Remove existing entry for this path
-    const filtered = existing.filter((f: RecentFolder) => f.path !== path)
-
-    // Add to front and limit to MAX_RECENT_FOLDERS
-    const updated = [
-      { path, lastOpened: Date.now() },
-      ...filtered
+  addRecentFolder(folderPath) {
+    const normalized = normalizePath(folderPath)
+    const state = get()
+    const filtered = state.recentFolders.filter((entry) => entry.path !== normalized)
+    const next: RecentFolder[] = [
+      { path: normalized, lastOpened: Date.now(), version: RECENT_FOLDER_SCHEMA_VERSION as number } as RecentFolder,
+      ...filtered,
     ].slice(0, MAX_RECENT_FOLDERS)
 
-    set({ recentFolders: updated })
+    set({ recentFolders: next })
 
-    // Notify to rebuild menu with updated recent folders
     try {
       buildMenu()
-    } catch (e) {
-      console.error('[workspace] Failed to rebuild menu:', e)
+    } catch (error) {
+      console.error('[workspace] Failed to rebuild menu after updating recents:', error)
     }
   },
 
-  clearRecentFolders: () => {
+  clearRecentFolders() {
     set({ recentFolders: [] })
-
-    // Notify to rebuild menu with cleared recent folders
     try {
       buildMenu()
-    } catch (e) {
-      console.error('[workspace] Failed to rebuild menu:', e)
+    } catch (error) {
+      console.error('[workspace] Failed to rebuild menu after clearing recents:', error)
     }
   },
 
-  ensureWorkspaceReady: async ({ baseDir, preferAgent = false, overwrite = false }: { baseDir: string; preferAgent?: boolean; overwrite?: boolean }) => {
+  async ensureWorkspaceReady({ baseDir, preferAgent = false, overwrite = false }) {
     try {
-      // Fast bootstrap: create folders and minimal context only
       await bootstrapWorkspace({ baseDir, preferAgent: false, overwrite })
-      // Optionally kick off AI-enhanced context in background
       if (preferAgent) {
         setTimeout(() => {
-          bootstrapWorkspace({ baseDir, preferAgent: true, overwrite: false }).catch((e) => {
-            console.error('[workspace] ensureWorkspaceReady agent-context failed:', e)
+          bootstrapWorkspace({ baseDir, preferAgent: true, overwrite: false }).catch((error) => {
+            console.error('[workspace] Background context generation failed:', error)
           })
         }, 100)
       }
       return { ok: true }
-    } catch (e) {
-      console.error('[workspace] ensureWorkspaceReady failed:', e)
+    } catch (error) {
+      console.error('[workspace] ensureWorkspaceReady failed:', error)
       return { ok: false }
     }
   },
 
-  hasUnsavedChanges: () => {
-    const state = get() as any
-
-    // Check if current session has unsaved items
-    const current = state.sessions?.find((sess: any) => sess.id === state.currentId)
-    if (current && current.items && current.items.length > 0) {
-      // Consider it "unsaved" if there are items (user might want to keep them)
-      return true
-    }
-
-    return false
+  hasUnsavedChanges() {
+    const state = store.getState() as any
+    const current = state.sessions?.find((session: any) => session.id === state.currentId)
+    if (!current) return false
+    return Boolean(current.items?.length)
   },
 
-  openFolder: async (folderPath: string) => {
-    console.log('[workspace] openFolder called with:', folderPath)
-    // Store the old workspace root in case we need to restore it on error
-    const oldWorkspaceRoot = get().workspaceRoot
+  async openFolder(folderPath) {
+    const normalized = normalizePath(folderPath)
+    const state = store.getState() as WorkspaceStore
+
+    if (state.appBootstrapping) {
+      console.warn('[workspace] Attempted to open folder while bootstrapping')
+      return { ok: false, error: 'App is still initializing' }
+    }
 
     try {
-      const state = get() as any
+      await fs.access(normalized)
+    } catch (error) {
+      console.error('[workspace] Folder is not accessible:', error)
+      return { ok: false, error: 'Folder is not accessible' }
+    }
 
-      // Don't allow opening folder while app is still initializing
-      if (state.appBootstrapping) {
-        console.log('[workspace] App is still bootstrapping, rejecting folder open')
-        return { ok: false, error: 'App is still initializing' }
+    if (state.hasUnsavedChanges?.()) {
+      console.warn('[workspace] Unsaved changes detected before switching workspace')
+    }
+
+    set({ appBootstrapping: true } as any)
+    state.setStartupMessage?.('Opening workspace...')
+
+    try {
+      if (state.saveCurrentSession) {
+        state.setStartupMessage?.('Saving current session...')
+        await state.saveCurrentSession()
       }
 
-      // Show loading screen
-      if (state.setStartupMessage) {
-        state.setStartupMessage('Opening workspace...')
-      }
-      set({ appBootstrapping: true } as any)
-
-      // 1. Check for unsaved changes
-      console.log('[workspace] Step 1: Checking for unsaved changes')
-      if (state.hasUnsavedChanges?.()) {
+      state.setStartupMessage?.('Ensuring workspace context...')
+      const ready = await (get() as WorkspaceSlice).ensureWorkspaceReady({ baseDir: normalized })
+      if (!ready.ok) {
+        throw new Error('Failed to prepare workspace')
       }
 
-      // 2. Save current session before switching
-      console.log('[workspace] Step 2: Saving current session')
-      if (state.setStartupMessage) state.setStartupMessage('Saving current session...')
+      state.setStartupMessage?.('Resetting explorers...')
+      if (state.clearExplorer) {
+        await state.clearExplorer()
+      }
+
+      set({ workspaceRoot: normalized } as any)
+      ;(get() as WorkspaceSlice).addRecentFolder(normalized)
+
+      if (state.loadExplorer) {
+        state.setStartupMessage?.('Loading workspace files...')
+        await state.loadExplorer(normalized)
+      }
+
       try {
-        if (state.saveCurrentSession) {
-          await state.saveCurrentSession()
-        }
-        console.log('[workspace] Step 2 complete')
-      } catch (e) {
-        console.error('[workspace] Failed to save current session:', e)
-      }
-
-      // 3. Clear all explorer terminals
-      console.log('[workspace] Step 3: Clearing terminals')
-      if (state.setStartupMessage) state.setStartupMessage('Cleaning up terminals...')
-      try {
-        if (state.clearExplorerTerminals) {
-          await state.clearExplorerTerminals()
-        }
-        console.log('[workspace] Step 3 complete')
-      } catch (e) {
-        console.error('[workspace] Failed to clear explorer terminals:', e)
-      }
-
-      // 4. Verify folder exists and reinitialize indexer
-      console.log('[workspace] Step 4: Verifying folder and reinitializing indexer')
-      if (state.setStartupMessage) state.setStartupMessage('Switching workspace...')
-      try {
-        const resolved = path.resolve(folderPath)
-        console.log('[workspace] Resolved path:', resolved)
-        // Verify the directory exists
-        await fs.access(resolved)
-        console.log('[workspace] Directory exists, reinitializing indexer')
-
-        // Set new workspace root BEFORE reinitializing indexer so the indexer picks up the correct path
-        set({
-          workspaceRoot: resolved,
-          explorerOpenFolders: [resolved],
-          explorerChildrenByDir: {}
-        } as any)
-        try { process.env.HIFIDE_WORKSPACE_ROOT = resolved } catch {}
-
-        // Reinitialize indexer with new root
-        resetIndexer()
-        await getIndexer()
-        console.log('[workspace] Step 4 complete (root set to:', resolved, ')')
+        (await getIndexer()).switchRoot(normalized)
       } catch (error) {
-        console.error('[workspace] Step 4 failed:', error)
-        // Restore old workspace root on error
-        set({ appBootstrapping: false, workspaceRoot: oldWorkspaceRoot } as any)
-        if (state.setStartupMessage) state.setStartupMessage(null)
-        return { ok: false, error: String(error) }
+        console.error('[workspace] Failed to switch indexer root:', error)
       }
 
-      // 5. Add to recent folders
-      console.log('[workspace] Step 5: Adding to recent folders')
-      state.addRecentFolder(folderPath)
-      console.log('[workspace] Step 5 complete')
+      (get() as WorkspaceSlice).setWorkspaceRoot(normalized)
 
-      // 6. Bootstrap workspace folders (.hifide-public, .hifide-private, etc.)
-      console.log('[workspace] Step 6: Bootstrapping workspace folders')
-      if (state.setStartupMessage) state.setStartupMessage('Initializing workspace folders...')
-      try {
-        // Centralized bootstrap
-        if (state.ensureWorkspaceReady) {
-          await state.ensureWorkspaceReady({ baseDir: folderPath, preferAgent: true, overwrite: false })
-        }
-        console.log('[workspace] Step 6 complete')
-      } catch (e) {
-        console.error('[workspace] Failed to bootstrap workspace:', e)
-      }
-
-      // 7. Workspace root already updated in Step 4 (before indexer init). Just log current root.
-      console.log('[workspace] Workspace root is set to:', get().workspaceRoot)
-      // 8. Reload sessions from new workspace
-      console.log('[workspace] Step 8: Loading sessions')
-      if (state.setStartupMessage) state.setStartupMessage('Loading sessions...')
-      try {
-        if (state.loadSessions) {
-          await state.loadSessions()
-        }
-        console.log('[workspace] Step 8 complete')
-      } catch (e) {
-        console.error('[workspace] Failed to load sessions:', e)
-      }
-
-      // 9. Ensure a session is present
-      console.log('[workspace] Step 9: Ensuring session present')
-      let createdNewSession = false
-      try {
-        if (state.ensureSessionPresent) {
-          createdNewSession = state.ensureSessionPresent()
-        }
-        console.log('[workspace] Step 9 complete, createdNewSession:', createdNewSession)
-      } catch (e) {
-        console.error('[workspace] Failed to ensure session:', e)
-      }
-
-      // 9b. Initialize the current session (loads flow, resumes if paused)
-      // Only if we didn't create a new session (newSession already initializes)
-      console.log('[workspace] Step 9b: Initializing session')
-      if (!createdNewSession) {
-        try {
-          if (state.initializeSession) {
-            await state.initializeSession()
-          }
-          console.log('[workspace] Step 9b complete')
-        } catch (e) {
-          console.error('[workspace] Failed to initialize session:', e)
-        }
-      } else {
-        console.log('[workspace] Step 9b skipped (new session already initialized)')
-      }
-
-      // 10. Start a new explorer terminal
-      console.log('[workspace] Step 10: Setting up terminal')
-      if (state.setStartupMessage) state.setStartupMessage('Setting up terminal...')
-      try {
-        const newTabId = crypto.randomUUID()
-        set({
-          explorerTerminalTabs: [newTabId],
-          explorerActiveTerminal: newTabId
-        } as any)
-        console.log('[workspace] Step 10 complete')
-      } catch (e) {
-        console.error('[workspace] Failed to create terminal:', e)
-      }
-
-      // 11. Load file tree
-      console.log('[workspace] Step 11: Loading file tree')
-      if (state.setStartupMessage) state.setStartupMessage('Loading file tree...')
-
-      // 11b. Indexing gate: check heuristics and rebuild if needed (blocking)
-      try {
-        console.log('[workspace] Step 11b: Checking code index (heuristics)')
-        if (state.setStartupMessage) state.setStartupMessage('Checking code index...')
-        if (state.refreshIndexStatus) await state.refreshIndexStatus()
-        if (state.maybeAutoRebuildAndWait) {
-          await state.maybeAutoRebuildAndWait()
-        }
-        console.log('[workspace] Step 11b complete')
-      } catch (e) {
-        console.error('[workspace] Failed during indexing gate:', e)
-      }
-
-      // Refresh context
-      console.log('[workspace] Refreshing context')
-      try {
-        await state.refreshContext?.()
-        console.log('[workspace] Context refresh complete')
-      } catch (e) {
-        console.error('[workspace] Failed to refresh context:', e)
-      }
-
-      // Load initial file tree
-      console.log('[workspace] Loading initial file tree')
-      try {
-        if (state.loadExplorerDir) {
-          await state.loadExplorerDir(folderPath)
-        }
-        console.log('[workspace] File tree loaded')
-      } catch (e) {
-        console.error('[workspace] Failed to load file tree:', e)
-      }
-
-      // 12. File watching is handled by the IPC layer (fs:watchStart)
-      // The renderer will set up file watching via window.fs.watchDir
-      // This is intentionally left to the renderer since it needs to subscribe to events
-
-      // Done
+      state.setStartupMessage?.(null)
       set({ appBootstrapping: false } as any)
-      if (state.setStartupMessage) state.setStartupMessage(null)
-      console.log('[workspace] openFolder completed successfully')
       return { ok: true }
     } catch (error) {
-      console.error('[workspace] Failed to open folder:', error)
-      // Restore old workspace root on error
-      set({ appBootstrapping: false, workspaceRoot: oldWorkspaceRoot } as any)
-      const state = get() as any
-      if (state.setStartupMessage) state.setStartupMessage(null)
-      return { ok: false, error: String(error) }
+      console.error('[workspace] Failed to open workspace:', error)
+      set({ appBootstrapping: false } as any)
+      state.setStartupMessage?.(null)
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
   },
 
-  refreshContext: async () => {
-    const state = get() as any
-    const folder = state.workspaceRoot
-    if (!folder) return
-
-    set({ ctxRefreshing: true })
+  closeWorkspace() {
+    const state = get()
+    state.fileWatchCleanup?.()
+    set({
+      workspaceRoot: null,
+      fileWatchCleanup: null,
+      fileWatchEvent: null,
+    })
     try {
-      const res = await bootstrapWorkspace({ baseDir: folder, preferAgent: true, overwrite: true })
-      if (res) {
-        set({ ctxResult: res })
-      }
-    } catch (e) {
-      console.error('[workspace] Failed to refresh context:', e)
-    } finally {
-      set({ ctxRefreshing: false })
+      stopKanbanWatcher()
+    } catch (error) {
+      console.error('[workspace] Failed to stop Kanban watcher:', error)
+    }
+    try {
+      resetIndexer()
+    } catch (error) {
+      console.error('[workspace] Failed to reset indexer:', error)
     }
   },
 })
-

@@ -1,4 +1,4 @@
-import { useEffect, Profiler } from 'react'
+import { useEffect, Profiler, useCallback } from 'react'
 import { Button, Group, Title } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useAppStore, useDispatch, selectCurrentView } from './store'
@@ -8,15 +8,14 @@ import AgentView from './components/AgentView'
 import ExplorerView from './components/ExplorerView'
 import SourceControlView from './components/SourceControlView'
 import KnowledgeBaseView from './components/KnowledgeBaseView'
+import KanbanView from './components/KanbanView'
 import SettingsPane from './SettingsPane'
 import LoadingScreen from './components/LoadingScreen'
-
 import { useRerenderTrace, logStoreDiff } from './utils/perf'
-// We need a dispatch instance for menu handlers
-// This will be set when the App component mounts
-let globalDispatch: ReturnType<typeof useDispatch> | null = null
 
-// Menu event handlers - defined once at module level
+let globalDispatch: ReturnType<typeof useDispatch> | null = null
+let handlersRegistered = false
+
 const menuHandlers = {
   openSettings: () => {
     globalDispatch?.('setCurrentView', { view: 'settings' })
@@ -24,10 +23,16 @@ const menuHandlers = {
   openSession: () => {
     globalDispatch?.('setCurrentView', { view: 'agent' })
   },
+  openFlowEditor: () => {
+    globalDispatch?.('setCurrentView', { view: 'flowEditor' })
+  },
+  openKanban: () => {
+    globalDispatch?.('setCurrentView', { view: 'kanban' })
+  },
   toggleTerminalPanel: () => {
-    globalDispatch?.('setCurrentView', { view: 'explorer' })
-    const currentOpen = useAppStore.getState().windowState?.explorerTerminalPanelOpen ?? false
-    globalDispatch?.('updateWindowState', { explorerTerminalPanelOpen: !currentOpen })
+    const store = useAppStore.getState()
+    const isOpen = store.windowState?.explorerTerminalPanelOpen ?? false
+    globalDispatch?.('updateWindowState', { explorerTerminalPanelOpen: !isOpen })
   },
   openFolder: async () => {
     const result = await window.workspace?.openFolderDialog?.()
@@ -42,70 +47,102 @@ const menuHandlers = {
     globalDispatch?.('clearRecentFolders')
   },
   exportFlow: () => {
-
     if (!globalDispatch) {
-      console.error('[exportFlow] globalDispatch not available yet')
+      console.error('[menu] exportFlow invoked before dispatch ready')
       return
     }
-
-    // Call via dispatch - action runs in main process
     globalDispatch('feExportFlow')
   },
   importFlow: () => {
-
     if (!globalDispatch) {
-      console.error('[importFlow] globalDispatch not available yet')
+      console.error('[menu] importFlow invoked before dispatch ready')
       return
     }
-
-    // Call via dispatch - action runs in main process
     globalDispatch('feImportFlow')
-  }
+  },
 }
 
-// Track if handlers are registered to prevent duplicates
-let handlersRegistered = false
+function registerMenuHandlers() {
+  if (handlersRegistered || !window.menu?.on) return
 
+  window.menu.on('open-settings', menuHandlers.openSettings)
+  window.menu.on('open-session', menuHandlers.openSession)
+  window.menu.on('open-chat', menuHandlers.openSession)
+  window.menu.on('open-flow-editor', menuHandlers.openFlowEditor)
+  window.menu.on('open-kanban', menuHandlers.openKanban)
+  window.menu.on('toggle-terminal-panel', menuHandlers.toggleTerminalPanel)
+  window.menu.on('open-folder', menuHandlers.openFolder)
+  window.menu.on('open-recent-folder', menuHandlers.openRecentFolder)
+  window.menu.on('clear-recent-folders', menuHandlers.clearRecentFolders)
+  window.menu.on('export-flow', menuHandlers.exportFlow)
+  window.menu.on('import-flow', menuHandlers.importFlow)
+
+  handlersRegistered = true
+}
+
+function unregisterMenuHandlers() {
+  if (!handlersRegistered || !window.menu?.off) return
+
+  window.menu.off('open-settings', menuHandlers.openSettings)
+  window.menu.off('open-session', menuHandlers.openSession)
+  window.menu.off('open-chat', menuHandlers.openSession)
+  window.menu.off('open-flow-editor', menuHandlers.openFlowEditor)
+  window.menu.off('open-kanban', menuHandlers.openKanban)
+  window.menu.off('toggle-terminal-panel', menuHandlers.toggleTerminalPanel)
+  window.menu.off('open-folder', menuHandlers.openFolder)
+  window.menu.off('open-recent-folder', menuHandlers.openRecentFolder)
+  window.menu.off('clear-recent-folders', menuHandlers.clearRecentFolders)
+  window.menu.off('export-flow', menuHandlers.exportFlow)
+  window.menu.off('import-flow', menuHandlers.importFlow)
+
+  handlersRegistered = false
+}
 
 function App() {
-  // Get dispatch for menu handlers
   const dispatch = useDispatch()
 
-  // Use selector for better performance
   const currentView = useAppStore(selectCurrentView)
-  const appBootstrapping = useAppStore((s) => s.appBootstrapping)
-  const startupMessage = useAppStore((s) => s.startupMessage)
-  const exportResult = useAppStore((s) => s.feExportResult)
-  const importResult = useAppStore((s) => s.feImportResult)
+  const appBootstrapping = useAppStore((state) => state.appBootstrapping)
+  const startupMessage = useAppStore((state) => state.startupMessage)
+  const exportResult = useAppStore((state) => state.feExportResult)
+  const importResult = useAppStore((state) => state.feImportResult)
 
-  // Perf: trace App re-renders and subscribe to store diffs (dev only)
-  useRerenderTrace('App', { currentView, appBootstrapping, hasExportResult: !!exportResult, hasImportResult: !!importResult })
+  useRerenderTrace('App', {
+    currentView,
+    appBootstrapping,
+    hasExportResult: !!exportResult,
+    hasImportResult: !!importResult,
+  })
+
   useEffect(() => {
-    const unsub = (useAppStore as any).subscribe?.((next: any, prev: any) => {
+    const unsubscribe = (useAppStore as any).subscribe?.((next: any, prev: any) => {
       logStoreDiff('store', prev, next)
     })
-    return () => unsub && unsub()
+    return () => {
+      if (unsubscribe) unsubscribe()
+    }
   }, [])
 
-
-  // Set global dispatch for menu handlers
   useEffect(() => {
     globalDispatch = dispatch
+    return () => {
+      if (globalDispatch === dispatch) {
+        globalDispatch = null
+      }
+    }
   }, [dispatch])
 
-  // Expose store to window for debugging
   useEffect(() => {
     (window as any).debugStore = useAppStore
   }, [])
 
-  // Show notification when export completes
   useEffect(() => {
     if (!exportResult) return
 
     if (exportResult.success && exportResult.path) {
       notifications.show({
         title: 'Flow Exported',
-        message: `Saved to ${exportResult.path}`,
+        message: `Exported to ${exportResult.path}`,
         color: 'green',
       })
     } else if (exportResult.error) {
@@ -116,18 +153,16 @@ function App() {
       })
     }
 
-    // Clear the result after showing notification
     dispatch('feClearExportResult')
   }, [exportResult, dispatch])
 
-  // Show notification when import completes
   useEffect(() => {
     if (!importResult) return
 
     if (importResult.success && importResult.name) {
       notifications.show({
         title: 'Flow Imported',
-        message: `"${importResult.name}" has been added to your library`,
+        message: `"${importResult.name}" was added to your library`,
         color: 'green',
       })
     } else if (importResult.error) {
@@ -138,39 +173,17 @@ function App() {
       })
     }
 
-    // Clear the result after showing notification
     dispatch('feClearImportResult')
   }, [importResult, dispatch])
 
-  // Register menu handlers once (via typed preload API)
   useEffect(() => {
-    if (handlersRegistered || !window.menu?.on) return
-
-    handlersRegistered = true
-    window.menu.on('open-settings', menuHandlers.openSettings)
-    window.menu.on('open-session', menuHandlers.openSession)
-    window.menu.on('toggle-terminal-panel', menuHandlers.toggleTerminalPanel)
-    window.menu.on('open-folder', menuHandlers.openFolder)
-    window.menu.on('open-recent-folder', menuHandlers.openRecentFolder)
-
-    window.menu.on('clear-recent-folders', menuHandlers.clearRecentFolders)
-    window.menu.on('export-flow', menuHandlers.exportFlow)
-    window.menu.on('import-flow', menuHandlers.importFlow)
+    registerMenuHandlers()
+    return () => {
+      unregisterMenuHandlers()
+    }
   }, [])
 
-  // Note: Store initialization is now handled by the main process via zubridge
-  // No need to call initializeStore() here
-
-
-  // Keep main-process menu state in sync with current view (for enabling/disabling items)
-  useEffect(() => {
-    window.app?.setView?.(currentView)
-  }, [currentView])
-
-
-
-  // Render the appropriate view based on currentView
-  const renderView = () => {
+  const renderView = useCallback(() => {
     switch (currentView) {
       case 'agent':
         return <AgentView />
@@ -178,25 +191,23 @@ function App() {
         return <ExplorerView />
       case 'sourceControl':
         return <SourceControlView />
+      case 'knowledgeBase':
+        return <KnowledgeBaseView />
+      case 'kanban':
+        return <KanbanView />
       case 'settings':
         return (
           <div style={{ padding: '16px', backgroundColor: '#1e1e1e', height: '100%', overflow: 'auto' }}>
             <SettingsPane />
           </div>
-
         )
-      case 'knowledgeBase':
-        return <KnowledgeBaseView />
       default:
         return <AgentView />
     }
-  }
+  }, [currentView])
 
-
-  // Gate UI until boot completes
   if (appBootstrapping) {
     return <LoadingScreen message={startupMessage} />
-
   }
 
   return (
@@ -204,167 +215,152 @@ function App() {
       id="App"
       onRender={(_id, _phase, actualDuration) => {
         if (actualDuration > 16) {
+          // eslint-disable-next-line no-console
+          console.debug('[perf] App render exceeded 16ms:', actualDuration)
         }
       }}
     >
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-      {/* Custom Title Bar */}
-
-      <div
-        style={{
-          height: 36,
-          backgroundColor: '#2d2d30',
-          borderBottom: '1px solid #3e3e42',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: 0,
-          WebkitAppRegion: 'drag' as any,
-        } as any}
-      >
-        <Group gap={0} style={{ WebkitAppRegion: 'no-drag' as any } as any}>
-          <div
-            style={{
-              padding: '0 8px 0 6px',
-              height: 36,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            <img
-              src="hifide-logo.png"
-              alt="HiFide"
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+        <div
+          style={{
+            height: 36,
+            backgroundColor: '#2d2d30',
+            borderBottom: '1px solid #3e3e42',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: 0,
+            WebkitAppRegion: 'drag',
+          } as any}
+        >
+          <Group gap={0} style={{ WebkitAppRegion: 'no-drag' } as any}>
+            <div
               style={{
-                width: 16,
-                height: 16,
-                objectFit: 'contain',
+                padding: '0 8px 0 6px',
+                height: 36,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
               }}
-            />
-            <Title order={4} style={{ fontWeight: 600, fontSize: '13px', color: '#cccccc' }}>
-              HiFide
-            </Title>
-          </div>
-          <Group gap={0}>
-            {(['file', 'edit', 'view', 'window', 'help'] as const).map((name) => (
-              <div
-                key={name}
-                style={{
-                  padding: '0 12px',
-                  height: 36,
-                  display: 'flex',
-                  alignItems: 'center',
-                  cursor: 'default',
-                  fontSize: '13px',
-                  color: '#cccccc',
-                  transition: 'background-color 0.1s ease, color 0.1s ease',
-                }}
-                onClick={(e) => {
-                  const el = e.currentTarget as HTMLElement
-                  const rect = el.getBoundingClientRect()
-                  window.menu?.popup?.({ menu: name, x: rect.left, y: rect.bottom })
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'
-                  e.currentTarget.style.color = '#ffffff'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent'
-                  e.currentTarget.style.color = '#cccccc'
-                }}
-              >
-                {name[0].toUpperCase() + name.slice(1)}
-              </div>
-            ))}
+            >
+              <img
+                src="hifide-logo.png"
+                alt="HiFide"
+                style={{ width: 16, height: 16, objectFit: 'contain' }}
+              />
+              <Title order={4} style={{ fontWeight: 600, fontSize: '13px', color: '#cccccc' }}>
+                HiFide
+              </Title>
+            </div>
+            <Group gap={0}>
+              {(['file', 'edit', 'view', 'window', 'help'] as const).map((name) => (
+                <div
+                  key={name}
+                  style={{
+                    padding: '0 12px',
+                    height: 36,
+                    display: 'flex',
+                    alignItems: 'center',
+                    cursor: 'default',
+                    fontSize: '13px',
+                    color: '#cccccc',
+                    transition: 'background-color 0.1s ease, color 0.1s ease',
+                  }}
+                  onClick={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect()
+                    window.menu?.popup?.({ menu: name, x: rect.left, y: rect.bottom })
+                  }}
+                  onMouseEnter={(event) => {
+                    event.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'
+                    event.currentTarget.style.color = '#ffffff'
+                  }}
+                  onMouseLeave={(event) => {
+                    event.currentTarget.style.backgroundColor = 'transparent'
+                    event.currentTarget.style.color = '#cccccc'
+                  }}
+                >
+                  {name[0].toUpperCase() + name.slice(1)}
+                </div>
+              ))}
+            </Group>
           </Group>
-        </Group>
-        <Group gap={0} style={{ WebkitAppRegion: 'no-drag' as any }}>
-          <Button
-            size="compact-xs"
-            variant="subtle"
-            onClick={() => window.windowControls?.minimize?.()}
-            title="Minimize"
-            styles={{
-              root: {
-                color: '#cccccc',
-                width: 46,
-                height: 36,
-                borderRadius: 0,
-                '&:hover': {
-                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+
+          <Group gap={0} style={{ WebkitAppRegion: 'no-drag' } as any }>
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              onClick={() => window.windowControls?.minimize?.()}
+              title="Minimize"
+              styles={{
+                root: {
+                  color: '#cccccc',
+                  width: 46,
+                  height: 36,
+                  borderRadius: 0,
+                  '&:hover': {
+                    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  },
                 },
-              },
-            }}
-          >
-            <svg width="10" height="10" viewBox="0 0 10 10">
-              <rect x="1" y="5" width="8" height="1" fill="currentColor" />
-            </svg>
-          </Button>
-          <Button
-            size="compact-xs"
-            variant="subtle"
-            onClick={() => window.windowControls?.maximize?.()}
-            title="Maximize"
-            styles={{
-              root: {
-                color: '#cccccc',
-                width: 46,
-                height: 36,
-                borderRadius: 0,
-                '&:hover': {
-                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10">
+                <rect x="1" y="5" width="8" height="1" fill="currentColor" />
+              </svg>
+            </Button>
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              onClick={() => window.windowControls?.maximize?.()}
+              title="Maximize"
+              styles={{
+                root: {
+                  color: '#cccccc',
+                  width: 46,
+                  height: 36,
+                  borderRadius: 0,
+                  '&:hover': {
+                    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  },
                 },
-              },
-            }}
-          >
-            <svg width="10" height="10" viewBox="0 0 10 10">
-              <rect x="2" y="2" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1" />
-            </svg>
-          </Button>
-          <Button
-            size="compact-xs"
-            variant="subtle"
-            onClick={() => window.windowControls?.close?.()}
-            title="Close"
-            styles={{
-              root: {
-                color: '#cccccc',
-                width: 46,
-                height: 36,
-                borderRadius: 0,
-
-                '&:hover': {
-                  backgroundColor: '#e81123',
-                  color: '#ffffff',
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10">
+                <rect x="2" y="2" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1" />
+              </svg>
+            </Button>
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              onClick={() => window.windowControls?.close?.()}
+              title="Close"
+              styles={{
+                root: {
+                  color: '#cccccc',
+                  width: 46,
+                  height: 36,
+                  borderRadius: 0,
+                  '&:hover': {
+                    backgroundColor: '#e81123',
+                    color: '#ffffff',
+                  },
                 },
-              },
-            }}
-          >
-            <svg width="10" height="10" viewBox="0 0 10 10">
-              <path d="M2 2 L8 8 M8 2 L2 8" stroke="currentColor" strokeWidth="1.2" />
-            </svg>
-          </Button>
-        </Group>
-      </div>
-
-      {/* Main Content Area + Status Bar */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', flexDirection: 'column' }}>
-        {/* Content row (ActivityBar + Views) */}
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          {/* Activity Bar */}
-          <ActivityBar />
-
-
-          {/* Main View Area */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            {renderView()}
-          </div>
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10">
+                <path d="M2 2 L8 8 M8 2 L2 8" stroke="currentColor" strokeWidth="1.2" />
+              </svg>
+            </Button>
+          </Group>
         </div>
 
-        {/* Status Bar */}
-        <StatusBar />
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+            <ActivityBar />
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>{renderView()}</div>
+          </div>
+          <StatusBar />
+        </div>
       </div>
-    </div>
     </Profiler>
   )
 }

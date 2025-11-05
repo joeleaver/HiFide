@@ -8,10 +8,46 @@
 // View Types
 // ============================================================================
 
-export type ViewType = 'agent' | 'explorer' | 'sourceControl' | 'terminal' | 'settings' | 'knowledgeBase'
+
+export type ViewType = 'agent' | 'explorer' | 'sourceControl' | 'terminal' | 'settings' | 'knowledgeBase' | 'kanban'
+// ============================================================================
 
 // ============================================================================
-// Chat/Session Types
+// Kanban Types
+// ============================================================================
+
+export type KanbanStatus = 'backlog' | 'todo' | 'inProgress' | 'done'
+
+export interface KanbanEpic {
+  id: string
+  name: string
+  color?: string
+  description?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface KanbanTask {
+  id: string
+  title: string
+  status: KanbanStatus
+  order: number
+  description?: string
+  epicId?: string | null
+  assignees?: string[]
+  tags?: string[]
+  createdAt: number
+  updatedAt: number
+}
+
+export interface KanbanBoard {
+  version: number
+  columns: KanbanStatus[]
+  epics: KanbanEpic[]
+  tasks: KanbanTask[]
+  metadata?: Record<string, unknown>
+}
+
 // ============================================================================
 
 // Badge system for inline timeline display

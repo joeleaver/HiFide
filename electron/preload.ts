@@ -19,14 +19,33 @@ contextBridge.exposeInMainWorld('zubridge', handlers)
 // - Validation: use validateApiKeys() action in settings slice
 
 
-// Typed Menu API
+// Typed Menu API with off() support and listener tracking
+const __menuListenerMap: Map<string, Map<Function, Function>> = new Map()
 contextBridge.exposeInMainWorld('menu', {
   popup: (args: { menu: string; x: number; y: number }) => ipcRenderer.invoke('menu:popup', args),
   on: (name: string, listener: (payload?: any) => void) => {
     const channel = `menu:${name}`
     const fn = (_: any, payload: any) => listener(payload)
+    let byName = __menuListenerMap.get(channel)
+    if (!byName) { byName = new Map(); __menuListenerMap.set(channel, byName) }
+    byName.set(listener, fn)
     ipcRenderer.on(channel, fn)
-    return () => ipcRenderer.off(channel, fn)
+    return () => {
+      ipcRenderer.off(channel, fn)
+      byName?.delete(listener)
+    }
+  },
+  off: (name: string, listener: (payload?: any) => void) => {
+    const channel = `menu:${name}`
+    const byName = __menuListenerMap.get(channel)
+    const fn = byName?.get(listener)
+    if (fn) {
+      ipcRenderer.off(channel, fn as any)
+      byName?.delete(listener)
+    } else {
+      // Fallback: attempt to remove the original listener (may no-op if wrapper was used)
+      try { ipcRenderer.off(channel, listener as any) } catch {}
+    }
   },
 })
 

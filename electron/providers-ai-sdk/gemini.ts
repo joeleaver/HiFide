@@ -6,18 +6,32 @@ import { AGENT_MAX_STEPS } from '../store/utils/constants'
 
 import type { ProviderAdapter, StreamHandle, AgentTool, ChatMessage } from '../providers/provider'
 
+// Gemini function tool name constraints: ^[A-Za-z][A-Za-z0-9_]{0,63}$
 function sanitizeName(name: string): string {
-  let safe = (name || 'tool').replace(/[^a-zA-Z0-9_-]/g, '_')
+  let safe = String(name || 'tool')
+    .replace(/[^a-zA-Z0-9_]/g, '_') // disallow hyphens and other chars
   if (!safe) safe = 'tool'
+  // Must start with a letter
+  if (!/^[A-Za-z]/.test(safe)) safe = `t_${safe}`
+  // Enforce max length 64 (leave room for suffixing later)
+  if (safe.length > 64) safe = safe.slice(0, 64)
   return safe
 }
 
 function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: string; [k: string]: any }) {
   const map: Record<string, any> = {}
   const nameMap = new Map<string, string>() // safe -> original
+
   for (const t of tools || []) {
     if (!t || !t.name || typeof t.run !== 'function') continue
-    const safe = sanitizeName(t.name)
+    const base = sanitizeName(t.name)
+    // Ensure uniqueness if multiple names sanitize to same safe value
+    let safe = base
+    let i = 2
+    while (Object.prototype.hasOwnProperty.call(map, safe) && nameMap.get(safe) !== t.name) {
+      const trimmed = base.length > 60 ? base.slice(0, 60) : base
+      safe = `${trimmed}_${i++}`
+    }
     if (nameMap.has(safe) && nameMap.get(safe) !== t.name) {
       const DEBUG = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
       if (DEBUG) console.warn('[ai-sdk:gemini] tool name collision after sanitize', { safe, a: nameMap.get(safe), b: t.name })
@@ -95,6 +109,7 @@ export const GeminiAiSdkProvider: ProviderAdapter = {
         messages: msgs as any,
         tools: Object.keys(aiTools).length ? aiTools : undefined,
         toolChoice: Object.keys(aiTools).length ? 'auto' : 'none',
+        parallelToolCalls: false,
         temperature: typeof temperature === 'number' ? temperature : undefined,
         abortSignal: ac.signal,
         stopWhen: stepCountIs(AGENT_MAX_STEPS),
@@ -114,28 +129,29 @@ export const GeminiAiSdkProvider: ProviderAdapter = {
               }
               case 'tool-input-start': {
                 const callId = chunk.toolCallId || chunk.id || ''
-                if (!seenStarts.has(callId)) {
-                  seenStarts.add(callId)
-                  const safe = String(chunk.toolName || '')
-                  const original = nameMap.get(safe) || safe
+                if (callId) {
                   const args = (chunk as any).input
-                  if (args !== undefined) onToolStart?.({ callId, name: original, arguments: args })
-                  else onToolStart?.({ callId, name: original })
+                  if (args !== undefined) {
+                    const safe = String(chunk.toolName || '')
+                    const original = nameMap.get(safe) || safe
+                    onToolStart?.({ callId, name: original, arguments: args })
+                    seenStarts.add(callId)
+                  }
                 }
                 break
               }
               case 'tool-input-delta': {
-                // We ignore deltas for now to avoid noisy partial-args starts
+                // Ignore deltas; wait for 'tool-call' which includes full arguments.
                 break
               }
               case 'tool-call': {
                 const callId = chunk.toolCallId || chunk.id || ''
-                if (callId && !seenStarts.has(callId)) {
-                  seenStarts.add(callId)
+                if (callId) {
                   const safe = String(chunk.toolName || '')
                   const original = nameMap.get(safe) || safe
                   const args = (chunk as any).input
                   onToolStart?.({ callId, name: original, arguments: args })
+                  seenStarts.add(callId)
                 }
                 break
               }

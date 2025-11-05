@@ -29,6 +29,7 @@ function ToolBadgeContainer({ badge, children }: ToolBadgeContainerProps) {
 
   // Use expanded state or default
   const canExpand = !!(badge.expandable && children)
+  const keepMounted = badge.contentType === 'diff'
 
   // Status indicator color
   const statusColor =
@@ -293,7 +294,7 @@ function ToolBadgeContainer({ badge, children }: ToolBadgeContainerProps) {
             transition: 'max-height 0.2s ease-in-out, padding 0.2s ease-in-out',
           }}
         >
-          {isExpanded ? children : null}
+          {keepMounted ? children : (isExpanded ? children : null)}
         </div>
       )}
     </div>

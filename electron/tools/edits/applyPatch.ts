@@ -12,8 +12,10 @@ import { randomUUID } from 'node:crypto'
 function extractPatchPayload(raw: string): string {
   if (!raw) return ''
   let s = String(raw)
-  // Strip code fences
-  s = s.replace(/^```[a-zA-Z0-9._-]*\s*/g, '').replace(/```\s*$/g, '')
+  // Strip an opening fenced code block line entirely, including any attributes (e.g., ```diff filename=foo)
+  s = s.replace(/^```[^\n]*\n/, '')
+  // Strip a trailing closing fence
+  s = s.replace(/```+\s*$/, '')
   // Try *** Begin Patch ... *** End Patch
   const beginIdx = s.indexOf('*** Begin Patch')
   const endIdx = s.indexOf('*** End Patch')
@@ -55,11 +57,25 @@ function parseUnifiedDiff(patch: string): FilePatch[] {
   const lines = patch.split(/\r?\n/)
   const files: FilePatch[] = []
   let i = 0
+
+  const isPathLike = (s: string) => {
+    const t = s.trim()
+    if (!t || t.startsWith('diff --git') || t.startsWith('--- ') || t.startsWith('+++ ') || t.startsWith('@@') || t.startsWith('***') || t.startsWith('apply_patch') || t.startsWith('```')) return false
+    if (/^\\ No newline at end of file$/.test(t)) return false
+    // Heuristic: contains a path separator or a dot and no spaces
+    return ((t.includes('/') || t.includes('\\') || t.includes('.')) && !/\s/.test(t))
+  }
+  const nextNonEmpty = (from: number) => {
+    let j = from
+    while (j < lines.length && lines[j].trim() === '') j++
+    return j
+  }
+
   while (i < lines.length) {
     const line = lines[i]
+
+    // Case 1: full git header
     if (line.startsWith('diff --git ')) {
-      // Start new file block
-      // Example: diff --git a/foo.ts b/foo.ts
       const m = /^diff --git\s+a\/(\S+)\s+b\/(\S+)/.exec(line)
       let oldPath = ''
       let newPath = ''
@@ -67,19 +83,19 @@ function parseUnifiedDiff(patch: string): FilePatch[] {
       i++
       let newFile = false
       let deletedFile = false
-      // Scan header until we see --- and +++ or next diff
+      // Scan until --- +++ or next diff
       while (i < lines.length && !lines[i].startsWith('--- ') && !lines[i].startsWith('diff --git ')) {
         const hdr = lines[i]
         if (/^new file mode /i.test(hdr)) newFile = true
         if (/^deleted file mode /i.test(hdr)) deletedFile = true
         i++
       }
-      // Expect --- and +++
+      // Optional --- and +++
       if (i < lines.length && lines[i].startsWith('--- ')) {
         const mm = /^---\s+(.*)$/.exec(lines[i])
         if (mm) {
           const v = mm[1]
-          if (v.includes('/dev/null')) oldPath = '' // new file
+          if (v.includes('/dev/null')) oldPath = ''
           else oldPath = stripABPrefix(v.replace(/^a\//, '').trim())
         }
         i++
@@ -100,19 +116,17 @@ function parseUnifiedDiff(patch: string): FilePatch[] {
         newFile: newFile || (oldPath === '' && newPath !== ''),
         deletedFile: deletedFile || (newPath === '' && oldPath !== ''),
       }
-
-      // Parse hunks until next diff or EOF
-      while (i < lines.length && !lines[i].startsWith('diff --git ')) {
+      // Hunks until next file header
+      while (i < lines.length && !lines[i].startsWith('diff --git ') && !lines[i].startsWith('--- ')) {
         if (lines[i].startsWith('@@')) {
           const h = parseHunkHeader(lines[i])
           i++
           const hLines: HunkLine[] = []
-          while (i < lines.length && !lines[i].startsWith('@@') && !lines[i].startsWith('diff --git ')) {
+          while (i < lines.length && !lines[i].startsWith('@@') && !lines[i].startsWith('diff --git ') && !lines[i].startsWith('--- ')) {
             const l = lines[i]
             if (l.startsWith('--- ') || l.startsWith('+++ ')) { i++; continue }
             if (l === '\\ No newline at end of file') { i++; continue }
             if (l.length === 0) {
-              // Empty line counts as context with empty text, but unified patches usually prefix with space
               hLines.push({ type: 'context', text: '' })
             } else if (l[0] === ' ') {
               hLines.push({ type: 'context', text: l.slice(1) })
@@ -121,7 +135,6 @@ function parseUnifiedDiff(patch: string): FilePatch[] {
             } else if (l[0] === '-') {
               hLines.push({ type: 'del', text: l.slice(1) })
             } else {
-              // Non-hunk line; break to outer
               break
             }
             i++
@@ -129,14 +142,118 @@ function parseUnifiedDiff(patch: string): FilePatch[] {
           fp.hunks.push({ ...h, lines: hLines })
           continue
         }
-        // Skip other header/noise lines
         i++
       }
       files.push(fp)
       continue
     }
+
+    // Case 2: minimal header starting with --- / +++
+    if (line.startsWith('--- ')) {
+      let oldPath = ''
+      let newPath = ''
+      let newFile = false
+      let deletedFile = false
+      const mmOld = /^---\s+(.*)$/.exec(line)
+      if (mmOld) {
+        const v = mmOld[1]
+        if (v.includes('/dev/null')) oldPath = ''
+        else oldPath = stripABPrefix(v.replace(/^a\//, '').trim())
+      }
+      i++
+      if (i < lines.length && lines[i].startsWith('+++ ')) {
+        const mmNew = /^\+\+\+\s+(.*)$/.exec(lines[i])
+        if (mmNew) {
+          const v = mmNew[1]
+          if (v.includes('/dev/null')) { newPath = '' ; deletedFile = true }
+          else newPath = stripABPrefix(v.replace(/^b\//, '').trim())
+        }
+        i++
+      }
+      const fp: FilePatch = {
+        oldPath: stripABPrefix(oldPath),
+        newPath: stripABPrefix(newPath || oldPath),
+        hunks: [],
+        newFile: newFile || (oldPath === '' && newPath !== ''),
+        deletedFile: deletedFile || (newPath === '' && oldPath !== ''),
+      }
+      while (i < lines.length && !lines[i].startsWith('diff --git ') && !lines[i].startsWith('--- ')) {
+        if (lines[i].startsWith('@@')) {
+          const h = parseHunkHeader(lines[i])
+          i++
+          const hLines: HunkLine[] = []
+          while (i < lines.length && !lines[i].startsWith('@@') && !lines[i].startsWith('diff --git ') && !lines[i].startsWith('--- ')) {
+            const l = lines[i]
+            if (l.startsWith('--- ') || l.startsWith('+++ ')) { i++; continue }
+            if (l === '\\ No newline at end of file') { i++; continue }
+            if (l.length === 0) {
+              hLines.push({ type: 'context', text: '' })
+            } else if (l[0] === ' ') {
+              hLines.push({ type: 'context', text: l.slice(1) })
+            } else if (l[0] === '+') {
+              hLines.push({ type: 'add', text: l.slice(1) })
+            } else if (l[0] === '-') {
+              hLines.push({ type: 'del', text: l.slice(1) })
+            } else {
+              break
+            }
+            i++
+          }
+          fp.hunks.push({ ...h, lines: hLines })
+          continue
+        }
+        i++
+      }
+      files.push(fp)
+      continue
+    }
+
+    // Case 3: "udiff-simple" (Gemini): first line is a path, followed by @@ hunks (no ---/+++ lines)
+    if (isPathLike(line)) {
+      const pathLine = line.trim().replace(/\\/g, '/')
+      const j = nextNonEmpty(i + 1)
+      if (j < lines.length && lines[j].startsWith('@@')) {
+        const fp: FilePatch = { oldPath: pathLine, newPath: pathLine, hunks: [], newFile: false, deletedFile: false }
+        i = j
+        while (i < lines.length && !lines[i].startsWith('diff --git ') && !lines[i].startsWith('--- ')) {
+          if (isPathLike(lines[i])) {
+            // next file block starts when next non-empty after this is a hunk header
+            const k = nextNonEmpty(i + 1)
+            if (k < lines.length && lines[k].startsWith('@@')) break
+          }
+          if (lines[i].startsWith('@@')) {
+            const h = parseHunkHeader(lines[i])
+            i++
+            const hLines: HunkLine[] = []
+            while (i < lines.length && !lines[i].startsWith('@@') && !lines[i].startsWith('diff --git ') && !lines[i].startsWith('--- ')) {
+              const l = lines[i]
+              if (l === '\\ No newline at end of file') { i++; continue }
+              if (l.length === 0) {
+                hLines.push({ type: 'context', text: '' })
+              } else if (l[0] === ' ') {
+                hLines.push({ type: 'context', text: l.slice(1) })
+              } else if (l[0] === '+') {
+                hLines.push({ type: 'add', text: l.slice(1) })
+              } else if (l[0] === '-') {
+                hLines.push({ type: 'del', text: l.slice(1) })
+              } else {
+                break
+              }
+              i++
+            }
+            fp.hunks.push({ ...h, lines: hLines })
+            continue
+          }
+          i++
+        }
+        files.push(fp)
+        continue
+      }
+    }
+
     i++
   }
+
   return files
 }
 
@@ -249,12 +366,17 @@ export const applyPatchTool: AgentTool = {
 
         if (fp.deletedFile) {
           const after = ''
-          previews.push({ path: relPath, before, after, sizeBefore: before.length, sizeAfter: after.length })
-          results.push({ path: relPath, changed: true })
-          applied++
           if (!args?.dryRun && exists) {
             try { await fs.unlink(wsAbs) } catch {}
           }
+          // Verify deletion when not dryRun
+          let msg: string | undefined
+          if (!args?.dryRun) {
+            try { await fs.access(wsAbs); msg = 'delete-verify-failed' } catch {}
+          }
+          previews.push({ path: relPath, before, after, sizeBefore: before.length, sizeAfter: after.length })
+          results.push({ path: relPath, changed: true, message: msg })
+          applied++
           continue
         }
 
@@ -265,15 +387,24 @@ export const applyPatchTool: AgentTool = {
           return { ok: false, error: `Failed to apply patch for ${relPath}: ${appliedRes.error}` }
         }
         const after = appliedRes.content || ''
-        previews.push({ path: relPath, before, after, sizeBefore: before.length, sizeAfter: after.length })
-        results.push({ path: relPath, changed: before !== after })
+        // Write and verify when changed
         if (before !== after) {
-          applied++
           if (!args?.dryRun) {
             // Ensure containing dir exists
             try { await fs.mkdir(path.dirname(wsAbs), { recursive: true }) } catch {}
             await atomicWrite(wsAbs, after)
           }
+          // Verify write when not dryRun
+          let msg: string | undefined
+          if (!args?.dryRun) {
+            try { await fs.access(wsAbs) } catch { msg = 'write-verify-failed' }
+          }
+          previews.push({ path: relPath, before, after, sizeBefore: before.length, sizeAfter: after.length })
+          results.push({ path: relPath, changed: true, message: msg })
+          applied++
+        } else {
+          previews.push({ path: relPath, before, after, sizeBefore: before.length, sizeAfter: after.length })
+          results.push({ path: relPath, changed: false })
         }
       }
 

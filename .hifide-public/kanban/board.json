@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "columns": ["backlog", "todo", "inProgress", "done"],
+  "epics": [
+    {
+      "id": "epic-initial",
+      "name": "Foundations",
+      "color": "#5C7AEA",
+      "description": "Initial epic to group foundational tasks.",
+      "createdAt": 0,
+      "updatedAt": 0
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-welcome",
+      "title": "Review the Kanban board",
+      "status": "backlog",
+      "order": 0,
+      "description": "Open the Kanban view and explore drag & drop between columns.",
+      "epicId": "epic-initial",
+      "assignees": [],
+      "tags": ["kanban"],
+      "createdAt": 0,
+      "updatedAt": 0
+    }
+  ],
+  "metadata": {
+    "createdAt": 0
+  }
+}

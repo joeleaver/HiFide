@@ -90,6 +90,7 @@ export const AnthropicAiSdkProvider: ProviderAdapter = {
         messages: msgs as any,
         tools: Object.keys(aiTools).length ? aiTools : undefined,
         toolChoice: Object.keys(aiTools).length ? 'auto' : 'none',
+        parallelToolCalls: false,
         temperature: typeof temperature === 'number' ? temperature : undefined,
         abortSignal: ac.signal,
         stopWhen: stepCountIs(AGENT_MAX_STEPS),
@@ -217,7 +218,7 @@ export const AnthropicAiSdkProvider: ProviderAdapter = {
             onStreamError?.(String(err?.message || err))
           } catch {}
         }
-      })
+      } as any)
       // Ensure the stream is consumed so callbacks fire reliably
       result.consumeStream().catch((err: any) => {
         if (DEBUG) console.error('[ai-sdk:anthropic] consumeStream error', err)

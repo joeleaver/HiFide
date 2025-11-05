@@ -48,7 +48,7 @@ export default function StatusBar() {
   }, [providerValid])
 
   // Subscribe to only the current provider's models, with shallow comparator to avoid ref churn
-  const modelOptions = useAppStore((s) => s.modelsByProvider[selectedProvider] || [])
+  const modelOptions = useAppStore((s) => s.modelsByProvider?.[selectedProvider] || [])
 
   // For Fireworks, show only the last path segment as the label to keep it readable
   const displayModelOptions = useMemo(() => {

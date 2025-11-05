@@ -53,8 +53,13 @@ function SafeDiff({ before, after, path }: { before?: string; after?: string; pa
         overviewRulerBorder: false,
         overviewRulerLanes: 0,
         automaticLayout: true,
-        scrollBeyondLastLine: false
-      }}
+        scrollBeyondLastLine: false,
+        // Prefer focused hunks with small context
+
+        hideUnchangedRegions: { enabled: true, contextLineCount: 3 },
+
+        diffAlgorithm: 'advanced'
+      } as any}
       language={undefined}
       onMount={(ed) => { editorRef.current = ed }}
     />

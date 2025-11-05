@@ -6,7 +6,6 @@ import {
   useDispatch,
   selectSessions,
   selectCurrentId,
-  selectAgentTerminalTabs,
 } from '../store'
 import { useUiStore } from '../store/ui'
 import { useTerminalStore } from '../store/terminal'
@@ -31,7 +30,7 @@ export default function AgentView() {
   // Use selectors for better performance
   const sessions = useAppStore(selectSessions)
   const currentId = useAppStore(selectCurrentId)
-  const agentTerminalTabs = useAppStore(selectAgentTerminalTabs)
+  const agentTerminalTabs = useAppStore((s) => s.agentTerminalTabs || [])
   const fitTerminal = useTerminalStore((s) => s.fitTerminal)
 
   // Read persisted window state from main store (hydrate UI store on mount only)
@@ -57,7 +56,7 @@ export default function AgentView() {
   useRerenderTrace('AgentView', {
     metaPanelOpen,
     currentId,
-    sessionCount: sessions.length,
+    sessionCount: (sessions?.length ?? 0),
     flowCanvasCollapsed,
   })
 
@@ -107,7 +106,7 @@ export default function AgentView() {
       // Persist to main (silent, no broadcast) when drag ends
       dispatch('persistWindowState', { updates: { sessionPanelWidth: useUiStore.getState().sessionPanelWidth } })
       // After layout settles, re-fit all agent terminals to new width and sync PTY size
-      requestAnimationFrame(() => agentTerminalTabs.forEach((id) => fitTerminal(id)))
+      requestAnimationFrame(() => (agentTerminalTabs || []).forEach((id: string) => fitTerminal(id)))
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -136,7 +135,7 @@ export default function AgentView() {
       // Persist to main (silent, no broadcast) when drag ends
       dispatch('persistWindowState', { updates: { metaPanelWidth: useUiStore.getState().metaPanelWidth } })
       // After layout settles, re-fit all agent terminals to new width and sync PTY size
-      requestAnimationFrame(() => agentTerminalTabs.forEach((id) => fitTerminal(id)))
+      requestAnimationFrame(() => (agentTerminalTabs || []).forEach((id: string) => fitTerminal(id)))
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -181,7 +180,7 @@ export default function AgentView() {
           <Select
             value={currentId || undefined}
             onChange={(v) => v && dispatch('select', v)}
-            data={sessions.map((sess) => ({
+            data={(sessions || []).map((sess) => ({
               value: sess.id,
               label: sess.title || 'Untitled',
             }))}

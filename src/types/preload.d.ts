@@ -160,6 +160,7 @@ declare global {
     menu?: {
       popup: (args: { menu: string; x: number; y: number }) => Promise<any>;
       on: (name: string, listener: (payload?: any) => void) => () => void;
+      off: (name: string, listener: (payload?: any) => void) => void;
     };
     windowControls?: {
       minimize: () => Promise<any>;

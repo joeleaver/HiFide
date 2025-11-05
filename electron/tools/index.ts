@@ -2,12 +2,11 @@
  * Agent Tools Registry
  *
  * Aggregates all agent tools from individual files.
- * Each tool is self-contained in its own file for better maintainability.
  */
 
 import type { AgentTool } from '../providers/provider'
 
-// Agent tools
+// Agent self-regulation tools
 import { assessTaskTool } from './agent/assessTask'
 import { checkResourcesTool } from './agent/checkResources'
 import { summarizeProgressTool } from './agent/summarizeProgress'
@@ -29,13 +28,21 @@ import { removeTool } from './fs/remove'
 import { truncateFileTool } from './fs/truncateFile'
 import { truncateDirTool } from './fs/truncateDir'
 
-// Edits tools
+// Edit tools
 import { applyEditsTool } from './edits/apply'
-import { applyPatchTool } from './edits/applyPatch'
 
 // Index tools
 import { indexSearchTool } from './index/search'
 
+// Kanban tools
+import { kanbanGetBoardTool } from './kanban/getBoard'
+import { kanbanCreateTaskTool } from './kanban/createTask'
+import { kanbanUpdateTaskTool } from './kanban/updateTask'
+import { kanbanDeleteTaskTool } from './kanban/deleteTask'
+import { kanbanMoveTaskTool } from './kanban/moveTask'
+import { kanbanCreateEpicTool } from './kanban/createEpic'
+import { kanbanUpdateEpicTool } from './kanban/updateEpic'
+import { kanbanDeleteEpicTool } from './kanban/deleteEpic'
 
 // Workspace tools
 import { searchWorkspaceTool } from './workspace/searchWorkspace'
@@ -54,24 +61,18 @@ import { applyEditsTargetedTool } from './code/applyEditsTargeted'
 import { replaceCallTool } from './code/replaceCall'
 import { replaceConsoleLevelTool } from './code/replaceConsoleLevel'
 
-
 // Text tools
 import { grepTool } from './text/grep'
 
-// Knowledge Base tools
+// Knowledge base tools
 import { knowledgeBaseSearchTool } from './kb/search'
 import { knowledgeBaseStoreTool } from './kb/store'
 
-/**
- * Complete registry of all agent tools
- */
 export const agentTools: AgentTool[] = [
-  // Self-regulation tools
   assessTaskTool,
   checkResourcesTool,
   summarizeProgressTool,
 
-  // File system tools
   readFileTool,
   readLinesTool,
   readDirTool,
@@ -88,35 +89,35 @@ export const agentTools: AgentTool[] = [
   truncateFileTool,
   truncateDirTool,
 
-  // Edits tools
   applyEditsTool,
-  applyPatchTool,
 
-  // Workspace (preferred discovery tools)
+  indexSearchTool,
+
+  kanbanGetBoardTool,
+  kanbanCreateTaskTool,
+  kanbanUpdateTaskTool,
+  kanbanDeleteTaskTool,
+  kanbanMoveTaskTool,
+  kanbanCreateEpicTool,
+  kanbanUpdateEpicTool,
+  kanbanDeleteEpicTool,
+
   searchWorkspaceTool,
   jumpWorkspaceTool,
   workspaceMapTool,
 
-  // Text tools (kept available but de-emphasized)
-  grepTool,
-
-  // Index tools
-  indexSearchTool,
-
-  // Terminal tools
   terminalExecTool,
   sessionSearchOutputTool,
   sessionTailTool,
   sessionRestartTool,
 
-  // Code tools
   searchAstTool,
   applyEditsTargetedTool,
   replaceCallTool,
   replaceConsoleLevelTool,
 
-  // Knowledge Base tools
+  grepTool,
+
   knowledgeBaseSearchTool,
   knowledgeBaseStoreTool,
 ]
-

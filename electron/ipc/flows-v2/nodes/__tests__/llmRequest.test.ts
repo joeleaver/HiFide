@@ -103,7 +103,7 @@ describe('LLM Request Node', () => {
       const message = 'Say "Hello from Gemini!" and nothing else.'
 
       const result = await withFixture(
-        'chat-gemini-simple',
+        'chat-gemini-simple-v2',
         async () => {
           const flow = createMockFlowAPI()
           const inputs = createMockNodeInputs({})

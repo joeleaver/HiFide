@@ -270,31 +270,19 @@ export const readLinesTool: AgentTool = {
         const n = clamp(Number(input.headLines ?? DEFAULT_LINES), 1, MAX_LINES)
         const r = await readHead(abs, encoding, n, maxBytes, timeoutMs)
         const text = r.lines.join(input?.normalizeEol === false ? eolStr : '\n')
-        return {
-          path: rel,
-          text,
-          lineCount: r.lines.length,
-          truncated: !!r.truncated,
-          usedParams: { mode: 'head', headLines: n, path: rel }
-        }
+        return text
       }
 
       if (mode === 'tail') {
         const n = clamp(Number(input.tailLines ?? DEFAULT_LINES), 1, MAX_LINES)
         const r = await readTail(abs, encoding, n, maxBytes, timeoutMs)
         const text = r.lines.join(input?.normalizeEol === false ? eolStr : '\n')
-        return {
-          path: rel,
-          text,
-          lineCount: r.lines.length,
-          truncated: !!r.truncated,
-          usedParams: { mode: 'tail', tailLines: n, path: rel }
-        }
+        return text
       }
 
       if (mode === 'regex') {
         const patt = typeof input.pattern === 'string' ? input.pattern : ''
-        if (!patt) return { path: rel, text: '', lineCount: 0, truncated: false, usedParams: { mode: 'regex', pattern: '', flags: input.flags, path: rel } }
+        if (!patt) return ''
         const r = await readRegex(abs, encoding, {
           pattern: patt,
           flags: input.flags,
@@ -307,7 +295,7 @@ export const readLinesTool: AgentTool = {
           end: input.scanEndLine,
         })
         const ms = Array.isArray(r.matches) ? r.matches : []
-        if (!ms.length) return { path: rel, text: '', lineCount: 0, truncated: false, usedParams: { mode: 'regex', pattern: patt, flags: input.flags, path: rel } }
+        if (!ms.length) return ''
         // Build a single contiguous window covering all matched blocks with their contexts
         let start = Number.MAX_SAFE_INTEGER
         let end = -1
@@ -321,15 +309,7 @@ export const readLinesTool: AgentTool = {
         }
         const r2 = await readRange(abs, encoding, start, end, maxBytes, timeoutMs)
         const text = r2.lines.join(input?.normalizeEol === false ? eolStr : '\n')
-        return {
-          path: rel,
-          text,
-          startLine: start,
-          endLine: end,
-          lineCount: r2.lines.length,
-          truncated: !!r2.truncated,
-          usedParams: { mode: 'regex', pattern: patt, flags: input.flags, scanStartLine: input.scanStartLine, scanEndLine: input.scanEndLine, path: rel }
-        }
+        return text
       }
 
       if (mode === 'around') {
@@ -363,15 +343,7 @@ export const readLinesTool: AgentTool = {
 
         const r = await readRange(abs, encoding, start, end, maxBytes, timeoutMs)
         const text = r.lines.join(input?.normalizeEol === false ? eolStr : '\n')
-        return {
-          path: rel,
-          text,
-          startLine: start,
-          endLine: end,
-          lineCount: r.lines.length,
-          truncated: !!r.truncated,
-          usedParams: { mode: 'around', focusLine: focus, window: win, beforeLines: before, afterLines: after, path: rel }
-        }
+        return text
       }
 
       // range (default)
@@ -393,15 +365,7 @@ export const readLinesTool: AgentTool = {
 
       const r = await readRange(abs, encoding, start, end, maxBytes, timeoutMs)
       const text = r.lines.join(input?.normalizeEol === false ? eolStr : '\n')
-      return {
-        path: rel,
-        text,
-        startLine: start,
-        endLine: end,
-        lineCount: r.lines.length,
-        truncated: !!r.truncated,
-        usedParams: { mode: 'range', startLine: start, endLine: end, path: rel }
-      }
+      return text
     } catch (e: any) {
       return `Error: ${e?.message || String(e)}`
     }

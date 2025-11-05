@@ -1,4 +1,5 @@
 import type { AgentTool } from '../../providers/provider'
+import { sanitizeTerminalOutput, redactOutput } from '../utils'
 
 export const sessionSearchOutputTool: AgentTool = {
   name: 'terminalSessionSearchOutput',
@@ -46,7 +47,9 @@ export const sessionSearchOutputTool: AgentTool = {
         if (pos === -1) break
         const start = Math.max(0, pos - 80)
         const end = Math.min(text.length, pos + q.length + 80)
-        const snippet = text.slice(start, end)
+        const snippetRaw = text.slice(start, end)
+        const snippetSan = sanitizeTerminalOutput(snippetRaw)
+        const snippet = redactOutput(snippetSan).redacted
         results.push({ ...source, pos, snippet })
         idx = pos + q.length
       }

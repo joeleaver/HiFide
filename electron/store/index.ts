@@ -24,6 +24,7 @@ import { createIndexingSlice, type IndexingSlice } from './slices/indexing.slice
 import { createProviderSlice, type ProviderSlice } from './slices/provider.slice'
 import { createSettingsSlice, type SettingsSlice } from './slices/settings.slice'
 import { createToolsSlice, type ToolsSlice } from './slices/tools.slice'
+import { createKanbanSlice, type KanbanSlice } from './slices/kanban.slice'
 // NOTE: Terminal slice is renderer-only (uses xterm which is browser-specific)
 import type { TerminalSlice } from './slices/terminal.slice'
 import { createSessionSlice, type SessionSlice } from './slices/session.slice'
@@ -45,6 +46,7 @@ export type AppStore = ViewSlice &
   ProviderSlice &
   SettingsSlice &
   ToolsSlice &
+  KanbanSlice &
   TerminalSlice &
   SessionSlice &
   FlowEditorSlice &
@@ -79,6 +81,7 @@ export const useMainStore = create<AppStore>()(
         ...createProviderSlice(set, get, store),
         ...createSettingsSlice(set, get, store),
         ...createToolsSlice(set, get, store),
+        ...createKanbanSlice(set as any, get as any, store as any),
         // NOTE: Terminal slice - state management works in main, xterm operations are renderer-only
         agentTerminalTabs: [],
         agentActiveTerminal: null,
@@ -412,4 +415,8 @@ export type {
   OpenedFile,
   AgentMetrics,
   ActivityEvent,
+  KanbanStatus,
+  KanbanTask,
+  KanbanEpic,
+  KanbanBoard,
 } from './types'

@@ -76,6 +76,40 @@ export class Indexer {
     this.useWorkspaceGitignore = opts.useWorkspaceGitignore ?? (this.scanRoot === this.root)
   }
 
+  // Clean up resources (watchers, timers) and release references
+  public dispose() {
+    try { this.stopWatch() } catch {}
+    try { if (this.debounceTimer) { clearTimeout(this.debounceTimer as any); } } catch {}
+    this.debounceTimer = null
+    this.inProgress = false
+    this.cancelled = false
+    this.data = null
+    this.engine = null
+    this.ig = null
+  }
+
+  // Switch to a new workspace root. Optionally override scanRoot/index subdir/mode.
+  public switchRoot(newRoot: string, opts: Partial<IndexerOptions> = {}) {
+    // Stop any active watchers before changing paths
+    try { this.stopWatch() } catch {}
+
+    this.root = newRoot
+    this.scanRoot = opts.scanRoot || newRoot
+
+    const privateDir = path.join(newRoot, '.hifide-private')
+    const sub = opts.indexSubdir || path.basename(this.indexDir) || 'indexes'
+    this.indexDir = path.join(privateDir, sub)
+    try { fs.mkdirSync(this.indexDir, { recursive: true }) } catch {}
+
+    this.indexPath = path.join(this.indexDir, 'meta.json')
+    this.useWorkspaceGitignore = opts.useWorkspaceGitignore ?? (this.scanRoot === this.root)
+    if (opts.mode) this.mode = opts.mode
+
+    // Drop any loaded data; callers should rebuild as needed
+    this.data = null
+    this.ig = null
+  }
+
   status() {
     const exists = fs.existsSync(this.indexPath)
     const elapsedMs = this.progress.startedAt ? Date.now() - this.progress.startedAt : 0

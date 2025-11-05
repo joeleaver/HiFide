@@ -1,33 +1,43 @@
 import type { AgentTool } from '../../providers/provider'
-import { applyLineRangeEditsInternal } from '../utils'
 import { randomUUID } from 'node:crypto'
-
+import { applyEditsPayload } from './applySmartEngine'
 
 export const applyEditsTool: AgentTool = {
   name: 'applyEdits',
-  description: 'Apply sequential, line-based edits to a single file. Provide 1-based startLine/endLine ranges in ascending order; tool normalizes line endings automatically.',
+  description: `Unified file edits. One parameter: payload (string). Auto-detects format; preserves EOL/BOM/indent; respects .gitignore and denylist (.hifide-private/.hifide-public). Always allows create/delete/partial.
+
+Use one of these formats (auto-detected):
+
+1) Search/Replace (recommended)
+File: path/to/file.ts
+<<<<<<< SEARCH
+old code
+=======
+new code
+>>>>>>> REPLACE
+
+2) OpenAI Patch
+*** Begin Patch
+*** Update File: path/to/file.ts
+@@
+-old line
++new line
+
+3) Unified diff (git-style) also accepted.`,
   parameters: {
     type: 'object',
     properties: {
-      path: { type: 'string', description: 'File path relative to workspace' },
-      edits: {
-        type: 'array',
-        description: 'Sequential line ranges to replace (1-based, inclusive)',
-        items: {
-          type: 'object',
-          properties: {
-            startLine: { type: 'integer' },
-            endLine: { type: 'integer' },
-            newText: { type: 'string' },
-          },
-          required: ['startLine', 'endLine', 'newText'],
-        },
-      },
+      payload: { type: 'string', description: 'Raw edit payload (OpenAI Patch, unified diff, or Search/Replace blocks). Provide only the patch content; plain text only (no JSON wrapper, no code fences).' }
     },
-    required: ['path', 'edits'],
+    required: ['payload'],
+    additionalProperties: false
   },
-  run: async ({ path, edits, dryRun }: { path: string; edits: Array<{ startLine: number; endLine: number; newText: string }>; dryRun?: boolean }) => {
-    return await applyLineRangeEditsInternal(path, edits, { dryRun })
+  run: async ({ payload }: { payload: string }) => {
+    try {
+      return await applyEditsPayload(String(payload || ''))
+    } catch (e: any) {
+      return { ok: false, applied: 0, results: [], error: e?.message || String(e) }
+    }
   },
   toModelResult: (raw: any) => {
     if (raw?.fileEditsPreview && Array.isArray(raw.fileEditsPreview)) {

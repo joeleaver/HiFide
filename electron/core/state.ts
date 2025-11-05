@@ -8,7 +8,8 @@
 import { BrowserWindow } from 'electron'
 import Store from 'electron-store'
 import path from 'node:path'
-import type { PtySession, FlowHandle, StreamHandle } from '../types'
+import fs from 'node:fs'
+import fsPromises from 'node:fs/promises'
 import { Indexer } from '../indexing/indexer'
 import { AnthropicAiSdkProvider } from '../providers-ai-sdk/anthropic'
 import { GeminiAiSdkProvider } from '../providers-ai-sdk/gemini'
@@ -67,7 +68,7 @@ export async function getProviderKey(provider: string): Promise<string | null> {
   const { useMainStore } = await import('../store')
   const state = useMainStore.getState()
 
-  // Try Zustand store first (primary storage)
+  // 1) Try Zustand store first (primary storage)
   const keys = state.settingsApiKeys
   if (keys) {
     if (provider === 'openai' && keys.openai?.trim()) return keys.openai
@@ -77,49 +78,27 @@ export async function getProviderKey(provider: string): Promise<string | null> {
     if (provider === 'xai' && (keys as any).xai?.trim()) return (keys as any).xai
   }
 
-  // Fallback to legacy electron-store for migration (no legacy for xai)
-  const keyName = provider === 'anthropic' ? 'anthropic' : provider === 'gemini' ? 'gemini' : provider === 'fireworks' ? 'fireworks' : 'openai'
-  const stored = legacySecureStore.get(keyName) as string | undefined
-  if (stored) {
-    // Migrate to new system
-    if (provider === 'openai') state.setOpenAiApiKey(stored)
-    if (provider === 'anthropic') state.setAnthropicApiKey(stored)
-    if (provider === 'gemini') state.setGeminiApiKey(stored)
-    if (provider === 'fireworks') (state as any).setFireworksApiKey?.(stored)
-    // Remove from legacy storage
-    legacySecureStore.delete(keyName)
-    return stored
-  }
+  // 2) Fallback: environment variables
+  try {
+    const envMap: Record<string, string> = {
+      openai: 'OPENAI_API_KEY',
+      anthropic: 'ANTHROPIC_API_KEY',
+      gemini: 'GEMINI_API_KEY',
+      fireworks: 'FIREWORKS_API_KEY',
+      xai: 'XAI_API_KEY',
+    }
+    const envVar = envMap[provider]
+    if (envVar && process?.env?.[envVar]?.trim()) return process.env[envVar]!
+  } catch {}
 
-  // Try environment variables
-  const env = process.env
-  if (provider === 'openai' && env?.OPENAI_API_KEY) return env.OPENAI_API_KEY
-  if (provider === 'anthropic' && env?.ANTHROPIC_API_KEY) return env.ANTHROPIC_API_KEY
-  if (provider === 'gemini' && (env?.GEMINI_API_KEY || env?.GOOGLE_API_KEY)) {
-    return env.GEMINI_API_KEY || env.GOOGLE_API_KEY || null
-  }
-  if (provider === 'fireworks' && env?.FIREWORKS_API_KEY) return env.FIREWORKS_API_KEY
-  if (provider === 'xai' && (env as any)?.XAI_API_KEY) return (env as any).XAI_API_KEY
+  // 3) Fallback: legacy secure store (migration)
+  try {
+    const legacy = legacySecureStore.get(provider)
+    if (typeof legacy === 'string' && legacy.trim()) return legacy
+  } catch {}
 
   return null
 }
-
-
-
-/**
- * PTY sessions map (sessionId -> session info)
- */
-export const ptySessions = new Map<string, PtySession>()
-
-/**
- * Inflight LLM request handles (requestId -> stream handle)
- */
-export const inflightRequests = new Map<string, StreamHandle>()
-
-/**
- * Inflight flow execution handles (requestId -> flow handle)
- */
-export const inflightFlows = new Map<string, FlowHandle>()
 
 /**
  * Provider capability registry
@@ -127,9 +106,73 @@ export const inflightFlows = new Map<string, FlowHandle>()
 export const providerCapabilities: Record<string, Record<string, boolean>> = {
   openai: { tools: true, jsonSchema: true, vision: false, streaming: true },
   anthropic: { tools: true, jsonSchema: false, vision: false, streaming: true },
-  gemini: { tools: true, jsonSchema: true, vision: true, streaming: true },
+  gemini: { tools: true, jsonSchema: false, vision: true, streaming: true },
   fireworks: { tools: true, jsonSchema: true, vision: false, streaming: true },
   xai: { tools: true, jsonSchema: true, vision: false, streaming: true },
+}
+
+/**
+ * Kanban board filesystem watcher state
+ */
+let kanbanWatcher: fs.FSWatcher | null = null
+let kanbanWatchedDir: string | null = null
+let kanbanWatcherDebounce: NodeJS.Timeout | null = null
+
+function scheduleKanbanReload(): void {
+  if (kanbanWatcherDebounce) {
+    clearTimeout(kanbanWatcherDebounce)
+  }
+  kanbanWatcherDebounce = setTimeout(() => {
+    void triggerKanbanReload()
+  }, 200)
+}
+
+async function triggerKanbanReload(): Promise<void> {
+  try {
+    const { useMainStore } = await import('../store/index.js')
+    const state = useMainStore.getState() as any
+    if (typeof state.kanbanRefreshFromDisk === 'function') {
+      await state.kanbanRefreshFromDisk()
+    }
+  } catch (error) {
+    console.error('[kanban] Failed to refresh board after filesystem update:', error)
+  }
+}
+
+export async function startKanbanWatcher(workspaceRoot: string): Promise<void> {
+  const dir = path.join(workspaceRoot, '.hifide-public', 'kanban')
+  if (kanbanWatchedDir === dir && kanbanWatcher) return
+
+  stopKanbanWatcher()
+
+  try {
+    await fsPromises.mkdir(dir, { recursive: true })
+    kanbanWatcher = fs.watch(dir, (eventType, filename) => {
+      if (!filename || filename.toString() !== 'board.json') return
+      if (eventType === 'rename' || eventType === 'change') {
+        scheduleKanbanReload()
+      }
+    })
+    kanbanWatchedDir = dir
+  } catch (error) {
+    console.error('[kanban] Failed to start filesystem watcher:', error)
+  }
+}
+
+export function stopKanbanWatcher(): void {
+  if (kanbanWatcher) {
+    try {
+      kanbanWatcher.close()
+    } catch (error) {
+      console.error('[kanban] Failed to stop filesystem watcher:', error)
+    }
+  }
+  kanbanWatcher = null
+  kanbanWatchedDir = null
+  if (kanbanWatcherDebounce) {
+    clearTimeout(kanbanWatcherDebounce)
+    kanbanWatcherDebounce = null
+  }
 }
 
 /**
@@ -159,7 +202,9 @@ let kbIndexer: Indexer | null = null
 export async function getIndexer(): Promise<Indexer> {
   if (!indexer) {
     const { useMainStore } = await import('../store/index.js')
-    indexer = new Indexer(useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd())
+    indexer = new Indexer(
+      useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd(),
+    )
   }
   return indexer
 }
@@ -170,19 +215,44 @@ export async function getIndexer(): Promise<Indexer> {
 export async function getKbIndexer(): Promise<Indexer> {
   if (!kbIndexer) {
     const { useMainStore } = await import('../store/index.js')
-    const workspaceRoot = useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+    const workspaceRoot =
+      useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
     const kbRoot = path.join(workspaceRoot, '.hifide-public', 'kb')
-    kbIndexer = new Indexer(workspaceRoot, { scanRoot: kbRoot, indexSubdir: 'indexes-kb', useWorkspaceGitignore: false, mode: 'kb' })
+    // KB indexing scans the KB folder but treats workspace root as canonical root for paths
+    kbIndexer = new Indexer(workspaceRoot, {
+      scanRoot: kbRoot,
+      indexSubdir: 'kb-index',
+      useWorkspaceGitignore: false,
+      mode: 'kb',
+    })
   }
   return kbIndexer
 }
-
 
 /**
  * Reset the indexer (used when workspace root changes)
  */
 export function resetIndexer(): void {
+  if (indexer) {
+    try {
+      indexer.dispose()
+    } catch (error) {
+      console.error('[indexer] Failed to dispose existing indexer:', error)
+    }
+  }
   indexer = null
-  kbIndexer = null
 }
 
+/**
+ * Reset the KB indexer (used when workspace root changes)
+ */
+export function resetKbIndexer(): void {
+  if (kbIndexer) {
+    try {
+      kbIndexer.dispose()
+    } catch (error) {
+      console.error('[indexer] Failed to dispose existing KB indexer:', error)
+    }
+  }
+  kbIndexer = null
+}

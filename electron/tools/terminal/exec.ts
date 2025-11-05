@@ -3,6 +3,7 @@ import { getWebContents } from '../../core/state'
 
 import { useMainStore } from '../../store/index'
 import path from 'node:path'
+import { sanitizeTerminalOutput, redactOutput } from '../utils'
 
 export const terminalExecTool: AgentTool = {
   name: 'terminalExec',
@@ -119,21 +120,30 @@ export const terminalExecTool: AgentTool = {
       }
 
       const raw = (idx != null && rec.state.commands[idx]) ? rec.state.commands[idx].data : String(rec.state.ring)
-      const text = raw.slice(-tailBytes)
-      const truncated = text.length < raw.length
+      const textRaw = raw.slice(-tailBytes)
+      const textSanitized = sanitizeTerminalOutput(textRaw)
+      const text = redactOutput(textSanitized).redacted
+      const truncated = textRaw.length < raw.length
       const durationMs = Date.now() - capStart
       const complete = Date.now() - lastChange > idleMs
 
       // Return session info along with execution confirmation and captured output
       const state = rec.state
-      const lastCmds = state.commands.slice(-5).map((c: any) => ({
-        id: c.id,
-        command: c.command.slice(0, 200),
-        startedAt: c.startedAt,
-        endedAt: c.endedAt,
-        bytes: c.bytes,
-        tail: c.data.slice(-200)
-      }))
+      const lastCmds = state.commands.slice(-5).map((c: any) => {
+        const cmd = redactOutput(sanitizeTerminalOutput(c.command.slice(0, 200))).redacted
+        const tail = redactOutput(sanitizeTerminalOutput(c.data.slice(-200))).redacted
+        return {
+          id: c.id,
+          command: cmd,
+          startedAt: c.startedAt,
+          endedAt: c.endedAt,
+          bytes: c.bytes,
+          tail
+        }
+      })
+
+      const liveTailRaw = state.ring.slice(-400)
+      const liveTail = redactOutput(sanitizeTerminalOutput(liveTailRaw)).redacted
 
       const result = {
         ok: true,
@@ -142,7 +152,7 @@ export const terminalExecTool: AgentTool = {
         cwd: rec.cwd,
         commandCount: state.commands.length,
         lastCommands: lastCmds,
-        liveTail: state.ring.slice(-400),
+        liveTail,
         captured: { text, bytes: lastBytes, truncated, durationMs, complete }
       }
       console.log('[terminal.exec] Returning result:', { ok: result.ok, sessionId: result.sessionId, commandCount: result.commandCount, complete })

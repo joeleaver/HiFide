@@ -1,21 +1,14 @@
 /**
  * Menu and window control IPC handlers
- * 
- * Handles application menu building and window controls
  */
 
 import type { IpcMain, MenuItemConstructorOptions } from 'electron'
-import { app, BrowserWindow, Menu, shell } from 'electron'
+import { BrowserWindow, Menu, shell } from 'electron'
 import { getWindow, windowStateStore } from '../core/state'
+import type { ViewType } from '../store/types'
 
-/**
- * Current view for menu state
- */
-let currentViewForMenu: 'agent' | 'explorer' | 'sourceControl' | 'terminal' | 'settings' | 'flowEditor' = 'agent'
+let currentViewForMenu: ViewType = 'agent'
 
-/**
- * Menu references for popup
- */
 const menuRefs: {
   file?: Electron.Menu
   edit?: Electron.Menu
@@ -24,13 +17,25 @@ const menuRefs: {
   help?: Electron.Menu
 } = {}
 
-/**
- * Build the application menu
- */
+const VIEW_SHORTCUTS: Array<{ view: ViewType; label: string; accelerator: string; channel: string }> = [
+  { view: 'agent', label: 'Chat', accelerator: process.platform === 'darwin' ? 'Cmd+1' : 'Ctrl+1', channel: 'menu:open-chat' },
+  { view: 'flowEditor' as ViewType, label: 'Flow Editor', accelerator: process.platform === 'darwin' ? 'Cmd+2' : 'Ctrl+2', channel: 'menu:open-flow-editor' },
+  { view: 'kanban', label: 'Kanban Board', accelerator: process.platform === 'darwin' ? 'Cmd+3' : 'Ctrl+3', channel: 'menu:open-kanban' },
+  { view: 'settings', label: 'Settings', accelerator: process.platform === 'darwin' ? 'Cmd+,' : 'Ctrl+,', channel: 'menu:open-settings' },
+]
+
+function sendMenuEvent(channel: string, ...args: any[]) {
+  const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
+  wc?.send(channel, ...args)
+}
+
+export function setCurrentViewForMenu(view: ViewType) {
+  currentViewForMenu = view
+}
+
 export function buildMenu(): void {
   const isMac = process.platform === 'darwin'
 
-  // Get recent folders from window state store
   let recentFolders: Array<{ path: string; lastOpened: number }> = []
   try {
     const stored = windowStateStore.get('recentFolders')
@@ -40,102 +45,34 @@ export function buildMenu(): void {
   } catch {}
 
   const template: MenuItemConstructorOptions[] = [
-    ...(isMac ? [{ role: 'appMenu' as const }] : []),
+    ...(isMac ? ([{ role: 'appMenu' as const }] as MenuItemConstructorOptions[]) : []),
     {
       label: 'File',
       submenu: [
-        // Flow Editor specific menu items
-        ...(currentViewForMenu === 'flowEditor' ? [
-          {
-            label: 'New Flow',
-            accelerator: isMac ? 'Cmd+N' : 'Ctrl+N',
-            click: () => {
-              const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-              wc?.send('menu:flow-new')
-            },
-          },
-          {
-            label: 'Open Flow...',
-            accelerator: isMac ? 'Cmd+O' : 'Ctrl+O',
-            click: () => {
-              const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-              wc?.send('menu:flow-open')
-            },
-          },
-          {
-            label: 'Save Flow',
-            accelerator: isMac ? 'Cmd+S' : 'Ctrl+S',
-            click: () => {
-              const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-              wc?.send('menu:flow-save')
-            },
-          },
-          {
-            label: 'Save Flow As...',
-            accelerator: isMac ? 'Cmd+Shift+S' : 'Ctrl+Shift+S',
-            click: () => {
-              const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-              wc?.send('menu:flow-save-as')
-            },
-          },
-          { type: 'separator' as const },
-        ] : []),
-        // Agent view specific menu items
-        ...(currentViewForMenu === 'agent' ? [
-          {
-            label: 'Import Flow...',
-            accelerator: isMac ? 'Cmd+I' : 'Ctrl+I',
-            click: () => {
-              const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-              wc?.send('menu:import-flow')
-            },
-          },
-          {
-            label: 'Export Flow...',
-            accelerator: isMac ? 'Cmd+E' : 'Ctrl+E',
-            click: () => {
-              const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-              wc?.send('menu:export-flow')
-            },
-          },
-          { type: 'separator' as const },
-        ] : []),
-        // Standard menu items for other views
-        ...(currentViewForMenu !== 'flowEditor' ? [
-          {
-            label: 'Open Folder...',
-            accelerator: isMac ? 'Cmd+O' : 'Ctrl+O',
-            click: () => {
-              const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-              wc?.send('menu:open-folder')
-            },
-          },
-          {
-            label: 'Open Recent',
-            submenu: recentFolders.length > 0
-              ? [
-                  ...recentFolders.map(folder => ({
-                    label: folder.path,
-                    click: () => {
-                      const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-                      wc?.send('menu:open-recent-folder', folder.path)
-                    },
-                  })),
-                  { type: 'separator' as const },
-                  {
-                    label: 'Clear Recently Opened',
-                    click: () => {
-                      const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-                      wc?.send('menu:clear-recent-folders')
-                    },
-                  },
-                ]
-              : [{ label: 'No Recent Folders', enabled: false }],
-          },
-          { type: 'separator' as const },
-        ] : []),
+        {
+          label: 'Open Folder…',
+          accelerator: isMac ? 'Cmd+O' : 'Ctrl+O',
+          click: () => sendMenuEvent('menu:open-folder'),
+        },
+        {
+          label: 'Open Recent',
+          submenu:
+            recentFolders.length > 0
+              ? (recentFolders.map((folder) => ({
+                  label: folder.path,
+                  click: () => sendMenuEvent('menu:open-recent-folder', folder.path),
+                })) as MenuItemConstructorOptions[])
+              : ([{ label: 'No Recent Folders', enabled: false }] as MenuItemConstructorOptions[]),
+        },
+        { type: 'separator' },
+        {
+          label: 'Close Workspace',
+          accelerator: isMac ? 'Cmd+Shift+W' : 'Ctrl+Shift+W',
+          click: () => sendMenuEvent('menu:close-workspace'),
+        },
+        { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' },
-      ],
+      ] as MenuItemConstructorOptions[],
     },
     {
       label: 'Edit',
@@ -147,141 +84,114 @@ export function buildMenu(): void {
         { role: 'copy' },
         { role: 'paste' },
         { role: 'selectAll' },
-      ],
+      ] as MenuItemConstructorOptions[],
     },
     {
       label: 'View',
       submenu: [
-        {
-          label: 'Chat',
-          accelerator: isMac ? 'Cmd+1' : 'Ctrl+1',
-          click: () => {
-            const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-            wc?.send('menu:open-chat')
-          },
-        },
-        {
-          label: 'Flow Editor',
-          accelerator: isMac ? 'Cmd+2' : 'Ctrl+2',
-          click: () => {
-            const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-            wc?.send('menu:open-flow-editor')
-          },
-        },
-        {
-          label: 'Settings',
-          accelerator: isMac ? 'Cmd+,' : 'Ctrl+,',
-          click: () => {
-            const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-            wc?.send('menu:open-settings')
-          },
-        },
+        ...VIEW_SHORTCUTS.map((entry) => ({
+          label: entry.label,
+          accelerator: entry.accelerator,
+          type: 'checkbox' as const,
+          checked: currentViewForMenu === entry.view,
+          click: () => sendMenuEvent(entry.channel),
+        })),
+        { type: 'separator' },
         {
           label: 'Toggle Terminal Panel',
           accelerator: isMac ? 'Cmd+`' : 'Ctrl+`',
           enabled: currentViewForMenu === 'explorer',
-          click: () => {
-            const wc = BrowserWindow.getFocusedWindow()?.webContents || getWindow()?.webContents
-            wc?.send('menu:toggle-terminal-panel')
-          },
+          click: () => sendMenuEvent('menu:toggle-terminal-panel'),
         },
         { type: 'separator' },
         { role: 'reload' },
         { role: 'forceReload' },
-        ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' as const }]),
+        { role: 'toggleDevTools' },
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },
         { role: 'zoomOut' },
+        { type: 'separator' },
         { role: 'togglefullscreen' },
-      ],
+      ] as MenuItemConstructorOptions[],
     },
     {
-      role: 'windowMenu' as const,
+      label: 'Window',
+      role: 'window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        ...(isMac
+          ? ([{ type: 'separator' as const }, { role: 'front' }] as MenuItemConstructorOptions[])
+          : ([{ role: 'close' }] as MenuItemConstructorOptions[])),
+      ] as MenuItemConstructorOptions[],
     },
     {
       label: 'Help',
       submenu: [
         {
           label: 'Learn More',
-          click: async () => {
-            await shell.openExternal('https://electronjs.org')
-          },
+          click: () => shell.openExternal('https://github.com/joeleaver/HiFide'),
         },
-      ],
+      ] as MenuItemConstructorOptions[],
     },
   ]
 
-  const appMenu = Menu.buildFromTemplate(template)
-  Menu.setApplicationMenu(appMenu)
+  const menu = Menu.buildFromTemplate(template)
+  Menu.setApplicationMenu(menu)
 
-  // Cache submenus for popup (Windows/Linux). On macOS we still allow popup for consistency.
-  const items = appMenu.items
-  menuRefs.file = items.find(i => i.label === 'File')?.submenu || menuRefs.file
-  menuRefs.edit = items.find(i => i.label === 'Edit')?.submenu || menuRefs.edit
-  menuRefs.view = items.find(i => i.label === 'View')?.submenu || menuRefs.view
-  menuRefs.window = items.find(i => i.role === 'windowMenu')?.submenu || items.find(i => i.label === 'Window')?.submenu || menuRefs.window
-  menuRefs.help = items.find(i => i.label === 'Help')?.submenu || menuRefs.help
+  menuRefs.file = menu.items.find((item) => item.label === 'File')?.submenu ?? undefined
+  menuRefs.edit = menu.items.find((item) => item.label === 'Edit')?.submenu ?? undefined
+  menuRefs.view = menu.items.find((item) => item.label === 'View')?.submenu ?? undefined
+  menuRefs.window = menu.items.find((item) => item.label === 'Window')?.submenu ?? undefined
+  menuRefs.help = menu.items.find((item) => item.label === 'Help')?.submenu ?? undefined
 }
 
-/**
- * Register menu and window control IPC handlers
- */
-export function registerMenuHandlers(ipcMain: IpcMain): void {
-  /**
-   * Popup a menu at specified coordinates
-   */
-  ipcMain.handle('menu:popup', (_e, args: { menu: 'file' | 'edit' | 'view' | 'window' | 'help'; x?: number; y?: number }) => {
-    const m = menuRefs[args.menu]
-    const win = getWindow()
-    if (!win || !m) return
+export function registerMenuHandlers(ipc: IpcMain) {
+  ipc.handle('menu:get-current-view', () => currentViewForMenu)
+  ipc.handle('menu:set-view', (_event, view: ViewType) => {
+    setCurrentViewForMenu(view)
+    buildMenu()
+  })
 
-    // Position menu below the menu item
-    if (args.x !== undefined && args.y !== undefined) {
-      m.popup({ window: win, x: Math.round(args.x), y: Math.round(args.y) })
+  // Also support renderer-side app.setView bridge
+  ipc.handle('app:set-view', (_event, view: ViewType) => {
+    setCurrentViewForMenu(view)
+    buildMenu()
+  })
+
+  ipc.handle('menu:popup', (event, menuOrArgs: any, x?: number, y?: number) => {
+    let name: keyof typeof menuRefs | undefined
+    let px: number | undefined
+    let py: number | undefined
+
+    // Support both positional args and single-object payload
+    if (menuOrArgs && typeof menuOrArgs === 'object' && typeof menuOrArgs.menu === 'string') {
+      name = menuOrArgs.menu as keyof typeof menuRefs
+      px = Number(menuOrArgs.x)
+      py = Number(menuOrArgs.y)
     } else {
-      m.popup({ window: win })
+      name = menuOrArgs as keyof typeof menuRefs
+      px = x
+      py = y
     }
-  })
 
-  /**
-   * Update menu item enablement when renderer view changes
-   */
-  ipcMain.handle('app:set-view', (_e, view: 'agent' | 'explorer' | 'sourceControl' | 'terminal' | 'settings' | 'flowEditor') => {
-    currentViewForMenu = view
-    buildMenu() // Rebuild menu to show/hide contextual items
-    const appMenu = Menu.getApplicationMenu()
-    const viewMenu = appMenu?.items.find(i => i.label === 'View')?.submenu
-    const toggleItem = viewMenu?.items.find(i => i.label === 'Toggle Terminal Panel')
-    if (toggleItem) {
-      toggleItem.enabled = view === 'explorer'
+    const submenu = name ? menuRefs[name] : undefined
+    if (submenu) {
+      const ox = (typeof px === 'number' && Number.isFinite(px)) ? Math.round(px) : undefined
+      const oy = (typeof py === 'number' && Number.isFinite(py)) ? Math.round(py) : undefined
+      const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
+      // Only include x/y if valid to avoid NativeConversion errors on Windows
+      const opts: any = { window: win }
+      if (typeof ox === 'number') opts.x = ox
+      if (typeof oy === 'number') opts.y = oy
+      submenu.popup(opts)
     }
-  })
-
-  /**
-   * Window controls
-   */
-  ipcMain.handle('window:minimize', () => {
-    getWindow()?.minimize()
-  })
-
-  ipcMain.handle('window:maximize', () => {
-    const win = getWindow()
-    if (!win) return
-    if (win.isMaximized()) {
-      win.unmaximize()
-    } else {
-      win.maximize()
-    }
-    return win.isMaximized()
-  })
-
-  ipcMain.handle('window:close', () => {
-    getWindow()?.close()
-  })
-
-  ipcMain.handle('window:isMaximized', () => {
-    return getWindow()?.isMaximized()
   })
 }
 
+export function unregisterMenuHandlers(ipc: IpcMain) {
+  ipc.removeHandler('menu:get-current-view')
+  ipc.removeHandler('menu:set-view')
+  ipc.removeHandler('menu:popup')
+}

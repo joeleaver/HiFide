@@ -1,5 +1,7 @@
 import { ScrollArea, Text, Stack, Group } from '@mantine/core'
 import { useAppStore, useDispatch, selectSessions, selectCurrentId } from '../store'
+import type { Session, TokenUsage } from '../store'
+
 import { useUiStore } from '../store/ui'
 import { useEffect } from 'react'
 import CollapsiblePanel from './CollapsiblePanel'
@@ -31,10 +33,9 @@ export default function TokensCostsPanel() {
   const currentSession = sessions.find((sess) => sess.id === currentId)
 
   const total = currentSession?.tokenUsage.total || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
-  const byProvider = currentSession?.tokenUsage.byProvider || {}
-  const byProviderAndModelTokens = (currentSession?.tokenUsage as any)?.byProviderAndModel || {}
-
-  const costs = currentSession?.costs || { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }
+  const byProvider = currentSession?.tokenUsage.byProvider ?? ({} as Record<string, TokenUsage>)
+  const byProviderAndModelTokens: Record<string, Record<string, TokenUsage>> = currentSession?.tokenUsage.byProviderAndModel ?? {}
+  const costs = (currentSession?.costs ?? { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }) as Session['costs']
   const { totalCost, byProviderAndModel } = costs
   const hasUsage = total.totalTokens > 0
 
@@ -119,7 +120,7 @@ export default function TokensCostsPanel() {
                       {Object.entries(models).map(([model, cost]) => {
                         // Get token usage for this provider/model combination
                         const providerUsage = byProvider[provider]
-                        const perModelUsage = (byProviderAndModelTokens as any)?.[provider]?.[model]
+                        const perModelUsage = byProviderAndModelTokens?.[provider]?.[model]
 
                         return (
                           <div key={`${provider}-${model}`} style={{ marginBottom: '6px' }}>
