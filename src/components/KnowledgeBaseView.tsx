@@ -150,7 +150,7 @@ export default function KnowledgeBaseView() {
               <TextInput label="Title" value={title} onChange={(e) => setTitle(e.currentTarget.value)} />
             </div>
             <div style={{ flex: 1, minHeight: 0 }}>
-              <div data-theme="dark" style={{ height: '100%' }}>
+              <div data-theme="dark" style={{ height: '100%', overflow: 'auto' }}>
                 <MDXEditor
                   key={selectedId || 'new'}
                   ref={editorRef}

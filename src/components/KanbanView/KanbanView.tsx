@@ -128,14 +128,11 @@ export default function KanbanView() {
     const toIndex = destination.index
 
     try {
-      const res = await dispatch('kanbanMoveTask', {
+      await dispatch('kanbanMoveTask', {
         taskId: draggableId,
         toStatus,
         toIndex,
       })
-      if (!res?.ok) {
-        throw new Error('Move rejected')
-      }
     } catch (err) {
       console.error('[kanban] move failed:', err)
       notifications.show({ color: 'red', title: 'Move failed', message: 'Unable to move task. Please try again.' })
@@ -302,8 +299,6 @@ export default function KanbanView() {
             <Droppable droppableId={status} key={status}>
               {(provided, snapshot) => (
                 <Paper
-                  ref={provided.innerRef}
-                  {...provided.droppableProps}
                   withBorder
                   radius="md"
                   p="sm"
@@ -330,7 +325,11 @@ export default function KanbanView() {
                     </ActionIcon>
                   </Group>
 
-                  <ScrollArea style={{ flex: 1, marginTop: 12 }} type="auto">
+                  <div
+                    ref={provided.innerRef}
+                    {...provided.droppableProps}
+                    style={{ flex: 1, marginTop: 12, overflowY: 'auto' }}
+                  >
                     <Stack gap="sm">
                       {tasksByStatus[status].map((task, index) => (
                         <Draggable draggableId={task.id} index={index} key={task.id}>
@@ -353,7 +352,7 @@ export default function KanbanView() {
                         </Box>
                       )}
                     </Stack>
-                  </ScrollArea>
+                  </div>
                 </Paper>
               )}
             </Droppable>
@@ -411,6 +410,7 @@ function KanbanTaskCard({ task, epic, provided, dragging, onEdit, onDelete }: Ka
         backgroundColor: dragging ? 'rgba(57, 147, 255, 0.18)' : 'rgba(20,20,20,0.9)',
         boxShadow: dragging ? '0 8px 20px rgba(0,0,0,0.35)' : 'none',
         cursor: 'grab',
+        ...(provided.draggableProps.style as any),
       }}
     >
       <Group justify="space-between" align="flex-start" gap="sm">
