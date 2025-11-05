@@ -134,8 +134,8 @@ export default function FlowNode(props: NodeProps<any>) {
           costUSD={costUSD}
         />
 
-        {/* Expandable Config Section */}
-        {expanded && (
+        {/* Expandable Config Section (always show for readFile to make picker obvious) */}
+        {(expanded || nodeType === 'readFile') && (
           <NodeConfig
             nodeId={id}
             nodeType={nodeType}

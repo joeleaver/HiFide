@@ -905,7 +905,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
             const newNode: FlowNode = {
               id,
               type: 'hifiNode',
-              data: { nodeType, label, labelBase: label, config: defaultConfig },
+              data: { nodeType, label, labelBase: label, config: defaultConfig, expanded: nodeType === 'readFile' },
               position,
             }
 

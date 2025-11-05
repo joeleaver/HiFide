@@ -130,11 +130,20 @@ export const defaultContextStartNode: NodeFunction = async (flow, context, _data
     })
   }
 
-  const systemInstructions = (config as any)?.systemInstructions
+  const systemInstructionsFromConfig = (config as any)?.systemInstructions
   const temperature = (config as any)?.temperature as number | undefined
   const reasoningEffort = (config as any)?.reasoningEffort as ('low'|'medium'|'high') | undefined
   const includeThoughts = !!(config as any)?.includeThoughts
   const thinkingBudget = (config as any)?.thinkingBudget as number | undefined
+
+  // Prefer dynamic input if connected, otherwise fall back to config
+  let systemInstructions = systemInstructionsFromConfig
+  if (inputs.has('systemInstructionsIn')) {
+    try {
+      const v = await inputs.pull('systemInstructionsIn')
+      if (typeof v === 'string') systemInstructions = v
+    } catch {}
+  }
 
   // Always override provider/model with global selection
   const provider = flow.store?.selectedProvider || 'openai'

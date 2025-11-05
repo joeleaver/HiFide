@@ -1089,13 +1089,22 @@ class LLMService {
             }
           : { inputTokens: calcInput, outputTokens: calcOutput, totalTokens: calcInput + calcOutput, cachedInputTokens: 0 })
 
-      // Cost estimate (provider-aware)
+      // Cost estimate (provider-aware; includes cached input at reduced rate)
       let costEstimate: number | undefined
       try {
         const rateTable: any = (DEFAULT_PRICING as any)[provider] || {}
         const rate = rateTable?.[model]
         if (rate) {
-          costEstimate = (totals.inputTokens / 1_000_000) * rate.inputCostPer1M + (totals.outputTokens / 1_000_000) * rate.outputCostPer1M
+          const cached = Math.max(0, Number((totals as any).cachedInputTokens || 0))
+          const input = Math.max(0, Number((totals as any).inputTokens || 0))
+          const normalInput = Math.max(0, input)
+          const providerId = String(provider || '').toLowerCase()
+          const cachedPer1M = typeof (rate as any).cachedInputCostPer1M === 'number'
+            ? (rate as any).cachedInputCostPer1M
+            : (providerId === 'openai' ? rate.inputCostPer1M * 0.10 : rate.inputCostPer1M)
+          costEstimate = (normalInput / 1_000_000) * rate.inputCostPer1M
+            + (cached / 1_000_000) * cachedPer1M
+            + (Number((totals as any).outputTokens || 0) / 1_000_000) * rate.outputCostPer1M
         }
       } catch {}
 

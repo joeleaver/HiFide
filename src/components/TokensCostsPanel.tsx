@@ -37,7 +37,7 @@ export default function TokensCostsPanel() {
   const byProviderAndModelTokens: Record<string, Record<string, TokenUsage>> = currentSession?.tokenUsage.byProviderAndModel ?? {}
   const costs = (currentSession?.costs ?? { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }) as Session['costs']
   const { totalCost, byProviderAndModel } = costs
-  const hasUsage = total.totalTokens > 0
+  const hasUsage = (total.totalTokens > 0) || ((total.cachedTokens || 0) > 0)
 
   return (
     <CollapsiblePanel
@@ -78,7 +78,7 @@ export default function TokensCostsPanel() {
                   <span style={{ color: '#81c784' }}>{total.outputTokens.toLocaleString()}</span>
                   <span style={{ color: '#666' }}> out</span>
                   <span style={{ color: '#666' }}> = </span>
-                  <span style={{ color: '#fff' }}>{total.totalTokens.toLocaleString()}</span>
+                  <span style={{ color: '#fff' }}>{(total.inputTokens + (total.cachedTokens || 0) + total.outputTokens).toLocaleString()}</span>
                 </Text>
               </Group>
               {totalCost > 0 && (
@@ -146,6 +146,13 @@ export default function TokensCostsPanel() {
                                 (${Number(cost.inputCost ?? 0).toFixed(4)} in + ${Number(cost.outputCost ?? 0).toFixed(4)} out)
                               </Text>
                             </Group>
+                            {(((perModelUsage?.cachedTokens || 0) > 0) || (cost as any)?.cachedInputCost) ? (
+                              <Group gap="xs" ml="md">
+                                <Text size="xs" c="dimmed" style={{ minWidth: '50px' }}>Cached:</Text>
+                                <Text size="xs" c="#968c7fff">{(perModelUsage?.cachedTokens || 0).toLocaleString()}</Text>
+                                <Text size="xs" c="#4ade80">${Number((cost as any)?.cachedInputCost || 0).toFixed(4)}</Text>
+                              </Group>
+                            ) : null}
                           </div>
                         )
                       })}
@@ -191,8 +198,26 @@ export default function TokensCostsPanel() {
                           return (
                             <tr key={`${r.requestId}:${r.nodeId}:${r.executionId}:${idx}`} style={{ borderBottom: '1px solid #222' }}>
                               <td style={{ padding: '4px 8px', color: '#888' }}>{r.provider} / {r.model}</td>
-                              <td style={{ padding: '4px 8px', textAlign: 'right', color: '#4fc3f7' }}>{Number(input).toLocaleString()}</td>
-                              <td style={{ padding: '4px 8px', textAlign: 'right', color: '#4ade80' }}>${Number(inputCost).toFixed(4)}</td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right' }}>
+                                {Number(r?.usage?.cachedTokens || 0) > 0 ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
+                                    <span style={{ color: '#4fc3f7' }}>{Number(input).toLocaleString()}</span>
+                                    <span style={{ color: '#968c7fff' }}>{Number(r?.usage?.cachedTokens || 0).toLocaleString()}</span>
+                                  </div>
+                                ) : (
+                                  <span style={{ color: '#4fc3f7' }}>{Number(input).toLocaleString()}</span>
+                                )}
+                              </td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right' }}>
+                                {Number(r?.usage?.cachedTokens || 0) > 0 || Number((r?.cost?.cachedInputCost || 0)) > 0 ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
+                                    <span style={{ color: '#4ade80' }}>${Number(Math.max(0, (inputCost - (r?.cost?.cachedInputCost || 0)))).toFixed(4)}</span>
+                                    <span style={{ color: '#968c7fff' }}>${Number(r?.cost?.cachedInputCost || 0).toFixed(4)}</span>
+                                  </div>
+                                ) : (
+                                  <span style={{ color: '#4ade80' }}>${Number(inputCost).toFixed(4)}</span>
+                                )}
+                              </td>
                               <td style={{ padding: '4px 8px', textAlign: 'right', color: '#81c784' }}>{Number(output).toLocaleString()}</td>
                               <td style={{ padding: '4px 8px', textAlign: 'right', color: '#4ade80' }}>${Number(outputCost).toFixed(4)}</td>
                             </tr>

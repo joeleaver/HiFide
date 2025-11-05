@@ -19,6 +19,45 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
   const selectedProvider = useAppStore((s) => s.selectedProvider)
   const selectedModel = useAppStore((s) => s.selectedModel)
   const dispatch = useDispatch()
+  const isSysInConnected = useMemo(() => {
+    return feEdges.some((e: any) => e.target === nodeId && e.targetHandle === 'systemInstructionsIn')
+  }, [feEdges, nodeId])
+
+  // readFile config state (top-level to respect hooks rules)
+  const workspaceRoot = useAppStore((s) => s.workspaceRoot)
+  const workspaceFiles = useAppStore((s) => s.kbWorkspaceFiles) || []
+  const [rfPickerOpen, setRfPickerOpen] = useState(false)
+  const [rfPickerQuery, setRfPickerQuery] = useState('')
+  const [rfPickerIndex, setRfPickerIndex] = useState(0)
+  const filtered = useMemo(() => {
+    const q = rfPickerQuery.trim().toLowerCase()
+    if (!q) return workspaceFiles.slice(0, 200)
+    const arr = workspaceFiles.filter((p: string) => p.toLowerCase().includes(q))
+    return arr.slice(0, 200)
+  }, [workspaceFiles, rfPickerQuery])
+  useEffect(() => {
+    if (rfPickerOpen) {
+      if (!workspaceFiles.length) dispatch('kbRefreshWorkspaceFileIndex')
+      setRfPickerIndex(0)
+    }
+  }, [rfPickerOpen, workspaceFiles.length, dispatch])
+  const computeAndPatchEstimate = async (relPath: string) => {
+    try {
+      const root = (workspaceRoot || '').replace(/[\\/]+$/, '')
+      const rel = (relPath || '').replace(/^[\\/]+/, '')
+      const abs = `${root}/${rel}`
+      const res = await (window as any).workspace.readFile(abs)
+      if (res?.ok) {
+        const tokens = Math.ceil((res.content?.length || 0) / 4)
+        onConfigChange({ filePath: relPath, tokenEstimateTokens: tokens })
+      } else {
+        onConfigChange({ filePath: relPath })
+      }
+    } catch {
+      onConfigChange({ filePath: relPath })
+    }
+  }
+
 
   const providerOptions = useMemo(() => {
     return Object.entries(providerValid || {})
@@ -68,22 +107,28 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
           </Text>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>System Instructions:</span>
-            <textarea
-              value={config.systemInstructions || ''}
-              onChange={(e) => onConfigChange({ systemInstructions: e.target.value })}
-              placeholder="Optional system instructions for the AI (e.g., 'You are a helpful assistant...')"
-              rows={4}
-              style={{
-                padding: '4px 6px',
-                background: '#252526',
-                color: '#cccccc',
-                border: '1px solid #3e3e42',
-                borderRadius: 3,
-                fontSize: 10,
-                fontFamily: 'inherit',
-                resize: 'vertical',
-              }}
-            />
+            {!isSysInConnected ? (
+              <textarea
+                value={config.systemInstructions || ''}
+                onChange={(e) => onConfigChange({ systemInstructions: e.target.value })}
+                placeholder="Optional system instructions for the AI (e.g., 'You are a helpful assistant...')"
+                rows={4}
+                style={{
+                  padding: '4px 6px',
+                  background: '#252526',
+                  color: '#cccccc',
+                  border: '1px solid #3e3e42',
+                  borderRadius: 3,
+                  fontSize: 10,
+                  fontFamily: 'inherit',
+                  resize: 'vertical',
+                }}
+              />
+            ) : (
+              <Text size="xs" c="dimmed" style={{ fontSize: 9 }}>
+                Receiving instructions from input edge (System Instructions In)
+              </Text>
+            )}
           </label>
 
           {/* Sampling & reasoning controls (visible only when global provider & model are selected) */}
@@ -221,6 +266,8 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
               style={{
                 padding: '4px 6px',
                 background: '#252526',
+
+
                 color: '#cccccc',
                 border: '1px solid #3e3e42',
                 borderRadius: 3,
@@ -232,6 +279,84 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
           </label>
         </div>
       )}
+
+      {/* readFile node configuration */}
+      {nodeType === 'readFile' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #333' }}>
+          <Text size="xs" c="dimmed" style={{ fontSize: 9, lineHeight: 1.3 }}>
+            📄 Reads a file from your workspace and outputs its contents via Data Out.
+          </Text>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>File path (workspace-relative):</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                type="text"
+                value={config.filePath || ''}
+                onChange={(e) => onConfigChange({ filePath: e.target.value })}
+                placeholder="e.g., src/prompts/system.md"
+                style={{ flex: 1, padding: '4px 6px', background: '#252526', color: '#cccccc', border: '1px solid #3e3e42', borderRadius: 3, fontSize: 10 }}
+              />
+              <button
+                className="nodrag"
+                onClick={() => { setRfPickerQuery(''); setRfPickerOpen(true) }}
+                style={{ padding: '4px 8px', background: '#3e3e42', color: '#cccccc', border: '1px solid #555', borderRadius: 3, fontSize: 10, cursor: 'pointer' }}
+              >Pick</button>
+            </div>
+            {!!config.tokenEstimateTokens && (
+              <Text size="xs" c="dimmed" style={{ fontSize: 9 }}>
+                ≈ {config.tokenEstimateTokens} tokens
+              </Text>
+            )}
+          </label>
+
+          {rfPickerOpen && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setRfPickerOpen(false)}>
+              <div style={{ width: 720, maxHeight: 520, background: '#1e1e1e', border: '1px solid #333', borderRadius: 8, overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
+                <div style={{ padding: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    autoFocus
+                    type="text"
+                    placeholder="Type to search workspace files"
+                    value={rfPickerQuery}
+                    onChange={(e) => { setRfPickerQuery(e.currentTarget.value); setRfPickerIndex(0) }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'ArrowDown') { e.preventDefault(); setRfPickerIndex((i) => Math.min(i + 1, filtered.length - 1)) }
+                      else if (e.key === 'ArrowUp') { e.preventDefault(); setRfPickerIndex((i) => Math.max(i - 1, 0)) }
+                      else if (e.key === 'Enter') {
+                        const sel = filtered[rfPickerIndex]
+                        if (sel) {
+                          computeAndPatchEstimate(sel)
+                          setRfPickerOpen(false)
+                          setRfPickerQuery('')
+                        }
+                      } else if (e.key === 'Escape') {
+                        setRfPickerOpen(false)
+                      }
+                    }}
+                    style={{ flex: 1, padding: '4px 6px', background: '#252526', color: '#ccc', border: '1px solid #3e3e42', borderRadius: 4, fontSize: 12 }}
+                  />
+                </div>
+                <div style={{ maxHeight: 420, overflow: 'auto' }}>
+                  {filtered.map((f: string, idx: number) => (
+                    <div
+                      key={f + idx}
+                      onClick={() => { computeAndPatchEstimate(f); setRfPickerOpen(false); setRfPickerQuery('') }}
+                      onMouseEnter={() => setRfPickerIndex(idx)}
+                      style={{ padding: '8px 12px', backgroundColor: idx === rfPickerIndex ? '#2a2a2a' : 'transparent', cursor: 'pointer', borderBottom: '1px solid #2a2a2a', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace', fontSize: 12 }}
+                    >
+                      {f}
+                    </div>
+                  ))}
+                  {filtered.length === 0 && (
+                    <div style={{ padding: 12, color: '#888' }}>No matches</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
 
       {/* injectMessages node configuration */}
       {nodeType === 'injectMessages' && <InjectMessagesConfig nodeId={nodeId} config={config} onConfigChange={onConfigChange} />}
@@ -292,22 +417,28 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
           </label>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>System Instructions:</span>
-            <textarea
-              value={config.systemInstructions || ''}
-              onChange={(e) => onConfigChange({ systemInstructions: e.target.value })}
-              placeholder="Optional system instructions for this isolated context (e.g., 'You are a code analyzer...')"
-              rows={4}
-              style={{
-                padding: '4px 6px',
-                background: '#252526',
-                color: '#cccccc',
-                border: '1px solid #3e3e42',
-                borderRadius: 3,
-                fontSize: 10,
-                fontFamily: 'inherit',
-                resize: 'vertical',
-              }}
-            />
+            {!isSysInConnected ? (
+              <textarea
+                value={config.systemInstructions || ''}
+                onChange={(e) => onConfigChange({ systemInstructions: e.target.value })}
+                placeholder="Optional system instructions for this isolated context (e.g., 'You are a code analyzer...')"
+                rows={4}
+                style={{
+                  padding: '4px 6px',
+                  background: '#252526',
+                  color: '#cccccc',
+                  border: '1px solid #3e3e42',
+                  borderRadius: 3,
+                  fontSize: 10,
+                  fontFamily: 'inherit',
+                  resize: 'vertical',
+                }}
+              />
+            ) : (
+              <Text size="xs" c="dimmed" style={{ fontSize: 9 }}>
+                Receiving instructions from input edge (System Instructions In)
+              </Text>
+            )}
           </label>
 
             {/* Sampling & reasoning controls (visible only when provider & model are selected) */}

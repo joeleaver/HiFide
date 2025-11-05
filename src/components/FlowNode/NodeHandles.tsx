@@ -62,6 +62,11 @@ export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
     inputs.push({ id: 'context', label: 'Context In', color: contextColor })
     inputs.push({ id: 'userMessage', label: 'User Message', color: CONNECTION_COLORS.data })
     inputs.push({ id: 'assistantMessage', label: 'Assistant Message', color: CONNECTION_COLORS.data })
+  } else if (nodeType === 'defaultContextStart' || nodeType === 'newContext') {
+    // Entry nodes: add System Instructions In input (no Context/Data inputs)
+    inputs.push({ id: 'systemInstructionsIn', label: 'System Instructions In', color: CONNECTION_COLORS.data })
+  } else if (nodeType === 'readFile') {
+    // readFile has no inputs
   } else if (!isEntryNode) {
     // All other nodes have Context In and Data In
     inputs.push({ id: 'context', label: 'Context In', color: contextColor })
@@ -121,6 +126,9 @@ export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
   } else if (nodeType === 'defaultContextStart' || nodeType === 'newContext') {
     // Entry nodes only have Context Out (no data)
     outputs.push({ id: 'context', label: 'Context Out', color: contextColor })
+  } else if (nodeType === 'readFile') {
+    // readFile outputs only Data Out
+    outputs.push({ id: 'data', label: 'Data Out', color: CONNECTION_COLORS.data })
   } else {
     // All other nodes have Context Out and Data Out
     outputs.push({ id: 'context', label: 'Context Out', color: contextColor })

@@ -889,7 +889,9 @@ export class FlowScheduler {
             {
               inputTokens: event.usage.inputTokens,
               outputTokens: event.usage.outputTokens,
-              totalTokens: event.usage.totalTokens
+              totalTokens: event.usage.totalTokens,
+              // Preserve cached tokens if provided by provider SDKs
+              cachedTokens: (event.usage as any).cachedTokens ?? 0,
             },
             event.nodeId,
             (event as any).executionId

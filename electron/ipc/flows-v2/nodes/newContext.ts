@@ -25,14 +25,23 @@ export const metadata = {
 /**
  * Node implementation
  */
-export const newContextNode: NodeFunction = async (flow, _context, dataIn, _inputs, config) => {
+export const newContextNode: NodeFunction = async (flow, _context, dataIn, inputs, config) => {
   const provider = (config.provider as string) || 'openai'
   const model = (config.model as string) || 'gpt-4o'
-  const systemInstructions = (config.systemInstructions as string) || ''
+  const sysFromConfig = (config.systemInstructions as string) || ''
   const temperature = (config as any)?.temperature as number | undefined
   const reasoningEffort = (config as any)?.reasoningEffort as ('low'|'medium'|'high') | undefined
   const includeThoughts = !!(config as any)?.includeThoughts
   const thinkingBudget = (config as any)?.thinkingBudget as number | undefined
+
+  // Prefer dynamic input if connected, otherwise fall back to config
+  let systemInstructions = sysFromConfig
+  if (inputs.has('systemInstructionsIn')) {
+    try {
+      const v = await inputs.pull('systemInstructionsIn')
+      if (typeof v === 'string') systemInstructions = v
+    } catch {}
+  }
 
   flow.log.info('Creating isolated context', {
     provider,

@@ -21,6 +21,7 @@ export const NODE_COLORS: Record<string, string> = {
   portalInput: '#ec4899',
   portalOutput: '#ec4899',
   cache: '#1e88e5',           // Blue - caching/performance optimization
+  readFile: '#4a9eff',        // Input - file reader
 }
 
 /**
@@ -44,6 +45,7 @@ export const NODE_TYPE_LABELS: Record<string, string> = {
   portalInput: 'Portal In',
   portalOutput: 'Portal Out',
   cache: 'Cache',
+  readFile: 'Read File',
 }
 
 /**
@@ -62,6 +64,7 @@ export type NodeCategory = 'input' | 'llm' | 'flow-control' | 'safety'
 export const NODE_CATEGORIES: Record<string, NodeCategory> = {
   userInput: 'input',
   manualInput: 'input',
+  readFile: 'input',
   llmRequest: 'llm',
   tools: 'llm',
   newContext: 'llm',

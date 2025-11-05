@@ -6,6 +6,7 @@ const SHOW_SAFETY_CATEGORY = false
 const NODE_PALETTE: Array<{ nodeType: string; label: string; icon: string; description: string }> = [
   { nodeType: 'userInput', label: 'User Input', icon: '👤', description: 'Accept user input (entry point or pause mid-flow)' },
   { nodeType: 'manualInput', label: 'Manual Input', icon: '✍️', description: 'Send pre-configured user message mid-flow' },
+  { nodeType: 'readFile', label: 'Read File', icon: '📄', description: 'Read a workspace file and output its contents' },
   { nodeType: 'newContext', label: 'New Context', icon: '🔀', description: 'Create new execution context with different model/provider' },
   { nodeType: 'llmRequest', label: 'LLM Request', icon: '💬', description: 'Send a request to the LLM' },
   { nodeType: 'tools', label: 'Tools', icon: '🔧', description: 'Provide tools to LLM (auto or specific list)' },

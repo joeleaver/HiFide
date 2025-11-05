@@ -691,11 +691,15 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 
         const providerCosts = sess.costs.byProviderAndModel[provider] || {}
         const modelCost = providerCosts[model] || { inputCost: 0, outputCost: 0, totalCost: 0, currency: 'USD' }
+        const prevCached = (modelCost as any).cachedInputCost || 0
+        const prevSavings = (modelCost as any).savings || 0
         const newModelCost = cost ? {
           inputCost: modelCost.inputCost + (cost.inputCost || 0),
           outputCost: modelCost.outputCost + (cost.outputCost || 0),
           totalCost: modelCost.totalCost + (cost.totalCost || 0),
           currency: 'USD',
+          cachedInputCost: prevCached + (cost.cachedInputCost || 0),
+          savings: prevSavings + (cost.savings || 0),
         } : modelCost
         const newTotalCost = sess.costs.totalCost + (cost?.totalCost || 0)
 
@@ -792,11 +796,15 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 
           const providerCosts = sess.costs.byProviderAndModel[provider] || {}
           const modelCost = providerCosts[model] || { inputCost: 0, outputCost: 0, totalCost: 0, currency: 'USD' }
+          const prevCached = (modelCost as any).cachedInputCost || 0
+          const prevSavings = (modelCost as any).savings || 0
           const newModelCost = cost ? {
             inputCost: modelCost.inputCost + (cost.inputCost || 0),
             outputCost: modelCost.outputCost + (cost.outputCost || 0),
             totalCost: modelCost.totalCost + (cost.totalCost || 0),
             currency: 'USD',
+            cachedInputCost: prevCached + (cost.cachedInputCost || 0),
+            savings: prevSavings + (cost.savings || 0),
           } : modelCost
           const newTotalCost = sess.costs.totalCost + (cost?.totalCost || 0)
 

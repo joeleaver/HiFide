@@ -339,7 +339,7 @@ export interface FlowEditorSlice {
   feHandleToolEnd: (requestId: string, toolName: string, callId?: string, nodeId?: string, result?: any) => void
   feHandleToolError: (requestId: string, toolName: string, error: string, callId?: string, nodeId?: string) => void
   feHandleIntentDetected: (requestId: string, nodeId: string, intent: string, provider?: string, model?: string) => void
-  feHandleTokenUsage: (requestId: string, provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }, nodeId?: string, executionId?: string) => void
+  feHandleTokenUsage: (requestId: string, provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number }, nodeId?: string, executionId?: string) => void
   feHandleRateLimitWait: (requestId: string, nodeId: string, attempt: number, waitMs: number, reason?: string, provider?: string, model?: string) => void
   feHandleUsageBreakdown: (requestId: string, nodeId: string, provider: string, model: string, breakdown: any, executionId?: string) => void
 
@@ -2975,7 +2975,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feHandleTokenUsage: (requestId: string, provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }, nodeId?: string, executionId?: string) => {
+  feHandleTokenUsage: (requestId: string, provider: string, model: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number }, nodeId?: string, executionId?: string) => {
     if (!requestId || requestId !== get().feRequestId) return
     if (provider && model && usage) {
       const state = store.getState() as any

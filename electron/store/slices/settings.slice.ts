@@ -379,24 +379,27 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
 
     // Calculate costs with cache awareness
     const cachedTokens = usage.cachedTokens || 0
-    const normalInputTokens = usage.inputTokens - cachedTokens
+    const normalInputTokens = usage.inputTokens
 
     // Normal input tokens at full price
     const normalInputCost = (normalInputTokens / 1_000_000) * pricing.inputCostPer1M
 
-    // Cached tokens at reduced price (if pricing available)
-    const cachedInputCost = pricing.cachedInputCostPer1M
-      ? (cachedTokens / 1_000_000) * pricing.cachedInputCostPer1M
-      : (cachedTokens / 1_000_000) * pricing.inputCostPer1M  // Fallback to normal price
+    // Cached tokens at reduced price (provider-aware)
+    // For OpenAI, estimate cached input at 10% of normal input price when no cached rate is configured.
+    const providerId = String(provider || '').toLowerCase()
+    const effectiveCachedPer1M = typeof (pricing as any).cachedInputCostPer1M === 'number'
+      ? (pricing as any).cachedInputCostPer1M
+      : (providerId === 'openai' ? pricing.inputCostPer1M * 0.10 : pricing.inputCostPer1M)
+
+    const cachedInputCost = (cachedTokens / 1_000_000) * effectiveCachedPer1M
 
     const inputCost = normalInputCost + cachedInputCost
     const outputCost = (usage.outputTokens / 1_000_000) * pricing.outputCostPer1M
 
-    // Calculate savings if caching was used
+    // Calculate savings if caching was used (whenever cached rate < full rate)
     let savings = 0
     let savingsPercent = 0
-    if (cachedTokens > 0 && pricing.cachedInputCostPer1M) {
-      // Savings = what we would have paid at full price - what we actually paid
+    if (cachedTokens > 0 && effectiveCachedPer1M < pricing.inputCostPer1M) {
       const fullPriceCost = (cachedTokens / 1_000_000) * pricing.inputCostPer1M
       savings = fullPriceCost - cachedInputCost
       const totalWithoutSavings = inputCost + outputCost + savings
