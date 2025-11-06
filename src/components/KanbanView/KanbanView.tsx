@@ -9,7 +9,6 @@ import {
   Loader,
   Modal,
   Paper,
-  ScrollArea,
   Select,
   Stack,
   Text,

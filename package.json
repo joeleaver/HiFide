@@ -55,6 +55,7 @@
     "ai": "^5.0.87",
     "dagre": "^0.8.5",
     "dompurify": "^3.3.0",
+    "electron-log": "^5.4.3",
     "electron-store": "^11.0.2",
     "fast-glob": "^3.3.3",
     "highlight.js": "^11.11.1",

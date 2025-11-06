@@ -30,7 +30,7 @@ export default function AgentView() {
   // Use selectors for better performance
   const sessions = useAppStore(selectSessions)
   const currentId = useAppStore(selectCurrentId)
-  const agentTerminalTabs = useAppStore((s) => s.agentTerminalTabs || [])
+  const agentTerminalTabs = useAppStore((s) => s.agentTerminalTabs)
   const fitTerminal = useTerminalStore((s) => s.fitTerminal)
 
   // Read persisted window state from main store (hydrate UI store on mount only)

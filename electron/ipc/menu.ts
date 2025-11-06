@@ -3,7 +3,7 @@
  */
 
 import type { IpcMain, MenuItemConstructorOptions } from 'electron'
-import { BrowserWindow, Menu, shell } from 'electron'
+import { BrowserWindow, Menu, shell, app } from 'electron'
 import { getWindow, windowStateStore } from '../core/state'
 import type { ViewType } from '../store/types'
 
@@ -133,6 +133,11 @@ export function buildMenu(): void {
           label: 'Learn More',
           click: () => shell.openExternal('https://github.com/joeleaver/HiFide'),
         },
+        { type: 'separator' },
+        {
+          label: 'View Logs',
+          click: () => shell.openPath(app.getPath('logs')),
+        },
       ] as MenuItemConstructorOptions[],
     },
   ]
@@ -159,6 +164,34 @@ export function registerMenuHandlers(ipc: IpcMain) {
     setCurrentViewForMenu(view)
     buildMenu()
   })
+
+  // Window control handlers (for custom titlebar buttons)
+  ipc.handle('window:minimize', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getFocusedWindow() || getWindow()
+    try { win?.minimize() } catch {}
+    return { ok: true }
+  })
+
+  ipc.handle('window:maximize', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getFocusedWindow() || getWindow()
+    if (win) {
+      try {
+        if (win.isMaximized()) win.unmaximize()
+        else win.maximize()
+        return { ok: true, isMaximized: win.isMaximized() }
+      } catch (e) {
+        return { ok: false, error: String(e) }
+      }
+    }
+    return { ok: false, error: 'no-window' }
+  })
+
+  ipc.handle('window:close', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getFocusedWindow() || getWindow()
+    try { win?.close() } catch {}
+    return { ok: true }
+  })
+
 
   ipc.handle('menu:popup', (event, menuOrArgs: any, x?: number, y?: number) => {
     let name: keyof typeof menuRefs | undefined
@@ -194,4 +227,9 @@ export function unregisterMenuHandlers(ipc: IpcMain) {
   ipc.removeHandler('menu:get-current-view')
   ipc.removeHandler('menu:set-view')
   ipc.removeHandler('menu:popup')
+
+  // Window control handlers
+  ipc.removeHandler('window:minimize')
+  ipc.removeHandler('window:maximize')
+  ipc.removeHandler('window:close')
 }

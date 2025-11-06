@@ -74,22 +74,24 @@ function SessionPane() {
 
   // Subscribe to a minimal signature of the items to avoid re-renders on reference churn
   const itemsSig = useAppStore((s) => {
-    const currentSession = s.sessions.find((sess: any) => sess.id === currentId)
-    const items = currentSession?.items || []
-    const len = items.length
+    const sessions = (s as any).sessions
+    if (!Array.isArray(sessions) || !sessions.length || !currentId) return '0'
+    const currentSession = sessions.find((sess: any) => sess.id === currentId)
+    const items = currentSession?.items
+    const len = Array.isArray(items) ? items.length : 0
     if (!len) return '0'
     const last = items[len - 1]
-    const contentLen = Array.isArray(last.content) ? last.content.length : 0
+    const contentLen = Array.isArray(last?.content) ? last.content.length : 0
     const lastContent = contentLen ? last.content[contentLen - 1] : undefined
-    if (!lastContent) return `${len}:${last.id}:${last.type}:none`
+    if (!lastContent) return `${len}:${last?.id}:${last?.type}:none`
     if ((lastContent as any).type === 'text') {
-      return `${len}:${last.id}:${last.type}:text:${(lastContent as any).text?.length ?? 0}`
+      return `${len}:${last?.id}:${last?.type}:text:${(lastContent as any).text?.length ?? 0}`
     }
     if ((lastContent as any).type === 'badge') {
       const b = (lastContent as any).badge || {}
-      return `${len}:${last.id}:${last.type}:badge:${b.status || ''}:${b.addedLines ?? ''}:${b.removedLines ?? ''}:${b.label || ''}`
+      return `${len}:${last?.id}:${last?.type}:badge:${b.status || ''}:${b.addedLines ?? ''}:${b.removedLines ?? ''}:${b.label || ''}`
     }
-    return `${len}:${last.id}:${last.type}:${(lastContent as any).type || 'other'}`
+    return `${len}:${last?.id}:${last?.type}:${(lastContent as any).type || 'other'}`
   })
 
   // Read full items non-subscribed, keyed by signature changes

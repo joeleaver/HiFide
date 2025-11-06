@@ -8,7 +8,8 @@ import TerminalView from './TerminalView'
 
 export default function TerminalPanel({ context }: { context: 'agent' | 'explorer' }) {
   // Use selectors for better performance
-  const tabs = useAppStore(context === 'agent' ? selectAgentTerminalTabs : selectExplorerTerminalTabs)
+  const tabsRaw = useAppStore(context === 'agent' ? selectAgentTerminalTabs : selectExplorerTerminalTabs)
+  const tabs = tabsRaw || []
   const activeTab = useAppStore(context === 'agent' ? selectAgentActiveTerminal : selectExplorerActiveTerminal)
 
   // Read from windowState (main store) with hydration guard

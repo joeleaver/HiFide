@@ -19,14 +19,15 @@ export const metadata = {
   description: 'Read a file from the workspace and output its contents (Data Out).'
 }
 
-export const readFileNode: NodeFunction = async (flow, _context, _dataIn, _inputs, config) => {
+export const readFileNode: NodeFunction = async (flow, context, _dataIn, _inputs, config) => {
   const filePath = (config?.filePath || '').trim()
   if (!filePath) {
     flow.log.warn('readFile: missing filePath')
     return {
-      context: null,
+      context,
       data: '',
-      status: 'blocked',
+      status: 'error',
+      error: 'No file selected',
       metadata: { error: 'No file selected' }
     }
   }
@@ -38,9 +39,10 @@ export const readFileNode: NodeFunction = async (flow, _context, _dataIn, _input
     const msg = `readFile: path outside workspace or invalid: ${String(err)}`
     flow.log.error(msg)
     return {
-      context: null,
+      context,
       data: '',
       status: 'error',
+      error: msg,
       metadata: { error: msg }
     }
   }
@@ -65,7 +67,7 @@ export const readFileNode: NodeFunction = async (flow, _context, _dataIn, _input
     })
 
     return {
-      context: null,
+      context,
       data: content,
       status: 'success',
       metadata: { tokenEstimateTokens, durationMs }
@@ -74,9 +76,10 @@ export const readFileNode: NodeFunction = async (flow, _context, _dataIn, _input
     const msg = `readFile: failed to read file: ${String(err)}`
     flow.log.error(msg)
     return {
-      context: null,
+      context,
       data: '',
       status: 'error',
+      error: msg,
       metadata: { error: msg }
     }
   }
