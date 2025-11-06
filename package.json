@@ -1,8 +1,14 @@
 {
   "name": "hifide",
-  "private": true,
   "version": "0.0.0",
   "type": "module",
+  "author": "Joe Leaver",
+  "homepage": "https://github.com/joeleaver/hifide",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/joeleaver/hifide"
+  },
+  "description": "Agentic-first IDE",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && pnpm -s prepackage:kill && pnpm -s rebuild:native && pnpm -s package:electron",
@@ -57,6 +63,7 @@
     "ajv-formats": "^3.0.1",
     "conf": "^15.0.2",
     "dagre": "^0.8.5",
+    "dequal": "^2.0.3",
     "dompurify": "^3.3.0",
     "electron-log": "^5.4.3",
     "electron-store": "^11.0.2",

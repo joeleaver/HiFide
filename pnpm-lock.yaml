@@ -124,6 +124,9 @@ importers:
       dagre:
         specifier: ^0.8.5
         version: 0.8.5
+      dequal:
+        specifier: ^2.0.3
+        version: 2.0.3
       dompurify:
         specifier: ^3.3.0
         version: 3.3.0
