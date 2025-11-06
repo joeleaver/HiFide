@@ -118,6 +118,9 @@ importers:
       ajv-formats:
         specifier: ^3.0.1
         version: 3.0.1(ajv@8.17.1)
+      conf:
+        specifier: ^15.0.2
+        version: 15.0.2
       dagre:
         specifier: ^0.8.5
         version: 0.8.5
