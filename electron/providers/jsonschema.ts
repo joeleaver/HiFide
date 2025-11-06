@@ -1,7 +1,9 @@
 import Ajv, { ValidateFunction } from 'ajv'
+import addFormats from 'ajv-formats'
 
 // Simple shared JSON Schema validator with caching
 const ajv = new Ajv({ allErrors: false })
+addFormats(ajv)
 const cache = new WeakMap<object, ValidateFunction>()
 
 export function validateJson(schema: any, data: any): { ok: boolean; errors?: string } {
