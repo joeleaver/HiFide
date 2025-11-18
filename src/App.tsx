@@ -1,64 +1,124 @@
-import { useEffect, Profiler, useCallback } from 'react'
+import { useEffect, Profiler, useCallback, useState } from 'react'
 import { Button, Group, Title } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useAppStore, useDispatch, selectCurrentView } from './store'
 import ActivityBar from './components/ActivityBar'
 import StatusBar from './components/StatusBar'
-import AgentView from './components/AgentView'
+import FlowView from './components/FlowView'
 import ExplorerView from './components/ExplorerView'
 import SourceControlView from './components/SourceControlView'
 import KnowledgeBaseView from './components/KnowledgeBaseView'
 import KanbanView from './components/KanbanView'
 import SettingsPane from './SettingsPane'
-import LoadingScreen from './components/LoadingScreen'
-import { useRerenderTrace, logStoreDiff } from './utils/perf'
+import WelcomeScreen from './components/WelcomeScreen'
+import GlobalSessionPanel from './components/GlobalSessionPanel'
 
-let globalDispatch: ReturnType<typeof useDispatch> | null = null
+import LoadingScreen from './components/LoadingScreen'
+import { useRerenderTrace } from './utils/perf'
+import { useUiStore } from './store/ui'
+import { getBackendClient } from './lib/backend/bootstrap'
+
+import { useBackendBinding } from './store/binding'
+import { useSessionUi } from './store/sessionUi'
+import { useChatTimeline } from './store/chatTimeline'
+import { useFlowContexts } from './store/flowContexts'
+
+import { useLoadingOverlay } from './store/loadingOverlay'
+
 let handlersRegistered = false
 
 const menuHandlers = {
-  openSettings: () => {
-    globalDispatch?.('setCurrentView', { view: 'settings' })
+  openSettings: async () => {
+    try { await getBackendClient()?.rpc('view.set', { view: 'settings' }) } catch {}
+    try { (useUiStore as any).setState?.({ currentView: 'settings' }) } catch {}
   },
-  openSession: () => {
-    globalDispatch?.('setCurrentView', { view: 'agent' })
+  openSession: async () => {
+    try { await getBackendClient()?.rpc('view.set', { view: 'flow' }) } catch {}
+    try { (useUiStore as any).setState?.({ currentView: 'flow' }) } catch {}
   },
-  openFlowEditor: () => {
-    globalDispatch?.('setCurrentView', { view: 'flowEditor' })
+  openFlowEditor: async () => {
+    try { await getBackendClient()?.rpc('view.set', { view: 'flow' }) } catch {}
+    try { (useUiStore as any).setState?.({ currentView: 'flow' }) } catch {}
   },
-  openKanban: () => {
-    globalDispatch?.('setCurrentView', { view: 'kanban' })
+  openKanban: async () => {
+    try { await getBackendClient()?.rpc('view.set', { view: 'kanban' }) } catch {}
+    try { (useUiStore as any).setState?.({ currentView: 'kanban' }) } catch {}
   },
-  toggleTerminalPanel: () => {
-    const store = useAppStore.getState()
-    const isOpen = store.windowState?.explorerTerminalPanelOpen ?? false
-    globalDispatch?.('updateWindowState', { explorerTerminalPanelOpen: !isOpen })
+  toggleTerminalPanel: async () => {
+    try {
+      await getBackendClient()?.rpc('ui.toggleWindowState', { key: 'explorerTerminalPanelOpen' })
+    } catch (e) {
+      // Silently ignore menu toggle errors; user can retry from UI
+    }
   },
   openFolder: async () => {
     const result = await window.workspace?.openFolderDialog?.()
     if (result?.ok && result.path) {
-      globalDispatch?.('openFolder', result.path)
+      const client = getBackendClient()
+      if (!client) return
+      try {
+        await (client as any).whenReady?.(7000)
+      } catch {}
+      try {
+        await client.rpc('workspace.open', { root: result.path })
+        // View will switch to 'flow' on workspace.ready
+      } catch (e) {
+        // Silently ignore openFolder failures here; StatusBar can reflect workspace state
+      }
     }
   },
   openRecentFolder: async (folderPath: string) => {
-    globalDispatch?.('openFolder', folderPath)
-  },
-  clearRecentFolders: () => {
-    globalDispatch?.('clearRecentFolders')
-  },
-  exportFlow: () => {
-    if (!globalDispatch) {
-      console.error('[menu] exportFlow invoked before dispatch ready')
-      return
+    const client = getBackendClient()
+    if (!client) return
+    try {
+      await (client as any).whenReady?.(7000)
+    } catch {}
+    try {
+      await client.rpc('workspace.open', { root: folderPath })
+      // View will switch to 'flow' on workspace.ready
+    } catch (e) {
+      // Silently ignore openRecentFolder failures; user can retry selection
     }
-    globalDispatch('feExportFlow')
   },
-  importFlow: () => {
-    if (!globalDispatch) {
-      console.error('[menu] importFlow invoked before dispatch ready')
-      return
+  clearRecentFolders: async () => {
+    try { await getBackendClient()?.rpc('workspace.clearRecentFolders', {}) } catch (e) {
+      // Silently ignore clearRecentFolders failures
     }
-    globalDispatch('feImportFlow')
+  },
+  exportFlow: async () => {
+    try {
+      const res: any = await getBackendClient()?.rpc('flowEditor.exportFlow', {})
+      const result = res?.result
+      if (res?.ok && result) {
+        if (result.canceled) return
+        if (result.success) {
+          notifications.show({ color: 'green', title: 'Exported', message: result.path || 'Flow exported' })
+        } else {
+          notifications.show({ color: 'red', title: 'Export failed', message: result.error || 'Unknown error' })
+        }
+      } else if (res && res.error) {
+        notifications.show({ color: 'red', title: 'Export failed', message: String(res.error) })
+      }
+    } catch (e) {
+      notifications.show({ color: 'red', title: 'Export failed', message: String(e) })
+    }
+  },
+  importFlow: async () => {
+    try {
+      const res: any = await getBackendClient()?.rpc('flowEditor.importFlow', {})
+      const result = res?.result
+      if (res?.ok && result) {
+        if (result.canceled) return
+        if (result.success) {
+          notifications.show({ color: 'green', title: 'Imported', message: result.name || 'Flow imported' })
+        } else {
+          notifications.show({ color: 'red', title: 'Import failed', message: result.error || 'Unknown error' })
+        }
+      } else if (res && res.error) {
+        notifications.show({ color: 'red', title: 'Import failed', message: String(res.error) })
+      }
+    } catch (e) {
+      notifications.show({ color: 'red', title: 'Import failed', message: String(e) })
+    }
   },
 }
 
@@ -99,82 +159,152 @@ function unregisterMenuHandlers() {
 }
 
 function App() {
-  const dispatch = useDispatch()
+  const currentView = useUiStore((s) => s.currentView)
+  const setCurrentViewLocal = useUiStore((s) => (s as any).setCurrentViewLocal)
+  const mainCollapsed = useUiStore((s) => (s as any).mainCollapsed)
+  const setSessionPanelWidth = useUiStore((s) => s.setSessionPanelWidth)
+  const setMainCollapsed = useUiStore((s) => (s as any).setMainCollapsed)
 
-  const currentView = useAppStore(selectCurrentView)
-  const appBootstrapping = useAppStore((state) => state.appBootstrapping)
-  const startupMessage = useAppStore((state) => state.startupMessage)
-  const exportResult = useAppStore((state) => state.feExportResult)
-  const importResult = useAppStore((state) => state.feImportResult)
+  const [appBootstrapping, setAppBootstrapping] = useState<boolean>(true)
+  const [startupMessage, setStartupMessage] = useState<string | null>(null)
+  const { active: wsLoading, message: wsLoadingMessage, overlayAgeMs, hydratingAgeMs, phase: wsPhase } = useLoadingOverlay()
+  const showDebugOverlay = (() => { try { return localStorage.getItem('hifide.debug.overlay') === '1' } catch { return false } })()
+  // HUD-only selectors (no effects)
+  const bindingRoot = useBackendBinding((s) => s.root)
+  const attached = useBackendBinding((s) => s.attached)
+  const workspaceId = useBackendBinding((s) => s.workspaceId)
+  const sessionsCount = useSessionUi((s) => (s.sessions?.length || 0))
+  const currentSessionId = useSessionUi((s) => s.currentId)
+  const timelineHydrating = useChatTimeline((s) => s.isHydrating)
+  const timelineRenderedOnce = useChatTimeline((s: any) => (s as any).hasRenderedOnce)
+  const hydMeta = useSessionUi((s) => s.isHydratingMeta)
+  const hydUsage = useSessionUi((s) => s.isHydratingUsage)
+  const listHydrated = useSessionUi((s) => s.hasHydratedList)
+  const sessionEventsInited = useSessionUi((s) => (s as any).eventsInited)
+  const boot = (window as any)?.wsBackend?.getBootstrap?.()
+  const bootUrl = boot?.url || null
+  const bootWindowId = boot?.windowId || null
+
+
+  // Keep overlay visible if workspace bound but either the sessions list is not hydrated yet
+  // OR timeline/meta/usage are hydrating
+  // OR there is at least one session but the timeline has not completed its
+  // first render yet (closes any recompute gap between flags and the actual
+  // UI becoming stable). For a truly empty workspace (no sessions), don't gate
+  // on hasRenderedOnce.
+  const overlayActive = wsLoading || (
+    attached && (
+      !listHydrated ||
+      (sessionsCount > 0 && !timelineRenderedOnce) ||
+      timelineHydrating ||
+      hydMeta ||
+      hydUsage
+    )
+  )
+
+
+
+
+  // Hydrate boot status via snapshot-after-subscribe (race-proof). Show a connecting message until WS is ready.
+  useEffect(() => {
+    let off: (() => void) | undefined
+    let pollTimer: any
+    const run = async () => {
+      const client = getBackendClient()
+      if (!client) {
+        setStartupMessage('Connecting to backend…')
+        return
+      }
+      // Distinct pre-WS message
+      setStartupMessage('Connecting to backend…')
+      try {
+        await (client as any).whenReady?.(7000)
+      } catch {}
+      // Subscribe first to avoid missing an in-flight state change between snapshot and subscribe
+      off = client.subscribe('app.boot.changed', (p: any) => {
+        setAppBootstrapping(!!p?.appBootstrapping)
+        setStartupMessage(p?.startupMessage || null)
+      })
+      // Then request a snapshot of current boot status
+      try {
+        const res: any = await client.rpc('app.getBootStatus', {})
+        if (res?.ok) {
+          setAppBootstrapping(!!res.appBootstrapping)
+          setStartupMessage(res.startupMessage || null)
+        }
+      } catch {}
+
+      // Fallback: while bootstrapping, poll snapshot periodically in case a WS event is missed
+      // This avoids getting visually "stuck" on an old message if a notification is dropped
+      pollTimer = setInterval(async () => {
+        try {
+          // If we already finished bootstrapping, stop polling
+          if (!appBootstrapping) { clearInterval(pollTimer); pollTimer = null; return }
+          const snap: any = await client.rpc('app.getBootStatus', {})
+          if (snap?.ok) {
+            setAppBootstrapping(!!snap.appBootstrapping)
+            setStartupMessage(snap.startupMessage || null)
+            if (!snap.appBootstrapping && pollTimer) { clearInterval(pollTimer); pollTimer = null }
+          }
+        } catch {}
+      }, 1500)
+    }
+    run()
+    return () => { try { off?.() } catch {}; if (pollTimer) clearInterval(pollTimer) }
+  }, [appBootstrapping])
 
   useRerenderTrace('App', {
     currentView,
     appBootstrapping,
-    hasExportResult: !!exportResult,
-    hasImportResult: !!importResult,
   })
 
-  useEffect(() => {
-    const unsubscribe = (useAppStore as any).subscribe?.((next: any, prev: any) => {
-      logStoreDiff('store', prev, next)
-    })
-    return () => {
-      if (unsubscribe) unsubscribe()
-    }
-  }, [])
 
+
+  // Hydrate currentView once: if a workspace is already bound, force 'flow'.
+  // Do not force 'welcome' here; let workspaceUi re-check after handshake.
   useEffect(() => {
-    globalDispatch = dispatch
-    return () => {
-      if (globalDispatch === dispatch) {
-        globalDispatch = null
+    (async () => {
+      try {
+        const client = getBackendClient()
+        if (!client) return
+        await (client as any).whenReady?.(7000)
+        const ws: any = await client.rpc('workspace.get', {})
+        if (ws?.ok && ws.root) {
+          try { await client.rpc('view.set', { view: 'flow' }) } catch {}
+          setCurrentViewLocal('flow')
+        }
+      } catch {
+        // ignore; default 'flow' remains
       }
-    }
-  }, [dispatch])
+    })()
+  }, [setCurrentViewLocal])
 
-  useEffect(() => {
-    (window as any).debugStore = useAppStore
-  }, [])
 
-  useEffect(() => {
-    if (!exportResult) return
 
-    if (exportResult.success && exportResult.path) {
-      notifications.show({
-        title: 'Flow Exported',
-        message: `Exported to ${exportResult.path}`,
-        color: 'green',
-      })
-    } else if (exportResult.error) {
-      notifications.show({
-        title: 'Export Failed',
-        message: exportResult.error,
-        color: 'red',
-      })
-    }
 
-    dispatch('feClearExportResult')
-  }, [exportResult, dispatch])
 
-  useEffect(() => {
-    if (!importResult) return
 
-    if (importResult.success && importResult.name) {
-      notifications.show({
-        title: 'Flow Imported',
-        message: `"${importResult.name}" was added to your library`,
-        color: 'green',
-      })
-    } else if (importResult.error) {
-      notifications.show({
-        title: 'Import Failed',
-        message: importResult.error,
-        color: 'red',
-      })
-    }
 
-    dispatch('feClearImportResult')
-  }, [importResult, dispatch])
+
+
+
+
+
+
+
+
+
+
+	      // Tick while overlay/hydration is active so timeouts can elapse without other state changes
+	      const [nowTick, setNowTick] = useState<number>(0)
+	      /* useEffect(() => {
+	        const watching = overlaySince !== null || hydratingSince !== null
+	        if (!watching) return
+	        setNowTick(Date.now())
+	        const id = window.setInterval(() => setNowTick(Date.now()), 250)
+	        return () => window.clearInterval(id)
+	      }, [overlaySince, hydratingSince]) */
+
 
   useEffect(() => {
     registerMenuHandlers()
@@ -182,12 +312,42 @@ function App() {
       unregisterMenuHandlers()
     }
   }, [])
+  // Hydrate per-project layout (session panel width, mainCollapsed) and auto-shrink window if collapsed
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.workspace?.getSettings?.()
+        const layout = (res && (res as any).settings && (res as any).settings.layout) || {}
+        // Restore Session Panel width first
+        let spw = 300
+        if (typeof layout.sessionPanelWidth === 'number') {
+          spw = Math.max(240, layout.sessionPanelWidth)
+          setSessionPanelWidth(spw)
+        }
+        // Restore collapsed state
+        if (typeof layout.mainCollapsed === 'boolean') {
+          setMainCollapsed(layout.mainCollapsed)
+          // If starting collapsed, shrink the window right away to Session + Nav width
+          if (layout.mainCollapsed) {
+            const NAV_W = 48
+            const targetW = Math.max(300, Math.floor(spw + NAV_W))
+            const targetH = Math.max(300, Math.floor(window.innerHeight || 600))
+            try { await getBackendClient()?.rpc('window.setContentSize', { width: targetW, height: targetH }) } catch {}
+          }
+        }
+      } catch {}
+    })()
+  }, [setSessionPanelWidth, setMainCollapsed])
+
 
   const renderView = useCallback(() => {
     switch (currentView) {
-      case 'agent':
-        return <AgentView />
+      case 'welcome':
+        return <WelcomeScreen />
+      case 'flow':
+        return <FlowView />
       case 'explorer':
+
         return <ExplorerView />
       case 'sourceControl':
         return <SourceControlView />
@@ -202,7 +362,7 @@ function App() {
           </div>
         )
       default:
-        return <AgentView />
+        return <FlowView />
     }
   }, [currentView])
 
@@ -213,12 +373,7 @@ function App() {
   return (
     <Profiler
       id="App"
-      onRender={(_id, _phase, actualDuration) => {
-        if (actualDuration > 16) {
-          // eslint-disable-next-line no-console
-          console.debug('[perf] App render exceeded 16ms:', actualDuration)
-        }
-      }}
+      onRender={() => {}}
     >
       <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
         <div
@@ -289,7 +444,7 @@ function App() {
             <Button
               size="compact-xs"
               variant="subtle"
-              onClick={() => window.windowControls?.minimize?.()}
+              onClick={async () => { try { await getBackendClient()?.rpc('window.minimize', {}) } catch {} }}
               title="Minimize"
               styles={{
                 root: {
@@ -310,7 +465,7 @@ function App() {
             <Button
               size="compact-xs"
               variant="subtle"
-              onClick={() => window.windowControls?.maximize?.()}
+              onClick={async () => { try { await getBackendClient()?.rpc('window.toggleMaximize', {}) } catch {} }}
               title="Maximize"
               styles={{
                 root: {
@@ -331,7 +486,7 @@ function App() {
             <Button
               size="compact-xs"
               variant="subtle"
-              onClick={() => window.windowControls?.close?.()}
+              onClick={async () => { try { await getBackendClient()?.rpc('window.close', {}) } catch {} }}
               title="Close"
               styles={{
                 root: {
@@ -355,12 +510,39 @@ function App() {
 
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden', flexDirection: 'column' }}>
           <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-            <ActivityBar />
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>{renderView()}</div>
+            {currentView === 'welcome' ? (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>{renderView()}</div>
+            ) : (
+              <>
+                <GlobalSessionPanel />
+                <ActivityBar />
+                {mainCollapsed ? null : (
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>{renderView()}</div>
+                )}
+              </>
+            )}
           </div>
-          <StatusBar />
+          {currentView === 'welcome' ? null : <StatusBar />}
         </div>
       </div>
+      {overlayActive && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.4)', zIndex: 10000 }}>
+          <LoadingScreen message={wsLoadingMessage || 'Opening workspace…'} />
+        </div>
+      )}
+      {showDebugOverlay && (
+        <div style={{ position: 'fixed', right: 8, bottom: 8, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 11, padding: '8px 10px', borderRadius: 6, zIndex: 10001, pointerEvents: 'none' }}>
+          <div><strong>Loading Debug</strong></div>
+          <div>view: {currentView}</div>
+          <div>root: {bindingRoot || '-'} | attached: {String(attached)} | wsId: {workspaceId || '-'} | sessions: {sessionsCount} | sel: {currentSessionId || '-'} | list: {String(listHydrated)} | sEv: {String(sessionEventsInited)}</div>
+          <div>hydrating: t={String(timelineHydrating)} m={String(hydMeta)} u={String(hydUsage)} | wsLoading: {String(wsLoading)} | show: {String(overlayActive)}</div>
+          <div>msg: {wsLoadingMessage || '-'} | phase: {wsPhase}</div>
+          <div>overlayAge: {overlayAgeMs} | hydAge: {hydratingAgeMs}</div>
+    <div>ws: {bootUrl || '-'} | windowId: {String(bootWindowId || '-')}</div>
+        </div>
+      )}
+
+
     </Profiler>
   )
 }

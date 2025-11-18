@@ -25,7 +25,7 @@ import path from 'node:path'
 
 export interface ExplorerSlice {
   // State
-  explorerOpenFolders: string[] // Array instead of Set for zubridge serialization
+  explorerOpenFolders: string[] // Array (JSON-serializable) instead of Set for persistence/IPC
   explorerChildrenByDir: Record<string, ExplorerEntry[]>
   openedFile: OpenedFile | null
 

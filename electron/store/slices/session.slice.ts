@@ -19,10 +19,12 @@
 import type { StateCreator } from 'zustand'
 import type { Session, TokenUsage, TokenCost, AgentMetrics, ActivityEvent, SessionItem, SessionMessage, NodeExecutionBox, Badge } from '../types'
 import { MAX_SESSIONS } from '../utils/constants'
-import { deriveTitle } from '../utils/sessions'
+import { deriveTitle, initialSessionTitle } from '../utils/sessions'
 import { loadAllSessions, sessionSaver, deleteSessionFromDisk } from '../utils/session-persistence'
 
 import { loadWorkspaceSettings, saveWorkspaceSettings } from '../../ipc/workspace'
+
+import * as agentPty from '../../services/agentPty'
 
 // ============================================================================
 const DEBUG_USAGE = process.env.HF_DEBUG_USAGE === '1' || process.env.HF_DEBUG_TOKENS === '1'
@@ -37,10 +39,10 @@ const DEBUG_USAGE = process.env.HF_DEBUG_USAGE === '1' || process.env.HF_DEBUG_T
 // ============================================================================
 
 export interface SessionSlice {
-  // Session State
-  sessions: Session[]
-  currentId: string | null
-  sessionsLoaded: boolean
+
+  // Workspace-scoped session state (Phase 3 migration)
+  sessionsByWorkspace: Record<string, Session[]>
+  currentIdByWorkspace: Record<string, string | null>
 
   // Current Node Execution State (simplified model)
   // Maps nodeId -> boxId for currently open boxes
@@ -71,10 +73,25 @@ export interface SessionSlice {
   ensureSessionPresent: () => boolean  // Returns true if a new session was created
   saveCurrentSession: (immediate?: boolean) => Promise<void>  // immediate bypasses debounce
   updateCurrentSessionFlow: (flowId: string) => Promise<void>
+  setSessionExecutedFlow: (params: { sessionId: string; flowId: string }) => Promise<void>
+  setSessionProviderModel: (params: { sessionId: string; provider: string; model: string }) => Promise<void>
   select: (id: string) => void
   newSession: (title?: string) => string
   rename: (params: { id: string; title: string }) => void
   remove: (id: string) => Promise<void>
+
+  // Workspace-scoped helpers (Phase 3)
+  getSessionsFor: (params: { workspaceId: string }) => Session[]
+  setSessionsFor: (params: { workspaceId: string; sessions: Session[] }) => void
+  getCurrentIdFor: (params: { workspaceId: string }) => string | null
+  setCurrentIdFor: (params: { workspaceId: string; id: string | null }) => void
+
+  // Workspace-scoped actions (Phase 2)
+  selectFor: (params: { workspaceId: string; id: string }) => void
+  newSessionFor: (params: { workspaceId: string; title?: string }) => string
+  loadSessionsFor: (params: { workspaceId: string }) => Promise<void>
+  ensureSessionPresentFor: (params: { workspaceId: string }) => boolean
+  initializeSessionFor: (params: { workspaceId: string }) => Promise<void>
 
   // Session Item Actions
   addSessionItem: (item: Omit<SessionItem, 'id' | 'timestamp'>) => void
@@ -109,11 +126,15 @@ export interface SessionSlice {
   }) => void
 
 
+  // Start a brand-new conversation context for the current session: clears timeline and resets messageHistory
+  startNewContext: () => Promise<void>
+
+
 
   // Token Usage Actions
-  recordTokenUsage: (params: { requestId: string; nodeId: string; executionId: string; provider: string; model: string; usage: TokenUsage }) => void
-  finalizeNodeUsage: (params: { requestId: string; nodeId: string; executionId: string }) => void
-  finalizeRequestUsage: (params: { requestId: string }) => void
+  recordTokenUsage: (params: { sessionId?: string; requestId: string; nodeId: string; executionId: string; provider: string; model: string; usage: TokenUsage }) => void
+  finalizeNodeUsage: (params: { sessionId?: string; requestId: string; nodeId: string; executionId: string }) => void
+  finalizeRequestUsage: (params: { sessionId?: string; requestId: string }) => void
 
   // Flow Debug Log Actions
   addFlowDebugLog: (log: Omit<NonNullable<Session['flowDebugLogs']>[number], 'timestamp'>) => void
@@ -139,10 +160,9 @@ export interface SessionSlice {
 // ============================================================================
 
 export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice> = (set, get) => ({
-  // State
-  sessions: [],
-  currentId: null,
-  sessionsLoaded: false,
+  // State (workspace-scoped only)
+  sessionsByWorkspace: {},
+  currentIdByWorkspace: {},
 
   currentRequestId: null,
   openExecutionBoxes: {},
@@ -161,68 +181,284 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 
   agentMetrics: null,
 
+
+	  // Workspace-scoped helpers (Phase 3)
+	  getSessionsFor: ({ workspaceId }: { workspaceId: string }) => {
+	    const map = (get() as any).sessionsByWorkspace || {}
+	    return map[workspaceId] || []
+	  },
+	  setSessionsFor: ({ workspaceId, sessions }: { workspaceId: string; sessions: Session[] }) => {
+	    set((s: any) => ({
+	      sessionsByWorkspace: {
+	        ...(s.sessionsByWorkspace || {}),
+	        [workspaceId]: sessions,
+	      },
+	    }))
+	  },
+	  getCurrentIdFor: ({ workspaceId }: { workspaceId: string }) => {
+	    const map = (get() as any).currentIdByWorkspace || {}
+	    return map[workspaceId] ?? null
+	  },
+	  setCurrentIdFor: ({ workspaceId, id }: { workspaceId: string; id: string | null }) => {
+	    set((s: any) => ({
+	      currentIdByWorkspace: {
+	        ...(s.currentIdByWorkspace || {}),
+	        [workspaceId]: id,
+	      },
+	    }))
+	  },
+
+		  // Workspace-scoped actions (Phase 2)
+		  selectFor: ({ workspaceId, id }: { workspaceId: string; id: string }) => {
+		    const state: any = get()
+		    const isActiveWorkspace = state.workspaceRoot === workspaceId
+		    // Save current session immediately before switching (only for active workspace)
+		    if (isActiveWorkspace && typeof state.saveCurrentSession === 'function') {
+		      try { state.saveCurrentSession(true) } catch {}
+		    }
+		    // Update workspace-scoped currentId (and mirror to global if active workspace)
+		    set((s: any) => {
+		      const next: any = {
+		        currentIdByWorkspace: {
+		          ...(s.currentIdByWorkspace || {}),
+		          [workspaceId]: id,
+		        },
+		      }
+		      if (isActiveWorkspace) {
+        const list: any[] = (((s as any).sessionsByWorkspace || {})[workspaceId]) || []
+        const sel = Array.isArray(list) ? list.find((x: any) => x.id === id) : null
+        ;(next as any).feSelectedTemplate = sel?.lastUsedFlow || ((s as any).feSelectedTemplate)
+        ;(next as any).feMainFlowContext = sel?.currentContext || null
+        ;(next as any).feIsolatedContexts = {}
+
+
+		      }
+		      return next
+		    })
+		    // Persist last selected session for this workspace (only for active workspace)
+		    if (isActiveWorkspace) {
+		      ;(async () => {
+		        try {
+		          const settings = await loadWorkspaceSettings()
+		          ;(settings as any).lastSessionId = id
+		          await saveWorkspaceSettings(settings)
+		        } catch (e) {
+		          console.error('[sessions] Failed to save lastSessionId (selectFor):', e)
+		        }
+		      })()
+		    }
+		    // Initialize the selected session (loads flow and starts execution) for active workspace
+		    if (isActiveWorkspace && typeof state.initializeSession === 'function') {
+		      setTimeout(() => { void state.initializeSession() }, 100)
+		    }
+		  },
+
+		  newSessionFor: ({ workspaceId, title }: { workspaceId: string; title?: string }) => {
+		    const now = Date.now()
+		    const state: any = get()
+		    const isActiveWorkspace = state.workspaceRoot === workspaceId
+		    const initialTitle = (typeof title === 'string' && title.trim().length > 0) ? title : initialSessionTitle(now)
+		    const provider = state.selectedProvider || 'openai'
+		    const model = state.selectedModel || 'gpt-4o'
+		    const lastUsedFlow = state.feSelectedTemplate || 'default'
+		    const session: Session = {
+		      id: crypto.randomUUID(),
+		      title: initialTitle,
+		      items: [],
+		      createdAt: now,
+		      updatedAt: now,
+		      lastActivityAt: now,
+		      lastUsedFlow,
+		      currentContext: { provider, model },
+		      flowDebugLogs: [],
+		      tokenUsage: { byProvider: {}, byProviderAndModel: {}, total: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+		      costs: { byProviderAndModel: {}, totalCost: 0, currency: 'USD' },
+		      requestsLog: [],
+		    }
+		    // Active workspace side-effects
+		    if (isActiveWorkspace) {
+		      if (typeof state.clearAgentTerminals === 'function') {
+		        try { void state.clearAgentTerminals() } catch {}
+		      }
+		      ;(globalThis as any).__hifideSessionFlowCache = {}
+		    }
+		    // Write into per-workspace maps and mirror to global if active workspace
+		    set((s: any) => {
+		      const prevList: Session[] = (s.sessionsByWorkspace?.[workspaceId] || [])
+		      const newList = [session, ...prevList].slice(0, MAX_SESSIONS)
+		      const patch: any = {
+		        sessionsByWorkspace: {
+		          ...(s.sessionsByWorkspace || {}),
+		          [workspaceId]: newList,
+		        },
+		        currentIdByWorkspace: {
+		          ...(s.currentIdByWorkspace || {}),
+
+
+
+		          [workspaceId]: session.id,
+		        },
+		      }
+		      if (isActiveWorkspace) {
+        ;(patch as any).feSelectedTemplate = session.lastUsedFlow
+        ;(patch as any).feMainFlowContext = session.currentContext
+        ;(patch as any).feIsolatedContexts = {}
+
+
+
+		      }
+		      return patch
+		    })
+		    // Persist last selected session per workspace (only for active workspace)
+		    if (isActiveWorkspace) {
+		      ;(async () => {
+		        try {
+		          const settings = await loadWorkspaceSettings()
+		          ;(settings as any).lastSessionId = session.id
+		          await saveWorkspaceSettings(settings)
+		        } catch (e) {
+		          console.error('[sessions] Failed to save lastSessionId (newSessionFor):', e)
+		        }
+		      })()
+		    }
+		    // Initialize/save only for active workspace to preserve isolation
+		    if (isActiveWorkspace && typeof state.initializeSession === 'function') {
+		      setTimeout(() => { void state.initializeSession() }, 100)
+		    }
+		    if (isActiveWorkspace && typeof state.saveCurrentSession === 'function') {
+		      try { state.saveCurrentSession(true) } catch {}
+
+		    }
+		    return session.id
+		  },
+
+
+		  // Workspace-scoped loaders/initializers (Phase 2)
+		  loadSessionsFor: async ({ workspaceId }: { workspaceId: string }) => {
+		    const state: any = get()
+		    const isActive = state.workspaceRoot === workspaceId
+		    // Load from disk for the active workspace (loadAllSessions reads from current workspaceRoot)
+		    const sessions = await loadAllSessions(workspaceId)
+		    let currentId: string | null = (typeof state.getCurrentIdFor === 'function') ? state.getCurrentIdFor({ workspaceId }) : null
+		    if (sessions.length === 0) {
+		      // If no sessions on disk, create one via newSessionFor; that will set maps and (if active) mirror globals
+		      get().newSessionFor({ workspaceId })
+		      return
+		    }
+		    // Prefer workspace settings lastSessionId only for active workspace
+		    if (isActive) {
+		      try {
+		        const settings = await loadWorkspaceSettings()
+		        const preferredId = (settings as any)?.lastSessionId
+		        if (preferredId && sessions.find(s => s.id === preferredId)) {
+		          currentId = preferredId
+		        }
+		      } catch (e) {
+		        console.error('[sessions] Failed to read workspace settings (loadSessionsFor):', e)
+		      }
+		    }
+
+
+		    // If no current ID or not found, use most recent
+		    if (!currentId || !sessions.find(s => s.id === currentId)) {
+		      currentId = sessions[0]?.id || null
+		    }
+		    // Write into per-workspace maps and (if active) mirror global + sessionsLoaded
+		    set((s: any) => {
+		      const patch: any = {
+		        sessionsByWorkspace: { ...(s.sessionsByWorkspace || {}), [workspaceId]: sessions },
+		        currentIdByWorkspace: { ...(s.currentIdByWorkspace || {}), [workspaceId]: currentId },
+		      }
+		      if (isActive) {
+        const sel = Array.isArray(sessions) ? sessions.find((x: any) => x.id === currentId) : null
+        ;(patch as any).feSelectedTemplate = sel?.lastUsedFlow || ((s as any).feSelectedTemplate)
+        ;(patch as any).feMainFlowContext = sel?.currentContext || null
+        ;(patch as any).feIsolatedContexts = {}
+
+
+		      }
+		      return patch
+		    })
+		  },
+
+		  ensureSessionPresentFor: ({ workspaceId }: { workspaceId: string }) => {
+		    const state: any = get()
+		    const isActive = state.workspaceRoot === workspaceId
+		    const list: Session[] = (typeof state.getSessionsFor === 'function') ? state.getSessionsFor({ workspaceId }) : []
+		    if (!list || list.length === 0) {
+		      get().newSessionFor({ workspaceId })
+		      return true
+		    }
+		    const cur = (typeof state.getCurrentIdFor === 'function') ? state.getCurrentIdFor({ workspaceId }) : null
+		    if (!cur) {
+		      const firstId = list[0].id
+		      set((s: any) => {
+		        const patch: any = {
+		          currentIdByWorkspace: { ...(s.currentIdByWorkspace || {}), [workspaceId]: firstId },
+		        }
+		        if (isActive)
+                {
+          const sel = Array.isArray(list) ? list.find((x: any) => x.id === firstId) : null
+          ;(patch as any).feSelectedTemplate = sel?.lastUsedFlow || ((s as any).feSelectedTemplate)
+          ;(patch as any).feMainFlowContext = sel?.currentContext || null
+          ;(patch as any).feIsolatedContexts = {}
+
+
+
+                }
+
+		        return patch
+		      })
+		      return false
+		    }
+		    return false
+		  },
+
+		  initializeSessionFor: async ({ workspaceId }: { workspaceId: string }) => {
+		    const state: any = get()
+		    const isActive = state.workspaceRoot === workspaceId
+		    if (isActive && typeof state.initializeSession === 'function') {
+		      await state.initializeSession()
+		    }
+		  },
+
+
+
   // Session Actions
   loadSessions: async () => {
-    let sessions = await loadAllSessions()
-
-    // Determine target currentId using workspace settings (lastSessionId) or persisted currentId
-    let currentId: string | null = (get() as any).currentId || null
-
-    // If no valid sessions found, create a new one automatically
-    if (sessions.length === 0) {
-      get().newSession()
-      set({ sessionsLoaded: true })
-      return
+    const state: any = get()
+    const ws = state.workspaceRoot || null
+    if (ws && typeof state.loadSessionsFor === 'function') {
+      await state.loadSessionsFor({ workspaceId: ws })
     }
-
-    // Prefer workspace-scoped lastSessionId if available
-    try {
-      const settings = await loadWorkspaceSettings()
-      const preferredId = (settings as any)?.lastSessionId
-      if (preferredId && sessions.find(s => s.id === preferredId)) {
-        currentId = preferredId
-      }
-    } catch (e) {
-      console.error('[sessions] Failed to read workspace settings:', e)
-    }
-
-    // If no current ID or session doesn't exist in this workspace, use most recent
-    if (!currentId || !sessions.find(s => s.id === currentId)) {
-      currentId = sessions[0]?.id || null
-    }
-
-    set({ sessions, currentId, sessionsLoaded: true })
   },
 
   /**
    * Initialize the current session
    * - Loads the flow template (lastUsedFlow or default)
    * - Sets feSelectedTemplate to match the session's flow
-   * - Does NOT start or resume the flow; leaves it in a stopped state
+   * - Starts the flow execution
    * - Ensures a terminal exists for the session
    */
   initializeSession: async () => {
     const state = get() as any
-    const currentSession = state.sessions?.find((s: Session) => s.id === state.currentId)
-
-    if (!currentSession) {
-      return
-    }
+    const ws = state.workspaceRoot || null
+    const sid = (ws && typeof state.getCurrentIdFor === 'function') ? state.getCurrentIdFor({ workspaceId: ws }) : null
+    const list: Session[] = (ws && typeof state.getSessionsFor === 'function') ? (state.getSessionsFor({ workspaceId: ws }) || []) : []
+    const currentSession = Array.isArray(list) ? list.find((s: Session) => s.id === sid) : null
+    if (!currentSession) { return }
 
     // Create the PTY session for this session (using session ID as PTY session ID)
     const workspaceRoot = state.workspaceRoot
-    const getOrCreate = (globalThis as any).__getOrCreateAgentPtyFor
-    if (getOrCreate) {
-      console.log('[session] Creating PTY for session:', currentSession.id)
-      await getOrCreate(currentSession.id, { cwd: workspaceRoot || undefined, sessionId: currentSession.id })
-    }
+    console.log('[session] Creating PTY for session:', currentSession.id)
+    await agentPty.getOrCreateAgentPtyFor(currentSession.id, { cwd: workspaceRoot || undefined })
 
     // Ensure terminal tab exists
     if (state.ensureSessionTerminal) {
       await state.ensureSessionTerminal()
     }
 
-    // Load the flow template without starting execution
+    // Load the flow template
     const flowTemplateId = currentSession.lastUsedFlow || 'default'
 
     // Set the selected template to match the session's flow (via any cast since it's in FlowEditorSlice)
@@ -234,40 +470,51 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 
     // Update session's lastUsedFlow if it wasn't set
     if (!currentSession.lastUsedFlow) {
-      const sessions = state.sessions.map((s: Session) =>
-        s.id === state.currentId
+      const sessions = list.map((s: Session) =>
+        s.id === sid
           ? { ...s, lastUsedFlow: flowTemplateId, updatedAt: Date.now() }
           : s
       )
-      set({ sessions })
+      set((s: any) => {
+        const ws = (s as any).workspaceRoot || null
+        if (!ws) return {}
+        const sid = ((s as any).currentIdByWorkspace?.[ws] ?? null)
+        return {
+          sessionsByWorkspace: { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions },
+          currentIdByWorkspace: { ...((s as any).currentIdByWorkspace || {}), [ws]: sid },
+        }
+      })
       if (state.saveCurrentSession) {
         await state.saveCurrentSession()
       }
     }
 
+    // Start the flow after session is fully initialized
+    if (state.flowInit) {
+      await state.flowInit()
+    }
+
   },
 
   ensureSessionPresent: () => {
-    const state = get()
-
-    if (!state.sessions || state.sessions.length === 0) {
-      get().newSession()
-      return true // Created a new session
+    const state: any = get()
+    const ws = state.workspaceRoot || null
+    if (ws && typeof state.ensureSessionPresentFor === 'function') {
+      return state.ensureSessionPresentFor({ workspaceId: ws })
     }
-
-    if (!state.currentId) {
-      const id = state.sessions[0].id
-      set({ currentId: id })
-      return false // Selected existing session, needs initialization
-    }
-
-    return false // Session already present and selected
+    return false
   },
 
   saveCurrentSession: async (immediate = false) => {
-    const state = get()
-    const current = state.sessions.find((sess) => sess.id === state.currentId)
+    const state: any = get()
+    const ws = state.workspaceRoot || null
 
+    let current: any = null
+    if (ws && state.sessionsByWorkspace && state.currentIdByWorkspace) {
+      const list = state.sessionsByWorkspace[ws] || []
+      const id = state.currentIdByWorkspace[ws] ?? null
+      current = Array.isArray(list) ? list.find((sess: any) => sess.id === id) : null
+    }
     if (!current) {
       console.warn('[saveCurrentSession] No current session found')
       return
@@ -275,136 +522,108 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 
     // Save to disk using debounced saver
     sessionSaver.save(current, immediate)
-
-    // Persist handled by Zustand persist middleware in main process
   },
 
   updateCurrentSessionFlow: async (flowId: string) => {
-    const state = get()
-    if (!state.currentId) return
+    const state: any = get()
+    const ws = state.workspaceRoot || null
+    if (!ws || typeof state.getCurrentIdFor !== 'function' || typeof state.getSessionsFor !== 'function') return
+    const id = state.getCurrentIdFor({ workspaceId: ws })
+    if (!id) return
 
+    const prevList: Session[] = state.getSessionsFor({ workspaceId: ws }) || []
 
-    const sessions = state.sessions.map((s: Session) =>
-      s.id === state.currentId
-        ? { ...s, lastUsedFlow: flowId, updatedAt: Date.now() }
-        : s
+    const sessions = prevList.map((s: any) =>
+      s.id === id ? { ...s, lastUsedFlow: flowId, updatedAt: Date.now() } : s
     )
 
-    set({ sessions })
+    set((s: any) => {
+      const ws2 = (s as any).workspaceRoot || null
+      if (!ws2) return {}
+      const sid2 = ((s as any).currentIdByWorkspace?.[ws2] ?? null)
+      return {
+        sessionsByWorkspace: { ...((s as any).sessionsByWorkspace || {}), [ws2]: sessions },
+        currentIdByWorkspace: { ...((s as any).currentIdByWorkspace || {}), [ws2]: sid2 },
+      }
+    })
 
-    // Save the updated session
+    await get().saveCurrentSession()
+  },
+
+  setSessionExecutedFlow: async ({ sessionId, flowId }: { sessionId: string; flowId: string }) => {
+    const state: any = get()
+    const ws = state.workspaceRoot || null
+    const prevList: Session[] = (ws && typeof state.getSessionsFor === 'function')
+      ? (state.getSessionsFor({ workspaceId: ws }) || [])
+      : []
+    const sessions = prevList.map((s: any) =>
+      s.id === sessionId ? { ...s, lastUsedFlow: flowId, updatedAt: Date.now() } : s
+    )
+    set((s: any) => {
+      const ws2 = (s as any).workspaceRoot || null
+      if (!ws2) return {}
+      const sid2 = ((s as any).currentIdByWorkspace?.[ws2] ?? null)
+      return {
+        sessionsByWorkspace: { ...((s as any).sessionsByWorkspace || {}), [ws2]: sessions },
+        currentIdByWorkspace: { ...((s as any).currentIdByWorkspace || {}), [ws2]: sid2 },
+      }
+    })
+    await get().saveCurrentSession()
+  },
+
+  setSessionProviderModel: async ({ sessionId, provider, model }: { sessionId: string; provider: string; model: string }) => {
+    set((s: any) => {
+      const ws = (s as any).workspaceRoot || null
+      if (!ws) return {}
+      const prevList: Session[] = ((s as any).sessionsByWorkspace?.[ws]) || []
+      const sessions = prevList.map((sess: any) => {
+        if (sess.id !== sessionId) return sess
+        return {
+          ...sess,
+          currentContext: {
+            ...sess.currentContext,
+            provider,
+            model,
+          },
+          updatedAt: Date.now(),
+        }
+      })
+      const sid = ((s as any).currentIdByWorkspace?.[ws] ?? null)
+      return {
+        sessionsByWorkspace: { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions },
+        currentIdByWorkspace: { ...((s as any).currentIdByWorkspace || {}), [ws]: sid },
+      }
+    })
     await get().saveCurrentSession()
   },
 
   select: (id: string) => {
-    // Save current session immediately before switching
-    get().saveCurrentSession(true)
-
-    set({ currentId: id })
-
-    // Persist last selected session per workspace
-    ;(async () => {
-      try {
-        const settings = await loadWorkspaceSettings()
-        ;(settings as any).lastSessionId = id
-        await saveWorkspaceSettings(settings)
-      } catch (e) {
-        console.error('[sessions] Failed to save lastSessionId:', e)
-      }
-    })()
-
-    // Initialize the selected session (loads flow; does not start execution)
-    const state = get()
-    const stateAny = state as any
-    if (stateAny.initializeSession) {
-      setTimeout(() => {
-        void stateAny.initializeSession()
-      }, 100)
-    }
+    const state: any = get()
+    const ws = state.workspaceRoot || null
+    if (!ws || typeof state.selectFor !== 'function') return
+    state.selectFor({ workspaceId: ws, id })
   },
 
-  newSession: (title = 'New Session') => {
-    const now = Date.now()
-
-    // Get current provider/model from store for initial context
-    const state = get() as any
-    const provider = state.selectedProvider || 'openai'
-    const model = state.selectedModel || 'gpt-4o'
-
-    // Get the currently selected flow template to use for this new session
-    const lastUsedFlow = state.feSelectedTemplate || 'default'
-
-    const session: Session = {
-      id: crypto.randomUUID(),
-      title,
-      items: [],  // Chronological timeline of messages and badge groups
-      createdAt: now,
-      updatedAt: now,
-      lastActivityAt: now,
-      lastUsedFlow,  // Set to currently selected flow
-      currentContext: {
-        provider,
-        model,
-      },
-      flowDebugLogs: [],  // Initialize empty flow debug logs
-      tokenUsage: {
-        byProvider: {},
-        byProviderAndModel: {},
-        total: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-      },
-      costs: {
-        byProviderAndModel: {},
-        totalCost: 0,
-        currency: 'USD',
-      },
-      requestsLog: [],
-    }
-
-    // Clear all agent terminals when creating a new session (from terminal slice)
-    if (state.clearAgentTerminals) {
-      void state.clearAgentTerminals()
-    }
-
-    // Clear global flow cache for new session (don't inherit cache from previous session)
-    ;(globalThis as any).__hifideSessionFlowCache = {}
-
-    set((s) => {
-      const sessions = [session, ...s.sessions].slice(0, MAX_SESSIONS)
-      return { sessions, currentId: session.id }
-    })
-    // Persist last selected session per workspace (new session)
-    ;(async () => {
-      try {
-        const settings = await loadWorkspaceSettings()
-        ;(settings as any).lastSessionId = session.id
-        await saveWorkspaceSettings(settings)
-      } catch (e) {
-        console.error('[sessions] Failed to save lastSessionId (newSession):', e)
-      }
-    })()
-
-
-    // Initialize the new session (loads flow; does not start execution)
-    const initializeSession = state.initializeSession
-    if (initializeSession) {
-      setTimeout(() => {
-        void initializeSession()
-      }, 100)
-    }
-
-    // Save the new session immediately (bypass debounce)
-    get().saveCurrentSession(true)
-
-
-    return session.id
+  newSession: (title?: string) => {
+    const state: any = get()
+    const ws = state.workspaceRoot || null
+    if (!ws || typeof state.newSessionFor !== 'function') return ''
+    return state.newSessionFor({ workspaceId: ws, title })
   },
 
   rename: ({ id, title }: { id: string; title: string }) => {
-    set((s) => {
-      const sessions = s.sessions.map((sess) =>
+    set((s: any) => {
+      const ws = (s as any).workspaceRoot || null
+      if (!ws) return {}
+      const prevList: Session[] = (((s as any).sessionsByWorkspace?.[ws]) || [])
+      const sessions = prevList.map((sess: any) =>
         sess.id === id ? { ...sess, title, updatedAt: Date.now() } : sess
       )
-      return { sessions }
+      const sid = ((s as any).currentIdByWorkspace?.[ws] ?? null)
+      return {
+        sessionsByWorkspace: { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions },
+        currentIdByWorkspace: { ...((s as any).currentIdByWorkspace || {}), [ws]: sid },
+      }
     })
 
     // Save the renamed session
@@ -412,10 +631,17 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
   },
 
   remove: async (id: string) => {
-    set((s) => {
-      const filtered = s.sessions.filter((sess) => sess.id !== id)
-      const currentId = s.currentId === id ? (filtered[0]?.id ?? null) : s.currentId
-      return { sessions: filtered, currentId }
+    set((s: any) => {
+      const ws = (s as any).workspaceRoot || null
+      if (!ws) return {}
+      const prevList: Session[] = (((s as any).sessionsByWorkspace?.[ws]) || [])
+      const filtered = prevList.filter((sess: any) => sess.id !== id)
+      const prevCurrent = ((s as any).currentIdByWorkspace?.[ws] ?? null)
+      const currentId = prevCurrent === id ? (filtered[0]?.id ?? null) : prevCurrent
+      return {
+        sessionsByWorkspace: { ...((s as any).sessionsByWorkspace || {}), [ws]: filtered },
+        currentIdByWorkspace: { ...((s as any).currentIdByWorkspace || {}), [ws]: currentId },
+      }
     })
 
     // Delete the session file from disk
@@ -431,14 +657,24 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     const now = Date.now()
     const id = crypto.randomUUID()
 
-    // Debug logging
-    console.log('[addSessionItem] Adding item:', {
-      type: item.type,
-      role: (item as any).role,
-      contentLength: (item as any).content?.length || 0,
-      currentId: get().currentId,
-      sessionCount: get().sessions.length,
-    })
+    // Debug logging (workspace-aware)
+    try {
+      const st: any = get()
+      const ws = st.workspaceRoot || null
+      const currentIdForLog = (ws && typeof st.getCurrentIdFor === 'function')
+        ? st.getCurrentIdFor({ workspaceId: ws })
+        : null
+      const sessionsForLog = (ws && typeof st.getSessionsFor === 'function')
+        ? (st.getSessionsFor({ workspaceId: ws }) || [])
+        : []
+      console.log('[addSessionItem] Adding item:', {
+        type: item.type,
+        role: (item as any).role,
+        contentLength: (item as any).content?.length || 0,
+        currentId: currentIdForLog,
+        sessionCount: sessionsForLog.length,
+      })
+    } catch {}
 
     // Add id and timestamp to the item
     let fullItem: SessionItem
@@ -461,20 +697,28 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     }
 
     set((s) => {
-      if (!s.currentId) {
-        console.warn('[addSessionItem] No currentId, skipping')
+      const ws = (s as any).workspaceRoot || null
+      if (!ws) return {}
+      const sid = (((s as any).currentIdByWorkspace || {})[ws] ?? null)
+      if (!sid) {
+        console.warn('[addSessionItem] No currentId (workspace-scoped), skipping')
         return {}
       }
 
-      const sessions = s.sessions.map((sess) => {
-        if (sess.id !== s.currentId) return sess
+      const prevList: any[] = ((((s as any).sessionsByWorkspace || {})[ws]) || [])
+
+      const sessions = prevList.map((sess: any) => {
+        if (sess.id !== sid) return sess
 
         // Update title if this is the first user message
         let newTitle = sess.title
         if (item.type === 'message' && (item as any).role === 'user') {
-          const hasMessages = sess.items.some(i => i.type === 'message')
-          if (!hasMessages && (!sess.title || sess.title === 'New Session')) {
-            newTitle = deriveTitle((item as any).content)
+          const hasMessages = sess.items.some((i: any) => i.type === 'message')
+          if (!hasMessages) {
+            const isInitial = String(sess.title || '') === initialSessionTitle(sess.createdAt)
+            if (isInitial) {
+              newTitle = deriveTitle((item as any).content, sess.createdAt)
+            }
           }
         }
 
@@ -487,8 +731,13 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
         }
       })
 
-      console.log('[addSessionItem] Updated sessions, new item count:', sessions.find(s => s.id === get().currentId)?.items.length)
-      return { sessions }
+      try { console.log('[addSessionItem] Updated sessions, new item count:', sessions.find((s2: any) => s2.id === sid)?.items.length) } catch {}
+      const patch: any = {}
+      if (ws) {
+        patch.sessionsByWorkspace = { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions }
+        patch.currentIdByWorkspace = { ...((s as any).currentIdByWorkspace || {}), [ws]: sid }
+      }
+      return patch
     })
 
     // Debounced save after adding item
@@ -497,21 +746,31 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 
   updateSessionItem: ({ id, updates }: { id: string; updates: Partial<SessionItem> }) => {
     set((s) => {
-      if (!s.currentId) return {}
+      const ws = (s as any).workspaceRoot || null
+      if (!ws) return {}
+      const sid = (((s as any).currentIdByWorkspace || {})[ws] ?? null)
+      if (!sid) return {}
 
-      const sessions = s.sessions.map((sess) => {
-        if (sess.id !== s.currentId) return sess
+      const prevList: any[] = ((((s as any).sessionsByWorkspace || {})[ws]) || [])
+
+      const sessions = prevList.map((sess: any) => {
+        if (sess.id !== sid) return sess
 
         return {
           ...sess,
-          items: sess.items.map(item =>
-            item.id === id ? { ...item, ...updates } as SessionItem : item
+          items: sess.items.map((item: any) =>
+            item.id === id ? ({ ...item, ...updates } as SessionItem) : item
           ),
           updatedAt: Date.now(),
         }
       })
 
-      return { sessions } as Partial<SessionSlice>
+      const patch: any = {}
+      if (ws) {
+        patch.sessionsByWorkspace = { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions }
+        patch.currentIdByWorkspace = { ...((s as any).currentIdByWorkspace || {}), [ws]: sid }
+      }
+      return patch
     })
 
     // Debounced save after update
@@ -537,10 +796,15 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     }>
   }) => {
     set((s) => {
-      if (!s.currentId) return {}
+      const ws = (s as any).workspaceRoot || null
+      if (!ws) return {}
+      const sid = (((s as any).currentIdByWorkspace || {})[ws] ?? null)
+      if (!sid) return {}
 
-      const sessions = s.sessions.map((sess) => {
-        if (sess.id !== s.currentId) return sess
+      const prevList: any[] = ((((s as any).sessionsByWorkspace || {})[ws]) || [])
+
+      const sessions = prevList.map((sess: any) => {
+        if (sess.id !== sid) return sess
 
         return {
           ...sess,
@@ -556,17 +820,65 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
         }
       })
 
-      return { sessions }
+      const patch: any = {}
+      patch.sessionsByWorkspace = { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions }
+      patch.currentIdByWorkspace = { ...((s as any).currentIdByWorkspace || {}), [ws]: sid }
+      return patch
     })
 
     // Debounced save after context update
     get().saveCurrentSession()
   },
 
+  // Clear timeline and reset message history; stop any running flow first
+  startNewContext: async () => {
+    const state: any = get()
+    try {
+      const running = state.feStatus === 'running' || state.feStatus === 'waitingForInput'
+      if (running && typeof state.feStop === 'function') {
+        await state.feStop()
+      }
+    } catch {}
+
+    set((s) => {
+      const ws = (s as any).workspaceRoot || null
+      if (!ws) return {}
+      const sid = (((s as any).currentIdByWorkspace || {})[ws] ?? null)
+      if (!sid) return {}
+
+      const prevList: any[] = ((((s as any).sessionsByWorkspace || {})[ws]) || [])
+
+      const sessions = prevList.map((sess: any) => {
+        if (sess.id !== sid) return sess
+        const now = Date.now()
+        return {
+          ...sess,
+          items: [],
+          currentContext: {
+            ...(sess.currentContext || {}),
+            messageHistory: []
+          },
+          lastActivityAt: now,
+          updatedAt: now,
+        }
+      })
+
+      const patch: any = { openExecutionBoxes: {} }
+      patch.sessionsByWorkspace = { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions }
+      patch.currentIdByWorkspace = { ...((s as any).currentIdByWorkspace || {}), [ws]: sid }
+      return patch
+    })
+
+    try { await get().saveCurrentSession(true) } catch {}
+
+    // Ensure inspector reflects cleared ephemeral contexts when not running
+    try { (set as any)({ feMainFlowContext: null, feIsolatedContexts: {} }) } catch {}
+  },
+
 
 
   // Token Usage Actions
-  recordTokenUsage: ({ requestId, nodeId, executionId, provider, model, usage }: { requestId: string; nodeId: string; executionId: string; provider: string; model: string; usage: TokenUsage }) => {
+  recordTokenUsage: ({ sessionId: _sessionId, requestId, nodeId, executionId, provider, model, usage }: { sessionId?: string; requestId: string; nodeId: string; executionId: string; provider: string; model: string; usage: TokenUsage }) => {
     const state = get() as any
 
     set((s) => {
@@ -638,7 +950,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     get().saveCurrentSession()
   },
 
-  finalizeNodeUsage: ({ requestId, nodeId, executionId }: { requestId: string; nodeId: string; executionId: string }) => {
+  finalizeNodeUsage: ({ sessionId, requestId, nodeId, executionId }: { sessionId?: string; requestId: string; nodeId: string; executionId: string }) => {
     const state = get() as any
 
     set((s) => {
@@ -647,7 +959,13 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       const acc = accMap[key]
       if (!acc) return {}
 
-      if (!s.currentId) {
+      const ws = (s as any).workspaceRoot || null
+      if (!ws) {
+        const { [key]: _, ...rest } = accMap
+        return { inFlightUsageByKey: rest }
+      }
+      const sid = sessionId || (((s as any).currentIdByWorkspace || {})[ws] ?? null)
+      if (!sid) {
         const { [key]: _, ...rest } = accMap
         return { inFlightUsageByKey: rest }
       }
@@ -661,8 +979,10 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
         } catch {}
       }
 
-      const sessions = s.sessions.map((sess) => {
-        if (sess.id !== s.currentId) return sess
+      const prevList: any[] = ((((s as any).sessionsByWorkspace || {})[ws]) || [])
+
+      const sessions = prevList.map((sess: any) => {
+        if (sess.id !== sid) return sess
 
         const providerUsage = sess.tokenUsage.byProvider[provider] || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
         const newProviderUsage = {
@@ -739,13 +1059,18 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       })
 
       const { [key]: _, ...rest } = accMap
-      return { sessions, inFlightUsageByKey: rest }
+      const patch: any = { inFlightUsageByKey: rest }
+      if (ws) {
+        patch.sessionsByWorkspace = { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions }
+        patch.currentIdByWorkspace = { ...((s as any).currentIdByWorkspace || {}), [ws]: sid }
+      }
+      return patch
     })
 
     get().saveCurrentSession()
   },
 
-  finalizeRequestUsage: ({ requestId }: { requestId: string }) => {
+  finalizeRequestUsage: ({ sessionId, requestId }: { sessionId?: string; requestId: string }) => {
     const state = get() as any
 
     set((s) => {
@@ -754,11 +1079,16 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       const keys = Object.keys(accMap).filter(k => k.startsWith(prefix))
       if (!keys.length) return {}
 
-      let sessions = s.sessions
+      const ws = (s as any).workspaceRoot || null
+      if (!ws) return {}
+      const sid = sessionId || (((s as any).currentIdByWorkspace || {})[ws] ?? null)
+
+      let sessions: any[] = ((((s as any).sessionsByWorkspace || {})[ws]) || [])
+
       for (const key of keys) {
         const acc = accMap[key]
         if (!acc) continue
-        if (!s.currentId) continue
+        if (!sid) continue
         const { provider, model, usage } = acc
         const cost = state.calculateCost ? state.calculateCost(provider, model, usage) : null
 
@@ -766,8 +1096,8 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
           try { console.log('[usage:finalizeRequestUsage]', { requestId, key, provider, model, final: usage, cost }) } catch {}
         }
 
-        sessions = sessions.map((sess) => {
-          if (sess.id !== s.currentId) return sess
+        sessions = sessions.map((sess: any) => {
+          if (sess.id !== sid) return sess
 
           const providerUsage = sess.tokenUsage.byProvider[provider] || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
           const newProviderUsage = {
@@ -839,7 +1169,12 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       }
 
       const rest = Object.fromEntries(Object.entries(accMap).filter(([k]) => !k.startsWith(prefix)))
-      return { sessions, inFlightUsageByKey: rest }
+      const patch: any = { inFlightUsageByKey: rest }
+      if (ws) {
+        patch.sessionsByWorkspace = { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions }
+        patch.currentIdByWorkspace = { ...((s as any).currentIdByWorkspace || {}), [ws]: sid }
+      }
+      return patch
     })
 
     get().saveCurrentSession()
@@ -847,11 +1182,18 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 
   // Flow Debug Log Actions
   addFlowDebugLog: (log) => {
-    const currentId = get().currentId
+    const stateAny = get() as any
+    const ws = stateAny.workspaceRoot || null
+    if (!ws || typeof stateAny.getCurrentIdFor !== 'function') return
+    const currentId = stateAny.getCurrentIdFor({ workspaceId: ws })
     if (!currentId) return
 
     set((s) => {
-      const sessions = s.sessions.map((sess) => {
+      const ws = (s as any).workspaceRoot || null
+      if (!ws) return {}
+      const prevList: any[] = ((((s as any).sessionsByWorkspace || {})[ws]) || [])
+
+      const sessions = prevList.map((sess: any) => {
         if (sess.id !== currentId) return sess
 
         const flowDebugLogs = sess.flowDebugLogs || []
@@ -868,7 +1210,12 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
         }
       })
 
-      return { sessions }
+      const patch: any = {}
+      if (ws) {
+        patch.sessionsByWorkspace = { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions }
+        patch.currentIdByWorkspace = { ...((s as any).currentIdByWorkspace || {}), [ws]: currentId }
+      }
+      return patch
     })
 
     // Save after adding log
@@ -876,11 +1223,19 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
   },
 
   clearFlowDebugLogs: () => {
-    const currentId = get().currentId
+    const stateAny = get() as any
+    const ws = stateAny.workspaceRoot || null
+    const currentId = (ws && typeof stateAny.getCurrentIdFor === 'function')
+      ? stateAny.getCurrentIdFor({ workspaceId: ws })
+      : null
     if (!currentId) return
 
     set((s) => {
-      const sessions = s.sessions.map((sess) => {
+      const ws = (s as any).workspaceRoot || null
+      if (!ws) return {}
+      const prevList: any[] = ((((s as any).sessionsByWorkspace || {})[ws]) || [])
+
+      const sessions = prevList.map((sess: any) => {
         if (sess.id !== currentId) return sess
 
         return {
@@ -890,7 +1245,11 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
         }
       })
 
-      return { sessions }
+      if (!ws) return {}
+      const patch: any = {}
+      patch.sessionsByWorkspace = { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions }
+      patch.currentIdByWorkspace = { ...((s as any).currentIdByWorkspace || {}), [ws]: currentId }
+      return patch
     })
 
     // Save after clearing logs
@@ -899,34 +1258,51 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 
   // Flow Cache Actions
   getNodeCache: (nodeId: string) => {
-    const currentId = get().currentId
+    const stateAny = get() as any
+    const ws = stateAny.workspaceRoot || null
+    if (!ws || typeof stateAny.getCurrentIdFor !== 'function') return undefined
+    const currentId = stateAny.getCurrentIdFor({ workspaceId: ws })
     if (!currentId) return undefined
 
-    const currentSession = get().sessions.find((s) => s.id === currentId)
-    return currentSession?.flowCache?.[nodeId]
+    if (typeof stateAny.getSessionsFor !== 'function') return undefined
+    const sessions = (stateAny.getSessionsFor({ workspaceId: ws }) || [])
+    const currentSession = (sessions as any[]).find((s) => (s as any).id === currentId)
+    return (currentSession as any)?.flowCache?.[nodeId]
   },
 
   setNodeCache: async (nodeId: string, cache: { data: any; timestamp: number }) => {
-    const currentId = get().currentId
+    const stateAny = get() as any
+    const ws = stateAny.workspaceRoot || null
+    if (!ws || typeof stateAny.getCurrentIdFor !== 'function') return
+    const currentId = stateAny.getCurrentIdFor({ workspaceId: ws })
     if (!currentId) return
 
     console.log('[session] Setting cache for node:', nodeId)
 
     set((s) => {
-      const sessions = s.sessions.map((sess) => {
-        if (sess.id !== currentId) return sess
+      const ws = (s as any).workspaceRoot || null
+      if (!ws) return {}
+      const prevList: any[] = ((((s as any).sessionsByWorkspace || {})[ws]) || [])
+
+      const sessions = prevList.map((sess: any) => {
+        if ((sess as any).id !== currentId) return sess
 
         // Update the node's cache entry
-        const flowCache = { ...sess.flowCache, [nodeId]: cache }
+        const flowCache = { ...(sess as any).flowCache, [nodeId]: cache }
 
         return {
-          ...sess,
+          ...(sess as any),
           flowCache,
           updatedAt: Date.now(),
         }
       })
 
-      return { sessions }
+      const patch: any = {}
+      if (ws) {
+        patch.sessionsByWorkspace = { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions }
+        patch.currentIdByWorkspace = { ...((s as any).currentIdByWorkspace || {}), [ws]: currentId }
+      }
+      return patch
     })
 
     // Save after setting cache
@@ -934,27 +1310,38 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
   },
 
   clearNodeCache: async (nodeId: string) => {
-    const currentId = get().currentId
+    const stateAny = get() as any
+    const ws = stateAny.workspaceRoot || null
+    if (!ws || typeof stateAny.getCurrentIdFor !== 'function') return
+    const currentId = stateAny.getCurrentIdFor({ workspaceId: ws })
     if (!currentId) return
 
     console.log('[session] Clearing cache for node:', nodeId)
 
     set((s) => {
-      const sessions = s.sessions.map((sess) => {
-        if (sess.id !== currentId) return sess
+      const ws = (s as any).workspaceRoot || null
+      if (!ws) return {}
+      const prevList: any[] = ((((s as any).sessionsByWorkspace || {})[ws]) || [])
+
+      const sessions = prevList.map((sess: any) => {
+        if ((sess as any).id !== currentId) return sess
 
         // Remove the node's cache entry
-        const flowCache = { ...sess.flowCache }
-        delete flowCache[nodeId]
+        const flowCache = { ...(sess as any).flowCache }
+        delete (flowCache as any)[nodeId]
 
         return {
-          ...sess,
+          ...(sess as any),
           flowCache,
           updatedAt: Date.now(),
         }
       })
 
-      return { sessions }
+      if (!ws) return {}
+      const patch: any = {}
+      patch.sessionsByWorkspace = { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions }
+      patch.currentIdByWorkspace = { ...((s as any).currentIdByWorkspace || {}), [ws]: currentId }
+      return patch
     })
 
     // Save after clearing cache
@@ -1039,22 +1426,27 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 
       // Apply all buffered content in a single state update
       set((s) => {
-        if (!s.currentId) return {}
+        const ws = (s as any).workspaceRoot || null
+        if (!ws) return {}
+        const sid = ((((s as any).currentIdByWorkspace || {})[ws]) ?? null)
+        if (!sid) return {}
 
         // Find existing open box for this nodeId
-        const openBoxId = s.openExecutionBoxes[nodeId]
+        const openBoxId = (s as any).openExecutionBoxes[nodeId]
         let newBoxId: string | null = null
 
-        const sessions = s.sessions.map((sess) => {
-          if (sess.id !== s.currentId) return sess
+        const prevList: any[] = ((((s as any).sessionsByWorkspace || {})[ws]) || [])
+
+        const sessions = prevList.map((sess: any) => {
+          if ((sess as any).id !== sid) return sess
 
           const existingBoxIndex = openBoxId
-            ? sess.items.findIndex(item => item.id === openBoxId)
+            ? (sess as any).items.findIndex((item: any) => item.id === openBoxId)
             : -1
 
           if (existingBoxIndex !== -1) {
             // Box exists - append content
-            const items = [...sess.items]
+            const items = [ ...(sess as any).items ]
             const box = items[existingBoxIndex] as any
             items[existingBoxIndex] = {
               ...box,
@@ -1062,7 +1454,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
             }
 
             return {
-              ...sess,
+              ...(sess as any),
               items,
               updatedAt: Date.now()
             }
@@ -1085,25 +1477,28 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
             }
 
             return {
-              ...sess,
-              items: [...sess.items, newBox],
+              ...(sess as any),
+              items: [ ...(sess as any).items, newBox ],
               updatedAt: Date.now()
             }
           }
         })
 
+        const patch: any = {}
+        if (ws) {
+          patch.sessionsByWorkspace = { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions }
+          patch.currentIdByWorkspace = { ...((s as any).currentIdByWorkspace || {}), [ws]: sid }
+        }
+
         // Update open boxes map if we created a new box
         if (newBoxId) {
-          return {
-            sessions,
-            openExecutionBoxes: {
-              ...s.openExecutionBoxes,
-              [nodeId]: newBoxId
-            }
+          patch.openExecutionBoxes = {
+            ...((s as any).openExecutionBoxes),
+            [nodeId]: newBoxId
           }
         }
 
-        return { sessions }
+        return patch
       })
 
       // Debounced save
@@ -1175,18 +1570,23 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
    */
   updateBadgeInNodeExecution: ({ nodeId, badgeId, updates }: { nodeId: string; badgeId: string; updates: Partial<any> }) => {
     set((s) => {
-      if (!s.currentId) return {}
+      const ws = (s as any).workspaceRoot || null
+      if (!ws) return {}
+      const sid = ((((s as any).currentIdByWorkspace || {})[ws]) ?? null)
+      if (!sid) return {}
 
-      const openBoxId = s.openExecutionBoxes[nodeId]
+      const openBoxId = (s as any).openExecutionBoxes[nodeId]
       if (!openBoxId) return {} // No open box for this node
 
-      const sessions = s.sessions.map((sess) => {
-        if (sess.id !== s.currentId) return sess
+      const prevList: any[] = ((((s as any).sessionsByWorkspace || {})[ws]) || [])
 
-        const boxIndex = sess.items.findIndex(item => item.id === openBoxId)
+      const sessions = prevList.map((sess: any) => {
+        if ((sess as any).id !== sid) return sess
+
+        const boxIndex = (sess as any).items.findIndex((item: any) => item.id === openBoxId)
         if (boxIndex === -1) return sess
 
-        const box = sess.items[boxIndex] as any
+        const box = (sess as any).items[boxIndex] as any
         if (box.type !== 'node-execution') return sess
 
         // Find and update the badge
@@ -1207,20 +1607,25 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
           return item
         })
 
-        const items = [...sess.items]
+        const items = [ ...(sess as any).items ]
         items[boxIndex] = {
           ...box,
           content: updatedContent
         }
 
         return {
-          ...sess,
+          ...(sess as any),
           items,
           updatedAt: Date.now()
         }
       })
 
-      return { sessions }
+      const patch: any = {}
+      if (ws) {
+        patch.sessionsByWorkspace = { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions }
+        patch.currentIdByWorkspace = { ...((s as any).currentIdByWorkspace || {}), [ws]: sid }
+      }
+      return patch
     })
 
     // Debounced save
@@ -1245,18 +1650,23 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     }
 
     set((s) => {
-      if (!s.currentId) return {}
+      const ws = (s as any).workspaceRoot || null
+      if (!ws) return {}
+      const sid = ((((s as any).currentIdByWorkspace || {})[ws]) ?? null)
+      if (!sid) return {}
 
-      const openBoxId = s.openExecutionBoxes[nodeId]
+      const openBoxId = (s as any).openExecutionBoxes[nodeId]
       if (!openBoxId) return {} // No box to finalize
 
-      const sessions = s.sessions.map((sess) => {
-        if (sess.id !== s.currentId) return sess
+      const prevList: any[] = ((((s as any).sessionsByWorkspace || {})[ws]) || [])
 
-        const boxIndex = sess.items.findIndex(item => item.id === openBoxId)
+      const sessions = prevList.map((sess: any) => {
+        if ((sess as any).id !== sid) return sess
+
+        const boxIndex = (sess as any).items.findIndex((item: any) => item.id === openBoxId)
 
         if (boxIndex !== -1 && cost) {
-          const items = [...sess.items]
+          const items = [ ...(sess as any).items ]
           const box = items[boxIndex] as any
           items[boxIndex] = {
             ...box,
@@ -1264,7 +1674,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
           }
 
           return {
-            ...sess,
+            ...(sess as any),
             items,
             updatedAt: Date.now()
           }
@@ -1274,10 +1684,15 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       })
 
       // Remove from open boxes map so next execution creates a new box
-      const newOpenBoxes = { ...s.openExecutionBoxes }
-      delete newOpenBoxes[nodeId]
+      const newOpenBoxes = { ...((s as any).openExecutionBoxes) }
+      delete (newOpenBoxes as any)[nodeId]
 
-      return { sessions, openExecutionBoxes: newOpenBoxes }
+      const patch: any = { openExecutionBoxes: newOpenBoxes }
+      if (ws) {
+        patch.sessionsByWorkspace = { ...((s as any).sessionsByWorkspace || {}), [ws]: sessions }
+        patch.currentIdByWorkspace = { ...((s as any).currentIdByWorkspace || {}), [ws]: sid }
+      }
+      return patch
     })
 
     // Immediate save on finalize

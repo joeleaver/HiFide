@@ -30,6 +30,8 @@ import { getNodeFunction } from './nodes'
 import { createContextAPI } from './context-api'
 import { createEventEmitter } from './execution-events'
 
+import { emitFlowEvent } from './events'
+
 import util from 'node:util'
 
 
@@ -49,6 +51,9 @@ export class FlowScheduler {
   private incomingEdges = new Map<string, Edge[]>()
   private outgoingEdges = new Map<string, Edge[]>()
 
+  // Workspace scoping (absolute path)
+  private workspaceId: string | undefined
+  private sessionId: string | undefined
 
 
   // Cached store reference (lazy-loaded to avoid circular dependency)
@@ -97,6 +102,11 @@ export class FlowScheduler {
   // Output memoization - cache node outputs to prevent duplicate execution
   // private nodeOutputCache = new Map<string, NodeOutput>()
 
+
+  // Track active/executing nodes and paused state for status snapshots
+  private activeNodeIds = new Set<string>()
+  private pausedNodeId: string | null = null
+
   constructor(
     wc: WebContents | undefined,
     requestId: string,
@@ -106,6 +116,13 @@ export class FlowScheduler {
     this._wc = wc
     this.requestId = requestId
     this.flowDef = flowDef
+
+    // Workspace scoping for tools/events
+
+    // Session scoping for events
+    this.sessionId = (args as any)?.sessionId
+
+    this.workspaceId = (args as any)?.workspaceId
 
     // Initialize main context from session context (single source of truth)
     // Use requestId as contextId so terminal tools bind to the session's PTY
@@ -379,8 +396,7 @@ export class FlowScheduler {
         return { ok: true }
       }
       console.error('[FlowScheduler] Error:', error)
-      const store = await this.getStore()
-      store.feHandleError(this.requestId, error)
+      try { emitFlowEvent(this.requestId, { type: 'error', error, sessionId: (this as any).sessionId }) } catch {}
       return { ok: false, error }
     }
   }
@@ -443,7 +459,9 @@ export class FlowScheduler {
     console.log(`[Scheduler] ${nodeId} - Starting execution ${executionId}, isPull: ${isPull}, callerId: ${callerId}, pushedInputs:`, Object.keys(pushedInputs))
 
     const store = await this.getStore()
-    store.feHandleNodeStart(this.requestId, nodeId)
+    try { emitFlowEvent(this.requestId, { type: 'nodeStart', nodeId, executionId, sessionId: (this as any).sessionId }) } catch {}
+    // Track running node for snapshot/status queries
+    try { this.activeNodeIds.add(nodeId) } catch {}
 
     try {
       // Do NOT refresh from store here. The scheduler is the source of truth during execution.
@@ -521,7 +539,9 @@ export class FlowScheduler {
 
       const durationMs = Date.now() - startTime
       // Reduced logging
-      store.feHandleNodeEnd(this.requestId, nodeId, executionId, durationMs)
+    try { emitFlowEvent(this.requestId, { type: 'nodeEnd', nodeId, durationMs, executionId, sessionId: (this as any).sessionId }) } catch {}
+    // Mark node as no longer active
+    try { this.activeNodeIds.delete(nodeId) } catch {}
 
       // Check for error status - do not hard-stop the flow here
       if (result.status === 'error') {
@@ -645,15 +665,15 @@ export class FlowScheduler {
 
         if (runnables.length) {
           // Fire-and-forget: do not await successors
-          for (const { id: succId, promise } of runnables) {
-            promise.catch((err) => {
+          // Attach catch immediately on each promise to avoid unhandledRejection races
+          for (let i = 0; i < runnables.length; i++) {
+            const succId = runnables[i].id
+            runnables[i].promise = runnables[i].promise.catch((err) => {
               if (isCancellationError(err)) {
                 console.log(`[Scheduler] ${nodeId} - Successor ${succId} cancelled`)
                 return
               }
               console.error(`[Scheduler] ${nodeId} - Successor ${succId} error:`, err)
-              // Avoid stopping the whole flow. Errors will be surfaced by doExecuteNode catch for non-entry nodes.
-              // We still attach a catch to prevent unhandledRejection warnings.
             })
           }
         }
@@ -717,6 +737,7 @@ export class FlowScheduler {
       nodeId,
       requestId: this.requestId,
       executionId,
+      workspaceId: this.workspaceId,
       signal: this.abortController.signal,
       checkCancelled: () => {
         if (this.abortController.signal.aborted) {
@@ -776,9 +797,10 @@ export class FlowScheduler {
       waitForUserInput: async () => {
         console.log('[FlowAPI.waitForUserInput] Waiting for input, nodeId:', nodeId)
 
-        // Notify store that we're waiting for input
-        const store = await this.getStore()
-        store.feHandleWaitingForInput(this.requestId, nodeId)
+        // Notify renderer that we're waiting for input
+    try { emitFlowEvent(this.requestId, { type: 'waitingForInput', nodeId, sessionId: (this as any).sessionId }) } catch {}
+    // Record paused state for snapshot/status queries
+    try { this.pausedNodeId = nodeId } catch {}
 
         // Create a promise that will be resolved when resumeWithInput is called
         const userInput = await new Promise<string>((resolve) => {
@@ -806,6 +828,7 @@ export class FlowScheduler {
     if (this.abortController.signal.aborted) {
       if (
         event.type === 'chunk' ||
+        event.type === 'reasoning' ||
         event.type === 'tool_start' ||
         event.type === 'tool_end' ||
         event.type === 'tool_error' ||
@@ -829,7 +852,6 @@ export class FlowScheduler {
       console.log(util.inspect(event, { depth: null, colors: false, maxArrayLength: 200 }))
     }
 
-    const store = await this.getStore()
 
     switch (event.type) {
       case 'chunk':
@@ -838,64 +860,41 @@ export class FlowScheduler {
             const brief = (event.chunk || '').slice(0, 60).replace(/\n/g, '\\n')
             console.log(`[FlowAPI] chunk node=${event.nodeId} exec=${event.executionId} len=${event.chunk.length} brief=${brief}`)
           }
-          store.feHandleChunk(this.requestId, event.chunk, event.nodeId, event.provider, event.model)
+          try { emitFlowEvent(this.requestId, { type: 'chunk', nodeId: event.nodeId, text: event.chunk, executionId: event.executionId, sessionId: (this as any).sessionId }) } catch {}
+        }
+        break
+
+      case 'reasoning':
+        if ((event as any).reasoning) {
+          if (process.env.HF_FLOW_DEBUG === '1') {
+            const brief = ((event as any).reasoning || '').slice(0, 60).replace(/\n/g, '\\n')
+            console.log(`[FlowAPI] reasoning node=${event.nodeId} exec=${event.executionId} len=${(event as any).reasoning.length} brief=${brief}`)
+          }
+          try { emitFlowEvent(this.requestId, { type: 'reasoning', nodeId: event.nodeId, text: (event as any).reasoning, executionId: event.executionId, sessionId: (this as any).sessionId }) } catch {}
         }
         break
 
       case 'tool_start':
         if (event.tool) {
-          store.feHandleToolStart(
-            this.requestId,
-            event.tool.toolName,
-            event.nodeId,
-            event.tool.toolArgs,
-            event.tool.toolCallId,
-            event.provider,
-            event.model
-          )
+          try { emitFlowEvent(this.requestId, { type: 'toolStart', nodeId: event.nodeId, toolName: event.tool.toolName, callId: event.tool.toolCallId, toolArgs: event.tool.toolArgs, executionId: event.executionId, sessionId: (this as any).sessionId }) } catch {}
         }
         break
 
       case 'tool_end':
         if (event.tool) {
-          store.feHandleToolEnd(
-            this.requestId,
-            event.tool.toolName,
-            event.tool.toolCallId,
-            event.nodeId,
-            event.tool.toolResult
-          )
+          try { emitFlowEvent(this.requestId, { type: 'toolEnd', nodeId: event.nodeId, toolName: event.tool.toolName, callId: event.tool.toolCallId, result: event.tool.toolResult, executionId: event.executionId, sessionId: (this as any).sessionId }) } catch {}
         }
         break
 
       case 'tool_error':
         if (event.tool) {
-          store.feHandleToolError(
-            this.requestId,
-            event.tool.toolName,
-            event.tool.toolError || 'Unknown error',
-            event.tool.toolCallId,
-            event.nodeId
-          )
+          try { emitFlowEvent(this.requestId, { type: 'toolError', nodeId: event.nodeId, toolName: event.tool.toolName, error: event.tool.toolError || 'Unknown error', callId: event.tool.toolCallId, executionId: event.executionId, sessionId: (this as any).sessionId }) } catch {}
         }
         break
 
       case 'usage':
         if (event.usage) {
-          store.feHandleTokenUsage(
-            this.requestId,
-            event.provider,
-            event.model,
-            {
-              inputTokens: event.usage.inputTokens,
-              outputTokens: event.usage.outputTokens,
-              totalTokens: event.usage.totalTokens,
-              // Preserve cached tokens if provided by provider SDKs
-              cachedTokens: (event.usage as any).cachedTokens ?? 0,
-            },
-            event.nodeId,
-            (event as any).executionId
-          )
+          try { emitFlowEvent(this.requestId, { type: 'tokenUsage', nodeId: event.nodeId, provider: event.provider, model: event.model, usage: { inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, totalTokens: event.usage.totalTokens }, executionId: event.executionId, sessionId: (this as any).sessionId }) } catch {}
         }
         break
 
@@ -903,42 +902,37 @@ export class FlowScheduler {
       case 'usage_breakdown':
         if ((event as any).usageBreakdown) {
           try {
-            (store as any).feHandleUsageBreakdown?.(
-              this.requestId,
-              event.nodeId,
-              event.provider,
-              event.model,
-              (event as any).usageBreakdown,
-              (event as any).executionId
-            )
+            emitFlowEvent(this.requestId, {
+              type: 'usageBreakdown',
+              nodeId: event.nodeId,
+              provider: event.provider,
+              model: event.model,
+              breakdown: (event as any).usageBreakdown,
+              executionId: (event as any).executionId,
+              sessionId: (this as any).sessionId
+            })
           } catch (e) {
-            console.warn('[FlowAPI] feHandleUsageBreakdown failed:', e)
+            console.warn('[FlowAPI] usageBreakdown emit failed:', e)
           }
         }
         break
 
       case 'done':
         // Flow execution completed
-        store.feHandleDone(this.requestId)
+        try { emitFlowEvent(this.requestId, { type: 'done', sessionId: (this as any).sessionId }) } catch {}
         break
 
       case 'error':
         if (event.error) {
-          store.feHandleError(this.requestId, event.error, event.nodeId, event.provider, event.model)
+          try { emitFlowEvent(this.requestId, { type: 'error', nodeId: event.nodeId, error: event.error, sessionId: (this as any).sessionId }) } catch {}
         }
         break
 
       case 'rate_limit_wait':
         if (event.rateLimitWait) {
-          store.feHandleRateLimitWait(
-            this.requestId,
-            event.nodeId,
-            event.rateLimitWait.attempt,
-            event.rateLimitWait.waitMs,
-            event.rateLimitWait.reason,
-            event.provider,
-            event.model
-          )
+          if (process.env.HF_FLOW_DEBUG === '1') {
+            console.log('[ExecutionEvent] rate_limit_wait', event.rateLimitWait)
+          }
         }
         break
 
@@ -1144,6 +1138,8 @@ export class FlowScheduler {
     if (resolver) {
       console.log('[scheduler.resolveUserInput] Found resolver, resolving with input')
       resolver(userInput)
+      // Clear paused state after input is provided
+      try { this.pausedNodeId = null } catch {}
     } else {
       console.error('[scheduler.resolveUserInput] No resolver found for nodeId:', nodeId)
     }
@@ -1173,6 +1169,8 @@ export class FlowScheduler {
       const [nodeId, resolver] = entry
       console.log('[scheduler.resolveAnyWaitingUserInput] Resolving user input for node:', nodeId)
       resolver(userInput)
+      // Clear paused state after input is provided
+      try { this.pausedNodeId = null } catch {}
     }
   }
 
@@ -1191,12 +1189,30 @@ export class FlowScheduler {
 
     console.log(`[Scheduler] Found ${portalOutputNodes.length} portal output nodes with ID: ${portalId}`)
 
+
+
     // Execute each Portal Output node (push-trigger)
     for (const node of portalOutputNodes) {
       console.log(`[Scheduler] Triggering portal output node: ${node.id}`)
       await this.executeNode(node.id, {}, null, false)
     }
   }
+
+  /**
+   * Snapshot current scheduler state for UI seeding on reconnect
+   */
+  public getSnapshot(): { requestId: string; status: 'running' | 'waitingForInput' | 'stopped'; activeNodeIds: string[]; pausedNodeId: string | null } {
+    const aborted = this.abortController?.signal?.aborted === true
+    const hasWaiting = this.userInputResolvers.size > 0 || !!this.pausedNodeId
+    const status: 'running' | 'waitingForInput' | 'stopped' = aborted ? 'stopped' : (hasWaiting ? 'waitingForInput' : 'running')
+    return {
+      requestId: this.requestId,
+      status,
+      activeNodeIds: Array.from(this.activeNodeIds),
+      pausedNodeId: this.pausedNodeId || null,
+    }
+  }
+
 }
 
 

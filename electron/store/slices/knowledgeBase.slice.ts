@@ -1,5 +1,5 @@
 import type { StateCreator } from 'zustand'
-import { listItems, createItem, updateItem, deleteItem, readById, normalizeMarkdown, extractTrailingMeta, type KbItem, type KbHit } from '../utils/knowledgeBase'
+import { listItems, createItem, updateItem, deleteItem, normalizeMarkdown, type KbItem, type KbHit } from '../utils/knowledgeBase'
 import { listWorkspaceFiles } from '../utils/workspace-helpers'
 import { getKbIndexer } from '../../core/state'
 
@@ -7,8 +7,6 @@ export interface KnowledgeBaseSlice {
   // State
   kbLoading: boolean
   kbItems: Record<string, KbItem>
-  kbBodies: Record<string, string>
-  kbFiles: Record<string, string[]>
   kbWorkspaceFiles: string[]
   kbLastError?: string | null
 
@@ -17,7 +15,7 @@ export interface KnowledgeBaseSlice {
   kbSearchTags: string[]
   kbSearchResults: KbHit[]
 
-  // Operation result channel (zubridge-safe)
+  // Operation result channel (safe to send over JSON-RPC notifications)
   kbOpResult: { ok: boolean; op: 'create' | 'update' | 'delete'; id?: string; error?: string } | null
 
   // Actions
@@ -26,7 +24,6 @@ export interface KnowledgeBaseSlice {
   kbUpdateItem: (params: { id: string; patch: Partial<{ title: string; description: string; tags: string[]; files: string[] }> }) => Promise<void>
   kbDeleteItem: (params: { id: string }) => Promise<void>
 
-  kbReadItemBody: (params: { id: string }) => Promise<void>
   kbRefreshWorkspaceFileIndex: (params?: { includeExts?: string[]; max?: number }) => Promise<void>
 
   setKbSearchQuery: (query: string) => void
@@ -39,8 +36,6 @@ export const createKnowledgeBaseSlice: StateCreator<KnowledgeBaseSlice> = (set, 
   // State
   kbLoading: false,
   kbItems: {},
-  kbBodies: {},
-  kbFiles: {},
   kbWorkspaceFiles: [],
   kbLastError: null,
 
@@ -188,22 +183,6 @@ export const createKnowledgeBaseSlice: StateCreator<KnowledgeBaseSlice> = (set, 
     }
   },
 
-  kbReadItemBody: async ({ id }) => {
-    const baseDir = (get() as any).workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
-    try {
-      const found = await readById(baseDir, id)
-      if (found) {
-        const norm = normalizeMarkdown(found.body ?? '')
-        const { body } = extractTrailingMeta(norm)
-        set((s) => ({
-          kbBodies: { ...s.kbBodies, [id]: body },
-          kbFiles: { ...s.kbFiles, [id]: (found.meta as any).files || [] }
-        }))
-      }
-    } catch (e: any) {
-      set({ kbLastError: String(e) })
-    }
-  },
 
   kbClearOpResult: () => set({ kbOpResult: null }),
 })

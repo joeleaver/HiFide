@@ -1,7 +1,8 @@
-import { Stack, Textarea, Card, ScrollArea, Text, Badge as MantineBadge, useMantineTheme, Group, ActionIcon, Tooltip } from '@mantine/core'
+import { Stack, Card, ScrollArea, Text, Badge as MantineBadge, useMantineTheme, Group, ActionIcon, Tooltip, Skeleton } from '@mantine/core'
 import { DiffEditor } from '@monaco-editor/react'
 import { IconArrowsMaximize, IconX } from '@tabler/icons-react'
-import { useAppStore, useDispatch, selectCurrentId } from './store'
+// zubridge removed from session pane reads
+// import { useAppStore, useDispatch, selectCurrentId, selectCurrentSession } from './store'
 import { useUiStore } from './store/ui'
 import Markdown from './components/Markdown'
 // Debug flag for render logging
@@ -19,90 +20,46 @@ import { BadgeAstSearchContent } from './components/BadgeAstSearchContent'
 import { BadgeReadLinesContent } from './components/BadgeReadLinesContent'
 import { BadgeWorkspaceJumpContent } from './components/BadgeWorkspaceJumpContent'
 import { BadgeWorkspaceMapContent } from './components/BadgeWorkspaceMapContent'
+import { useChatTimeline } from './store/chatTimeline'
+import { getBackendClient } from './lib/backend/bootstrap'
+
+
 import { BadgeAgentAssessTaskContent } from './components/BadgeAgentAssessTaskContent'
 
+import { useFlowRuntime } from './store/flowRuntime'
 import { BadgeUsageBreakdownContent } from './components/BadgeUsageBreakdownContent'
 
 import { NodeOutputBox } from './components/NodeOutputBox'
-import { FlowStatusIndicator } from './components/FlowStatusIndicator'
+
 import type { NodeExecutionBox } from '../electron/store/types'
 import { useRef, useEffect, useMemo, memo, Fragment } from 'react'
 
-// Separate input component to prevent re-renders when parent updates
-const SessionInput = memo(function SessionInput() {
-  const dispatch = useDispatch()
-  const inputValue = useUiStore((s) => s.sessionInputValue || '')
-  const setInputValue = useUiStore((s) => s.setSessionInputValue)
+import SessionControlsBar from './components/SessionControlsBar'
 
-  const send = async () => {
-    const text = inputValue.trim()
-    if (!text) return
-
-    // Clear input and resume flow
-    setInputValue('')
-    await dispatch('feResume', { userInput: text })
-  }
-
-  return (
-    <Textarea
-      placeholder="Ask your agent... (Ctrl+Enter to send)"
-      autosize
-      minRows={2}
-      maxRows={6}
-      value={inputValue}
-      onChange={(e) => setInputValue(e.currentTarget.value)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-          e.preventDefault()
-          send()
-        }
-      }}
-      styles={{
-        input: {
-          backgroundColor: '#252526',
-          border: '1px solid #3e3e42',
-        },
-      }}
-    />
-
-  )
-})
 
 function SessionPane() {
   const theme = useMantineTheme()
-  const currentId = useAppStore(selectCurrentId)
+  // Read session timeline exclusively from renderer store fed by WS deltas (no zubridge reads)
+  const itemsSig = useChatTimeline((s: any) => s.sig)
+  const sessionItems = useChatTimeline((s: any) => s.items)
 
-  // Subscribe to a minimal signature of the items to avoid re-renders on reference churn
-  const itemsSig = useAppStore((s) => {
-    const sessions = (s as any).sessions
-    if (!Array.isArray(sessions) || !sessions.length || !currentId) return '0'
-    const currentSession = sessions.find((sess: any) => sess.id === currentId)
-    const items = currentSession?.items
-    const len = Array.isArray(items) ? items.length : 0
-    if (!len) return '0'
-    const last = items[len - 1]
-    const contentLen = Array.isArray(last?.content) ? last.content.length : 0
-    const lastContent = contentLen ? last.content[contentLen - 1] : undefined
-    if (!lastContent) return `${len}:${last?.id}:${last?.type}:none`
-    if ((lastContent as any).type === 'text') {
-      return `${len}:${last?.id}:${last?.type}:text:${(lastContent as any).text?.length ?? 0}`
+  const isHydratingTimeline = useChatTimeline((s: any) => s.isHydrating)
+  const hasRenderedOnce = useChatTimeline((s: any) => (s as any).hasRenderedOnce)
+  const hydrationVersion = useChatTimeline((s: any) => (s as any).hydrationVersion || 0)
+
+  // Mark the timeline as "rendered once" once we've seen at least one
+  // snapshot (hydrationVersion > 0) and finished hydrating. This covers both
+  // cases where the snapshot arrived before SessionPane mounted (first window)
+  // and cases where it arrives later.
+  useEffect(() => {
+    if (!hasRenderedOnce && hydrationVersion > 0 && !isHydratingTimeline) {
+      try { useChatTimeline.setState({ hasRenderedOnce: true } as any) } catch {}
     }
-    if ((lastContent as any).type === 'badge') {
-      const b = (lastContent as any).badge || {}
-      return `${len}:${last?.id}:${last?.type}:badge:${b.status || ''}:${b.addedLines ?? ''}:${b.removedLines ?? ''}:${b.label || ''}`
-    }
-    return `${len}:${last?.id}:${last?.type}:${(lastContent as any).type || 'other'}`
-  })
+  }, [hydrationVersion, isHydratingTimeline, hasRenderedOnce])
 
-  // Read full items non-subscribed, keyed by signature changes
-  const sessionItems = useMemo(() => {
-    const st = useAppStore.getState()
-    const currentSession = st.sessions.find((sess: any) => sess.id === currentId)
-    return currentSession?.items || []
-  }, [itemsSig, currentId])
+  // Flow execution state - now driven by renderer-side flowRuntime store (WebSocket events)
+  const feStatus = useFlowRuntime((s: any) => s.status)
 
-  // Flow execution state - these DO cause re-renders when they change
-  const feStatus = useAppStore((s) => s.feStatus)
 
   // Render diagnostics
   const renderCountRef = useRef(0)
@@ -115,24 +72,20 @@ function SessionPane() {
     const len = sessionItems.length
     const last = len ? sessionItems[len - 1] : null
     const lastSummary = last ? `${last.type}:${last.id}:${Array.isArray(last.content) ? last.content.length : 0}` : 'none'
-    // eslint-disable-next-line no-console
-    console.log(`[SessionPane] render #${renderCountRef.current} t=${(now / 1000).toFixed(3)}s Δ=${delta.toFixed(0)}ms items=${len} last=${lastSummary} feStatus=${feStatus}`)
   }
 
   // Smart auto-scroll: only scroll to bottom if user is already near bottom
   // Track previous selected values to identify change sources between renders
-  const prev = useRef<{ id: any; sig: any; fe: any; auto: any }>({ id: undefined, sig: undefined, fe: undefined, auto: undefined })
+  const prev = useRef<{ sig: any; fe: any; auto: any }>({ sig: undefined, fe: undefined, auto: undefined })
   const changed: string[] = []
-  if (prev.current.id !== currentId) changed.push('currentId')
   if (prev.current.sig !== itemsSig) changed.push('itemsSig')
   if (prev.current.fe !== feStatus) changed.push('feStatus')
   const autoNow = useUiStore((s) => s.shouldAutoScroll)
   if (prev.current.auto !== autoNow) changed.push('shouldAutoScroll')
-  prev.current = { id: currentId, sig: itemsSig, fe: feStatus, auto: autoNow }
+  prev.current = { sig: itemsSig, fe: feStatus, auto: autoNow }
 
   if (DEBUG_RENDERS) {
-    // eslint-disable-next-line no-console
-    console.log('[SessionPane] change sources =>', changed.length ? changed.join(',') : 'none')
+    // Detailed debug logging removed to reduce console noise
   }
 
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -305,7 +258,7 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
                     borderColor: '#2b5a8e',
                   }}
                 >
-                  <Text size="sm" c="#e0e0e0">{item.content}</Text>
+                  <Markdown content={item.content || ''} />
                 </Card>
               )
             }
@@ -316,14 +269,31 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
 
               // Merge consecutive text items to fix markdown rendering
               // (debounced flushing can split markdown syntax across multiple text items)
-              const mergedContent: Array<{ type: 'text'; text: string } | { type: 'badge'; badge: any }> = []
+              const mergedContent: Array<{ type: 'text'; text: string } | { type: 'reasoning'; text: string } | { type: 'badge'; badge: any }> = []
               let textBuffer = ''
+              let reasoningBuffer = ''
 
               for (const contentItem of box.content) {
                 if (contentItem.type === 'text') {
+                  // Flush reasoning first, then accumulate text
+                  if (reasoningBuffer) {
+                    mergedContent.push({ type: 'reasoning', text: reasoningBuffer })
+                    reasoningBuffer = ''
+                  }
                   textBuffer += contentItem.text
+                } else if (contentItem.type === 'reasoning') {
+                  // Flush text first, then accumulate reasoning (merge consecutive reasoning chunks)
+                  if (textBuffer) {
+                    mergedContent.push({ type: 'text', text: textBuffer })
+                    textBuffer = ''
+                  }
+                  reasoningBuffer += contentItem.text
                 } else {
-                  // Non-text item (badge) - flush accumulated text first
+                  // Non-text item (badge) - flush both buffers
+                  if (reasoningBuffer) {
+                    mergedContent.push({ type: 'reasoning', text: reasoningBuffer })
+                    reasoningBuffer = ''
+                  }
                   if (textBuffer) {
                     mergedContent.push({ type: 'text', text: textBuffer })
                     textBuffer = ''
@@ -332,7 +302,10 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
                 }
               }
 
-              // Flush any remaining text
+              // Flush any remaining buffers
+              if (reasoningBuffer) {
+                mergedContent.push({ type: 'reasoning', text: reasoningBuffer })
+              }
               if (textBuffer) {
                 mergedContent.push({ type: 'text', text: textBuffer })
               }
@@ -350,6 +323,26 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
                     {mergedContent.map((contentItem, idx) => {
                       if (contentItem.type === 'text') {
                         return <Markdown key={idx} content={contentItem.text} />
+                      }
+                      if (contentItem.type === 'reasoning') {
+                        const trimmed = (contentItem.text || '').replace(/\s+$/, '')
+                        return (
+                          <div
+                            key={idx}
+                            style={{
+                              position: 'relative',
+                              background: 'rgba(255,255,255,0.04)',
+                              border: '1px solid rgba(255,255,255,0.06)',
+                              borderRadius: 8,
+                              padding: '8px 28px',
+                              fontSize: '0.95em',
+                            }}
+                          >
+                            <Text c="gray.5" style={{ position: 'absolute', left: 8, top: 4, fontSize: 24, lineHeight: 1 }}>“</Text>
+                            <Text c="gray.5" style={{ position: 'absolute', right: 8, bottom: 4, fontSize: 24, lineHeight: 1 }}>”</Text>
+                            <Text style={{ fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{trimmed}</Text>
+                          </div>
+                        )
                       }
                       if (contentItem.type === 'badge') {
                         const badge = contentItem.badge
@@ -473,12 +466,14 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
                                       ui.openInlineDiffForBadge(badge.id, existing)
                                       return
                                     }
-                                    const dispatch = useDispatch()
-                                    await dispatch('loadDiffPreview', { key: payload.key })
-                                    const files = (useAppStore as any).getState().feLatestDiffPreview || []
-                                    ui.openInlineDiffForBadge(badge.id, files)
+                                    const client = getBackendClient()
+                                    if (client) {
+                                      const res: any = await client.rpc('edits.preview', { key: payload.key })
+                                      const files = Array.isArray(res?.data) ? res.data : []
+                                      if (files.length) ui.openInlineDiffForBadge(badge.id, files)
+                                    }
                                   } catch (e) {
-                                    console.error('Failed to load inline diff preview:', e)
+                                    // Swallow diff preview errors; badge remains clickable for full modal
                                   }
                                 }
                               } : undefined}
@@ -543,6 +538,7 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
   return (
     <Stack
       gap="md"
+
       style={{
         height: '100%',
         padding: '16px',
@@ -561,16 +557,23 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
       >
         <Stack gap="sm" pr="md">
           {/* Simplified session timeline rendering */}
-          {renderedItems}
+          {isHydratingTimeline ? (
+            <>
+              <Skeleton height={26} radius="sm" />
+              <Skeleton height={110} radius="sm" />
+              <Skeleton height={26} radius="sm" />
+            </>
+          ) : (
+            renderedItems
+          )}
 
-          {/* Flow status indicator - shows running/waiting/stopped states */}
-          <FlowStatusIndicator status={feStatus} />
         </Stack>
       </ScrollArea>
 
-      {/* Input Area - fixed at bottom */}
-      {feStatus !== 'stopped' && <SessionInput />}
+      {/* Controls Bar (now includes input + focus) */}
+      <SessionControlsBar />
     </Stack>
+
   )
 }
 

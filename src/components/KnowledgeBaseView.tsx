@@ -1,17 +1,112 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { Button, Group, Stack, TextInput, TagsInput, Title, ScrollArea, Badge, Divider, Modal, Kbd } from '@mantine/core'
-import { useAppStore, useDispatch } from '../store'
+import { getBackendClient } from '../lib/backend/bootstrap'
+import { IconPlus } from '@tabler/icons-react'
+
 
 // MDX Editor (dark theme)
 import '../styles/mdx-dark.css'
 import { MDXEditor, MDXEditorMethods, UndoRedo, BoldItalicUnderlineToggles, BlockTypeSelect, ListsToggle, CodeToggle, toolbarPlugin, headingsPlugin, listsPlugin, quotePlugin, markdownShortcutPlugin, codeBlockPlugin, codeMirrorPlugin, InsertCodeBlock, ChangeCodeMirrorLanguage, ConditionalContents } from '@mdxeditor/editor'
 
+
+// Supported code languages for MDXEditor CodeMirror integration
+const KB_CODE_LANGUAGES = {
+  ts: 'TypeScript',
+  tsx: 'TypeScript (react)',
+  js: 'JavaScript',
+  jsx: 'JavaScript (react)',
+  json: 'JSON',
+  css: 'CSS',
+  md: 'Markdown',
+  markdown: 'Markdown',
+  mdx: 'MDX',
+  bash: 'Bash',
+  sh: 'Shell',
+  shell: 'Shell',
+  powershell: 'PowerShell',
+  ps: 'PowerShell',
+  ps1: 'PowerShell',
+  yaml: 'YAML',
+  yml: 'YAML',
+  toml: 'TOML',
+  ini: 'INI',
+  env: 'dotenv',
+  dockerfile: 'Dockerfile',
+  docker: 'Dockerfile',
+  html: 'HTML',
+  xml: 'XML',
+  sql: 'SQL',
+  diff: 'Diff',
+  py: 'Python',
+  python: 'Python',
+  rb: 'Ruby',
+  go: 'Go',
+  rs: 'Rust',
+  rust: 'Rust',
+  cs: 'C#',
+  csharp: 'C#',
+  java: 'Java',
+  kt: 'Kotlin',
+  php: 'PHP',
+  swift: 'Swift',
+  c: 'C',
+  cpp: 'C++',
+  cxx: 'C++',
+  h: 'C/C++ Header',
+  txt: 'Plain Text',
+  text: 'Plain Text',
+  plaintext: 'Plain Text',
+  plain: 'Plain Text'
+} as const
+
+const ALLOWED_CODE_LANG_SET = new Set(Object.keys(KB_CODE_LANGUAGES))
+
+function sanitizeUnknownCodeFences(md: string): string {
+  if (!md) return md
+  const lines = md.split(/\r?\n/)
+  let inFence = false
+  let fenceMarker = '```'
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    // Support both backtick and tilde fences
+    const m = line.match(/^(\s*)(```|~~~)(.*)$/)
+    if (!m) continue
+    const [, indent, marker, rest] = m
+    const info = String(rest || '').trim()
+
+    if (!inFence) {
+      fenceMarker = marker
+      if (!info) {
+        // Unlabeled opening fence -> force txt
+        lines[i] = `${indent}${marker}txt`
+      } else {
+        const [lang, ...restTokens] = info.split(/\s+/)
+        const key = (lang || '').toLowerCase()
+        if (key && !ALLOWED_CODE_LANG_SET.has(key)) {
+          const restStr = restTokens.join(' ').trim()
+          lines[i] = `${indent}${marker}txt${restStr ? ` ${restStr}` : ''}`
+        }
+      }
+      inFence = true
+    } else {
+      // Closing fence -> normalize to closing marker only
+      lines[i] = `${indent}${fenceMarker}`
+      inFence = false
+    }
+  }
+  return lines.join('\n')
+}
+
+function sanitizeMarkdownForEditor(text: string): string {
+  if (!text) return ''
+  const norm = text.replace(/\r\n?/g, '\n')
+  return sanitizeUnknownCodeFences(norm)
+}
+
 export default function KnowledgeBaseView() {
-  const dispatch = useDispatch()
-  const kbItems = useAppStore((s) => s.kbItems)
-  const loading = useAppStore((s) => s.kbLoading)
-  const searchResults = useAppStore((s) => s.kbSearchResults)
-  const opResult = useAppStore((s) => s.kbOpResult)
+  const [itemsMap, setItemsMap] = useState<Record<string, any>>({})
+  const [, setLoading] = useState(false)
+  const [searchResults, setSearchResults] = useState<any[]>([])
 
   const [query, setQuery] = useState('')
   const [tags, setTags] = useState<string[]>([])
@@ -27,43 +122,80 @@ export default function KnowledgeBaseView() {
   const editorRef = useRef<MDXEditorMethods | null>(null)
 
 
-  // Loaded body from main store for selected item
-  const workspaceFiles = useAppStore((s) => s.kbWorkspaceFiles) || []
+  // Workspace files index (WS-only now)
+  const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([])
 
-  const loadedBody = useAppStore((s) => (selectedId ? s.kbBodies?.[selectedId] : undefined))
-  const loadedFiles = useAppStore((s) => (selectedId ? s.kbFiles?.[selectedId] : undefined))
 
-  // Load index on mount
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { dispatch('kbReloadIndex') }, [])
 
-  // When search changes, trigger search
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { dispatch('kbSearch', { query, tags }) }, [query, tags])
-
-  // When creating a new item completes, select it
+  // Load index on mount (WS)
   useEffect(() => {
-    if (opResult?.ok && opResult.op === 'create' && opResult.id) {
-      setSelectedId(opResult.id)
-      dispatch('kbClearOpResult')
-    }
-  }, [opResult])
+    const client = getBackendClient(); if (!client) return
+    setLoading(true)
+    client.rpc('kb.reloadIndex', {}).then((res: any) => {
+      if (res?.ok) setItemsMap(res.items || {})
+    }).catch(() => {}).finally(() => setLoading(false))
+  }, [])
 
-  const items = useMemo(() => (Object.values(kbItems || {}) as any[]).sort((a: any, b: any) => a.title.localeCompare(b.title)), [kbItems])
+  // Realtime subscriptions: items and workspace files
+  useEffect(() => {
+    const client = getBackendClient(); if (!client) return
+    const off1 = (client as any).subscribe?.('kb.items.changed', (p: any) => {
+      setItemsMap(p?.items || {})
+    })
+    const off2 = (client as any).subscribe?.('kb.files.changed', (p: any) => {
+      setWorkspaceFiles(Array.isArray(p?.files) ? p.files : [])
+    })
+    return () => { try { off1?.() } catch {}; try { off2?.() } catch {} }
+  }, [])
+
+
+  // When search changes, trigger WS search
+  useEffect(() => {
+    const client = getBackendClient(); if (!client) return
+    if (!query && (!tags || tags.length === 0)) { setSearchResults([]); return }
+    setLoading(true)
+    client.rpc('kb.search', { query, tags, limit: 50 }).then((res: any) => {
+      if (res?.ok) setSearchResults(res.results || [])
+    }).catch(() => {}).finally(() => setLoading(false))
+  }, [query, tags])
+
+
+  const items = useMemo(() => (Object.values(itemsMap || {}) as any[]).sort((a: any, b: any) => a.title.localeCompare(b.title)), [itemsMap])
   const list = query || tags.length ? searchResults : items
 
-  const selected = selectedId ? kbItems[selectedId] : null
+  const selected = selectedId ? itemsMap[selectedId] : null
 
   useEffect(() => {
     if (!selectedId) return
-    if (selected) {
-      setTitle(selected.title)
-      setEditTags(selected.tags || [])
-    }
-    dispatch('kbReadItemBody', { id: selectedId })
-  }, [selectedId])
+    if (!selected) return // Deleted or not yet present; another effect will clear
+    setTitle(selected.title)
+    setEditTags(selected.tags || [])
+    const client = getBackendClient()
+    if (!client) return
+    client.rpc('kb.getItemBody', { id: selectedId }).then((res: any) => {
+      if (res && res.ok) {
+        const body = res.body || ''
+        const safe = sanitizeMarkdownForEditor(body)
+        setDescription(safe)
+        setEditFiles(Array.isArray(res.files) ? res.files : [])
+        try { editorRef.current?.setMarkdown(safe) } catch {}
+      }
+    }).catch(() => {})
+  }, [selectedId, selected])
 
   // Quick picker filtered files
+  // If the currently selected item disappears (deleted), clear the editor
+  useEffect(() => {
+    if (selectedId && !itemsMap[selectedId]) {
+      setSelectedId(null)
+      setTitle('')
+      setDescription('')
+      setEditTags([])
+      setEditFiles([])
+      try { editorRef.current?.setMarkdown('') } catch {}
+    }
+  }, [itemsMap, selectedId])
+
   const filtered = useMemo(() => {
     const q = pickerQuery.trim().toLowerCase()
     if (!q) return workspaceFiles.slice(0, 200)
@@ -73,33 +205,26 @@ export default function KnowledgeBaseView() {
 
   useEffect(() => {
     if (pickerOpen) {
-      if (!workspaceFiles.length) dispatch('kbRefreshWorkspaceFileIndex')
+      if (!workspaceFiles.length) {
+        const client = getBackendClient(); if (client) {
+          client.rpc('kb.refreshWorkspaceFileIndex', {}).then((res: any) => {
+            if (res?.ok) setWorkspaceFiles(res.files || [])
+          }).catch(() => {})
+        }
+      }
       setPickerIndex(0)
     }
   }, [pickerOpen])
 
-  // Hydrate files when loaded
-  useEffect(() => {
-    if (selectedId && loadedFiles) setEditFiles(loadedFiles)
-  }, [selectedId, loadedFiles])
 
-  // Hydrate description from loaded body when it changes
-  useEffect(() => {
-    if (!selectedId || loadedBody === undefined) return
-    setDescription(loadedBody)
-    try { editorRef.current?.setMarkdown(loadedBody || '') } catch {}
-  }, [selectedId, loadedBody])
 
   return (
     <div style={{ display: 'flex', height: '100%', backgroundColor: '#1e1e1e', color: '#ddd' }}>
       {/* Left panel: search + list */}
       <div style={{ width: 360, borderRight: '1px solid #333', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: 12 }}>
-          <Title order={4} c="#eee">Knowledge Base</Title>
-          <TextInput placeholder="Search" value={query} onChange={(e) => setQuery(e.currentTarget.value)} mt="sm" />
-          <TagsInput placeholder="Filter tags" value={tags} onChange={setTags} mt="sm" />
-          <Group mt="sm">
-            <Button size="xs" onClick={() => dispatch('kbReloadIndex')} loading={loading}>Reload</Button>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Title order={4} c="#eee">Knowledge Base</Title>
             <Button size="xs" variant="light" onClick={() => {
               setSelectedId(null)
               setTitle('')
@@ -107,8 +232,13 @@ export default function KnowledgeBaseView() {
               setEditTags([])
               setEditFiles([])
               setNewFile('')
-            }}>New</Button>
-          </Group>
+            }}>
+              <IconPlus size={14} style={{ marginRight: 6 }} />
+              New
+            </Button>
+          </div>
+          <TextInput placeholder="Search" value={query} onChange={(e) => setQuery(e.currentTarget.value)} mt="sm" />
+          <TagsInput placeholder="Filter tags" value={tags} onChange={setTags} mt="sm" />
         </div>
         <Divider />
         <ScrollArea style={{ flex: 1 }}>
@@ -131,13 +261,33 @@ export default function KnowledgeBaseView() {
           <Title order={4} c="#eee">{selected ? 'Edit Item' : 'New Item'}</Title>
           <Group>
             {selected && (
-              <Button color="red" size="xs" onClick={() => selected && dispatch('kbDeleteItem', { id: selected.id })}>Delete</Button>
+              <Button color="red" size="xs" onClick={async () => {
+                const client = getBackendClient(); if (!client || !selected) return
+                const id = selected.id
+                const res = await client.rpc('kb.deleteItem', { id }).catch(() => null)
+                if (res?.ok) {
+                  const res2 = await client.rpc('kb.reloadIndex', {}).catch(() => null)
+                  if (res2?.ok) setItemsMap(res2.items || {})
+                  if (selectedId === id) setSelectedId(null)
+                }
+              }}>Delete</Button>
             )}
-            <Button size="xs" onClick={() => {
+            <Button size="xs" onClick={async () => {
+              const client = getBackendClient(); if (!client) return
               if (selected) {
-                dispatch('kbUpdateItem', { id: selected.id, patch: { title, description, tags: editTags, files: editFiles } })
+                const res = await client.rpc('kb.updateItem', { id: selected.id, patch: { title, description, tags: editTags, files: editFiles } }).catch(() => null)
+                if (res?.ok) {
+                  const res2 = await client.rpc('kb.reloadIndex', {}).catch(() => null)
+                  if (res2?.ok) setItemsMap(res2.items || {})
+                }
               } else {
-                dispatch('kbCreateItem', { title, description, tags: editTags, files: editFiles })
+                const res = await client.rpc('kb.createItem', { title, description, tags: editTags, files: editFiles }).catch(() => null)
+                if (res?.ok) {
+                  const newId = res.id
+                  const res2 = await client.rpc('kb.reloadIndex', {}).catch(() => null)
+                  if (res2?.ok) setItemsMap(res2.items || {})
+                  if (newId) setSelectedId(newId)
+                }
               }
             }}>Save</Button>
           </Group>
@@ -186,16 +336,9 @@ export default function KnowledgeBaseView() {
                     quotePlugin(),
                     markdownShortcutPlugin(),
                     /* Enable code blocks + syntax highlighting */
-                    codeBlockPlugin({ defaultCodeBlockLanguage: 'ts' }),
+                    codeBlockPlugin({ defaultCodeBlockLanguage: 'txt' }),
                     codeMirrorPlugin({
-                      codeBlockLanguages: {
-                        ts: 'TypeScript',
-                        tsx: 'TypeScript (react)',
-                        js: 'JavaScript',
-                        json: 'JSON',
-                        css: 'CSS',
-                        md: 'Markdown'
-                      }
+                      codeBlockLanguages: KB_CODE_LANGUAGES
                     })
                   ]}
                 />

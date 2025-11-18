@@ -5,9 +5,11 @@
 import type { IpcMain, MenuItemConstructorOptions } from 'electron'
 import { BrowserWindow, Menu, shell, app } from 'electron'
 import { getWindow, windowStateStore } from '../core/state'
+import { createWindow } from '../core/window'
 import type { ViewType } from '../store/types'
+import { useMainStore } from '../store'
 
-let currentViewForMenu: ViewType = 'agent'
+let currentViewForMenu: ViewType = 'flow'
 
 const menuRefs: {
   file?: Electron.Menu
@@ -18,7 +20,7 @@ const menuRefs: {
 } = {}
 
 const VIEW_SHORTCUTS: Array<{ view: ViewType; label: string; accelerator: string; channel: string }> = [
-  { view: 'agent', label: 'Chat', accelerator: process.platform === 'darwin' ? 'Cmd+1' : 'Ctrl+1', channel: 'menu:open-chat' },
+  { view: 'flow', label: 'Flow', accelerator: process.platform === 'darwin' ? 'Cmd+1' : 'Ctrl+1', channel: 'menu:open-chat' },
   { view: 'flowEditor' as ViewType, label: 'Flow Editor', accelerator: process.platform === 'darwin' ? 'Cmd+2' : 'Ctrl+2', channel: 'menu:open-flow-editor' },
   { view: 'kanban', label: 'Kanban Board', accelerator: process.platform === 'darwin' ? 'Cmd+3' : 'Ctrl+3', channel: 'menu:open-kanban' },
   { view: 'settings', label: 'Settings', accelerator: process.platform === 'darwin' ? 'Cmd+,' : 'Ctrl+,', channel: 'menu:open-settings' },
@@ -38,9 +40,17 @@ export function buildMenu(): void {
 
   let recentFolders: Array<{ path: string; lastOpened: number }> = []
   try {
-    const stored = windowStateStore.get('recentFolders')
-    if (Array.isArray(stored)) {
-      recentFolders = stored.slice(0, 10)
+    // Source of truth: Zustand main store
+    const st = useMainStore.getState() as any
+    recentFolders = Array.isArray(st.recentFolders) ? st.recentFolders.slice(0, 10) : []
+
+    // One-time migration from legacy windowStateStore if store is empty
+    if (recentFolders.length === 0) {
+      const legacy = windowStateStore.get('recentFolders') as any
+      if (Array.isArray(legacy) && legacy.length > 0) {
+        recentFolders = legacy.slice(0, 10)
+        try { useMainStore.setState({ recentFolders: legacy } as any, false) } catch {}
+      }
     }
   } catch {}
 
@@ -49,6 +59,11 @@ export function buildMenu(): void {
     {
       label: 'File',
       submenu: [
+        {
+          label: 'New Window',
+          accelerator: isMac ? 'Cmd+Shift+N' : 'Ctrl+Shift+N',
+          click: () => createWindow({ offsetFromCurrent: true }),
+        },
         {
           label: 'Open Folder…',
           accelerator: isMac ? 'Cmd+O' : 'Ctrl+O',
@@ -165,32 +180,6 @@ export function registerMenuHandlers(ipc: IpcMain) {
     buildMenu()
   })
 
-  // Window control handlers (for custom titlebar buttons)
-  ipc.handle('window:minimize', (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getFocusedWindow() || getWindow()
-    try { win?.minimize() } catch {}
-    return { ok: true }
-  })
-
-  ipc.handle('window:maximize', (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getFocusedWindow() || getWindow()
-    if (win) {
-      try {
-        if (win.isMaximized()) win.unmaximize()
-        else win.maximize()
-        return { ok: true, isMaximized: win.isMaximized() }
-      } catch (e) {
-        return { ok: false, error: String(e) }
-      }
-    }
-    return { ok: false, error: 'no-window' }
-  })
-
-  ipc.handle('window:close', (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getFocusedWindow() || getWindow()
-    try { win?.close() } catch {}
-    return { ok: true }
-  })
 
 
   ipc.handle('menu:popup', (event, menuOrArgs: any, x?: number, y?: number) => {
@@ -214,6 +203,7 @@ export function registerMenuHandlers(ipc: IpcMain) {
       const ox = (typeof px === 'number' && Number.isFinite(px)) ? Math.round(px) : undefined
       const oy = (typeof py === 'number' && Number.isFinite(py)) ? Math.round(py) : undefined
       const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
+
       // Only include x/y if valid to avoid NativeConversion errors on Windows
       const opts: any = { window: win }
       if (typeof ox === 'number') opts.x = ox
@@ -228,8 +218,5 @@ export function unregisterMenuHandlers(ipc: IpcMain) {
   ipc.removeHandler('menu:set-view')
   ipc.removeHandler('menu:popup')
 
-  // Window control handlers
-  ipc.removeHandler('window:minimize')
-  ipc.removeHandler('window:maximize')
-  ipc.removeHandler('window:close')
+
 }

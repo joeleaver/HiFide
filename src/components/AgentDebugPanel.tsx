@@ -1,18 +1,14 @@
 import { Stack, Text, ScrollArea, Badge, Group, UnstyledButton } from '@mantine/core'
 import { IconTrash } from '@tabler/icons-react'
-import { useAppStore, useDispatch } from '../store'
 import { useUiStore } from '../store/ui'
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import CollapsiblePanel from './CollapsiblePanel'
 
 import { useRerenderTrace } from '../utils/perf'
+import { getBackendClient } from '../lib/backend/bootstrap'
+import { FlowService } from '../services/flow'
 
 export default function AgentDebugPanel() {
-  const dispatch = useDispatch()
-
-  // Read persisted state from main store
-  const persistedCollapsed = useAppStore((s) => s.windowState.debugPanelCollapsed)
-  const persistedHeight = useAppStore((s) => s.windowState.debugPanelHeight)
 
   // Use UI store for local state
   const collapsed = useUiStore((s) => s.debugPanelCollapsed)
@@ -22,16 +18,30 @@ export default function AgentDebugPanel() {
   const setHeight = useUiStore((s) => s.setDebugPanelHeight)
   const setUserHasScrolledUp = useUiStore((s) => s.setDebugPanelUserScrolledUp)
 
-  // Sync UI store with persisted state ONLY on mount
-  // Don't sync during runtime to avoid race conditions
-  useEffect(() => {
-    setCollapsed(persistedCollapsed)
-    setHeight(persistedHeight)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // Only run on mount
+  // Local event log (renderer-only)
+  const [flowEvents, setFlowEvents] = useState<any[]>([])
 
-  // Read runtime (non-persisted) flow events from main store to avoid heavy session updates
-  const flowEvents = useAppStore((s) => s.feEvents)
+  // Hydrate persisted window state on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const res: any = await getBackendClient()?.rpc('ui.getWindowState', {})
+        const ws = res?.windowState || {}
+        if (typeof ws.debugPanelCollapsed === 'boolean') setCollapsed(!!ws.debugPanelCollapsed)
+        if (typeof ws.debugPanelHeight === 'number') setHeight(ws.debugPanelHeight)
+      } catch {}
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Subscribe to flow events and maintain a bounded log (<=500)
+  useEffect(() => {
+    const off = FlowService.onEvent((ev) => {
+      const withTs = { ...ev, timestamp: Date.now() }
+      setFlowEvents((prev) => (prev.length >= 500 ? [...prev.slice(-499), withTs] : [...prev, withTs]))
+    })
+    return () => { try { off?.() } catch {} }
+  }, [])
 
   // Dev-only: concise rerender trace
   useRerenderTrace('AgentDebugPanel', {
@@ -43,13 +53,13 @@ export default function AgentDebugPanel() {
 
   // Smart auto-scroll: track if user has manually scrolled up
   const scrollAreaRef = useRef<HTMLDivElement>(null)
-  const prevEventsLengthRef = useRef(flowEvents.length)
+  const prevEventsLengthRef = useRef(0)
 
   // Auto-scroll to bottom when new events arrive (unless user has scrolled up)
   useEffect(() => {
     if (flowEvents.length > prevEventsLengthRef.current && !userHasScrolledUp) {
       // New events arrived and user hasn't scrolled up - scroll to bottom
-      const viewport = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]')
+      const viewport = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLDivElement | null
       if (viewport) {
         viewport.scrollTop = viewport.scrollHeight
       }
@@ -64,9 +74,9 @@ export default function AgentDebugPanel() {
     setUserHasScrolledUp(!isAtBottom)
   }
 
-  // Clear flow events
+  // Clear flow events (renderer-only)
   const handleClearAll = () => {
-    dispatch('feClearLogs')
+    setFlowEvents([])
   }
 
   const formatTime = (timestamp: number) => {
@@ -106,15 +116,15 @@ export default function AgentDebugPanel() {
     <CollapsiblePanel
       title="FLOW DEBUG"
       collapsed={collapsed}
-      onToggleCollapse={() => {
+      onToggleCollapse={async () => {
         const newCollapsed = !collapsed
         setCollapsed(newCollapsed)
-        dispatch('updateWindowState', { debugPanelCollapsed: newCollapsed })
+        try { await getBackendClient()?.rpc('ui.updateWindowState', { updates: { debugPanelCollapsed: newCollapsed } }) } catch {}
       }}
       height={height}
-      onHeightChange={(newHeight) => {
+      onHeightChange={async (newHeight) => {
         setHeight(newHeight)
-        dispatch('updateWindowState', { debugPanelHeight: newHeight })
+        try { await getBackendClient()?.rpc('ui.updateWindowState', { updates: { debugPanelHeight: newHeight } }) } catch {}
       }}
       minHeight={150}
       maxHeight={600}

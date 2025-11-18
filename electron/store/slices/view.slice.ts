@@ -31,7 +31,7 @@ export interface ViewSlice {
 
 export const createViewSlice: StateCreator<ViewSlice> = (set) => ({
   // State - Initialized with defaults, persist middleware will restore saved values
-  currentView: 'agent',
+  currentView: 'flow',
   
   // Actions
   setCurrentView: ({ view }: { view: ViewType }) => {

@@ -1,8 +1,8 @@
-import { ReactNode, useEffect, memo } from 'react'
+import { ReactNode, useEffect, memo, useState } from 'react'
 import { Group, Text, Badge, UnstyledButton, useMantineTheme } from '@mantine/core'
 import { IconChevronDown, IconChevronUp } from '@tabler/icons-react'
 import { useUiStore } from '../store/ui'
-import { useAppStore, useDispatch } from '../store'
+import { getBackendClient } from '../lib/backend/bootstrap'
 import type { Badge as BadgeType } from '../../electron/store/types'
 
 interface ToolBadgeContainerProps {
@@ -20,12 +20,14 @@ function ToolBadgeContainer({ badge, children }: ToolBadgeContainerProps) {
   }
 
   const theme = useMantineTheme()
-  const dispatch = useDispatch()
   // Narrow selectors to avoid unrelated global changes re-rendering all badges
   const isExpanded = useUiStore((s) => s.expandedBadges?.has(badge.id) ?? (badge.defaultExpanded ?? false))
   const toggleBadgeExpansion = useUiStore((s) => s.toggleBadgeExpansion)
   const openInlineDiffForBadge = useUiStore((s) => s.openInlineDiffForBadge)
   const inlineDiff = useUiStore((s) => s.inlineDiffByBadge?.[badge.id])
+
+  // Local state for workspace-search used params (fetched via WS)
+  const [wsUsedParams, setWsUsedParams] = useState<any>(undefined)
 
   // Use expanded state or default
   const canExpand = !!(badge.expandable && children)
@@ -38,9 +40,21 @@ function ToolBadgeContainer({ badge, children }: ToolBadgeContainerProps) {
     badge.status === 'success' ? '#10b981' :   // Green
     '#6b7280'  // Gray fallback
 
-  // WorkspaceSearch header params (reactive)
+  // WorkspaceSearch header params
   const searchKey = badge.contentType === 'workspace-search' ? (badge as any)?.interactive?.data?.key : undefined
-  const wsUsedParams = useAppStore((s) => (searchKey ? (s as any).feLoadedToolResults?.[searchKey]?.usedParams : undefined))
+  useEffect(() => {
+    if (badge.contentType !== 'workspace-search') return
+    if (!searchKey) return
+    if (typeof wsUsedParams !== 'undefined') return
+    const client = getBackendClient()
+    if (!client) return
+    client.rpc('tool.getResult', { key: searchKey }).then((res: any) => {
+      const data = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      const used = data?.usedParams
+      if (used) setWsUsedParams(used)
+    }).catch(() => {})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchKey, badge.contentType])
 
   // Load diff data when expanded (for diff badges)
   useEffect(() => {
@@ -52,9 +66,10 @@ function ToolBadgeContainer({ badge, children }: ToolBadgeContainerProps) {
     if (existing && existing.length) return
 
     if (payload && typeof payload === 'object' && payload.key) {
-      // Note: do NOT include `dispatch` in deps to avoid re-runs from identity changes
-      dispatch('loadDiffPreview', { key: payload.key }).then(() => {
-        const files = (useAppStore as any).getState().feLatestDiffPreview || []
+      const client = getBackendClient()
+      if (!client) return
+      client.rpc('edits.preview', { key: payload.key }).then((res: any) => {
+        const files = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : [])
         if (files.length) openInlineDiffForBadge(badge.id, files)
       }).catch((e: any) => {
         console.error('Failed to load diff preview:', e)

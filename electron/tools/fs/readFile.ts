@@ -5,7 +5,7 @@
  */
 
 import type { AgentTool } from '../../providers/provider'
-import { resolveWithinWorkspace } from '../utils'
+import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot } from '../utils'
 import fs from 'node:fs/promises'
 
 export const readFileTool: AgentTool = {
@@ -17,8 +17,8 @@ export const readFileTool: AgentTool = {
     required: ['path'],
     additionalProperties: false,
   },
-  run: async (input: { path: string; normalizeEol?: boolean }) => {
-    const abs = resolveWithinWorkspace(input.path)
+  run: async (input: { path: string; normalizeEol?: boolean }, meta?: any) => {
+    const abs = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, input.path) : resolveWithinWorkspace(input.path)
     try {
       const content = await fs.readFile(abs, 'utf-8')
       const normalize = input?.normalizeEol !== false

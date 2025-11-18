@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import ignore from 'ignore'
-import { resolveWithinWorkspace, atomicWrite } from '../utils'
+import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot, atomicWrite } from '../utils'
 import { grepTool } from '../text/grep'
 import { applyPatchTool } from './applyPatch'
 
@@ -226,11 +226,11 @@ function parseSearchReplace(raw: string): SRBlock[] {
 }
 
 // --- Main entry ---
-export async function applyEditsPayload(rawPayload: string): Promise<ApplyResult> {
+export async function applyEditsPayload(rawPayload: string, workspaceId?: string): Promise<ApplyResult> {
   const payload = sanitizePayload(rawPayload)
   if (!payload) return { ok: false, applied: 0, results: [], error: 'empty-payload' }
 
-  const root = resolveWithinWorkspace('.')
+  const root = workspaceId ? resolveWithinWorkspaceWithRoot(workspaceId, '.') : resolveWithinWorkspace('.')
   const gitFilter = await loadGitignoreFilter(root)
   const respectGit = (rel: string) => {
     const relPosix = rel.split(path.sep).join('/')
@@ -239,7 +239,7 @@ export async function applyEditsPayload(rawPayload: string): Promise<ApplyResult
 
   // Unified diff path: delegate to existing tool
   if (looksUnifiedDiff(payload) && !looksOpenAiPatch(payload)) {
-    const r: any = await applyPatchTool.run({ patch: payload })
+    const r: any = await applyPatchTool.run({ patch: payload }, { workspaceId })
     if (r && r.ok) return r
     return { ok: false, applied: 0, results: [], error: r?.error || 'apply-patch-failed' }
   }
@@ -255,7 +255,7 @@ export async function applyEditsPayload(rawPayload: string): Promise<ApplyResult
       const rel = path.normalize(op.path)
       if (!respectGit(rel)) { results.push({ path: rel, changed: false, message: 'gitignored' }); continue }
       if (isDeniedRel(rel)) { results.push({ path: rel, changed: false, message: 'denied-path' }); continue }
-      const abs = resolveWithinWorkspace(rel)
+      const abs = workspaceId ? resolveWithinWorkspaceWithRoot(workspaceId, rel) : resolveWithinWorkspace(rel)
       if (op.kind === 'delete') {
         let before = ''
         try { before = await fs.readFile(abs, 'utf-8') } catch {}
@@ -315,7 +315,7 @@ export async function applyEditsPayload(rawPayload: string): Promise<ApplyResult
         // pathless: anchor by first non-empty line of search
         const first = (b.search.split('\n').find(l => l.trim().length) || '').trim()
         if (!first) { results.push({ path: '(unknown)', changed: false, message: 'empty-search' }); continue }
-        const res: any = await grepTool.run({ pattern: first, files: ['**/*'], options: { literal: true, filenamesOnly: false, lineNumbers: true } })
+        const res: any = await grepTool.run({ pattern: first, files: ['**/*'], options: { literal: true, filenamesOnly: false, lineNumbers: true } }, { workspaceId })
         if (!res || !res.ok) { results.push({ path: '(unknown)', changed: false, message: 'search-failed' }); continue }
         // gather candidate files and verify exact multi-line presence
         const candidateSet = new Set<string>((res.data?.matches || []).map((m: any) => String(m.file || '')))
@@ -324,7 +324,7 @@ export async function applyEditsPayload(rawPayload: string): Promise<ApplyResult
         for (const file of candidates) {
           if (!file) continue
           if (!respectGit(file) || isDeniedRel(file)) continue
-          const absF = resolveWithinWorkspace(file)
+          const absF = workspaceId ? resolveWithinWorkspaceWithRoot(workspaceId, file) : resolveWithinWorkspace(file)
           try {
             const text = await fs.readFile(absF, 'utf-8')
             if (toLF(text).includes(toLF(b.search))) exactHits.push(file)
@@ -335,7 +335,7 @@ export async function applyEditsPayload(rawPayload: string): Promise<ApplyResult
       }
       if (!respectGit(rel)) { results.push({ path: rel, changed: false, message: 'gitignored' }); continue }
       if (isDeniedRel(rel)) { results.push({ path: rel, changed: false, message: 'denied-path' }); continue }
-      const abs = resolveWithinWorkspace(rel)
+      const abs = workspaceId ? resolveWithinWorkspaceWithRoot(workspaceId, rel) : resolveWithinWorkspace(rel)
       let before = ''
       try { before = await fs.readFile(abs, 'utf-8') } catch (e: any) { results.push({ path: rel, changed: false, message: 'read-failed: ' + (e?.message || String(e)) }); continue }
       const eol = detectEol(before)

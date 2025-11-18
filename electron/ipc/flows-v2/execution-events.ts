@@ -96,10 +96,11 @@ export interface ExecutionEvent {
   model: string            // 'claude-haiku-4-5-20251001', etc.
 
   // Event type and data
-  type: 'chunk' | 'tool_start' | 'tool_end' | 'tool_error' | 'usage' | 'usage_breakdown' | 'done' | 'error' | 'rate_limit_wait'
+  type: 'chunk' | 'reasoning' | 'tool_start' | 'tool_end' | 'tool_error' | 'usage' | 'usage_breakdown' | 'done' | 'error' | 'rate_limit_wait'
 
   // Event-specific data (only one will be populated based on type)
   chunk?: string
+  reasoning?: string
   tool?: ToolEventData
   usage?: UsageEventData
   usageBreakdown?: UsageBreakdownEventData
@@ -127,12 +128,30 @@ export function createEventEmitter(
   handler: (event: ExecutionEvent) => void
 ): EmitExecutionEvent {
   return (event) => {
-    handler({
-      ...event,
-      executionId,
-      nodeId,
-      timestamp: Date.now()
-    })
+    try {
+      const maybe: any = handler({
+        ...event,
+        executionId,
+        nodeId,
+        timestamp: Date.now()
+      })
+      // If handler returned a Promise, attach a catch to avoid unhandled rejection noise
+      if (maybe && typeof maybe.catch === 'function') {
+        maybe.catch((err: any) => {
+          // Swallow here; scheduler already handles/report errors via flow events
+          // Still log for visibility except for obvious cancellation patterns
+          const msg = String(err?.message || err)
+          if (!/cancel|abort|stop|terminate/i.test(msg)) {
+            console.error('[exec-events] handler rejected:', err)
+          }
+        })
+      }
+    } catch (err) {
+      const msg = String((err as any)?.message || err)
+      if (!/cancel|abort|stop|terminate/i.test(msg)) {
+        console.error('[exec-events] handler threw:', err)
+      }
+    }
   }
 }
 

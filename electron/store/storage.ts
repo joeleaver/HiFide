@@ -21,10 +21,25 @@ const electronStore = new Store({
 
 // Migration: Remove persisted pricingConfig so it always uses DEFAULT_PRICING
 // This ensures new models are available immediately without app restart
-const storedState = electronStore.get('hifide-store')
+const storedState = electronStore.get('hifide-store') as any
 if (storedState && typeof storedState === 'object' && 'pricingConfig' in storedState) {
   const { pricingConfig, ...rest } = storedState as any
   electronStore.set('hifide-store', rest)
+}
+
+// Migration: Backfill new Fireworks model 'accounts/fireworks/models/minimax-m2' into
+// user allowlist if missing (one-time). This keeps existing custom entries intact.
+try {
+  if (storedState && typeof storedState === 'object') {
+    const arr = Array.isArray(storedState.fireworksAllowedModels) ? storedState.fireworksAllowedModels : null
+    const toAdd = 'accounts/fireworks/models/minimax-m2'
+    if (arr && !arr.includes(toAdd)) {
+      const next = [...arr, toAdd]
+      electronStore.set('hifide-store', { ...storedState, fireworksAllowedModels: next })
+    }
+  }
+} catch (e) {
+  console.warn('[storage:migrate] Failed to backfill Fireworks model minimax-m2', e)
 }
 
 /**

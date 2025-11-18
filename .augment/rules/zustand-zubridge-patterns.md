@@ -2,6 +2,9 @@
 type: "always_apply"
 ---
 
+> DEPRECATED: The project no longer uses @zubridge/electron. Renderer now communicates with the main store exclusively via WebSocket JSON‑RPC (snapshots + notifications). This document is retained for historical reference only.
+
+
 # Zustand + Zubridge Architecture Patterns
 
 This document describes the correct patterns for using Zustand with @zubridge/electron in the HiFide application.

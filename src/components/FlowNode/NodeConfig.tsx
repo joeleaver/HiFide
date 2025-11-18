@@ -1,7 +1,9 @@
 import { Text, Checkbox, Accordion } from '@mantine/core'
-import { useAppStore, useDispatch } from '../../store'
+import { getBackendClient } from '../../lib/backend/bootstrap'
+import { useFlowEditorLocal } from '../../store/flowEditorLocal'
 import { useMemo, useState, useEffect } from 'react'
 import InjectMessagesConfig from './InjectMessagesConfig'
+import { FlowService } from '../../services/flow'
 
 interface NodeConfigProps {
   nodeId: string
@@ -12,20 +14,39 @@ interface NodeConfigProps {
 
 export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }: NodeConfigProps) {
   // Get provider/model data for newContext node and llmRequest node
-  const providerValid = useAppStore((s) => s.providerValid)
-  const modelsByProvider = useAppStore((s) => s.modelsByProvider)
-  const feNodes = useAppStore((s) => s.feNodes)
-  const feEdges = useAppStore((s) => s.feEdges)
-  const selectedProvider = useAppStore((s) => s.selectedProvider)
-  const selectedModel = useAppStore((s) => s.selectedModel)
-  const dispatch = useDispatch()
+  const [providerValid, setProviderValid] = useState<Record<string, boolean>>({})
+  const [modelsByProvider, setModelsByProvider] = useState<Record<string, any[]>>({})
+  const feNodes = useFlowEditorLocal((s) => s.nodes)
+  const feEdges = useFlowEditorLocal((s) => s.edges)
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
+  const [selectedModel, setSelectedModel] = useState<string | null>(null)
+
+  // Hydrate provider/model settings snapshot from backend
+  useEffect(() => {
+    const client = getBackendClient(); if (!client) return
+    client.rpc('settings.get', {}).then((res: any) => {
+      if (res?.ok) {
+        setProviderValid(res.providerValid || {})
+        setModelsByProvider(res.modelsByProvider || {})
+        setSelectedProvider(res.selectedProvider || null)
+        setSelectedModel(res.selectedModel || null)
+      }
+    }).catch(() => {})
+  }, [])
   const isSysInConnected = useMemo(() => {
     return feEdges.some((e: any) => e.target === nodeId && e.targetHandle === 'systemInstructionsIn')
   }, [feEdges, nodeId])
 
   // readFile config state (top-level to respect hooks rules)
-  const workspaceRoot = useAppStore((s) => s.workspaceRoot)
-  const workspaceFiles = useAppStore((s) => s.kbWorkspaceFiles) || []
+  const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(null)
+  const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([])
+
+  useEffect(() => {
+    const client = getBackendClient(); if (!client) return
+    client.rpc('workspace.get', {}).then((res: any) => {
+      if (res?.ok) setWorkspaceRoot(res.root || null)
+    }).catch(() => {})
+  }, [])
   const [rfPickerOpen, setRfPickerOpen] = useState(false)
   const [rfPickerQuery, setRfPickerQuery] = useState('')
   const [rfPickerIndex, setRfPickerIndex] = useState(0)
@@ -37,10 +58,16 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
   }, [workspaceFiles, rfPickerQuery])
   useEffect(() => {
     if (rfPickerOpen) {
-      if (!workspaceFiles.length) dispatch('kbRefreshWorkspaceFileIndex')
+      if (!workspaceFiles.length) {
+        const client = getBackendClient(); if (client) {
+          client.rpc('kb.refreshWorkspaceFileIndex', {}).then((res: any) => {
+            if (res?.ok) setWorkspaceFiles(res.files || [])
+          }).catch(() => {})
+        }
+      }
       setRfPickerIndex(0)
     }
-  }, [rfPickerOpen, workspaceFiles.length, dispatch])
+  }, [rfPickerOpen, workspaceFiles.length])
   const computeAndPatchEstimate = async (relPath: string) => {
     try {
       const root = (workspaceRoot || '').replace(/[\\/]+$/, '')
@@ -1171,8 +1198,15 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
 
       {/* cache node configuration */}
       {nodeType === 'cache' && (() => {
-        const currentSession = useAppStore((s) => s.sessions?.find((sess: any) => sess.id === s.currentId))
-        const cacheData = currentSession?.flowCache?.[nodeId]
+        const [cacheData, setCacheData] = useState<{ data: any; timestamp: number } | undefined>(undefined)
+        useEffect(() => {
+          const client = getBackendClient(); if (!client) return
+          client.rpc('flow.getNodeCache', { nodeId }).then((res: any) => {
+            if (res?.ok) setCacheData(res.cache)
+          }).catch(() => {})
+          // we only fetch on mount; cache updates happen via invalidation or re-exec
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+        }, [])
         const cacheAge = cacheData ? ((Date.now() - cacheData.timestamp) / 1000).toFixed(1) : null
         const ttl = config.ttl ?? 300
         const isCacheValid = cacheData && ttl > 0 && parseFloat(cacheAge!) < ttl
@@ -1210,9 +1244,9 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
                 // Set invalidate timestamp for next execution (local state only)
                 onConfigChange({ invalidate: Date.now() })
 
-                // Immediately clear the cache in session (without triggering flow editor sync)
-                // Note: We don't await this to avoid blocking the UI
-                dispatch('clearNodeCache', nodeId)
+                // Immediately clear the cache in session via backend (fire-and-forget)
+                const client = getBackendClient(); if (client) client.rpc('flow.clearNodeCache', { nodeId }).catch(() => {})
+                setCacheData(undefined)
               }}
               style={{
                 padding: '6px 10px',
@@ -1288,7 +1322,7 @@ function ToolsConfig({ config, onConfigChange }: { config: any; onConfigChange: 
   useEffect(() => {
     const loadTools = async () => {
       try {
-        const tools = await window.flows?.getTools()
+        const tools = await FlowService.getTools()
         setAvailableTools(tools || [])
       } catch (e) {
         console.error('Failed to load tools:', e)
@@ -1374,6 +1408,7 @@ function ToolsConfig({ config, onConfigChange }: { config: any; onConfigChange: 
     terminal: '💻 Terminal',
     code: '🔧 Code Analysis',
     workspace: '🗂️ Workspace',
+    project: '📋 Project Management',
     other: '📦 Other',
   }
 

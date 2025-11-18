@@ -1,6 +1,6 @@
-import { memo, useEffect } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { Stack, Text, Group, Badge, Divider, Code } from '@mantine/core'
-import { useDispatch, useAppStore } from '../store'
+import { getBackendClient } from '../lib/backend/bootstrap'
 
 interface BadgeWorkspaceMapContentProps {
   badgeId: string
@@ -14,20 +14,18 @@ export const BadgeWorkspaceMapContent = memo(function BadgeWorkspaceMapContent({
   fullParams,
 }: BadgeWorkspaceMapContentProps) {
   void badgeId
-  const dispatch = useDispatch()
+
+  const [data, setData] = useState<any>(null)
 
   useEffect(() => {
-    const existing = (useAppStore as any).getState().feLoadedToolResults?.[searchKey]
-    if (existing === undefined) {
-      dispatch('loadToolResult', { key: searchKey })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const client = getBackendClient(); if (!client) return
+    client.rpc('tool.getResult', { key: searchKey }).then((res: any) => {
+      const val = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      setData(val)
+    }).catch(() => {})
   }, [searchKey])
 
-  const paramsFromStore = useAppStore((s) => (s as any).feToolParamsByKey?.[searchKey])
-  const data = useAppStore((s) => s.feLoadedToolResults?.[searchKey] || null) as any
-
-  const p = (paramsFromStore as any) || fullParams || {}
+  const p = fullParams || {}
   const maxPerSection = typeof p?.maxPerSection === 'number' ? p.maxPerSection : undefined
 
   if (!data) {

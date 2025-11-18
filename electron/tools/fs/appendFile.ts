@@ -1,5 +1,5 @@
 import type { AgentTool } from '../../providers/provider'
-import { resolveWithinWorkspace } from '../utils'
+import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot } from '../utils'
 import fs from 'node:fs/promises'
 
 export const appendFileTool: AgentTool = {
@@ -14,7 +14,7 @@ export const appendFileTool: AgentTool = {
     required: ['path', 'content'],
     additionalProperties: false,
   },
-  run: async (input: any) => {
+  run: async (input: any, meta?: any) => {
     const rel = input?.path
     const content = input?.content
 
@@ -29,7 +29,7 @@ export const appendFileTool: AgentTool = {
       throw new Error('fsAppendFile: invalid parameter "content" (must be a string)')
     }
 
-    const abs = resolveWithinWorkspace(rel)
+    const abs = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, rel) : resolveWithinWorkspace(rel)
 
     // Capture previous contents (if any) to provide a diff preview to the UI
     let before = ''

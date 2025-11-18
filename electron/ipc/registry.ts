@@ -13,11 +13,10 @@ import { registerIndexingHandlers } from './indexing'
 import { registerEditsHandlers } from './edits'
 import { registerRefactoringHandlers } from './refactoring'
 import { registerMenuHandlers } from './menu'
-import { registerPtyHandlers } from './pty'
 
-import { registerFlowHandlersV2 } from './flows-v2'
+
 import { registerFlowProfilesHandlers } from './flowProfiles'
-// Note: flowState handlers removed - state is now accessible via zubridge
+// Note: flowState handlers removed // State is now exposed via WebSocket JSON-RPC snapshot/notification APIs
 // Note: secrets handlers removed - API keys are now managed via Zustand store (settingsApiKeys)
 
 /**
@@ -40,11 +39,11 @@ export function registerAllHandlers(ipcMain: IpcMain): void {
   registerMenuHandlers(ipcMain)
 
   // Complex modules
-  registerPtyHandlers(ipcMain)
+  // PTY: moved to WebSocket JSON-RPC backend; legacy IPC handlers are no longer registered.
 
-  registerFlowHandlersV2(ipcMain) // V2: Clean function-based execution
   registerFlowProfilesHandlers(ipcMain)
-  // Note: flowState handlers removed - state is now accessible via zubridge
+  // Note: flowState handlers removed
+  // State is now exposed via WebSocket JSON-RPC snapshot/notification APIs
 
 }
 

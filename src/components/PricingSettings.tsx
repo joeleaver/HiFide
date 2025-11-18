@@ -1,19 +1,58 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Card, Stack, Group, Text, Button, Accordion, Table, NumberInput, Badge } from '@mantine/core'
-import { useAppStore, useDispatch, selectModelsByProvider, selectPricingConfig, selectDefaultPricingConfig, selectProviderValid } from '../store'
-import type { ModelPricing } from '../store'
+import { getBackendClient } from '../lib/backend/bootstrap'
+
+type ModelPricing = { inputCostPer1M: number; outputCostPer1M: number; cachedInputCostPer1M?: number }
+
 
 export default function PricingSettings() {
-  // Use selectors for better performance
-  const modelsByProvider = useAppStore(selectModelsByProvider)
-  const pricingConfig = useAppStore(selectPricingConfig)
-  const defaultPricingConfig = useAppStore(selectDefaultPricingConfig)
-  const providerValid = useAppStore(selectProviderValid)
-
-  // Use dispatch for actions
-  const dispatch = useDispatch()
-
+  const [modelsByProvider, setModelsByProvider] = useState<Record<string, Array<{ value: string; label: string }>>>({})
+  const [pricingConfig, setPricingConfig] = useState<any>({ customRates: false, openai: {}, anthropic: {}, gemini: {}, fireworks: {}, xai: {} })
+  const [defaultPricingConfig, setDefaultPricingConfig] = useState<any>({ customRates: false, openai: {}, anthropic: {}, gemini: {}, fireworks: {}, xai: {} })
+  const [providerValid, setProviderValid] = useState<Record<string, boolean>>({})
   const [expanded, setExpanded] = useState<string | null>(null)
+
+  useEffect(() => {
+    const client = getBackendClient(); if (!client) return
+    client.rpc<any>('settings.get', {}).then((snap) => {
+      if (!snap?.ok) return
+      setModelsByProvider(snap.modelsByProvider || {})
+      setProviderValid(snap.providerValid || {})
+      setPricingConfig(snap.pricingConfig || {})
+      setDefaultPricingConfig(snap.defaultPricingConfig || {})
+    }).catch(() => {})
+  }, [])
+
+  const resetAll = async () => {
+    const client = getBackendClient(); if (!client) return
+    try {
+      const res: any = await client.rpc('settings.resetPricingToDefaults', {})
+      if (res?.ok) {
+        setPricingConfig(res.pricingConfig || {})
+        setDefaultPricingConfig(res.defaultPricingConfig || {})
+      }
+    } catch {}
+  }
+
+  const resetProvider = async (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai') => {
+    const client = getBackendClient(); if (!client) return
+    try {
+      const res: any = await client.rpc('settings.resetProviderPricing', { provider })
+      if (res?.ok) {
+        setPricingConfig(res.pricingConfig || {})
+      }
+    } catch {}
+  }
+
+  const setPrice = async (provider: string, model: string, pricing: ModelPricing) => {
+    const client = getBackendClient(); if (!client) return
+    try {
+      const res: any = await client.rpc('settings.setPricingForModel', { provider, model, pricing })
+      if (res?.ok) {
+        setPricingConfig(res.pricingConfig || {})
+      }
+    } catch {}
+  }
 
   return (
     <Card withBorder style={{ backgroundColor: '#1e1e1e', borderColor: '#3e3e42' }}>
@@ -32,7 +71,7 @@ export default function PricingSettings() {
             size="xs"
             variant="light"
             color="red"
-            onClick={() => dispatch('resetPricingToDefaults')}
+            onClick={() => resetAll()}
             disabled={!pricingConfig.customRates}
           >
             Reset All to Defaults
@@ -70,7 +109,7 @@ export default function PricingSettings() {
                   style={{ cursor: 'pointer', textDecoration: 'underline' }}
                   onClick={(e) => {
                     e.stopPropagation()
-                    dispatch('resetProviderPricing', 'openai')
+                    resetProvider('openai')
                   }}
                 >
                   Reset
@@ -83,7 +122,7 @@ export default function PricingSettings() {
                 models={modelsByProvider.openai || []}
                 pricing={pricingConfig.openai}
                 defaultPricing={defaultPricingConfig.openai}
-                onUpdate={(model, pricing) => dispatch('setPricingForModel', { provider: 'openai', model, pricing })}
+                onUpdate={(model, pricing) => setPrice('openai', model, pricing)}
               />
             </Accordion.Panel>
           </Accordion.Item>
@@ -99,7 +138,7 @@ export default function PricingSettings() {
                   style={{ cursor: 'pointer', textDecoration: 'underline' }}
                   onClick={(e) => {
                     e.stopPropagation()
-                    dispatch('resetProviderPricing', 'anthropic')
+                    resetProvider('anthropic')
                   }}
                 >
                   Reset
@@ -112,7 +151,7 @@ export default function PricingSettings() {
                 models={modelsByProvider.anthropic || []}
                 pricing={pricingConfig.anthropic}
                 defaultPricing={defaultPricingConfig.anthropic}
-                onUpdate={(model, pricing) => dispatch('setPricingForModel', { provider: 'anthropic', model, pricing })}
+                onUpdate={(model, pricing) => setPrice('anthropic', model, pricing)}
               />
             </Accordion.Panel>
           </Accordion.Item>
@@ -128,7 +167,7 @@ export default function PricingSettings() {
                   style={{ cursor: 'pointer', textDecoration: 'underline' }}
                   onClick={(e) => {
                     e.stopPropagation()
-                    dispatch('resetProviderPricing', 'gemini')
+                    resetProvider('gemini')
                   }}
                 >
                   Reset
@@ -141,7 +180,7 @@ export default function PricingSettings() {
                 models={modelsByProvider.gemini || []}
                 pricing={pricingConfig.gemini}
                 defaultPricing={defaultPricingConfig.gemini}
-                onUpdate={(model, pricing) => dispatch('setPricingForModel', { provider: 'gemini', model, pricing })}
+                onUpdate={(model, pricing) => setPrice('gemini', model, pricing)}
               />
             </Accordion.Panel>
           </Accordion.Item>
@@ -157,7 +196,7 @@ export default function PricingSettings() {
                     style={{ cursor: 'pointer', textDecoration: 'underline' }}
                     onClick={(e) => {
                       e.stopPropagation()
-                      dispatch('resetProviderPricing', 'fireworks')
+                      resetProvider('fireworks')
                     }}
                   >
                     Reset
@@ -170,7 +209,7 @@ export default function PricingSettings() {
                   models={(modelsByProvider as any).fireworks || []}
                   pricing={(pricingConfig as any).fireworks}
                   defaultPricing={(defaultPricingConfig as any).fireworks}
-                  onUpdate={(model, pricing) => dispatch('setPricingForModel', { provider: 'fireworks', model, pricing })}
+                  onUpdate={(model, pricing) => setPrice('fireworks', model, pricing)}
                 />
               </Accordion.Panel>
             </Accordion.Item>
@@ -187,7 +226,7 @@ export default function PricingSettings() {
                   style={{ cursor: 'pointer', textDecoration: 'underline' }}
                   onClick={(e) => {
                     e.stopPropagation()
-                    dispatch('resetProviderPricing', 'xai')
+                    resetProvider('xai')
                   }}
                 >
                   Reset
@@ -200,7 +239,7 @@ export default function PricingSettings() {
                 models={(modelsByProvider as any).xai || []}
                 pricing={(pricingConfig as any).xai}
                 defaultPricing={(defaultPricingConfig as any).xai}
-                onUpdate={(model, pricing) => dispatch('setPricingForModel', { provider: 'xai', model, pricing })}
+                onUpdate={(model, pricing) => setPrice('xai', model, pricing)}
               />
             </Accordion.Panel>
           </Accordion.Item>

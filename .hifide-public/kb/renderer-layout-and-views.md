@@ -10,6 +10,8 @@ updatedAt: 2025-11-03T21:29:39.127Z
 ## Shell & navigation
 - `src/App.tsx` renders the framed desktop shell with a custom title bar, ActivityBar navigation, dynamic view routing, and StatusBar telemetry.
 - Menu commands from the main process are bridged via typed preload APIs and routed through a global Zustand dispatch to switch views, open folders, and manage flow import/export.
+- Titlebar window controls use WebSocket JSON-RPC methods (`window.minimize`, `window.toggleMaximize`/`window.maximize`, `window.close`); no preload bridge is exposed for these.
+
 
 ## Primary views
 - **AgentView (`src/components/AgentView.tsx`)** – Chat workspace featuring streaming markdown, tool badges, and agent debug panels.

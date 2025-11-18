@@ -1,42 +1,49 @@
 import { ScrollArea, Text, Stack, Group } from '@mantine/core'
-import { useAppStore, useDispatch, selectSessions, selectCurrentId } from '../store'
-import type { Session, TokenUsage } from '../store'
-
-import { useUiStore } from '../store/ui'
 import { useEffect } from 'react'
+import { getBackendClient } from '../lib/backend/bootstrap'
+import { useUiStore } from '../store/ui'
 import CollapsiblePanel from './CollapsiblePanel'
+import { useSessionUi } from '../store/sessionUi'
+
+// Minimal local types to avoid zubridge imports
+type TokenUsage = { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number }
 
 export default function TokensCostsPanel() {
-  const dispatch = useDispatch()
-
-  // Read persisted state from main store (guard for initial hydration)
-  const persistedCollapsed = useAppStore((s) => s.windowState?.tokensCostsCollapsed ?? false)
-  const persistedHeight = useAppStore((s) => s.windowState?.tokensCostsHeight ?? 250)
-
   // Use UI store for local state
   const collapsed = useUiStore((s) => s.tokensCostsCollapsed)
   const height = useUiStore((s) => s.tokensCostsHeight)
   const setCollapsed = useUiStore((s) => s.setTokensCostsCollapsed)
   const setHeight = useUiStore((s) => s.setTokensCostsHeight)
 
-  // Sync UI store with persisted state ONLY on mount
-  // Don't sync during runtime to avoid race conditions
+  // Read usage/costs/logs from centralized session store
+  const tokenUsage = useSessionUi((s: any) => s.tokenUsage) as {
+    total: TokenUsage
+    byProvider: Record<string, TokenUsage>
+    byProviderAndModel: Record<string, Record<string, TokenUsage>>
+  } | null
+  const costs = useSessionUi((s: any) => s.costs) as any
+  const requestsLog = useSessionUi((s: any) => s.requestsLog) as any[]
+
+  // Hydrate UI-only sizing from backend window state; usage comes from sessionUi store
   useEffect(() => {
-    setCollapsed(persistedCollapsed)
-    setHeight(persistedHeight)
+    const client = getBackendClient()
+    if (!client) return
+    ;(async () => {
+      try {
+        const ws = await client.rpc('ui.getWindowState', {})
+        const windowState = ws?.windowState || {}
+        if (typeof windowState.tokensCostsCollapsed === 'boolean') setCollapsed(windowState.tokensCostsCollapsed)
+        if (typeof windowState.tokensCostsHeight === 'number') setHeight(windowState.tokensCostsHeight)
+      } catch {}
+    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // Only run on mount
+  }, [])
 
-  const sessions = useAppStore(selectSessions)
-  const currentId = useAppStore(selectCurrentId)
-
-  const currentSession = sessions.find((sess) => sess.id === currentId)
-
-  const total = currentSession?.tokenUsage.total || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
-  const byProvider = currentSession?.tokenUsage.byProvider ?? ({} as Record<string, TokenUsage>)
-  const byProviderAndModelTokens: Record<string, Record<string, TokenUsage>> = currentSession?.tokenUsage.byProviderAndModel ?? {}
-  const costs = (currentSession?.costs ?? { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }) as Session['costs']
-  const { totalCost, byProviderAndModel } = costs
+  const total = tokenUsage?.total || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
+  const byProvider = tokenUsage?.byProvider ?? ({} as Record<string, TokenUsage>)
+  const byProviderAndModelTokens: Record<string, Record<string, TokenUsage>> = tokenUsage?.byProviderAndModel ?? {}
+  const totalCost = Number(costs?.totalCost ?? 0)
+  const byProviderAndModel = (costs?.byProviderAndModel ?? {}) as Record<string, Record<string, any>>
   const hasUsage = (total.totalTokens > 0) || ((total.cachedTokens || 0) > 0)
 
   return (
@@ -46,12 +53,14 @@ export default function TokensCostsPanel() {
       onToggleCollapse={() => {
         const newCollapsed = !collapsed
         setCollapsed(newCollapsed)
-        dispatch('updateWindowState', { tokensCostsCollapsed: newCollapsed })
+        const client = getBackendClient()
+        try { void client?.rpc('ui.updateWindowState', { updates: { tokensCostsCollapsed: newCollapsed } }) } catch {}
       }}
       height={height}
       onHeightChange={(newHeight) => {
         setHeight(newHeight)
-        dispatch('updateWindowState', { tokensCostsHeight: newHeight })
+        const client = getBackendClient()
+        try { void client?.rpc('ui.updateWindowState', { updates: { tokensCostsHeight: newHeight } }) } catch {}
       }}
       minHeight={150}
       maxHeight={400}
@@ -164,7 +173,7 @@ export default function TokensCostsPanel() {
 
             {/* Requests Table */}
             {(() => {
-              const logs: any[] = (currentSession as any)?.requestsLog || []
+              const logs: any[] = Array.isArray(requestsLog) ? requestsLog : []
               if (!logs.length) return null
               // Oldest first; also de-duplicate by (requestId,nodeId,executionId)
               const asc = [...logs].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))

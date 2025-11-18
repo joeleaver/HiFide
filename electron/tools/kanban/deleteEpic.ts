@@ -1,16 +1,15 @@
-import { z } from 'zod'
 import type { AgentTool } from '../../providers/provider'
 
-const inputSchema = z.object({
-  epicId: z.string().min(1, 'epicId is required'),
-})
-
 export const kanbanDeleteEpicTool: AgentTool = {
-  name: 'kanban:deleteEpic',
+  name: 'kanbanDeleteEpic',
   description: 'Delete an epic from the Kanban board (tasks referencing it will be unassigned).',
-  parameters: inputSchema,
-  async *run({ input }) {
-    const params = inputSchema.parse(input ?? {})
+  parameters: {
+    type: 'object',
+    properties: { epicId: { type: 'string', minLength: 1 } },
+    required: ['epicId'],
+    additionalProperties: false,
+  },
+  run: async (input: { epicId: string }) => {
     const { useMainStore } = await import('../../store')
     const state = useMainStore.getState() as any
 
@@ -18,16 +17,14 @@ export const kanbanDeleteEpicTool: AgentTool = {
       throw new Error('Kanban store is not initialized')
     }
 
-    const result = await state.kanbanDeleteEpic(params.epicId)
+    const result = await state.kanbanDeleteEpic(input.epicId)
     if (!result?.ok) {
-      throw new Error(`Failed to delete epic ${params.epicId}`)
+      throw new Error(`Failed to delete epic ${input.epicId}`)
     }
 
-    yield {
-      type: 'object',
-      data: {
-        summary: `Deleted epic ${params.epicId}.`,
-      },
+    return {
+      summary: `Deleted epic ${input.epicId}.`,
+      deleted: { epicId: input.epicId },
     }
   },
 }

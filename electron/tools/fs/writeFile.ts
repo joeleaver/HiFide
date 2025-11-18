@@ -6,7 +6,7 @@
 
 import fs from 'node:fs/promises'
 import type { AgentTool } from '../../providers/provider'
-import { resolveWithinWorkspace, atomicWrite } from '../utils'
+import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot, atomicWrite } from '../utils'
 
 export const writeFileTool: AgentTool = {
   name: 'fsWriteFile',
@@ -20,7 +20,7 @@ export const writeFileTool: AgentTool = {
     required: ['path', 'content'],
     additionalProperties: false,
   },
-  run: async (input: any) => {
+  run: async (input: any, meta?: any) => {
     const rel = input?.path
     const content = input?.content
 
@@ -35,7 +35,7 @@ export const writeFileTool: AgentTool = {
       throw new Error('fsWriteFile: invalid parameter "content" (must be a string)')
     }
 
-    const abs = resolveWithinWorkspace(rel)
+    const abs = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, rel) : resolveWithinWorkspace(rel)
 
     // Helper: detect dominant EOL style in a string
     const detectEol = (s: string): string => {

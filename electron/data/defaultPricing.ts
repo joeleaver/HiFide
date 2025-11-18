@@ -203,6 +203,7 @@ export const DEFAULT_PRICING: PricingConfig = {
     'accounts/fireworks/models/glm-4p6': { inputCostPer1M: 0.55, outputCostPer1M: 2.19 },
     'accounts/fireworks/models/kimi-k2-instruct-0905': { inputCostPer1M: 0.60, outputCostPer1M: 2.50 },
     'accounts/fireworks/models/deepseek-v3p1-terminus': { inputCostPer1M: 0.56, outputCostPer1M: 1.68 },
+    'accounts/fireworks/models/minimax-m2': { inputCostPer1M: 0.30, outputCostPer1M: 1.20 },
   },
 
   // xAI

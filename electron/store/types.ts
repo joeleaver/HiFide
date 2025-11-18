@@ -9,7 +9,7 @@
 // ============================================================================
 
 
-export type ViewType = 'agent' | 'explorer' | 'sourceControl' | 'terminal' | 'settings' | 'knowledgeBase' | 'kanban'
+export type ViewType = 'welcome' | 'flow' | 'explorer' | 'sourceControl' | 'terminal' | 'settings' | 'knowledgeBase' | 'kanban'
 // ============================================================================
 
 // ============================================================================
@@ -131,6 +131,7 @@ export type NodeExecutionBox = {
   // Everything that happened during this execution, in sequential order
   content: Array<
     | { type: 'text'; text: string }
+    | { type: 'reasoning'; text: string }
     | { type: 'badge'; badge: Badge }
   >
 

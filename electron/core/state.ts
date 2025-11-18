@@ -16,6 +16,7 @@ import { GeminiAiSdkProvider } from '../providers-ai-sdk/gemini'
 import { FireworksAiSdkProvider } from '../providers-ai-sdk/fireworks'
 import { OpenAiSdkProvider } from '../providers-ai-sdk/openai'
 import { XaiAiSdkProvider } from '../providers-ai-sdk/xai'
+import { activeConnections, broadcastWorkspaceNotification } from '../backend/ws/broadcast'
 
 import type { ProviderAdapter } from '../providers/provider'
 
@@ -112,28 +113,25 @@ export const providerCapabilities: Record<string, Record<string, boolean>> = {
 }
 
 /**
- * Kanban board filesystem watcher state
+ * Kanban board filesystem watchers per workspace
  */
-let kanbanWatcher: fs.FSWatcher | null = null
-let kanbanWatchedDir: string | null = null
-let kanbanWatcherDebounce: NodeJS.Timeout | null = null
+const kanbanWatchers = new Map<string, fs.FSWatcher>()
+const kanbanDebounces = new Map<string, NodeJS.Timeout>()
 
-function scheduleKanbanReload(): void {
-  if (kanbanWatcherDebounce) {
-    clearTimeout(kanbanWatcherDebounce)
-  }
-  kanbanWatcherDebounce = setTimeout(() => {
-    void triggerKanbanReload()
-  }, 200)
+function scheduleKanbanReload(workspaceRoot: string): void {
+  const existing = kanbanDebounces.get(workspaceRoot)
+  if (existing) clearTimeout(existing)
+  const t = setTimeout(() => { void triggerKanbanReload(workspaceRoot) }, 200)
+  kanbanDebounces.set(workspaceRoot, t)
 }
 
-async function triggerKanbanReload(): Promise<void> {
+async function triggerKanbanReload(workspaceRoot: string): Promise<void> {
   try {
-    const { useMainStore } = await import('../store/index.js')
-    const state = useMainStore.getState() as any
-    if (typeof state.kanbanRefreshFromDisk === 'function') {
-      await state.kanbanRefreshFromDisk()
-    }
+    const dir = path.join(workspaceRoot, '.hifide-public', 'kanban')
+    const { readKanbanBoard } = await import('../store/utils/kanban.js')
+    const board = await readKanbanBoard(workspaceRoot)
+    const ts = Date.now()
+    try { broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', { board, loading: false, saving: false, error: null, lastLoadedAt: ts }) } catch {}
   } catch (error) {
     console.error('[kanban] Failed to refresh board after filesystem update:', error)
   }
@@ -141,39 +139,107 @@ async function triggerKanbanReload(): Promise<void> {
 
 export async function startKanbanWatcher(workspaceRoot: string): Promise<void> {
   const dir = path.join(workspaceRoot, '.hifide-public', 'kanban')
-  if (kanbanWatchedDir === dir && kanbanWatcher) return
-
-  stopKanbanWatcher()
-
+  if (kanbanWatchers.has(workspaceRoot)) return
   try {
     await fsPromises.mkdir(dir, { recursive: true })
-    kanbanWatcher = fs.watch(dir, (eventType, filename) => {
+    const watcher = fs.watch(dir, (eventType, filename) => {
       if (!filename || filename.toString() !== 'board.json') return
-      if (eventType === 'rename' || eventType === 'change') {
-        scheduleKanbanReload()
-      }
+      if (eventType === 'rename' || eventType === 'change') scheduleKanbanReload(workspaceRoot)
     })
-    kanbanWatchedDir = dir
+    kanbanWatchers.set(workspaceRoot, watcher)
   } catch (error) {
     console.error('[kanban] Failed to start filesystem watcher:', error)
   }
 }
 
-export function stopKanbanWatcher(): void {
-  if (kanbanWatcher) {
+export function stopKanbanWatcher(workspaceRoot?: string): void {
+  // If a specific workspace is provided, stop only when no active connections remain
+  if (workspaceRoot) {
     try {
-      kanbanWatcher.close()
-    } catch (error) {
-      console.error('[kanban] Failed to stop filesystem watcher:', error)
+      // Count connections bound to this workspace; if any, keep watcher running
+      let hasConsumer = false
+      for (const [, meta] of Array.from(activeConnections.entries())) {
+        if (meta.workspaceId === workspaceRoot) { hasConsumer = true; break }
+      }
+      if (hasConsumer) return
+    } catch {}
+    const watcher = kanbanWatchers.get(workspaceRoot)
+    if (watcher) {
+      try { watcher.close() } catch (error) { console.error('[kanban] Failed to stop filesystem watcher:', error) }
     }
+    kanbanWatchers.delete(workspaceRoot)
+    const t = kanbanDebounces.get(workspaceRoot); if (t) { clearTimeout(t); kanbanDebounces.delete(workspaceRoot) }
+    return
   }
-  kanbanWatcher = null
-  kanbanWatchedDir = null
-  if (kanbanWatcherDebounce) {
-    clearTimeout(kanbanWatcherDebounce)
-    kanbanWatcherDebounce = null
+  // No workspace specified: stop all (used during app shutdown)
+  for (const [root, watcher] of Array.from(kanbanWatchers.entries())) {
+    try { watcher.close() } catch {}
+    kanbanWatchers.delete(root)
+    const t = kanbanDebounces.get(root); if (t) { clearTimeout(t); kanbanDebounces.delete(root) }
   }
 }
+
+/**
+ * Knowledge Base filesystem watchers per workspace
+ */
+const kbWatchers = new Map<string, fs.FSWatcher>()
+const kbDebounces = new Map<string, NodeJS.Timeout>()
+
+function scheduleKbReload(workspaceRoot: string): void {
+  const existing = kbDebounces.get(workspaceRoot); if (existing) clearTimeout(existing)
+  const t = setTimeout(() => { void triggerKbReload(workspaceRoot) }, 200)
+  kbDebounces.set(workspaceRoot, t)
+}
+
+async function triggerKbReload(workspaceRoot: string): Promise<void> {
+  try {
+    const { listItems } = await import('../store/utils/knowledgeBase.js')
+    const items = await listItems(workspaceRoot)
+    const map: Record<string, any> = {}
+    for (const it of items) map[it.id] = it
+    try { broadcastWorkspaceNotification(workspaceRoot, 'kb.items.changed', { items: map, error: null }) } catch {}
+  } catch (error) {
+    console.error('[kb] Failed to reload index after filesystem update:', error)
+  }
+}
+
+export async function startKbWatcher(workspaceRoot: string): Promise<void> {
+  const dir = path.join(workspaceRoot, '.hifide-public', 'kb')
+  if (kbWatchers.has(workspaceRoot)) return
+  try {
+    await fsPromises.mkdir(dir, { recursive: true })
+    const watcher = fs.watch(dir, { recursive: process.platform !== 'linux' }, (eventType, filename) => {
+      if (!filename || !filename.toString().endsWith('.md')) return
+      if (eventType === 'rename' || eventType === 'change') scheduleKbReload(workspaceRoot)
+    })
+    kbWatchers.set(workspaceRoot, watcher)
+  } catch (error) {
+    console.error('[kb] Failed to start filesystem watcher:', error)
+  }
+}
+
+export function stopKbWatcher(workspaceRoot?: string): void {
+  if (workspaceRoot) {
+    try {
+      let hasConsumer = false
+      for (const [, meta] of Array.from(activeConnections.entries())) {
+        if (meta.workspaceId === workspaceRoot) { hasConsumer = true; break }
+      }
+      if (hasConsumer) return
+    } catch {}
+    const watcher = kbWatchers.get(workspaceRoot)
+    if (watcher) { try { watcher.close() } catch (error) { console.error('[kb] Failed to stop filesystem watcher:', error) } }
+    kbWatchers.delete(workspaceRoot)
+    const t = kbDebounces.get(workspaceRoot); if (t) { clearTimeout(t); kbDebounces.delete(workspaceRoot) }
+    return
+  }
+  for (const [root, watcher] of Array.from(kbWatchers.entries())) {
+    try { watcher.close() } catch {}
+    kbWatchers.delete(root)
+    const t = kbDebounces.get(root); if (t) { clearTimeout(t); kbDebounces.delete(root) }
+  }
+}
+
 
 /**
  * Provider adapters registry
@@ -187,72 +253,80 @@ export const providers: Record<string, ProviderAdapter> = {
 }
 
 /**
- * Indexer singleton
+ * Indexers per workspace (no global singleton)
  */
-let indexer: Indexer | null = null
+const indexers = new Map<string, Indexer>()
 
 /**
- * KB Indexer singleton
+ * KB Indexers per workspace
  */
-let kbIndexer: Indexer | null = null
+const kbIndexers = new Map<string, Indexer>()
 
 /**
- * Get or create the indexer instance
+ * Get or create the indexer instance for a workspace.
+ * If workspaceRoot is omitted, uses the currently active workspace in the store.
  */
-export async function getIndexer(): Promise<Indexer> {
-  if (!indexer) {
-    const { useMainStore } = await import('../store/index.js')
-    indexer = new Indexer(
-      useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd(),
-    )
+export async function getIndexer(workspaceRoot?: string): Promise<Indexer> {
+  const { useMainStore } = await import('../store/index.js')
+  const root = path.resolve(
+    workspaceRoot || useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+  )
+  let idx = indexers.get(root)
+  if (!idx) {
+    idx = new Indexer(root)
+    indexers.set(root, idx)
   }
-  return indexer
+  return idx
 }
 
 /**
- * Get or create the KB indexer instance (indexes .hifide-public/kb)
+ * Get or create the KB indexer instance (indexes .hifide-public/kb) for a workspace.
  */
-export async function getKbIndexer(): Promise<Indexer> {
-  if (!kbIndexer) {
-    const { useMainStore } = await import('../store/index.js')
-    const workspaceRoot =
-      useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
-    const kbRoot = path.join(workspaceRoot, '.hifide-public', 'kb')
-    // KB indexing scans the KB folder but treats workspace root as canonical root for paths
-    kbIndexer = new Indexer(workspaceRoot, {
+export async function getKbIndexer(workspaceRoot?: string): Promise<Indexer> {
+  const { useMainStore } = await import('../store/index.js')
+  const root = path.resolve(
+    workspaceRoot || useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+  )
+  let idx = kbIndexers.get(root)
+  if (!idx) {
+    const kbRoot = path.join(root, '.hifide-public', 'kb')
+    idx = new Indexer(root, {
       scanRoot: kbRoot,
       indexSubdir: 'kb-index',
       useWorkspaceGitignore: false,
       mode: 'kb',
     })
+    kbIndexers.set(root, idx)
   }
-  return kbIndexer
+  return idx
 }
 
 /**
- * Reset the indexer (used when workspace root changes)
+ * Reset the indexer for a workspace (used when workspace root changes)
  */
-export function resetIndexer(): void {
-  if (indexer) {
-    try {
-      indexer.dispose()
-    } catch (error) {
-      console.error('[indexer] Failed to dispose existing indexer:', error)
-    }
+export async function resetIndexer(workspaceRoot?: string): Promise<void> {
+  const { useMainStore } = await import('../store/index.js')
+  const root = path.resolve(
+    workspaceRoot || useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+  )
+  const idx = indexers.get(root)
+  if (idx) {
+    try { idx.dispose() } catch (error) { console.error('[indexer] Failed to dispose indexer:', error) }
+    indexers.delete(root)
   }
-  indexer = null
 }
 
 /**
- * Reset the KB indexer (used when workspace root changes)
+ * Reset the KB indexer for a workspace
  */
-export function resetKbIndexer(): void {
-  if (kbIndexer) {
-    try {
-      kbIndexer.dispose()
-    } catch (error) {
-      console.error('[indexer] Failed to dispose existing KB indexer:', error)
-    }
+export async function resetKbIndexer(workspaceRoot?: string): Promise<void> {
+  const { useMainStore } = await import('../store/index.js')
+  const root = path.resolve(
+    workspaceRoot || useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+  )
+  const idx = kbIndexers.get(root)
+  if (idx) {
+    try { idx.dispose() } catch (error) { console.error('[indexer] Failed to dispose KB indexer:', error) }
+    kbIndexers.delete(root)
   }
-  kbIndexer = null
 }

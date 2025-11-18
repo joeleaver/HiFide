@@ -1,6 +1,6 @@
-import { memo, useEffect, useCallback } from 'react'
+import { memo, useEffect, useCallback, useState } from 'react'
 import { Stack, Text, Code, Group, Badge, Divider, Accordion, Button } from '@mantine/core'
-import { useDispatch, useAppStore } from '../store'
+import { getBackendClient } from '../lib/backend/bootstrap'
 import Markdown from './Markdown'
 
 interface BadgeKnowledgeBaseSearchContentProps {
@@ -31,40 +31,34 @@ export const BadgeKnowledgeBaseSearchContent = memo(function BadgeKnowledgeBaseS
 }: BadgeKnowledgeBaseSearchContentProps) {
   void badgeId
 
-  const dispatch = useDispatch()
+  // Local KB search results and bodies
+  const [resultsObj, setResultsObj] = useState<KbSearchResult | null>(null)
+  const [kbBodies, setKbBodies] = useState<Record<string, string>>({})
 
-  // Load results from cache into state
+  // Load results via WS
   useEffect(() => {
-    const existing = (useAppStore as any).getState().feLoadedToolResults?.[searchKey]
-    if (existing === undefined) {
-      dispatch('loadToolResult', { key: searchKey })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const client = getBackendClient()
+    if (!client) return
+    client.rpc('tool.getResult', { key: searchKey }).then((res: any) => {
+      const data = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      if (data && typeof data === 'object') setResultsObj(data as KbSearchResult)
+    }).catch(() => {})
   }, [searchKey])
 
-  // Prefer shallow, sanitized params stored in main store; fall back to fullParams
-  const paramsFromStore = useAppStore((s) => (s as any).feToolParamsByKey?.[searchKey])
-
-  // Read results from state (object with { count, results })
-  const resultsObj: KbSearchResult | null = useAppStore((s) => (s as any).feLoadedToolResults?.[searchKey] || null)
-
   // Extract parameters
-  const pStore: any = paramsFromStore as any
   const pFull: any = fullParams || {}
+  const query: string = typeof pFull?.query === 'string' ? pFull.query : ''
+  const tags: string[] = Array.isArray(pFull?.tags) ? (pFull.tags as any[]).map((t) => String(t)) : []
+  const limit: number | undefined = typeof pFull?.limit === 'number' ? pFull.limit : undefined
 
-  const query: string = (typeof pStore?.query === 'string' && pStore.query) || (typeof pFull?.query === 'string' ? pFull.query : '')
-  const tags: string[] = Array.isArray(pStore?.tags)
-    ? (pStore.tags as any[]).map((t) => String(t))
-    : (Array.isArray(pFull?.tags) ? (pFull.tags as any[]).map((t) => String(t)) : [])
-  const limit: number | undefined = (typeof pStore?.limit === 'number' ? pStore.limit : (typeof pFull?.limit === 'number' ? pFull.limit : undefined))
-
-  // KB body loading helpers
-  const kbBodies = useAppStore((s) => (s as any).kbBodies || {}) as Record<string, string>
+  // KB body loading helpers via WS
   const handleLoadBody = useCallback((id: string) => {
-    dispatch('kbReadItemBody', { id })
-  }, [dispatch])
-
-
+    const client = getBackendClient(); if (!client) return
+    client.rpc('kb.getItemBody', { id }).then((res: any) => {
+      const body = res && typeof res === 'object' && 'body' in res ? (res as any).body : undefined
+      if (typeof body === 'string') setKbBodies((prev) => ({ ...prev, [id]: body }))
+    }).catch(() => {})
+  }, [])
 
   const hasObj = !!(resultsObj && typeof resultsObj === 'object')
   const results: KbHit[] = hasObj && Array.isArray((resultsObj as any).results) ? (resultsObj as any).results : []
@@ -77,13 +71,15 @@ export const BadgeKnowledgeBaseSearchContent = memo(function BadgeKnowledgeBaseS
   useEffect(() => {
     if (!resultsObj) return
     const idsToLoad = results.slice(0, AUTO_OPEN_TOP).map((h) => h.id).filter(Boolean)
-    const state: any = (useAppStore as any).getState()
-    for (const id of idsToLoad) {
-      if (!state.kbBodies?.[id]) {
-        dispatch('kbReadItemBody', { id })
+    const client = getBackendClient(); if (!client) return
+    idsToLoad.forEach((id) => {
+      if (!kbBodies[id]) {
+        client.rpc('kb.getItemBody', { id }).then((res: any) => {
+          const body = res && typeof res === 'object' && 'body' in res ? (res as any).body : undefined
+          if (typeof body === 'string') setKbBodies((prev) => ({ ...prev, [id]: body }))
+        }).catch(() => {})
       }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    })
   }, [resultsObj])
 
   return (

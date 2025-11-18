@@ -3,7 +3,7 @@ import fg from 'fast-glob'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import ignore from 'ignore'
-import { resolveWithinWorkspace } from '../utils'
+import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot } from '../utils'
 
 function escapeRegExp(str: string) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -268,8 +268,8 @@ export const grepTool: AgentTool = {
       literal?: boolean
       cursor?: string
     }
-  }) => {
-    const root = resolveWithinWorkspace('.')
+  }, meta?: any) => {
+    const root = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, '.') : resolveWithinWorkspace('.')
 
     const includeGlobs = Array.isArray(files) && files.length ? files : ['**/*']
     let excludeGlobs = [

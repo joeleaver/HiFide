@@ -46,7 +46,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
 // ----------------------------------------------------------------------------
 // Global error hardening
 // Swallow benign OS pipe errors (e.g., EPIPE from PTY/streams) so they don't
-// bubble as uncaught exceptions that zubridge will log and potentially exit on.
+// bubble as uncaught exceptions that could crash the process.
 // ----------------------------------------------------------------------------
 ;(() => {
   const isIgnorable = (err: any) => {
@@ -60,7 +60,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
     return false
   }
 
-  // Prefer capture callback so other listeners (e.g., zubridge) don’t see ignorable errors
+  // Prefer capture callback so other listeners don’t see ignorable errors
   const setCapture = (process as any).setUncaughtExceptionCaptureCallback as
     | ((cb: ((err: any) => void) | null) => void)
     | undefined
@@ -101,8 +101,20 @@ try {
 } catch {}
 
 process.on('unhandledRejection', (reason: any) => {
-  const msg = reason && (reason as any).stack ? (reason as any).stack : String(reason)
-  console.error('[main] unhandledRejection', msg)
+  try {
+    const raw = reason as any
+    const text = raw?.stack || raw?.message || String(reason)
+    // Ignore benign cancellations (expected when stopping a running flow)
+    const isCancellation =
+      (raw && raw.name === 'AbortError') || /\b(cancel|canceled|cancelled|abort|aborted|terminate|terminated|stop|stopped)\b/i.test(text)
+    if (isCancellation) {
+      console.warn('[main] Ignored unhandledRejection (cancellation)')
+      return
+    }
+    console.error('[main] unhandledRejection', text)
+  } catch {
+    console.error('[main] unhandledRejection', String(reason))
+  }
 })
 
 
@@ -148,16 +160,32 @@ async function initialize(): Promise<void> {
 
   // Continue heavy initialization after a tick to let the window paint and bridge connect
   setImmediate(async () => {
+    let astGrepOk = true
     try {
       console.time('[main] verifyAstGrepAvailable')
       await verifyAstGrepAvailable()
       console.timeEnd('[main] verifyAstGrepAvailable')
+    } catch (err) {
+      astGrepOk = false
+      console.error('[main] ast-grep unavailable; continuing without structural search:', err)
+    }
 
+    try {
       console.time('[main] initializeMainStore')
       await initializeMainStore()
       console.timeEnd('[main] initializeMainStore')
     } catch (err) {
-      console.error('[main] Post-window initialization failed:', err)
+      console.error('[main] initializeMainStore failed:', err)
+    }
+
+    // Optionally surface a non-blocking warning in logs if ast-grep is missing
+    if (!astGrepOk) {
+      try {
+        const { useMainStore } = await import('./store')
+        const st: any = useMainStore.getState()
+        // Keep app usable; StatusBar can read this message if desired
+        st.setStartupMessage?.('Structural search disabled: @ast-grep/napi not available')
+      } catch {}
     }
   })
 

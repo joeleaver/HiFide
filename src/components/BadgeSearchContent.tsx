@@ -1,6 +1,6 @@
-import { memo, useEffect } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { Stack, Text, Code, Group, Badge, Divider } from '@mantine/core'
-import { useDispatch, useAppStore } from '../store'
+import { getBackendClient } from '../lib/backend/bootstrap'
 
 interface BadgeSearchContentProps {
   badgeId: string
@@ -25,21 +25,19 @@ export const BadgeSearchContent = memo(function BadgeSearchContent({
   fullParams
 }: BadgeSearchContentProps) {
   void badgeId;
-  const dispatch = useDispatch()
 
-  // Load results from cache into state
+  // Local state for results
+  const [results, setResults] = useState<SearchResult[]>([])
+
+  // Load results via WS
   useEffect(() => {
-    // Only request load if we don't already have results for this key
-    const existing = (useAppStore as any).getState().feLoadedToolResults?.[searchKey]
-    if (existing === undefined) {
-      dispatch('loadToolResult', { key: searchKey })
-    }
-    // Note: do NOT include `dispatch` as a dependency; its identity may change and cause re-runs
+    const client = getBackendClient()
+    if (!client) return
+    client.rpc('tool.getResult', { key: searchKey }).then((res: any) => {
+      const data = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      if (Array.isArray(data)) setResults(data as SearchResult[])
+    }).catch(() => {})
   }, [searchKey])
-
-  // Read results from state (avoid [] literal in selector to prevent unnecessary re-renders)
-  const loadedResults = useAppStore((s) => s.feLoadedToolResults?.[searchKey])
-  const results: SearchResult[] = loadedResults ?? []
 
   if (!results.length) {
     return (

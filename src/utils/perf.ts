@@ -101,14 +101,11 @@ export function useRerenderTrace(name: string, watched: Record<string, any>) {
       const diffs = shallowDiff(prev, watched)
       if (diffs.length > 0) {
         const since = (now - (tsRef.current || now)).toFixed(1)
-        // Log concise change list; expand in console to inspect values
-        // eslint-disable-next-line no-console
-        console.debug(`🔁 ${name} re-render (+${since}ms) changed:`, diffs.map(d => d.key))
+        // Log concise change list to a DevTools-friendly store if needed
+        // (console logging is disabled here to keep renderer console focused on backend events)
       }
     } else {
-      // First mount
-      // eslint-disable-next-line no-console
-      console.debug(`🔁 ${name} mount`)
+      // First mount; console logging disabled here as well
     }
     prevRef.current = watched
     tsRef.current = now

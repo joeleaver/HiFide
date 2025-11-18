@@ -9,6 +9,7 @@
  * - fs:          Filesystem operations
  * - edits:       Code editing (apply edits/patches/targeted)
  * - workspace:   Workspace discovery and Knowledge Base
+ * - project:     Project Management (Kanban, tasks/epics)
  * - index:       Search/index utilities (includes textGrep)
  * - terminal:    Terminal/session tools
  * - code:        Code analysis/refactors (AST search, small transforms)
@@ -22,6 +23,7 @@ export type ToolCategory =
   | 'fs'
   | 'edits'
   | 'workspace'
+  | 'project'
   | 'index'
   | 'terminal'
   | 'code'
@@ -49,14 +51,16 @@ const DEFAULT_TOOL_CATEGORY_MAP: Record<string, ToolCategory> = {
   fsExists: 'fs',
   fsStat: 'fs',
   fsAppendFile: 'fs',
-  kanbanGetBoard: 'workspace',
-  kanbanCreateTask: 'workspace',
-  kanbanUpdateTask: 'workspace',
-  kanbanDeleteTask: 'workspace',
-  kanbanMoveTask: 'workspace',
-  kanbanCreateEpic: 'workspace',
-  kanbanUpdateEpic: 'workspace',
-  kanbanDeleteEpic: 'workspace',
+
+  // Project Management (Kanban)
+  kanbanGetBoard: 'project',
+  kanbanCreateTask: 'project',
+  kanbanUpdateTask: 'project',
+  kanbanDeleteTask: 'project',
+  kanbanMoveTask: 'project',
+  kanbanCreateEpic: 'project',
+  kanbanUpdateEpic: 'project',
+  kanbanDeleteEpic: 'project',
 
   // Terminal
   codeApplyEditsTargeted: 'edits',
@@ -95,6 +99,7 @@ export const createToolsSlice: StateCreator<ToolsSlice, [], [], ToolsSlice> = (_
     // Heuristics as fallback to keep future tools grouped reasonably
     if (name.startsWith('fs')) return 'fs'
     if (name.startsWith('agent')) return 'agent'
+    if (name.startsWith('kanban')) return 'project'
     if (name.startsWith('workspace') || name.startsWith('knowledgeBase')) return 'workspace'
     if (name.toLowerCase().includes('applyedits') || name.toLowerCase().includes('patch')) return 'edits'
     if (name.startsWith('terminal') || name.startsWith('session')) return 'terminal'

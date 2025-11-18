@@ -1,5 +1,5 @@
 import type { AgentTool } from '../../providers/provider'
-import { resolveWithinWorkspace } from '../utils'
+import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot } from '../utils'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -15,8 +15,8 @@ export const truncateDirTool: AgentTool = {
     required: ['path'],
     additionalProperties: false,
   },
-  run: async ({ path: rel, ensureExists = true }: { path: string; ensureExists?: boolean }) => {
-    const abs = resolveWithinWorkspace(rel)
+  run: async ({ path: rel, ensureExists = true }: { path: string; ensureExists?: boolean }, meta?: any) => {
+    const abs = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, rel) : resolveWithinWorkspace(rel)
     if (ensureExists) {
       await fs.mkdir(abs, { recursive: true })
     }

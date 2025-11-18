@@ -1,5 +1,5 @@
 import type { AgentTool } from '../../providers/provider'
-import { resolveWithinWorkspace } from '../utils'
+import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot } from '../utils'
 import fs from 'node:fs/promises'
 
 export const truncateFileTool: AgentTool = {
@@ -14,8 +14,8 @@ export const truncateFileTool: AgentTool = {
     required: ['path'],
     additionalProperties: false,
   },
-  run: async ({ path: rel, create = true }: { path: string; create?: boolean }) => {
-    const abs = resolveWithinWorkspace(rel)
+  run: async ({ path: rel, create = true }: { path: string; create?: boolean }, meta?: any) => {
+    const abs = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, rel) : resolveWithinWorkspace(rel)
     if (create) {
       await fs.writeFile(abs, '', 'utf-8')
     } else {

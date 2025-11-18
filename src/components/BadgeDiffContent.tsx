@@ -1,9 +1,9 @@
-import { memo, useEffect, useRef } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { Text, Button } from '@mantine/core'
 import { DiffEditor } from '@monaco-editor/react'
 
-import { useDispatch, useAppStore } from '../store'
 import { useUiStore } from '../store/ui'
+import { getBackendClient } from '../lib/backend/bootstrap'
 
 interface BadgeDiffContentProps {
   badgeId: string
@@ -51,17 +51,21 @@ const EMPTY_DIFF_LIST: DiffFile[] = []
  * Displays the first file's diff inline
  */
 export const BadgeDiffContent = memo(function BadgeDiffContent({ badgeId, diffKey }: BadgeDiffContentProps) {
-  const dispatch = useDispatch()
   const openDiffPreview = useUiStore((s) => s.openDiffPreview)
 
-  // Load diff from cache into state
-  useEffect(() => {
-    dispatch('loadToolResult', { key: diffKey })
-  }, [diffKey, dispatch])
+  // Local state for diff list
+  const [data, setData] = useState<DiffFile[]>(EMPTY_DIFF_LIST)
 
-  // Read diff from state
-  const dataFromStore = useAppStore((s) => s.feLoadedToolResults?.[diffKey])
-  const data = dataFromStore ?? EMPTY_DIFF_LIST
+  // Load diff via WS (from main-owned cache)
+  useEffect(() => {
+    const client = getBackendClient()
+    if (!client) return
+    client.rpc('tool.getResult', { key: diffKey }).then((res: any) => {
+      const val = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      const arr = Array.isArray(val) ? (val as DiffFile[]) : []
+      setData(arr)
+    }).catch(() => {})
+  }, [diffKey])
 
   // Ensure Monaco diff editor detaches models on unmount to avoid disposal errors
   const editorRef = useRef<any>(null)

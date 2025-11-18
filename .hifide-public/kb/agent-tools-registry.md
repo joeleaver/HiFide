@@ -12,7 +12,7 @@ updatedAt: 2025-11-03T21:29:28.799Z
 - Self-regulation tools (`agent/assessTask`, `agent/checkResources`, `agent/summarizeProgress`) enforce budgeting using the policy documented in `AGENT_SELF_REGULATION.md`.
 - Filesystem and edits tools wrap `fs`, `move/copy/remove`, `applyEdits`, and `applyPatch` operations with policy-aware prompts.
 - Workspace discovery tools (`workspace/searchWorkspace`, `workspace/jump`, `workspace/map`) are the preferred code navigation primitives.
-- Terminal wrappers (`terminal/exec`, `sessionSearchOutput`, `sessionTail`, `sessionRestart`) coordinate with PTY handlers under `electron/ipc/pty.ts`.
+- Terminal wrappers (`terminal/exec`, `sessionSearchOutput`, `sessionTail`, `sessionRestart`) coordinate with the WebSocket JSON-RPC PTY backend (`electron/backend/ws/server.ts`) and shared agent PTY service (`electron/services/agentPty.ts`).
 - Code-focused helpers (`code/searchAst`, `code/applyEditsTargeted`, `code/replaceCall`, `code/replaceConsoleLevel`) leverage AST transforms for safe edits.
 - Knowledge base tooling exposes `knowledgeBaseSearch` and `knowledgeBaseStore` for in-app documentation management.
 

@@ -1,5 +1,5 @@
 import type { Node, Edge } from 'reactflow'
-import { saveFlowProfile, listFlowTemplates, loadFlowTemplate } from '../flowProfiles'
+import { saveFlowProfile, saveWorkspaceFlowProfile, listFlowTemplates, loadFlowTemplate } from '../flowProfiles'
 
 /**
  * Snapshot/shape tests for flow profile serialization
@@ -100,6 +100,47 @@ describe('flowProfiles serialization', () => {
     expect(serEdge.selected).toBeUndefined()
     expect(serEdge.type).toBeUndefined()
   })
+  it('saves and loads workspace library profiles under .hifide-public/flows', async () => {
+    const nodes: Node[] = [
+      {
+        id: 'workspace-llm-1',
+        type: 'hifiNode',
+        position: { x: 5, y: 10 },
+        data: {
+          nodeType: 'llmRequest',
+          label: 'Workspace LLM',
+          labelBase: 'Workspace LLM',
+          config: { provider: 'openai', model: 'gpt-4o' },
+          expanded: false,
+        },
+      } as any,
+    ]
+
+    const edges: Edge[] = []
+
+    const name = `workspace-snapshot-${Date.now()}`
+    const description = 'workspace desc'
+
+    const res = await saveWorkspaceFlowProfile(nodes, edges, name, description)
+    expect(res.success).toBe(true)
+
+    const templates = await listFlowTemplates()
+    const workspace = templates.find((t) => t.id === name && t.library === 'workspace')
+    expect(workspace).toBeDefined()
+    expect(workspace!.profile).toMatchObject({
+      name,
+      description,
+    })
+
+    const loaded = await loadFlowTemplate(name)
+    expect(loaded).not.toBeNull()
+    const { nodes: loadedNodes } = loaded!
+    expect(loadedNodes[0].type).toBe('hifiNode')
+    const data: any = loadedNodes[0].data
+    expect(data.nodeType).toBe('llmRequest')
+  })
+
+
 
   it('round-trips via loadFlowTemplate with data.nodeType present and no data.kind', async () => {
     const name = 'snapshot-test'

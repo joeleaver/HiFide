@@ -1,6 +1,6 @@
-import { memo, useEffect } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { Stack, Text, Code, Group, Badge, Divider } from '@mantine/core'
-import { useDispatch, useAppStore } from '../store'
+import { getBackendClient } from '../lib/backend/bootstrap'
 
 interface BadgeWorkspaceJumpContentProps {
   badgeId: string
@@ -14,25 +14,20 @@ export const BadgeWorkspaceJumpContent = memo(function BadgeWorkspaceJumpContent
   fullParams
 }: BadgeWorkspaceJumpContentProps) {
   void badgeId
-  const dispatch = useDispatch()
 
-  // Load results from cache into state
+  const [data, setData] = useState<any>(null)
+
+  // Load results via WS
   useEffect(() => {
-    const existing = (useAppStore as any).getState().feLoadedToolResults?.[searchKey]
-    if (existing === undefined) {
-      dispatch('loadToolResult', { key: searchKey })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const client = getBackendClient(); if (!client) return
+    client.rpc('tool.getResult', { key: searchKey }).then((res: any) => {
+      const val = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      setData(val)
+    }).catch(() => {})
   }, [searchKey])
 
-  // Prefer shallow, sanitized params stored in main store to avoid deep snapshot truncation
-  const paramsFromStore = useAppStore((s) => (s as any).feToolParamsByKey?.[searchKey])
-
-  // Read results from state
-  const data = useAppStore((s) => s.feLoadedToolResults?.[searchKey] || null) as any
-
   // Extract parameters
-  const p = (paramsFromStore as any) || fullParams || {}
+  const p = fullParams || {}
   const target = String(p?.target || p?.query || '')
   const expand = p?.expand !== false
   const f = p?.filters || {}

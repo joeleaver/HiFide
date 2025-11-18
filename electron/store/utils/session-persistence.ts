@@ -14,17 +14,18 @@ import type { Session } from '../types'
 /**
  * Get the sessions directory path
  */
-export async function getSessionsDir(): Promise<string> {
+export async function getSessionsDir(workspaceRoot?: string): Promise<string> {
   // Resolve workspace-relative sessions directory
   const { useMainStore } = await import('../index')
 
   // <workspaceRoot>/.hifide-private/sessions
-
-  const baseDir = path.resolve(useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd())
+  const baseDir = path.resolve(
+    workspaceRoot || useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+  )
   const privateDir = path.join(baseDir, '.hifide-private')
   const sessionsDir = path.join(privateDir, 'sessions')
-  await fs.mkdir(privateDir, { recursive: true }).catch(() => {})
-  await fs.mkdir(sessionsDir, { recursive: true }).catch(() => {})
+  try { await fs.mkdir(privateDir, { recursive: true }) } catch {}
+  try { await fs.mkdir(sessionsDir, { recursive: true }) } catch {}
   return sessionsDir
 }
 
@@ -111,6 +112,92 @@ function isValidSession(session: any): session is Session {
   )
 }
 
+
+/**
+ * Attempt to upgrade legacy session formats to the new schema with items[] timeline.
+ * Returns upgraded Session or null if not recognized.
+ */
+function upgradeLegacySession(session: any): Session | null {
+  try {
+    if (!session || typeof session !== 'object') return null
+
+    const id = typeof session.id === 'string' ? session.id : null
+    if (!id) return null
+
+    const title = typeof session.title === 'string' ? session.title : `Session ${new Date().toLocaleString()}`
+
+    // Try to find messages in legacy locations
+    const ctx = session.currentContext || {}
+    const legacyMsgs: any[] = Array.isArray(ctx.messageHistory)
+      ? ctx.messageHistory
+      : Array.isArray(session.messageHistory)
+        ? session.messageHistory
+        : Array.isArray(session.messages)
+          ? session.messages
+          : []
+
+    const now = Date.now()
+    const createdAt = typeof session.createdAt === 'number' ? session.createdAt : now
+    const updatedAt = typeof session.updatedAt === 'number' ? session.updatedAt : now
+    const lastActivityAt = typeof session.lastActivityAt === 'number' ? session.lastActivityAt : updatedAt
+
+    // Provider/model fallback if missing
+    const provider = typeof ctx.provider === 'string' ? ctx.provider : (typeof session.provider === 'string' ? session.provider : 'openai')
+    const model = typeof ctx.model === 'string' ? ctx.model : (typeof session.model === 'string' ? session.model : 'gpt-4o-mini')
+
+    // If items already exists but is not an array, or empty, we can populate from legacy messages
+    const items: any[] = []
+
+    // Map legacy messages to timeline 'message' items (only user/assistant)
+    if (Array.isArray(legacyMsgs) && legacyMsgs.length) {
+      let ts = createdAt
+      for (const m of legacyMsgs) {
+        const role = (m?.role === 'user' || m?.role === 'assistant') ? m.role : null
+        const content = typeof m?.content === 'string' ? m.content
+          : Array.isArray(m?.content) ? m.content.map((seg: any) => {
+              if (typeof seg === 'string') return seg
+              if (seg && typeof seg.text === 'string') return seg.text
+              return ''
+            }).join('')
+          : ''
+        if (!role || !content) continue
+        const mid = (m?.metadata?.id && typeof m.metadata.id === 'string') ? m.metadata.id : `msg-${ts}`
+        const timestamp = typeof m?.timestamp === 'number' ? m.timestamp : ts
+        items.push({ type: 'message', id: mid, role, content, timestamp })
+        ts += 1
+      }
+    }
+
+    // If we still have no items, but there is a single last message stored differently, skip
+
+    // Build upgraded session
+    const upgraded: Session = {
+      id,
+      title,
+      items: Array.isArray(session.items) && session.items.length ? session.items : items,
+      createdAt,
+      updatedAt,
+      lastActivityAt,
+      currentContext: {
+        provider,
+        model,
+        systemInstructions: typeof ctx.systemInstructions === 'string' ? ctx.systemInstructions : undefined,
+        temperature: typeof ctx.temperature === 'number' ? ctx.temperature : undefined,
+        messageHistory: Array.isArray(ctx.messageHistory) ? ctx.messageHistory : undefined,
+      },
+      tokenUsage: (session.tokenUsage && typeof session.tokenUsage === 'object') ? session.tokenUsage : { byProvider: {}, byProviderAndModel: {}, total: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+      costs: (session.costs && typeof session.costs === 'object') ? session.costs : { byProviderAndModel: {}, totalCost: 0, currency: 'USD' },
+    }
+
+    // Must have items array to be valid after upgrade (can be empty if truly no history)
+    if (!Array.isArray(upgraded.items)) upgraded.items = []
+
+    return upgraded
+  } catch {
+    return null
+  }
+}
+
 /**
  * Load a session from disk
  */
@@ -121,8 +208,13 @@ export async function loadSessionFromDisk(sessionId: string): Promise<Session | 
     const content = await fs.readFile(filePath, 'utf-8')
     const session = JSON.parse(content)
 
-    // Validate session format
+    // Validate session format; attempt legacy upgrade if needed
     if (!isValidSession(session)) {
+      const upgraded = upgradeLegacySession(session)
+      if (upgraded) {
+        try { sessionSaver.save(upgraded, true) } catch {}
+        return upgraded
+      }
       return null
     }
 
@@ -137,9 +229,9 @@ export async function loadSessionFromDisk(sessionId: string): Promise<Session | 
  * Load all sessions from disk
  * Automatically filters out old/invalid format sessions
  */
-export async function loadAllSessions(): Promise<Session[]> {
+export async function loadAllSessions(workspaceRoot?: string): Promise<Session[]> {
   try {
-    const sessionsDir = await getSessionsDir()
+    const sessionsDir = await getSessionsDir(workspaceRoot)
     const files = await fs.readdir(sessionsDir)
     const sessionFiles = files.filter(f => f.endsWith('.json') && !f.endsWith('.tmp'))
 
@@ -151,11 +243,17 @@ export async function loadAllSessions(): Promise<Session[]> {
         const content = await fs.readFile(path.join(sessionsDir, file), 'utf-8')
         const session = JSON.parse(content)
 
-        // Validate session format - skip old/invalid sessions
+        // Validate session format - attempt upgrade for old/invalid sessions
         if (isValidSession(session)) {
           sessions.push(session)
         } else {
-          skippedCount++
+          const upgraded = upgradeLegacySession(session)
+          if (upgraded) {
+            sessions.push(upgraded)
+            try { sessionSaver.save(upgraded, true) } catch {}
+          } else {
+            skippedCount++
+          }
         }
       } catch (e) {
         console.error('[session-persistence] Failed to load session file:', file, e)

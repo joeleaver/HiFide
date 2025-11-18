@@ -1,7 +1,7 @@
 import type { StateCreator } from 'zustand'
 import type { Edge, Node, NodeChange, XYPosition } from 'reactflow'
 import type { PricingConfig } from '../types'
-import { initializeFlowProfiles, listFlowTemplates, loadFlowTemplate, saveFlowProfile, deleteFlowProfile, isSystemTemplate, loadSystemTemplates, type FlowTemplate, type FlowProfile } from '../../services/flowProfiles'
+import { initializeFlowProfiles, listFlowTemplates, loadFlowTemplate, saveFlowProfile, saveWorkspaceFlowProfile, deleteFlowProfile, deleteWorkspaceFlowProfile, isSystemTemplate, loadSystemTemplates, type FlowTemplate, type FlowProfile, type FlowLibrary } from '../../services/flowProfiles'
 import type { MainFlowContext } from '../../ipc/flows-v2/types'
 import { loadWorkspaceSettings, saveWorkspaceSettings } from '../../ipc/workspace'
 import { UiPayloadCache } from '../../core/uiPayloadCache'
@@ -28,7 +28,7 @@ export type FlowEvent = {
 // Flow execution status
 export type FlowStatus = 'stopped' | 'running' | 'waitingForInput'
 
-// Buffered/Throttled flush to reduce zubridge IPC during execution
+// Buffered/Throttled flush to reduce notification churn during execution
 let __feFlushTimer: NodeJS.Timeout | null = null
 let __fePendingEvents: FlowEvent[] = []
 let __fePendingFlowState: Record<string, NodeExecutionState> = {}
@@ -64,7 +64,7 @@ function __scheduleFeFlush(set: any, get: any, interval = 100) {
       const st = get().feStatus
       if (updates.feFlowState && !(st === 'running' || st === 'waitingForInput')) {
         const changedIds = Object.keys(statePatch)
-        if (process.env.NODE_ENV !== 'production') {
+        if (process.env.HF_FLOW_DEBUG === '1') {
           console.debug('[flowEditor] Dropping feFlowState patch while idle:', { status: st, changedIds })
         }
         delete (updates as any).feFlowState
@@ -112,7 +112,7 @@ function __scheduleFeFlush(set: any, get: any, interval = 100) {
     }
     if (Object.keys(updates).length) {
       try {
-        if (get().feStatus === 'stopped') {
+        if (get().feStatus === 'stopped' && process.env.HF_FLOW_DEBUG === '1') {
           // Debug: detect unexpected flushes while idle
           console.debug('[flowEditor] fe* flush while stopped:', Object.keys(updates))
         }
@@ -132,7 +132,7 @@ function __queueFeFlowState(set: any, get: any, nodeId: string, patch: Partial<N
     const status = get().feStatus
     if (!(status === 'running' || status === 'waitingForInput')) {
       // Ignore entirely when idle to prevent UI interactions (like dragging) from causing churn
-      if (process.env.NODE_ENV !== 'production') {
+      if (process.env.HF_FLOW_DEBUG === '1') {
         console.debug('[flowEditor] __queueFeFlowState ignored (idle):', { status, nodeId, patchKeys: Object.keys(patch || {}) })
       }
       return
@@ -161,7 +161,7 @@ function __queueFeMainContext(set: any, get: any, ctx: MainFlowContext) {
   try {
     const status = get().feStatus
     if (!(status === 'running' || status === 'waitingForInput')) {
-      if (process.env.NODE_ENV !== 'production') {
+      if (process.env.HF_FLOW_DEBUG === '1') {
         console.debug('[flowEditor] __queueFeMainContext ignored (idle):', { status })
       }
       return
@@ -246,17 +246,11 @@ export interface FlowEditorSlice {
   feErrorDetectEnabled: boolean
   feErrorDetectBlock: boolean
 
-  // Transient diff preview (loaded on demand; not persisted)
-  feLatestDiffPreview: Array<{ path: string; before?: string; after?: string; sizeBefore?: number; sizeAfter?: number; truncated?: boolean }> | null
 
-  // Loaded tool results (keyed by callId, loaded on demand; not persisted)
-  feLoadedToolResults: Record<string, any>
-
-  // Shallow params for tools keyed by callId (kept shallow to avoid deep snapshot truncation)
-  feToolParamsByKey: Record<string, any>
 
   // Template management state
   feCurrentProfile: string
+  feCurrentProfileLibrary: FlowLibrary | ''
   feAvailableTemplates: FlowTemplate[]
   feTemplatesLoaded: boolean
   feSelectedTemplate: string
@@ -269,20 +263,14 @@ export interface FlowEditorSlice {
   // Actions
   initFlowEditor: () => Promise<void>
 
-  // Unified tool result cache actions (replaces separate diff/search caches)
+  // Unified UI payload registration (main-only helper)
   registerToolResult: (params: { key: string; data: any }) => void
-  loadToolResult: (params: { key: string }) => void
-  clearToolResult: (params: { key: string }) => void
-
-  // Legacy diff preview actions (for backward compatibility with feLatestDiffPreview state)
-  loadDiffPreview: (params: { key: string }) => Promise<void>
-  clearLatestDiffPreview: () => void
   feLoadTemplates: () => Promise<void>
   feLoadTemplate: (params: { templateId: string }) => Promise<void>
   feSaveCurrentProfile: () => Promise<void>
   feStartPeriodicSave: () => void
   feStopPeriodicSave: () => void
-  feSaveAsProfile: (params: { name: string }) => Promise<void>
+  feSaveAsProfile: (params: { name: string; library?: FlowLibrary }) => Promise<void>
   feDeleteProfile: (params: { name: string }) => Promise<void>
   feExportFlow: () => Promise<void>
   feClearExportResult: () => void
@@ -383,10 +371,7 @@ async function __waitForFeSettle(maxWaitMs = 1000): Promise<void> {
   await new Promise((r) => setTimeout(r, 50))
 }
 
-// Unified in-memory cache for tool execution results (main process only, not persisted)
-// Keyed by callId (tool execution ID), stores any data that's too large to put in the store
-// This replaces the separate diff/search caches and works for any tool
-const __feToolResultCache = new Map<string, any>()
+
 
 // Module-scoped handles for periodic auto-save (do not put these in Zustand state)
 let __fePeriodicSaveTimeout: NodeJS.Timeout | null = null
@@ -431,17 +416,10 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   feErrorDetectEnabled: true,
   feErrorDetectBlock: false,
 
-  // Transient diff preview
-  feLatestDiffPreview: null,
-
-  // Loaded tool results
-  feLoadedToolResults: {},
-
-  // Shallow tool params by callId
-  feToolParamsByKey: {},
 
   // Template management initial state
   feCurrentProfile: '',
+  feCurrentProfileLibrary: '',
   feAvailableTemplates: [],
   feTemplatesLoaded: false,
   feSelectedTemplate: 'default',
@@ -452,58 +430,15 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
   feLastSavedState: null,
 
   // ----- Actions -----
-  // Unified tool result cache (works for any tool)
+  // Unified UI payload registration (stores heavy badge content outside Zustand)
   registerToolResult: ({ key, data }: { key: string; data: any }) => {
-    __feToolResultCache.set(key, data)
-    // Also push into state immediately so badges render without waiting for a second load
-    set((state) => ({
-      feLoadedToolResults: {
-        ...(state.feLoadedToolResults || {}),
-        [key]: data,
-      },
-    }))
-  },
-  loadToolResult: ({ key }: { key: string }) => {
-    const data = __feToolResultCache.get(key)
-
-    // If undefined in cache, mark as loaded-empty with null to avoid repeated loads
-    if (data === undefined) {
-      const current = get().feLoadedToolResults?.[key]
-      if (current === null) return // already marked loaded-empty
-      set((state) => ({
-        feLoadedToolResults: {
-          ...state.feLoadedToolResults,
-          [key]: null,
-        },
-      }))
-      return
+    try {
+      UiPayloadCache.put(String(key), data)
+    } catch (e) {
+      try { console.warn('[flowEditor] registerToolResult failed:', e) } catch {}
     }
-
-    // Only update if changed to avoid unnecessary rerenders
-    const current = get().feLoadedToolResults?.[key]
-    if (current === data) return
-
-    set((state) => ({
-      feLoadedToolResults: {
-        ...state.feLoadedToolResults,
-        [key]: data,
-      },
-    }))
-  },
-  clearToolResult: ({ key }: { key: string }) => {
-    __feToolResultCache.delete(key)
-    set((state) => {
-      const { [key]: _, ...rest } = state.feLoadedToolResults
-      return { feLoadedToolResults: rest }
-    })
   },
 
-  // Legacy diff preview actions (for backward compatibility)
-  loadDiffPreview: async ({ key }: { key: string }) => {
-    const data = __feToolResultCache.get(key) || []
-    set({ feLatestDiffPreview: data })
-  },
-  clearLatestDiffPreview: () => set({ feLatestDiffPreview: null }),
 
   initFlowEditor: async () => {
     // Load available templates
@@ -514,7 +449,10 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
     // Check if there's a current session - if so, let session initialization handle flow loading
     const state = get() as any
-    const hasSession = state.currentId && state.sessions?.find((s: any) => s.id === state.currentId)
+    const ws = state.workspaceRoot || null
+    const sid = (ws && typeof state.getCurrentIdFor === 'function') ? state.getCurrentIdFor({ workspaceId: ws }) : null
+    const list = (ws && typeof state.getSessionsFor === 'function') ? (state.getSessionsFor({ workspaceId: ws }) || []) : []
+    const hasSession = Boolean(sid && list.find((s: any) => s.id === sid))
 
     if (hasSession) {
       return
@@ -534,10 +472,24 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           const profile = await loadFlowTemplate(lastFlow)
           if (profile && profile.nodes && profile.edges) {
             const isSystem = await isSystemTemplate(lastFlow)
+            const libFromSettings = settings.lastUsedFlowLibrary as FlowLibrary | undefined
+            const templates = (get() as any).feAvailableTemplates as FlowTemplate[] | undefined
+            const tpl = Array.isArray(templates) ? templates.find((t) => t.id === lastFlow) : undefined
+
+            let library: FlowLibrary | '' = 'user'
+            if (libFromSettings === 'system' || libFromSettings === 'user' || libFromSettings === 'workspace') {
+              library = libFromSettings
+            } else if (tpl?.library) {
+              library = tpl.library
+            } else {
+              library = isSystem ? 'system' : 'user'
+            }
+
             set({
               feNodes: profile.nodes,
               feEdges: profile.edges,
-              feCurrentProfile: isSystem ? '' : lastFlow,
+              feCurrentProfile: library === 'system' ? '' : lastFlow,
+              feCurrentProfileLibrary: library === 'system' ? 'system' : library,
               feSelectedTemplate: lastFlow,  // Set selector to show loaded flow
             })
             loadedFromWorkspace = true
@@ -604,7 +556,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       set(patch)
     } catch {}
 
-    // Note: State synchronization is now handled by zubridge
+    // Note: State lives in main; renderer observes via JSON-RPC notifications
     // The main process can directly access the store via useMainStore
     // Flow events are handled by the scheduler directly updating the store
 
@@ -692,7 +644,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
     try {
       if (nodesDeepEqual(current, nodes)) {
-        if (process.env.NODE_ENV !== 'production') {
+        if (process.env.HF_FLOW_DEBUG === '1') {
           console.debug('[flowEditor] feSetNodes dropped (deep-equal)')
         }
         return
@@ -725,7 +677,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
     try {
       if (edgesDeepEqual(current, edges)) {
-        if (process.env.NODE_ENV !== 'production') {
+        if (process.env.HF_FLOW_DEBUG === '1') {
           console.debug('[flowEditor] feSetEdges dropped (deep-equal)')
         }
         return
@@ -774,13 +726,11 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     })
   },
   feAddNode: ({ nodeType, pos, label }: { nodeType: string; pos: XYPosition; label?: string }) => {
-    console.log('[feAddNode] Called with:', { nodeType, pos, label })
 
     // Prevent adding multiple defaultContextStart nodes
     if (nodeType === 'defaultContextStart') {
       const hasDefaultContextStart = get().feNodes.some(n => (n.data as any)?.nodeType === 'defaultContextStart')
       if (hasDefaultContextStart) {
-        console.log('[feAddNode] Prevented adding duplicate defaultContextStart')
         return
       }
     }
@@ -797,7 +747,6 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
 
     const newNode = { id, type: 'hifiNode', data: { nodeType: nodeType, label: lbl, labelBase: lbl, config: defaultConfig }, position: pos }
-    console.log('[feAddNode] Adding node:', newNode)
 
     set({
       feNodes: [
@@ -806,7 +755,6 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       ],
     })
 
-    console.log('[feAddNode] Node added, new count:', get().feNodes.length)
   },
   feSetSelectedNodeId: ({ id }: { id: string | null }) => set({ feSelectedNodeId: id }),
   feSetNodeLabel: ({ id, label }: { id: string; label: string }) => {
@@ -863,38 +811,45 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     // Execute the flow by finding the Context Start node and running it
     // Kick-off should ACK to renderer immediately; heavy work runs async.
 
-    // Check if flow is loaded
-    if (get().feNodes.length === 0) {
-      return
-    }
-
     // Use session ID as requestId so terminal tools bind to the session's PTY
-    const state = get() as any
-    const currentSessionId = state.currentId
+    // Determine session and flow for the active workspace (workspace-scoped state)
+    const storeState: any = (store as any).getState()
+    const ws = storeState.workspaceRoot || null
+    const currentSessionId = ws ? (storeState.currentIdByWorkspace?.[ws] ?? null) : null
     const requestId = currentSessionId || `flow-init-${Date.now()}`
 
-    // Reset all node styles and status (fast)
-    const resetNodes = get().feNodes.map((n) => ({
-      ...n,
-      style: { border: '2px solid #333', boxShadow: 'none' },
-      data: { ...(n.data as any), status: undefined, durationMs: undefined, costUSD: undefined, detectedIntent: undefined },
-    }))
+    const list = ws ? (storeState.sessionsByWorkspace?.[ws] || []) : []
+    const currentSession = Array.isArray(list) ? list.find((s: any) => s.id === currentSessionId) : null
+    const executedFlowId = currentSession?.lastUsedFlow || 'default'
+
+    // Reset node styles only if the editor is currently showing the executed flow
+    const isEditingExecuted = (get().feSelectedTemplate === executedFlowId) && (get().feNodes.length > 0)
+    if (isEditingExecuted) {
+      const resetNodes = get().feNodes.map((n) => ({
+        ...n,
+        style: { border: '2px solid #333', boxShadow: 'none' },
+        data: { ...(n.data as any), status: undefined, durationMs: undefined, costUSD: undefined, detectedIntent: undefined },
+      }))
+      set({ feNodes: resetNodes })
+    }
 
     set({
       feRequestId: requestId,
       feStatus: 'running',
       feStreamingText: '',  // Reset streaming text
-      feNodes: resetNodes,  // Reset node styles
       fePausedNode: null,   // Clear paused node
     })
 
-    // Defer heavy work to avoid zubridge ack timeout
+    // Defer heavy work to avoid blocking the JSON-RPC loop/ACKs
     setImmediate(async () => {
       try {
         const storeState: any = (store as any).getState()
 
-        // Get session context (single source of truth for provider/model/messageHistory)
-        const currentSession = storeState.sessions?.find((s: any) => s.id === storeState.currentId)
+        // Get session context (workspace-scoped SoT for provider/model/messageHistory)
+        const ws2 = storeState.workspaceRoot || null
+        const curId2 = ws2 ? (storeState.currentIdByWorkspace?.[ws2] ?? null) : null
+        const list2 = ws2 ? (storeState.sessionsByWorkspace?.[ws2] || []) : []
+        const currentSession = Array.isArray(list2) ? list2.find((s: any) => s.id === curId2) : null
         const sessionContext = currentSession?.currentContext
         if (!sessionContext) {
           console.error('[flowInit] No session context found - cannot initialize flow')
@@ -906,12 +861,14 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         const pricingConfig: PricingConfig | undefined = storeState.pricingConfig
         const modelPricing = (pricingConfig as any)?.[sessionContext.provider || '']?.[sessionContext.model || ''] || null
 
-        console.log('[flowInit] Initializing flow from session context:', {
-          sessionId: currentSession?.id,
-          provider: sessionContext.provider,
-          model: sessionContext.model,
-          messageCount: sessionContext.messageHistory?.length || 0
-        })
+        if (process.env.HF_FLOW_DEBUG === '1') {
+          console.log('[flowInit] Initializing flow from session context:', {
+            sessionId: currentSession?.id,
+            provider: sessionContext.provider,
+            model: sessionContext.model,
+            messageCount: sessionContext.messageHistory?.length || 0
+          })
+        }
 
         const rules: string[] = []
         if (get().feRuleEmails) rules.push('emails')
@@ -920,17 +877,33 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         if (get().feRuleNumbers16) rules.push('numbers16')
         const maxUSD = (() => { const v = parseFloat(get().feBudgetUSD); return isNaN(v) ? undefined : v })()
 
-        // Convert ReactFlow nodes/edges (UI format) to FlowDefinition (execution format)
+        // Build FlowDefinition from the executed flow (not necessarily the editor graph)
+        const execFlowId = currentSession?.lastUsedFlow || 'default'
+        let execNodes = get().feNodes
+        let execEdges = get().feEdges
+        if (!(Array.isArray(execNodes) && execNodes.length > 0 && get().feSelectedTemplate === execFlowId)) {
+          try {
+            const profile = await loadFlowTemplate(execFlowId)
+            if (profile && profile.nodes && profile.edges) {
+              execNodes = profile.nodes
+              execEdges = profile.edges
+            }
+          } catch (e) {
+            console.warn('[flowInit] Failed to load executed flow profile:', e)
+          }
+        }
+
         const { reactFlowToFlowDefinition } = await import('../../services/flowConversion.js')
-        const flowDef = reactFlowToFlowDefinition(get().feNodes, get().feEdges, 'editor-current')
+        const flowDef = reactFlowToFlowDefinition(execNodes, execEdges, execFlowId)
 
         const initArgs: any = {
           requestId,
-          flowId: 'simple-chat',
+          sessionId: currentSessionId,
+          flowId: execFlowId,
           flowDef,
           initialContext: sessionContext,
+          workspaceId: storeState.workspaceRoot || undefined,
           policy: {
-
             redactor: { enabled: get().feRedactorEnabled, rules },
             budgetGuard: { maxUSD, blockOnExceed: get().feBudgetBlock },
             errorDetection: { enabled: get().feErrorDetectEnabled, blockOnFlag: get().feErrorDetectBlock, patterns: (get().feErrorDetectPatterns || '').split(/[\n,]/g).map((s) => s.trim()).filter(Boolean) },
@@ -952,7 +925,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       }
     })
 
-    // Return immediately so zubridge can ACK without waiting for execution
+    // Return immediately so JSON-RPC can ACK without waiting for execution
   },
 
   /**
@@ -994,7 +967,9 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       const st = store.getState() as any
       if (st.finalizeRequestUsage) {
         try {
-          st.finalizeRequestUsage({ requestId: id })
+          const ws = st.workspaceRoot || null
+          const sid = ws ? (st.currentIdByWorkspace?.[ws] ?? null) : null
+          st.finalizeRequestUsage({ sessionId: sid, requestId: id })
         } catch (e) {
           console.warn('[flow] finalizeRequestUsage failed:', e)
         }
@@ -1013,9 +988,11 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
     // Add user message to session
     if (userInput) {
-      console.log('[feResume] Adding user message to session:', {
-        userInputLength: userInput.length,
-      })
+      if (process.env.HF_FLOW_DEBUG === '1') {
+        console.log('[feResume] Adding user message to session:', {
+          userInputLength: userInput.length,
+        })
+      }
       const state = store.getState() as any
       if (state.addSessionItem) {
         state.addSessionItem({
@@ -1286,10 +1263,15 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         })
 
         const isSystem = await isSystemTemplate(templateId)
+        const templates = (get() as any).feAvailableTemplates as FlowTemplate[] | undefined
+        const tpl = Array.isArray(templates) ? templates.find((t) => t.id === templateId) : undefined
+        const library: FlowLibrary | '' = tpl?.library || (isSystem ? 'system' : 'user')
+
         set({
           feNodes: profile.nodes,
           feEdges: profile.edges,
-          feCurrentProfile: isSystem ? '' : templateId,
+          feCurrentProfile: library === 'system' ? '' : templateId,
+          feCurrentProfileLibrary: library === 'system' ? 'system' : library,
           feSelectedTemplate: templateId,  // Update selector to show loaded template
           feHasUnsavedChanges: false,
           feLastSavedState: loadedState,
@@ -1299,15 +1281,10 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         try {
           const settings = await loadWorkspaceSettings()
           settings.lastUsedFlow = templateId
+          ;(settings as any).lastUsedFlowLibrary = library
           await saveWorkspaceSettings(settings)
         } catch (e) {
           console.error('[flowEditor] Failed to save last used flow:', e)
-        }
-
-        // Update the current session's lastUsedFlow
-        const storeState = get() as any
-        if (storeState.updateCurrentSessionFlow) {
-          await storeState.updateCurrentSessionFlow(templateId)
         }
 
         // Clear previous run state, then auto-start the flow
@@ -1321,14 +1298,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           feLog: ''
         })
 
-        try {
-          const stateAny = get() as any
-          if (stateAny.flowInit) {
-            await stateAny.flowInit()
-          }
-        } catch (e) {
-          console.error('[flowEditor] Auto-start after load failed:', e)
-        }
+
       }
     } catch (error) {
       console.error('Error loading template:', error)
@@ -1378,6 +1348,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         feNodes: [defaultNode],
         feEdges: [],
         feCurrentProfile: nameTrim,
+        feCurrentProfileLibrary: 'user',
         feSelectedTemplate: nameTrim,
         feHasUnsavedChanges: false,
         feFlowState: {},
@@ -1403,14 +1374,10 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         try {
           const settings = await loadWorkspaceSettings()
           settings.lastUsedFlow = nameTrim
+          ;(settings as any).lastUsedFlowLibrary = 'user'
           await saveWorkspaceSettings(settings)
         } catch (e) {
           console.error('[flowEditor] Failed to save last used flow (new):', e)
-        }
-
-        const storeState = get() as any
-        if (storeState.updateCurrentSessionFlow) {
-          await storeState.updateCurrentSessionFlow(nameTrim)
         }
 
         await get().feLoadTemplates()
@@ -1425,19 +1392,21 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
 
   feSaveCurrentProfile: async () => {
-    const { feCurrentProfile, feNodes, feEdges } = get()
+    const { feCurrentProfile, feCurrentProfileLibrary, feNodes, feEdges } = get()
+    if (!feCurrentProfile) {
+      return
+    }
+
     const isSystem = await isSystemTemplate(feCurrentProfile)
-    if (!feCurrentProfile || isSystem) {
+    if (isSystem || feCurrentProfileLibrary === 'system') {
       return
     }
 
     try {
-      const result = await saveFlowProfile(
-        feNodes,
-        feEdges,
-        feCurrentProfile,
-        ''
-      )
+      const result = feCurrentProfileLibrary === 'workspace'
+        ? await saveWorkspaceFlowProfile(feNodes, feEdges, feCurrentProfile, '')
+        : await saveFlowProfile(feNodes, feEdges, feCurrentProfile, '')
+
       if (result.success) {
         set({ feHasUnsavedChanges: false })
       } else {
@@ -1466,13 +1435,14 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         return
       }
 
-      const { feCurrentProfile } = currentState
-      const profileToSave = feCurrentProfile // Only save to the active user profile; ignore selectedTemplate to avoid overwriting during pending selection/modal
+      const { feCurrentProfile, feCurrentProfileLibrary } = currentState
+      const profileToSave = feCurrentProfile // Only save to the active profile; ignore selectedTemplate to avoid overwriting during pending selection/modal
+      const libraryToSave: FlowLibrary | '' = feCurrentProfileLibrary || 'user'
 
-      // Don't save system templates or when no active user profile
+      // Don't save system templates or when no active profile
       if (!profileToSave) return
       const isSystem = await isSystemTemplate(profileToSave)
-      if (isSystem) return
+      if (isSystem || libraryToSave === 'system') return
 
       // Debounce: clear existing timeout and set a new one
       if (__fePeriodicSaveTimeout) {
@@ -1482,6 +1452,11 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
       __fePeriodicSaveTimeout = setTimeout(async () => {
         const { feNodes, feEdges, feLastSavedState } = get()
+
+        // Guard: never auto-save an empty graph (prevents overwriting during hydration)
+        if ((!feNodes || feNodes.length === 0) && (!feEdges || feEdges.length === 0)) {
+          return
+        }
 
         // Create snapshot of current state
         const snapshot = JSON.stringify({
@@ -1508,7 +1483,10 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         // Only save if state has changed
         if (snapshot !== feLastSavedState) {
           try {
-            const result = await saveFlowProfile(feNodes, feEdges, profileToSave, '')
+            const result = libraryToSave === 'workspace'
+              ? await saveWorkspaceFlowProfile(feNodes, feEdges, profileToSave, '')
+              : await saveFlowProfile(feNodes, feEdges, profileToSave, '')
+
             if (result.success) {
               set({ feLastSavedState: snapshot, feHasUnsavedChanges: false })
             }
@@ -1531,23 +1509,24 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  feSaveAsProfile: async ({ name }: { name: string }) => {
+  feSaveAsProfile: async ({ name, library }: { name: string; library?: FlowLibrary }) => {
     const { feNodes, feEdges } = get()
     const isSystem = await isSystemTemplate(name)
     if (!name || isSystem) {
       return
     }
 
+    const targetLib: FlowLibrary = library && library !== 'system' ? library : 'user'
+
     try {
-      const result = await saveFlowProfile(
-        feNodes,
-        feEdges,
-        name,
-        ''
-      )
+      const result = targetLib === 'workspace'
+        ? await saveWorkspaceFlowProfile(feNodes, feEdges, name, '')
+        : await saveFlowProfile(feNodes, feEdges, name, '')
+
       if (result.success) {
         set({
           feCurrentProfile: name,
+          feCurrentProfileLibrary: targetLib,
           feHasUnsavedChanges: false,
           feSaveAsModalOpen: false,
           feNewProfileName: '',
@@ -1569,15 +1548,22 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       return
     }
 
+    const templates = (get() as any).feAvailableTemplates as FlowTemplate[] | undefined
+    const tpl = Array.isArray(templates) ? templates.find((t) => t.id === name) : undefined
+    const library: FlowLibrary | '' = tpl?.library || 'user'
+
     try {
-      const result = await deleteFlowProfile(name)
+      const result = library === 'workspace'
+        ? await deleteWorkspaceFlowProfile(name)
+        : await deleteFlowProfile(name)
+
       if (result.success) {
+        const state = get()
         // If we deleted the currently loaded profile, clear it
-        if (get().feCurrentProfile === name) {
-          set({ feCurrentProfile: '', feSelectedTemplate: '' })
-        }
-        // If it was selected in the dropdown, clear selection
-        if (get().feSelectedTemplate === name) {
+        if (state.feCurrentProfile === name) {
+          set({ feCurrentProfile: '', feCurrentProfileLibrary: '', feSelectedTemplate: '' })
+        } else if (state.feSelectedTemplate === name) {
+          // If it was selected in the dropdown, clear selection
           set({ feSelectedTemplate: '' })
         }
         // Reload templates to remove the deleted one
@@ -1650,7 +1636,9 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
     // Finalize per-node token usage into session totals
     if (isLlmRequest && executionId && state.finalizeNodeUsage) {
-      state.finalizeNodeUsage({ requestId, nodeId, executionId })
+      const ws = state.workspaceRoot || null
+      const sid = ws ? (state.currentIdByWorkspace?.[ws] ?? null) : null
+      state.finalizeNodeUsage({ sessionId: sid, requestId, nodeId, executionId })
     }
 
     // Update node execution state (buffered)
@@ -1736,7 +1724,9 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     if (!requestId || requestId !== get().feRequestId) return
     if (!nodeId) return
 
-    console.log('[FlowUI] tool_start received', { requestId, nodeId, toolName, callId, provider, model })
+    if (process.env.HF_FLOW_DEBUG === '1') {
+      console.log('[FlowUI] tool_start received', { requestId, nodeId, toolName, callId, provider, model })
+    }
 
     const activeTools = new Set(get().feActiveTools)
     activeTools.add(toolName)
@@ -1775,14 +1765,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         const path = toolArgs.path || toolArgs.file_path || toolArgs.dir_path
         if (path) {
           badgeMetadata = { filePath: path }
-          if (callId) {
-            set((state) => ({
-              feToolParamsByKey: {
-                ...(state as any).feToolParamsByKey,
-                [callId]: { path: String(path) }
-              }
-            }))
-          }
+
         }
       } else if (normalizedToolName === 'index_search') {
       } else if (normalizedToolName === 'fs_read_lines' || toolKey === 'fsreadlines') {
@@ -1825,28 +1808,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         // Populate metadata without overwriting file/range with unrelated keys
         badgeMetadata = { ...(filePath ? { filePath } : {}), ...(lineRange ? { lineRange } : {}), fullParams: toolArgs }
 
-        // Store shallow params for later header reconstruction at tool_end (covers cases where tool_start lacked args)
-        if (callId) {
-          const sanitizedParams: any = {
-            ...(filePath ? { path: filePath } : {}),
-            ...(typeof toolArgs.handle === 'string' ? { handle: String(toolArgs.handle) } : {}),
-            mode,
-            ...(toolArgs.startLine !== undefined || (handleObj && handleObj.s !== undefined) ? { startLine: Number(toolArgs.startLine ?? handleObj?.s) } : {}),
-            ...(toolArgs.endLine !== undefined || (handleObj && handleObj.e !== undefined) ? { endLine: Number(toolArgs.endLine ?? handleObj?.e) } : {}),
-            ...(toolArgs.headLines !== undefined ? { headLines: Number(toolArgs.headLines) } : {}),
-            ...(toolArgs.tailLines !== undefined ? { tailLines: Number(toolArgs.tailLines) } : {}),
-            ...(toolArgs.focusLine !== undefined ? { focusLine: Number(toolArgs.focusLine) } : {}),
-            ...(toolArgs.window !== undefined ? { window: Number(toolArgs.window) } : {}),
-            ...(toolArgs.beforeLines !== undefined ? { beforeLines: Number(toolArgs.beforeLines) } : {}),
-            ...(toolArgs.afterLines !== undefined ? { afterLines: Number(toolArgs.afterLines) } : {}),
-          }
-          set((state) => ({
-            feToolParamsByKey: {
-              ...(state as any).feToolParamsByKey,
-              [callId]: sanitizedParams
-            }
-          }))
-        }
+
       } else if (normalizedToolName === 'code_search_ast' || toolKey === 'codesearchast') {
         const pattern = toolArgs.pattern
         if (pattern) {
@@ -1857,23 +1819,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             query: String(pattern).slice(0, 80) + languages,
             fullParams: toolArgs
           }
-          // Store shallow, display-only params at a top-level map to avoid deep snapshot truncation in renderer bridges
-          if (callId) {
-            const sanitizedParams = {
-              pattern: String(toolArgs.pattern || ''),
-              languages: Array.isArray(toolArgs.languages) ? toolArgs.languages.map((s: any) => String(s)) : [],
-              includeGlobs: Array.isArray(toolArgs.includeGlobs) ? toolArgs.includeGlobs.map((s: any) => String(s)) : [],
-              excludeGlobs: Array.isArray(toolArgs.excludeGlobs) ? toolArgs.excludeGlobs.map((s: any) => String(s)) : [],
-              maxMatches: typeof toolArgs.maxMatches === 'number' ? toolArgs.maxMatches : undefined,
-              contextLines: typeof toolArgs.contextLines === 'number' ? toolArgs.contextLines : undefined,
-            }
-            set((state) => ({
-              feToolParamsByKey: {
-                ...(state as any).feToolParamsByKey,
-                [callId]: sanitizedParams
-              }
-            }))
-          }
+
 
         }
       } else if (toolKey === 'workspacesearch') {
@@ -1907,32 +1853,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           }
         }
 
-        // Store shallow, display-only params at a top-level map to avoid deep snapshot truncation in renderer bridges
-        if (callId) {
-          const f = (toolArgs && toolArgs.filters) || {}
-          const sanitizedParams = {
-            queries: terms,
-            // Keep original single query too for fallback display logic in renderer
-            ...(typeof toolArgs.query === 'string' && toolArgs.query.trim().length ? { query: String(toolArgs.query).trim() } : {}),
-            mode: String(toolArgs.mode || 'auto'),
-            filters: {
-              languages: Array.isArray(f.languages)
-                ? f.languages.map((s: any) => String(s))
-                : (typeof f.languages === 'string' ? [String(f.languages)] : []),
-              pathsInclude: Array.isArray(f.pathsInclude) ? f.pathsInclude.map((s: any) => String(s)) : [],
-              pathsExclude: Array.isArray(f.pathsExclude) ? f.pathsExclude.map((s: any) => String(s)) : [],
-              maxResults: typeof f.maxResults === 'number' ? f.maxResults : undefined,
-              maxSnippetLines: typeof f.maxSnippetLines === 'number' ? f.maxSnippetLines : undefined,
-              timeBudgetMs: typeof f.timeBudgetMs === 'number' ? f.timeBudgetMs : undefined,
-            }
-          }
-          set((state) => ({
-            feToolParamsByKey: {
-              ...(state as any).feToolParamsByKey,
-              [callId]: sanitizedParams
-            }
-          }))
-        }
+
       } else if (toolKey === 'workspacejump') {
         const target = String(toolArgs.target || '').trim()
         if (target) {
@@ -1941,31 +1862,12 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             fullParams: toolArgs
           }
         }
-        if (callId) {
-          const f = (toolArgs && toolArgs.filters) || {}
-          const sanitizedParams = {
-            target,
-            expand: toolArgs.expand !== false,
-            filters: {
-              languages: Array.isArray(f.languages) ? f.languages.map((s: any) => String(s)) : [],
-              pathsInclude: Array.isArray(f.pathsInclude) ? f.pathsInclude.map((s: any) => String(s)) : [],
-              pathsExclude: Array.isArray(f.pathsExclude) ? f.pathsExclude.map((s: any) => String(s)) : [],
-              maxSnippetLines: typeof f.maxSnippetLines === 'number' ? f.maxSnippetLines : undefined,
-              timeBudgetMs: typeof f.timeBudgetMs === 'number' ? f.timeBudgetMs : undefined,
-            }
-          }
-          set((state) => ({
-            feToolParamsByKey: {
-              ...(state as any).feToolParamsByKey,
-              [callId]: sanitizedParams
-            }
-          }))
-        }
+
       } else if (normalizedToolName === 'knowledgeBaseSearch' || normalizedToolName === 'knowledge_base_search' || normalizedToolName === 'knowledgebase_search') {
         // Knowledge Base search: show query/tags in header and store sanitized params for expanded view
         const q = typeof toolArgs.query === 'string' ? toolArgs.query.trim() : ''
         const tagsArr: string[] = Array.isArray(toolArgs.tags) ? toolArgs.tags.map((t: any) => String(t).trim()).filter(Boolean) : []
-        const limit = typeof toolArgs.limit === 'number' ? toolArgs.limit : undefined
+
 
         const headerParts: string[] = []
         if (q) headerParts.push(q)
@@ -1975,24 +1877,12 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           fullParams: toolArgs
         }
 
-        if (callId) {
-          const sanitizedParams = {
-            query: q,
-            tags: tagsArr,
-            ...(limit !== undefined ? { limit } : {})
-          }
-          set((state) => ({
-            feToolParamsByKey: {
-              ...(state as any).feToolParamsByKey,
-              [callId]: sanitizedParams
-            }
-          }))
-        }
+
       } else if (normalizedToolName === 'knowledgeBaseStore' || normalizedToolName === 'knowledge_base_store' || normalizedToolName === 'knowledgebase_store') {
         const id = typeof toolArgs.id === 'string' ? toolArgs.id.trim() : ''
         const title = typeof toolArgs.title === 'string' ? toolArgs.title.trim() : ''
         const tagsArr: string[] = Array.isArray(toolArgs.tags) ? toolArgs.tags.map((t: any) => String(t).trim()).filter(Boolean) : []
-        const filesArr: string[] = Array.isArray(toolArgs.files) ? toolArgs.files.map((f: any) => String(f).trim()).filter(Boolean) : []
+
         const isUpdate = !!id
 
         const headerParts: string[] = []
@@ -2001,16 +1891,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
         // Include full params for renderer fallback and store sanitized subset for display
         badgeMetadata = { query: headerParts.join(' '), fullParams: toolArgs }
-        if (callId) {
-          const sanitizedParams: any = { id, title, tags: tagsArr, files: filesArr }
-          if (typeof toolArgs.description === 'string') sanitizedParams.descPreview = String(toolArgs.description).slice(0, 160)
-          set((state) => ({
-            feToolParamsByKey: {
-              ...(state as any).feToolParamsByKey,
-              [callId]: sanitizedParams
-            }
-          }))
-        }
+
       } else if (normalizedToolName === 'workspace_map' || toolKey === 'workspacemap') {
         const maxPerSection = typeof toolArgs.maxPerSection === 'number' ? toolArgs.maxPerSection : undefined
         badgeMetadata = {
@@ -2018,31 +1899,13 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           fullParams: toolArgs
         }
         if (callId) {
-          set((state) => ({
-            feToolParamsByKey: {
-              ...(state as any).feToolParamsByKey,
-              [callId]: { maxPerSection }
-            }
-          }))
+
         }
       } else if (normalizedToolName === 'agentAssessTask' || normalizedToolName === 'agent_assess_task' || toolKey === 'agentassesstask') {
         const t = typeof (toolArgs as any).task_type === 'string' ? String((toolArgs as any).task_type) : (typeof (toolArgs as any).taskType === 'string' ? String((toolArgs as any).taskType) : '')
         badgeLabel = t ? `Assess Task — ${t}` : 'Assess Task'
         badgeMetadata = { ...(t ? { taskType: t } : {}), fullParams: toolArgs }
-        if (callId) {
-          const sanitizedParams: any = {
-            ...(t ? { task_type: t } : {}),
-            ...(typeof (toolArgs as any).estimated_files === 'number' ? { estimated_files: Number((toolArgs as any).estimated_files) } : {}),
-            ...(typeof (toolArgs as any).estimated_iterations === 'number' ? { estimated_iterations: Number((toolArgs as any).estimated_iterations) } : {}),
-            ...(typeof (toolArgs as any).strategy === 'string' ? { strategy: String((toolArgs as any).strategy) } : {}),
-          }
-          set((state) => ({
-            feToolParamsByKey: {
-              ...(state as any).feToolParamsByKey,
-              [callId]: sanitizedParams
-            }
-          }))
-        }
+
       }
     }
 
@@ -2083,7 +1946,9 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     activeTools.delete(toolName)
     __queueFeActiveTools(set, get, activeTools)
 
-    console.log('[FlowUI] tool_end received', { requestId, nodeId, toolName, callId })
+    if (process.env.HF_FLOW_DEBUG === '1') {
+      console.log('[FlowUI] tool_end received', { requestId, nodeId, toolName, callId })
+    }
 
     // Record event (buffered)
     __queueFeEvent(set, get, {
@@ -2113,10 +1978,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       if (isFsToolEarly && isErrorResultEarly) {
         // Try to recover a file path for header
         let filePath: string | undefined
-        try {
-          const saved = ((get() as any).feToolParamsByKey || {})[callId || ''] || {}
-          if (typeof saved.path === 'string' && saved.path) filePath = saved.path
-        } catch {}
+
         if (!filePath) {
           try {
             const used = ((get() as any).feLastToolArgs || {})[toolKeyEarly || normalizedToolNameEarly] || {}
@@ -2200,10 +2062,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         if (isFsTool && isErrorResult) {
           // Try to recover a file path for header
           let filePath: string | undefined
-          try {
-            const saved = ((get() as any).feToolParamsByKey || {})[callId || ''] || {}
-            if (typeof saved.path === 'string' && saved.path) filePath = saved.path
-          } catch {}
+
           if (!filePath) {
             try {
               const used = ((get() as any).feLastToolArgs || {})[toolKey || normalizedToolName] || {}
@@ -2289,19 +2148,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       // Minimal workspace.search result path (UI cached by provider)
       if (toolKey === 'workspacesearch' && result && (result as any).previewKey) {
         const count = Number((result as any).previewCount || 0)
-        // Try to enrich header with query/mode from start args if available
-        let headerQuery: string | undefined
-        try {
-          const saved = ((get() as any).feToolParamsByKey || {})[callId || ''] || {}
-          const qs: string[] = Array.isArray(saved?.queries) ? saved.queries : (saved?.query ? [saved.query] : [])
-          const terms = qs.map((q: any) => String(q || '').trim()).filter(Boolean)
-          if (terms.length) {
-            const shown = terms.slice(0, 2)
-            const suffix = terms.length > 2 ? ` +${terms.length - 2}` : ''
-            const mode = saved?.mode ? ` [${String(saved.mode)}]` : ''
-            headerQuery = shown.join(' | ') + suffix + mode
-          }
-        } catch {}
+
+
         state.updateBadgeInNodeExecution({
           nodeId,
           badgeId: callId,
@@ -2311,7 +2159,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             expandable: true,
             defaultExpanded: false,
             contentType: 'workspace-search' as const,
-            metadata: { resultCount: count, ...(headerQuery ? { query: headerQuery } : {}) },
+            metadata: { resultCount: count },
             interactive: { type: 'workspace-search', data: { key: callId, count, previewKey: (result as any)?.previewKey } }
           }
         })
@@ -2382,7 +2230,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         get().registerToolResult({ key: callId, data: result })
 
         const assessment = (result as any)?.assessment || {}
-        const taskType = typeof assessment.task_type === 'string' ? assessment.task_type : (typeof ((get() as any).feToolParamsByKey?.[callId || '']?.task_type) === 'string' ? (get() as any).feToolParamsByKey?.[callId || '']?.task_type : undefined)
+        const taskType = typeof assessment.task_type === 'string' ? assessment.task_type : undefined
         const tokenBudget = typeof assessment.token_budget === 'number' ? assessment.token_budget : undefined
         const maxIterations = typeof assessment.max_iterations === 'number' ? assessment.max_iterations : undefined
 
@@ -2518,9 +2366,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         get().registerToolResult({ key: callId, data: result })
 
         // Reconstruct file path for header from start params or result
-        const saved = ((get() as any).feToolParamsByKey || {})[callId || ''] || {}
         const used = (result && typeof result === 'object' && (result as any).usedParams) ? (result as any).usedParams : {}
-        let filePath: string | undefined = typeof saved.path === 'string' ? saved.path : undefined
+        let filePath: string | undefined = typeof (result as any)?.path === 'string' ? String((result as any).path) : undefined
         if (!filePath && typeof (result as any)?.path === 'string') filePath = String((result as any).path)
         if (!filePath && typeof used.path === 'string') filePath = String(used.path)
 
@@ -2547,14 +2394,12 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         get().registerToolResult({ key: callId, data: result })
 
         // Reconstruct file path and line range for header if missing from start
-        const saved = ((get() as any).feToolParamsByKey || {})[callId || ''] || {}
         const used = (result && typeof result === 'object' && (result as any).usedParams) ? (result as any).usedParams : {}
 
-        // File path from saved, result.path, or decoded handle (saved or used)
-        let filePath: string | undefined = typeof saved.path === 'string' ? saved.path : undefined
-        if (!filePath && typeof (result as any)?.path === 'string') filePath = String((result as any).path)
+        // File path from result.path, used.path, or decoded handle (used)
+        let filePath: string | undefined = typeof (result as any)?.path === 'string' ? String((result as any).path) : undefined
         if (!filePath && typeof used.path === 'string') filePath = String(used.path)
-        const handleStr: string | undefined = (typeof saved.handle === 'string' ? saved.handle : (typeof used.handle === 'string' ? used.handle : undefined))
+        const handleStr: string | undefined = (typeof used.handle === 'string' ? String(used.handle) : undefined)
         if (!filePath && handleStr) {
           try {
             const parsed = JSON.parse(Buffer.from(handleStr, 'base64').toString('utf-8'))
@@ -2562,23 +2407,23 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           } catch {}
         }
 
-        // Compute display range from params (prefer saved, fallback to used, then result.start/end)
-        const smode = String(saved.mode || used.mode || 'range')
+        // Compute display range from params (prefer used, then result.start/end)
+        const smode = String(used.mode || 'range')
         let lineRange: string | undefined
         if (smode === 'range') {
-          const s = Number(saved.startLine ?? used.startLine ?? (result as any)?.startLine)
-          const e = Number(saved.endLine ?? used.endLine ?? (result as any)?.endLine)
+          const s = Number(used.startLine ?? (result as any)?.startLine)
+          const e = Number(used.endLine ?? (result as any)?.endLine)
           if (s && e) lineRange = `L${s}-${e}`
           else if (s) lineRange = `L${s}`
         } else if (smode === 'head') {
-          const n = Number(saved.headLines ?? used.headLines)
+          const n = Number(used.headLines)
           lineRange = n ? `head:${n}` : 'head'
         } else if (smode === 'tail') {
-          const n = Number(saved.tailLines ?? used.tailLines)
+          const n = Number(used.tailLines)
           lineRange = n ? `tail:${n}` : 'tail'
         } else if (smode === 'around') {
-          const L = Number(saved.focusLine ?? used.focusLine)
-          const win = Number((saved.window ?? used.window) ?? Math.max(Number((saved.beforeLines ?? used.beforeLines) || 0), Number((saved.afterLines ?? used.afterLines) || 0)))
+          const L = Number(used.focusLine)
+          const win = Number((used.window) ?? Math.max(Number(used.beforeLines || 0), Number(used.afterLines || 0)))
           if (L && win) lineRange = `L${L} ±${win}`
           else if (L) lineRange = `L${L}`
           else lineRange = 'around'
@@ -2632,9 +2477,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
            normalizedToolName === 'fs_append_file' || toolKey === 'fsappendfile' ||
            normalizedToolName === 'fs_delete_file' || toolKey === 'fsdeletefile') &&
            result?.ok && !(result && Array.isArray((result as any).fileEditsPreview))) {
-        const saved = ((get() as any).feToolParamsByKey || {})[callId || ''] || {}
         const used = ((get() as any).feLastToolArgs || {})[toolKey || normalizedToolName] || {}
-        const filePath = saved.path || saved.file_path || used.path || used.file_path || (result as any)?.path
+        const filePath = used.path || used.file_path || (result as any)?.path
         state.updateBadgeInNodeExecution({
           nodeId,
           badgeId: callId,
@@ -2668,7 +2512,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             }
           } else {
             // Fallback: see if provider already registered into the local cache
-            const inCache = (__feToolResultCache as any)?.get?.(callId)
+            const inCache = UiPayloadCache.peek(callId as any)
             if (Array.isArray(inCache)) previews = inCache
           }
         } catch {}
@@ -2851,7 +2695,9 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     activeTools.delete(toolName)
     __queueFeActiveTools(set, get, activeTools)
 
-    console.log('[FlowUI] tool_error received', { requestId, nodeId, toolName, callId, error })
+    if (process.env.HF_FLOW_DEBUG === '1') {
+      console.log('[FlowUI] tool_error received', { requestId, nodeId, toolName, callId, error })
+    }
 
     // Record event (buffered)
     __queueFeEvent(set, get, {
@@ -2870,10 +2716,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
       let filePath: string | undefined
       // Try reconstructed params saved at tool_start
-      try {
-        const saved = ((get() as any).feToolParamsByKey || {})[callId || ''] || {}
-        if (typeof saved.path === 'string' && saved.path) filePath = saved.path
-      } catch {}
+
 
       // As a fallback, some providers stash last args by tool; try to use them
       if (!filePath) {
@@ -2993,11 +2836,11 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
 
       if (state.recordTokenUsage && nodeId && executionId) {
         // Accumulate per-node execution usage; show cumulative in LAST REQUEST
-        state.recordTokenUsage({ requestId, nodeId, executionId, provider, model, usage })
+        const ws = state.workspaceRoot || null
+        const sessionIdAtEvent = ws ? (state.currentIdByWorkspace?.[ws] ?? null) : null
+        state.recordTokenUsage({ sessionId: sessionIdAtEvent, requestId, nodeId, executionId, provider, model, usage })
       }
 
-      // Capture the session at event time to avoid cross-session updates
-      const sessionIdAtEvent = (store.getState() as any).currentId
 
       // Update the most recent badge group with matching provider/model to add cost info
       // This handles cases like intentRouter where the badge is created before token usage is reported
@@ -3006,9 +2849,13 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         const updatedState = store.getState() as any
         if (updatedState.lastRequestTokenUsage) {
           const { cost } = updatedState.lastRequestTokenUsage
-          if (cost && sessionIdAtEvent) {
-            const session = updatedState.sessions?.find((s: any) => s.id === sessionIdAtEvent)
-            if (session) {
+          const ws = updatedState.workspaceRoot || null
+          const curId = ws ? (updatedState.currentIdByWorkspace?.[ws] ?? null) : null
+          if (cost && ws && curId) {
+            const list: any[] = (updatedState.sessionsByWorkspace?.[ws] || [])
+            const sessIdx = list.findIndex((s: any) => s.id === curId)
+            if (sessIdx >= 0) {
+              const session = list[sessIdx]
               // Find the most recent badge group with matching provider/model but no cost
               for (let i = session.items.length - 1; i >= 0; i--) {
                 const item = session.items[i]
@@ -3019,21 +2866,23 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
                   !item.cost
                 ) {
                   // Update this badge group with cost information using the store's setState
-                  const updatedSessions = updatedState.sessions.map((sess: any) => {
-                    if (sess.id !== sessionIdAtEvent) return sess
+                  const updatedSession = {
+                    ...session,
+                    items: session.items.map((sessionItem: any, idx: number) =>
+                      idx === i && sessionItem.type === 'badge-group'
+                        ? { ...sessionItem, cost }
+                        : sessionItem
+                    ),
+                    updatedAt: Date.now(),
+                  }
+                  const updatedSessions = list.map((s: any, idx: number) => (idx === sessIdx ? updatedSession : s))
 
-                    return {
-                      ...sess,
-                      items: sess.items.map((sessionItem: any, idx: number) =>
-                        idx === i && sessionItem.type === 'badge-group'
-                          ? { ...sessionItem, cost }
-                          : sessionItem
-                      ),
-                      updatedAt: Date.now(),
+                  ;(store as any).setState({
+                    sessionsByWorkspace: {
+                      ...(updatedState.sessionsByWorkspace || {}),
+                      [ws]: updatedSessions,
                     }
                   })
-
-                  ;(store as any).setState({ sessions: updatedSessions })
 
                   // Save after updating
                   if (updatedState.saveCurrentSession) {
@@ -3195,12 +3044,14 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       timestamp: Date.now(),
     })
 
-    // Save flow state to session
+    // Save flow state to session (workspace-scoped)
     const state = store.getState() as any
-    const currentSession = state.sessions?.find((s: any) => s.id === state.currentId)
-    if (currentSession && state.saveCurrentSession) {
-      const sessions = state.sessions.map((s: any) =>
-        s.id === state.currentId
+    const ws = state.workspaceRoot || null
+    if (ws && typeof state.getSessionsFor === 'function' && typeof state.getCurrentIdFor === 'function' && typeof state.setSessionsFor === 'function') {
+      const sid = state.getCurrentIdFor({ workspaceId: ws })
+      const list = state.getSessionsFor({ workspaceId: ws }) || []
+      const sessions = list.map((s: any) =>
+        s.id === sid
           ? {
               ...s,
               flowState: {
@@ -3212,8 +3063,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
             }
           : s
       )
-      ;(store as any).setState({ sessions })
-      state.saveCurrentSession()
+      state.setSessionsFor({ workspaceId: ws, sessions })
+      if (state.saveCurrentSession) { state.saveCurrentSession() }
     }
   },
 
@@ -3233,24 +3084,28 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       const state2 = store.getState() as any
       if (state2.finalizeRequestUsage) {
         try {
-          state2.finalizeRequestUsage({ requestId })
+          const ws = (state2 as any).workspaceRoot || null
+          const sid = (ws && typeof state2.getCurrentIdFor === 'function') ? state2.getCurrentIdFor({ workspaceId: ws }) : undefined
+          state2.finalizeRequestUsage({ sessionId: sid, requestId })
         } catch (e) {
           console.warn('[flow] finalizeRequestUsage failed:', e)
         }
       }
     })()
 
-    // Clear flow state from session
+    // Clear flow state from session (workspace-scoped)
     const state = store.getState() as any
-    const currentSession = state.sessions?.find((s: any) => s.id === state.currentId)
-    if (currentSession && state.saveCurrentSession) {
-      const sessions = state.sessions.map((s: any) =>
-        s.id === state.currentId
+    const ws = state.workspaceRoot || null
+    if (ws && typeof state.getSessionsFor === 'function' && typeof state.getCurrentIdFor === 'function' && typeof state.setSessionsFor === 'function') {
+      const sid = state.getCurrentIdFor({ workspaceId: ws })
+      const list = state.getSessionsFor({ workspaceId: ws }) || []
+      const sessions = list.map((s: any) =>
+        s.id === sid
           ? { ...s, flowState: undefined, updatedAt: Date.now() }
           : s
       )
-      ;(store as any).setState({ sessions })
-      state.saveCurrentSession()
+      state.setSessionsFor({ workspaceId: ws, sessions })
+      if (state.saveCurrentSession) { state.saveCurrentSession() }
     }
 
     // Best-effort: flush any buffered UI updates now that we're done
@@ -3315,24 +3170,28 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       const state2 = store.getState() as any
       if (state2.finalizeRequestUsage) {
         try {
-          state2.finalizeRequestUsage({ requestId })
+          const ws = (state2 as any).workspaceRoot || null
+          const sid = (ws && typeof state2.getCurrentIdFor === 'function') ? state2.getCurrentIdFor({ workspaceId: ws }) : undefined
+          state2.finalizeRequestUsage({ sessionId: sid, requestId })
         } catch (e) {
           console.warn('[flow] finalizeRequestUsage failed:', e)
         }
       }
     })()
 
-    // Clear flow state from session
+    // Clear flow state from session (workspace-scoped)
     const state = store.getState() as any
-    const currentSession = state.sessions?.find((s: any) => s.id === state.currentId)
-    if (currentSession && state.saveCurrentSession) {
-      const sessions = state.sessions.map((s: any) =>
-        s.id === state.currentId
+    const ws = state.workspaceRoot || null
+    if (ws && typeof state.getSessionsFor === 'function' && typeof state.getCurrentIdFor === 'function' && typeof state.setSessionsFor === 'function') {
+      const sid = state.getCurrentIdFor({ workspaceId: ws })
+      const list = state.getSessionsFor({ workspaceId: ws }) || []
+      const sessions = list.map((s: any) =>
+        s.id === sid
           ? { ...s, flowState: undefined, updatedAt: Date.now() }
           : s
       )
-      ;(store as any).setState({ sessions })
-      state.saveCurrentSession()
+      state.setSessionsFor({ workspaceId: ws, sessions })
+      if (state.saveCurrentSession) { state.saveCurrentSession() }
     }
   },
 
@@ -3342,14 +3201,16 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     let syncTimeout: NodeJS.Timeout | null = null
 
     return (context: MainFlowContext) => {
-      console.log('[feUpdateMainFlowContext] Updating context:', {
-        contextId: context.contextId,
-        contextType: context.contextType,
-        provider: context.provider,
-        model: context.model,
-        systemInstructions: context.systemInstructions?.substring(0, 50) + '...',
-        messageHistoryLength: context.messageHistory.length
-      })
+      if (process.env.HF_FLOW_DEBUG === '1') {
+        console.log('[feUpdateMainFlowContext] Updating context:', {
+          contextId: context.contextId,
+          contextType: context.contextType,
+          provider: context.provider,
+          model: context.model,
+          systemInstructions: context.systemInstructions?.substring(0, 50) + '...',
+          messageHistoryLength: context.messageHistory.length,
+        })
+      }
 
       // Update the appropriate context based on type
       if (context.contextType === 'isolated') {
@@ -3364,9 +3225,11 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         syncTimeout = setTimeout(() => {
           const state = store.getState() as any
           if (state.updateCurrentContext) {
-            console.log('[feUpdateMainFlowContext] Syncing to session.currentContext', {
-              messageHistoryLength: context.messageHistory.length
-            })
+            if (process.env.HF_FLOW_DEBUG === '1') {
+              console.log('[feUpdateMainFlowContext] Syncing to session.currentContext', {
+                messageHistoryLength: context.messageHistory.length
+              })
+            }
             // Sync shallow copy to session (only fields that exist in both)
             state.updateCurrentContext({
               provider: context.provider,

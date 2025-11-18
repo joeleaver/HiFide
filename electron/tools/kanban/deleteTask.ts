@@ -1,16 +1,15 @@
-import { z } from 'zod'
 import type { AgentTool } from '../../providers/provider'
 
-const inputSchema = z.object({
-  taskId: z.string().min(1, 'taskId is required'),
-})
-
 export const kanbanDeleteTaskTool: AgentTool = {
-  name: 'kanban:deleteTask',
+  name: 'kanbanDeleteTask',
   description: 'Delete a task from the Kanban board.',
-  parameters: inputSchema,
-  async *run({ input }) {
-    const params = inputSchema.parse(input ?? {})
+  parameters: {
+    type: 'object',
+    properties: { taskId: { type: 'string', minLength: 1 } },
+    required: ['taskId'],
+    additionalProperties: false,
+  },
+  run: async (input: { taskId: string }) => {
     const { useMainStore } = await import('../../store')
     const state = useMainStore.getState() as any
 
@@ -18,16 +17,14 @@ export const kanbanDeleteTaskTool: AgentTool = {
       throw new Error('Kanban store is not initialized')
     }
 
-    const result = await state.kanbanDeleteTask(params.taskId)
+    const result = await state.kanbanDeleteTask(input.taskId)
     if (!result?.ok) {
-      throw new Error(`Failed to delete task ${params.taskId}`)
+      throw new Error(`Failed to delete task ${input.taskId}`)
     }
 
-    yield {
-      type: 'object',
-      data: {
-        summary: `Deleted task ${params.taskId}.`,
-      },
+    return {
+      summary: `Deleted task ${input.taskId}.`,
+      deleted: { taskId: input.taskId },
     }
   },
 }

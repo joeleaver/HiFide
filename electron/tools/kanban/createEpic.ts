@@ -1,19 +1,20 @@
-import { z } from 'zod'
 import type { AgentTool } from '../../providers/provider'
 import type { KanbanEpic } from '../../store'
 
-const inputSchema = z.object({
-  name: z.string().min(1, 'Epic name is required'),
-  color: z.string().optional(),
-  description: z.string().optional(),
-})
-
 export const kanbanCreateEpicTool: AgentTool = {
-  name: 'kanban:createEpic',
+  name: 'kanbanCreateEpic',
   description: 'Create a new epic on the Kanban board.',
-  parameters: inputSchema,
-  async *run({ input }) {
-    const params = inputSchema.parse(input ?? {})
+  parameters: {
+    type: 'object',
+    properties: {
+      name: { type: 'string', minLength: 1 },
+      color: { type: 'string' },
+      description: { type: 'string' },
+    },
+    required: ['name'],
+    additionalProperties: false,
+  },
+  run: async (input: { name: string; color?: string; description?: string }) => {
     const { useMainStore } = await import('../../store')
     const state = useMainStore.getState() as any
 
@@ -22,21 +23,18 @@ export const kanbanCreateEpicTool: AgentTool = {
     }
 
     const epic: KanbanEpic | null = await state.kanbanCreateEpic({
-      name: params.name,
-      color: params.color,
-      description: params.description,
+      name: input.name,
+      color: input.color,
+      description: input.description,
     })
 
     if (!epic) {
       throw new Error('Failed to create epic')
     }
 
-    yield {
-      type: 'object',
-      data: {
-        summary: `Created epic "${epic.name}".`,
-        epic,
-      },
+    return {
+      summary: `Created epic "${epic.name}".`,
+      epic,
     }
   },
 }

@@ -1,43 +1,96 @@
 import { Group, Text, UnstyledButton, Badge } from '@mantine/core'
 import { IconPlus, IconX, IconChevronUp, IconChevronDown } from '@tabler/icons-react'
-import { useEffect } from 'react'
-import { useAppStore, useDispatch, selectAgentTerminalTabs, selectAgentActiveTerminal, selectExplorerTerminalTabs, selectExplorerActiveTerminal } from '../store'
+import { useEffect, useState } from 'react'
 import { useTerminalStore } from '../store/terminal'
 import { usePanelResize } from '../hooks/usePanelResize'
 import TerminalView from './TerminalView'
+import { getBackendClient } from '../lib/backend/bootstrap'
 
 export default function TerminalPanel({ context }: { context: 'agent' | 'explorer' }) {
-  // Use selectors for better performance
-  const tabsRaw = useAppStore(context === 'agent' ? selectAgentTerminalTabs : selectExplorerTerminalTabs)
-  const tabs = tabsRaw || []
-  const activeTab = useAppStore(context === 'agent' ? selectAgentActiveTerminal : selectExplorerActiveTerminal)
-
-  // Read from windowState (main store) with hydration guard
-  const height = useAppStore((s) =>
-    context === 'agent'
-      ? (s.windowState?.agentTerminalPanelHeight ?? 300)
-      : (s.windowState?.explorerTerminalPanelHeight ?? 300)
-  )
-
-  // Use dispatch for main store actions (tab management)
-  const dispatch = useDispatch()
+  // Local tabs + active (hydrated via WS RPC + notification)
+  const [tabs, setTabs] = useState<string[]>([])
+  const [activeTab, setActiveTab] = useState<string | null>(null)
+  const [panelHeight, setPanelHeight] = useState<number>(300)
 
   // Use renderer-local terminal store for xterm operations and UI state
   const fitTerminal = useTerminalStore((s) => s.fitTerminal)
   const open = useTerminalStore((s) => context === 'agent' ? s.agentTerminalPanelOpen : s.explorerTerminalPanelOpen)
   const setTerminalPanelOpen = useTerminalStore((s) => s.setTerminalPanelOpen)
 
-  const addTab = () => {
-    dispatch('addTerminalTab', context)
+  // Hydrate tabs/active and height on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const res: any = await getBackendClient()?.rpc('terminal.getTabs', {})
+        if (res?.ok) {
+          setTabs(Array.isArray(context === 'agent' ? res.agentTabs : res.explorerTabs) ? (context === 'agent' ? res.agentTabs : res.explorerTabs) : [])
+          setActiveTab((context === 'agent' ? res.agentActive : res.explorerActive) || null)
+        }
+      } catch {}
+      try {
+        const w: any = await getBackendClient()?.rpc('ui.getWindowState', {})
+        const ws = w?.windowState || {}
+        setPanelHeight(
+          context === 'agent'
+            ? (typeof ws.agentTerminalPanelHeight === 'number' ? ws.agentTerminalPanelHeight : 300)
+            : (typeof ws.explorerTerminalPanelHeight === 'number' ? ws.explorerTerminalPanelHeight : 300)
+        )
+      } catch {}
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Subscribe to live tab/active changes and workspace changes
+  useEffect(() => {
+    const client = getBackendClient()
+    if (!client) return
+
+    const applyTabs = (p: any) => {
+      try {
+        const nextTabs = Array.isArray(context === 'agent' ? p?.agentTabs : p?.explorerTabs)
+          ? (context === 'agent' ? p.agentTabs : p.explorerTabs)
+          : []
+        setTabs(nextTabs)
+        setActiveTab((context === 'agent' ? p?.agentActive : p?.explorerActive) || null)
+      } catch {}
+    }
+
+    const offTabs = client.subscribe('terminal.tabs.changed', applyTabs)
+
+    // On workspace bind/ready, rehydrate terminal tabs for the new workspace
+    const rehydrate = async () => {
+      try {
+        const res: any = await client.rpc('terminal.getTabs', {})
+        if (res?.ok) {
+          applyTabs({
+            agentTabs: res.agentTabs,
+            explorerTabs: res.explorerTabs,
+            agentActive: res.agentActive,
+            explorerActive: res.explorerActive,
+          })
+        } else {
+          applyTabs({ agentTabs: [], explorerTabs: [], agentActive: null, explorerActive: null })
+        }
+      } catch {
+        applyTabs({ agentTabs: [], explorerTabs: [], agentActive: null, explorerActive: null })
+      }
+    }
+    const offBound = client.subscribe('workspace.bound', rehydrate)
+    const offReady = client.subscribe('workspace.ready', rehydrate)
+
+    return () => { try { offTabs?.(); offBound?.(); offReady?.() } catch {} }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const addTab = async () => {
+    try { await getBackendClient()?.rpc('terminal.addTab', { context }) } catch {}
   }
 
-  const closeTab = (id: string) => {
+  const closeTab = async (id: string) => {
     if (context === 'agent') {
-      // For agent terminals, dispatch to main store to restart PTY
-      dispatch('restartAgentTerminal', { tabId: id })
+      try { await getBackendClient()?.rpc('terminal.restartAgent', { tabId: id }) } catch {}
     } else {
-      // For explorer terminals, just remove the tab
-      dispatch('removeTerminalTab', { context, tabId: id })
+      try { await getBackendClient()?.rpc('terminal.removeTab', { context, tabId: id }) } catch {}
     }
   }
 
@@ -46,10 +99,13 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
   }
 
   const { onMouseDown, isResizingRef } = usePanelResize({
-    initialHeight: height,
+    initialHeight: panelHeight,
     setHeight: (newHeight) => {
-      dispatch('updateWindowState', {
-        [context === 'agent' ? 'agentTerminalPanelHeight' : 'explorerTerminalPanelHeight']: newHeight
+      setPanelHeight(newHeight)
+      void getBackendClient()?.rpc('ui.updateWindowState', {
+        updates: {
+          [context === 'agent' ? 'agentTerminalPanelHeight' : 'explorerTerminalPanelHeight']: newHeight
+        }
       })
     },
     min: 160,
@@ -73,7 +129,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
   return (
     <div
       style={{
-        height: open ? `${height}px` : 'auto',
+        height: open ? `${panelHeight}px` : 'auto',
         backgroundColor: '#1e1e1e',
         display: 'flex',
         flexDirection: 'column',
@@ -116,7 +172,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
       >
         <Group gap="xs">
           <Text size="xs" fw={600} c="dimmed">
-            TERMINAL
+            {context === 'agent' ? 'AGENT TERMINAL' : 'TERMINAL'}
           </Text>
           {tabs.length > 1 && (
             <Badge size="xs" variant="light" color="gray">
@@ -177,13 +233,14 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
               backgroundColor: '#252526',
               borderBottom: '1px solid #3e3e42',
               flexShrink: 0,
+              paddingLeft: '12px',
             }}
           >
             {tabs.map((id) => (
               <div
                 key={id}
-                onClick={() => {
-                  dispatch('setActiveTerminal', { context, tabId: id })
+                onClick={async () => {
+                  try { await getBackendClient()?.rpc('terminal.setActive', { context, tabId: id }) } catch {}
                 }}
                 style={{
                   height: '32px',

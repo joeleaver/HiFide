@@ -1,6 +1,6 @@
-import { memo, useEffect, useMemo } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { Code, Text, Group, Badge, Stack, Divider } from '@mantine/core'
-import { useAppStore, useDispatch } from '../store'
+import { getBackendClient } from '../lib/backend/bootstrap'
 
 interface BadgeReadLinesContentProps {
   badgeId: string
@@ -13,18 +13,16 @@ interface BadgeReadLinesContentProps {
  */
 export const BadgeReadLinesContent = memo(function BadgeReadLinesContent({ badgeId, readKey }: BadgeReadLinesContentProps) {
   void badgeId
-  const dispatch = useDispatch()
+
+  const [result, setResult] = useState<any>(undefined)
 
   useEffect(() => {
-    // Load results from cache into state on first mount
-    const existing = (useAppStore as any).getState().feLoadedToolResults?.[readKey]
-    if (existing === undefined) {
-      dispatch('loadToolResult', { key: readKey })
-    }
-    // do not include dispatch in deps to avoid identity changes re-running
+    const client = getBackendClient(); if (!client) return
+    client.rpc('tool.getResult', { key: readKey }).then((res: any) => {
+      const data = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      setResult(data)
+    }).catch(() => {})
   }, [readKey])
-
-  const result: any = useAppStore((s) => (s as any).feLoadedToolResults?.[readKey])
 
   const contentInfo = useMemo(() => {
     if (!result) return { kind: 'none' as const, text: '' }

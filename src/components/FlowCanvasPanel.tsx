@@ -14,12 +14,15 @@ import ReactFlow, {
   type Edge,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
-import { useAppStore, useDispatch } from '../store'
+import { getBackendClient } from '../lib/backend/bootstrap'
 import { useFlowEditorLocal } from '../store/flowEditorLocal'
-import { useRerenderTrace, logStoreDiff } from '../utils/perf'
+import { useRerenderTrace } from '../utils/perf'
+import { splitFlowsByLibrary, getLibraryLabel } from '../utils/flowLibraries'
+import { useFlowRuntime } from '../store/flowRuntime'
 
-import { Button, Group, Badge, TextInput, Modal, Text, Menu, UnstyledButton } from '@mantine/core'
-import { IconLayoutDistributeVertical, IconChevronDown, IconPlus, IconCopy, IconTrash, IconChevronRight } from '@tabler/icons-react'
+
+import { Button, Group, Badge, TextInput, Modal, Text, Menu } from '@mantine/core'
+import { IconLayoutDistributeVertical, IconChevronDown, IconChevronRight, IconPlus, IconCopy, IconTrash } from '@tabler/icons-react'
 import FlowNodeComponent from './FlowNode'
 import { useUiStore } from '../store/ui'
 import { getLayoutedElements } from '../utils/autoLayout'
@@ -59,9 +62,6 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   const rfRef = useRef<any>(null)
   const reactFlowInstance = useReactFlow()
 
-  // Use dispatch for actions
-  const dispatch = useDispatch()
-  const setFlowCanvasCollapsed = useUiStore((s) => s.setFlowCanvasCollapsed)
 
   // ===== LOCAL STATE (Instant UI Updates - Renderer-only store) =====
   // Nodes and edges are kept in a renderer-local zustand store for responsiveness
@@ -73,18 +73,15 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   const hydrateFromMain = useFlowEditorLocal((s) => s.hydrateFromMain)
 
   // ===== REMOTE STATE (Execution & Persistence) =====
-  // These come from the main store and are read-only in the renderer
-  const storeNodes = useAppStore((s) => s.feNodes)
-  const storeEdges = useAppStore((s) => s.feEdges)
   // Execution state (metadata only) - subscribe manually to avoid ref-only rerenders from IPC
-  const flowStateRef = useRef<Record<string, any>>({})
-  const [flowStateSig, setFlowStateSig] = useState<string>('')
+  const runtimeNodeStateRef = useRef<Record<string, any>>({})
+  const [nodeStateSig, setNodeStateSig] = useState<string>('')
   useEffect(() => {
     let prevSig = ''
-    const mkSig = (fs: any) => {
+    const mkSig = (ns: any) => {
       try {
         return JSON.stringify(
-          Object.entries(fs || {})
+          Object.entries(ns || {})
             .sort(([a],[b]) => a.localeCompare(b))
             .map(([id, v]: any) => ({ id, st: v?.status, ch: v?.cacheHit, dm: v?.durationMs, c: v?.costUSD, sb: v?.style?.border, ss: v?.style?.boxShadow }))
         )
@@ -92,41 +89,42 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
         return ''
       }
     }
-    // Seed from current state
-    const s = (useAppStore as any).getState()
-    flowStateRef.current = s?.feFlowState || {}
-    prevSig = mkSig(flowStateRef.current)
-    setFlowStateSig(prevSig)
-    // Subscribe to changes
-    const unsub = (useAppStore as any).subscribe((next: any) => {
-      const fs = next?.feFlowState || {}
-      const sig = mkSig(fs)
+    // Seed from current runtime state
+    const s = (useFlowRuntime as any).getState()
+    runtimeNodeStateRef.current = s?.nodeState || {}
+    prevSig = mkSig(runtimeNodeStateRef.current)
+    setNodeStateSig(prevSig)
+    // Subscribe to runtime changes
+    const unsub = (useFlowRuntime as any).subscribe((next: any) => {
+      const ns = next?.nodeState || {}
+      const sig = mkSig(ns)
       if (sig !== prevSig) {
-        flowStateRef.current = fs
+        runtimeNodeStateRef.current = ns
         prevSig = sig
-        setFlowStateSig(sig)
+        setNodeStateSig(sig)
       }
     })
     return () => unsub?.()
   }, [])
-  const status = useAppStore((s) => s.feStatus)
-  const pausedNode = useAppStore((s) => s.fePausedNode)
-  const currentProfile = useAppStore((s) => s.feCurrentProfile)
-  const availableTemplates = useAppStore((s) => s.feAvailableTemplates)
-  const templatesLoaded = useAppStore((s) => s.feTemplatesLoaded)
-  const selectedTemplate = useAppStore((s) => s.feSelectedTemplate)
-  const hasUnsavedChanges = useAppStore((s) => s.feHasUnsavedChanges)
+  const status = useFlowRuntime((s: any) => s.status)
+  const pausedNode = useFlowRuntime((s: any) => s.pausedNode)
+  const [availableTemplates, setAvailableTemplates] = useState<any[]>([])
+  const [templatesLoaded, setTemplatesLoaded] = useState<boolean>(false)
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('')
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false)
 
   // Helper to check if a template is from system library
   const isSystemTemplate = useCallback((templateId: string) => {
     const template = availableTemplates.find((t: any) => t.id === templateId)
     return template?.library === 'system'
   }, [availableTemplates])
-  const saveAsModalOpen = useAppStore((s) => s.feSaveAsModalOpen)
-  const loadTemplateModalOpen = useAppStore((s) => s.feLoadTemplateModalOpen)
+  const [saveAsModalOpen, setSaveAsModalOpen] = useState<boolean>(false)
+  const [loadTemplateModalOpen, setLoadTemplateModalOpen] = useState<boolean>(false)
+  const [pendingSelection, setPendingSelection] = useState<string | null>(null)
 
   // Use local state for profile name input to avoid lag on every keystroke
   const [localProfileName, setLocalProfileName] = useState('')
+  const [saveAsLibrary, setSaveAsLibrary] = useState<'workspace' | 'user'>('workspace')
 
   // New Flow modal state (renderer-only UI store)
   const newFlowModalOpen = useUiStore((s) => s.newFlowModalOpen)
@@ -137,142 +135,217 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   const setNewFlowError = useUiStore((s) => s.setNewFlowError)
   const resetNewFlowModal = useUiStore((s) => s.resetNewFlowModal)
 
-  // Memoize template options for Select component
-  const templateOptions = useMemo(() => {
-    if (!availableTemplates || availableTemplates.length === 0) {
-      return []
-    }
-
-    try {
-      // Separate system and user templates
-      const systemTemplates: Array<{ value: string; label: string }> = []
-      const userTemplates: Array<{ value: string; label: string }> = []
-
-      availableTemplates.forEach((template: any) => {
-        if (!template || !template.id || !template.name) {
-          return
-        }
-
-        const icon = template.library === 'system' ? '📦' : '💾'
-        const item = {
-          value: template.id,
-          label: `${icon} ${template.name}`,
-        }
-
-        if (template.library === 'system') {
-          systemTemplates.push(item)
-        } else {
-          userTemplates.push(item)
-        }
-      })
-
-      // Build grouped data structure for Mantine Select
-      const result: Array<{ group: string; items: Array<{ value: string; label: string }> }> = []
-
-      if (systemTemplates.length > 0) {
-        result.push({
-          group: 'System Library',
-          items: systemTemplates
-        })
-      }
-
-      if (userTemplates.length > 0) {
-        result.push({
-          group: 'User Library',
-          items: userTemplates
-        })
-      }
-
-      return result
-    } catch (error) {
-      console.error('Error loading options:', error)
-      return []
-    }
-  }, [availableTemplates])
+  // Flow template library groups for editor selector
+  const [templateFilter, setTemplateFilter] = useState('')
+  const allTemplates = Array.isArray(availableTemplates) ? availableTemplates : []
+  const { system: systemTemplates, user: userTemplates, workspace: workspaceTemplates } = splitFlowsByLibrary(allTemplates as any[])
 
   // No useEffect needed - templates are loaded by initFlowEditor in the store
 
   // Handle profile/template selection - auto-load when selected
-  const handleSelectionChange = useCallback((value: string | null) => {
+  const handleSelectionChange = useCallback(async (value: string | null) => {
     if (!value) return
 
-    // Check for unsaved changes before loading
     if (hasUnsavedChanges) {
-      // Store the pending selection and show confirmation modal
-      dispatch('feSetSelectedTemplate', { id: value })
-      dispatch('feSetLoadTemplateModalOpen', { open: true })
+      setPendingSelection(value)
+      setLoadTemplateModalOpen(true)
       return
     }
 
-    // Load directly if no unsaved changes
-    dispatch('feSetSelectedTemplate', { id: value })
-    dispatch('feLoadTemplate', { templateId: value })
-  }, [hasUnsavedChanges, dispatch])
+    const client = getBackendClient()
+    try {
+      const res: any = await client?.rpc('flowEditor.loadTemplate', { templateId: value })
+      if (res?.ok) {
+        // Refresh meta + graph
+        const t: any = await client?.rpc('flowEditor.getTemplates', {})
+        if (t?.ok) {
+          setAvailableTemplates(t.templates || [])
+          setTemplatesLoaded(!!t.templatesLoaded)
+          setSelectedTemplate(t.selectedTemplate || value)
+        }
+        const g: any = await client?.rpc('flowEditor.getGraph', {})
+        if (g?.ok) {
+          const nodes = Array.isArray(g.nodes) ? g.nodes : []
+          const edges = Array.isArray(g.edges) ? g.edges : []
+          const styledNodes = nodes.map((n: any) => ({ ...n, data: { ...(n.data || {}), __runtime: runtimeNodeStateRef.current?.[n.id] || null } }))
+          hydrateFromMain({ nodes: styledNodes, edges })
+          const nSig = JSON.stringify({ n: nodes.map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null })), e: edges.map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined })) })
+          ;(lastLoadedTemplateRef as any).currentSig = nSig
+          lastSyncedSigRef.current = nSig
+          setHasUnsavedChanges(false)
+        }
+      }
+    } catch {}
+  }, [hasUnsavedChanges, hydrateFromMain])
 
   // Handle save as (create new profile)
   const handleSaveAs = useCallback(async () => {
     if (!localProfileName.trim()) return
-
-    // Sync local state to store before saving
-    dispatch('feSetNodes', { nodes: localNodes })
-    dispatch('feSetEdges', { edges: localEdges })
-
-    // Then save
-    await dispatch('feSaveAsProfile', { name: localProfileName })
-
-    // Clear local input after save
-    setLocalProfileName('')
-  }, [localProfileName, localNodes, localEdges, dispatch])
+    const name = localProfileName.trim()
+    const client = getBackendClient()
+    try {
+      // Sync local state to backend before saving
+      await client?.rpc('flowEditor.setGraph', { nodes: localNodes, edges: localEdges })
+      const res: any = await client?.rpc('flowEditor.saveAsProfile', { name, library: saveAsLibrary })
+      if (res?.ok) {
+        setLocalProfileName('')
+        setSaveAsModalOpen(false)
+        // Refresh templates/meta
+        const t: any = await client?.rpc('flowEditor.getTemplates', {})
+        if (t?.ok) {
+          setAvailableTemplates(t.templates || [])
+          setTemplatesLoaded(!!t.templatesLoaded)
+          setSelectedTemplate(t.selectedTemplate || name)
+        }
+        // After save, update last loaded signature using current local graph
+        try {
+          const n = (localNodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
+          const e = (localEdges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
+          const sig = JSON.stringify({ n, e })
+          ;(lastLoadedTemplateRef as any).currentSig = sig
+          lastSyncedSigRef.current = sig
+          setHasUnsavedChanges(false)
+        } catch {}
+      }
+    } catch {}
+  }, [localProfileName, localNodes, localEdges, saveAsLibrary])
 
   // Actually load the template/profile (called from modal)
   const loadSelectedTemplate = useCallback(async () => {
-    if (!selectedTemplate) return
-    await dispatch('feLoadTemplate', { templateId: selectedTemplate })
-    dispatch('feSetLoadTemplateModalOpen', { open: false })
-  }, [selectedTemplate, dispatch])
+    if (!pendingSelection) return
+    const client = getBackendClient()
+    try {
+      const res: any = await client?.rpc('flowEditor.loadTemplate', { templateId: pendingSelection })
+      if (res?.ok) {
+        setLoadTemplateModalOpen(false)
+        setPendingSelection(null)
+        const t: any = await client?.rpc('flowEditor.getTemplates', {})
+        if (t?.ok) {
+          setAvailableTemplates(t.templates || [])
+          setTemplatesLoaded(!!t.templatesLoaded)
+          setSelectedTemplate(t.selectedTemplate || pendingSelection)
+        }
+        const g: any = await client?.rpc('flowEditor.getGraph', {})
+        if (g?.ok) {
+          const nodes = Array.isArray(g.nodes) ? g.nodes : []
+          const edges = Array.isArray(g.edges) ? g.edges : []
+          const styledNodes = nodes.map((n: any) => ({ ...n, data: { ...(n.data || {}), __runtime: runtimeNodeStateRef.current?.[n.id] || null } }))
+          hydrateFromMain({ nodes: styledNodes, edges })
+          const nSig = JSON.stringify({ n: nodes.map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null })), e: edges.map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined })) })
+          ;(lastLoadedTemplateRef as any).currentSig = nSig
+          lastSyncedSigRef.current = nSig
+          setHasUnsavedChanges(false)
+        }
+      }
+    } catch {}
+  }, [pendingSelection, hydrateFromMain])
 
-  // Handle modal cancel - revert selection to currently loaded flow
+  // Handle modal cancel
   const handleCancelLoad = useCallback(() => {
-    // Revert selection to the currently loaded flow
-    const currentlyLoaded = currentProfile || 'default'
-    dispatch('feSetSelectedTemplate', { id: currentlyLoaded })
-    dispatch('feSetLoadTemplateModalOpen', { open: false })
-  }, [currentProfile, dispatch])
+    setLoadTemplateModalOpen(false)
+    setPendingSelection(null)
+  }, [])
 
-  // ===== INITIALIZATION: Load nodes/edges from store when template changes =====
-  // Track the last loaded template to detect when a new template is loaded
+  // ===== HYDRATION: Load templates and graph from backend =====
   const lastLoadedTemplateRef = useRef<string | null>(null)
+  // Keep a ref of last synced signature to avoid sending unchanged graphs to backend
+  const lastSyncedSigRef = useRef<string | null>(null)
+
+  // Ensure we subscribe to backend events before taking the first snapshot
+  const [graphSubReady, setGraphSubReady] = useState(false)
 
   useEffect(() => {
-    if (!Array.isArray(storeNodes) || !Array.isArray(storeEdges)) return
+    let cancelled = false
+    const client = getBackendClient()
 
-    // If confirmation modal is open, do not hydrate yet (user hasn't confirmed switch)
-    if (loadTemplateModalOpen) return
+    // Only snapshot after subscription is in place to avoid missing in-flight changes
+    if (!graphSubReady) return
 
-    // Compute current minimal signature of main store graph
-    let sig = ''
-    try {
-      const n = (storeNodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
-      const e = (storeEdges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
-      sig = JSON.stringify({ n, e })
-    } catch {}
-
-    const lastSig = (lastLoadedTemplateRef as any).currentSig
-    const isFirstLoad = lastLoadedTemplateRef.current === null
-    const needsHydrate = isFirstLoad || !lastSig || lastSig !== sig
-
-    if (needsHydrate) {
-      hydrateFromMain({ nodes: storeNodes, edges: storeEdges })
-      ;(lastLoadedTemplateRef as any).currentSig = sig
-      lastLoadedTemplateRef.current = selectedTemplate
+    const computeSig = (nodes: any[], edges: any[]) => {
+      try {
+        const n = (nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
+        const e = (edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
+        return JSON.stringify({ n, e })
+      } catch { return '' }
     }
-  }, [storeNodes, storeEdges, selectedTemplate, loadTemplateModalOpen, hydrateFromMain])
 
-  // Keep a ref of last synced signature to avoid dispatching unchanged graphs
-  const lastSyncedSigRef = useRef<string | null>(null)
+    ;(async () => {
+      try {
+        await (client as any)?.whenReady?.(7000)
+        const t: any = await client?.rpc('flowEditor.getTemplates', {})
+        if (!cancelled && t?.ok) {
+          setAvailableTemplates(t.templates || [])
+          setTemplatesLoaded(!!t.templatesLoaded)
+          setSelectedTemplate(t.selectedTemplate || '')
+        }
+        const g: any = await client?.rpc('flowEditor.getGraph', {})
+        if (!cancelled && g?.ok) {
+          const nodes = Array.isArray(g.nodes) ? g.nodes : []
+          const edges = Array.isArray(g.edges) ? g.edges : []
+          const styledNodes = nodes.map((n: any) => ({
+            ...n,
+            data: { ...(n.data || {}), __runtime: runtimeNodeStateRef.current?.[n.id] || null }
+          }))
+          hydrateFromMain({ nodes: styledNodes, edges })
+          const sig = computeSig(nodes, edges)
+          ;(lastLoadedTemplateRef as any).currentSig = sig
+          lastLoadedTemplateRef.current = t?.selectedTemplate || ''
+          lastSyncedSigRef.current = sig
+          setHasUnsavedChanges(false)
+        }
+      } catch {}
+    })()
+
+    return () => { cancelled = true }
+  }, [hydrateFromMain, graphSubReady])
+
+  // Subscribe to backend notifications when graph/template changes in main
+  useEffect(() => {
+    const client = getBackendClient()
+    if (!client) return
+
+    // Subscribe first, then allow snapshot
+    const unsub = (client as any).subscribe?.('flowEditor.graph.changed', async (_params: any) => {
+      try {
+        const t: any = await (client as any).rpc('flowEditor.getTemplates', {})
+        if (t?.ok) {
+          setAvailableTemplates(t.templates || [])
+          setTemplatesLoaded(!!t.templatesLoaded)
+          setSelectedTemplate(t.selectedTemplate || '')
+        }
+        const g: any = await (client as any).rpc('flowEditor.getGraph', {})
+        if (g?.ok) {
+          const nodes = Array.isArray(g.nodes) ? g.nodes : []
+          const edges = Array.isArray(g.edges) ? g.edges : []
+          const styledNodes = nodes.map((n: any) => ({
+            ...n,
+            data: { ...(n.data || {}), __runtime: runtimeNodeStateRef.current?.[n.id] || null }
+          }))
+          hydrateFromMain({ nodes: styledNodes, edges })
+          try {
+            const n = (nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
+            const e = (edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
+            const sig = JSON.stringify({ n, e })
+            ;(lastLoadedTemplateRef as any).currentSig = sig
+            lastSyncedSigRef.current = sig
+            setHasUnsavedChanges(false)
+          } catch {}
+        }
+      } catch {}
+    })
+
+    // Mark subscription ready for initial snapshot
+    setGraphSubReady(true)
+    return () => { try { unsub?.() } catch {} }
+  }, [hydrateFromMain])
+
 
   // Debounced sync of local graph to main store only when dirty
   useEffect(() => {
+    // Guard: do not sync until we've hydrated from main to avoid overwriting with empty graph
+    if (!(lastLoadedTemplateRef as any).currentSig) {
+      return
+    }
     const t = setTimeout(() => {
       try {
         const n = (localNodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
@@ -284,19 +357,22 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
           lastSyncedSigRef.current = (lastLoadedTemplateRef as any).currentSig
         }
 
+        const client = getBackendClient()
         if (sig !== lastSyncedSigRef.current) {
-          dispatch('feSetNodes', { nodes: localNodes })
-          dispatch('feSetEdges', { edges: localEdges })
+          void client?.rpc('flowEditor.setGraph', { nodes: localNodes, edges: localEdges })
           lastSyncedSigRef.current = sig
         }
+        // Update local unsaved marker vs last loaded snapshot
+        const loadedSig = (lastLoadedTemplateRef as any).currentSig
+        setHasUnsavedChanges(!!loadedSig && sig !== loadedSig)
       } catch {
-        // Fallback: if signature fails, perform the dispatch
-        dispatch('feSetNodes', { nodes: localNodes })
-        dispatch('feSetEdges', { edges: localEdges })
+        // Fallback: if signature fails, still sync to backend
+        const client = getBackendClient()
+        void client?.rpc('flowEditor.setGraph', { nodes: localNodes, edges: localEdges })
       }
     }, 500)
     return () => clearTimeout(t)
-  }, [localNodes, localEdges, dispatch])
+  }, [localNodes, localEdges])
 
 
   // ===== NO CONTINUOUS SYNC OF GRAPH STRUCTURE =====
@@ -315,46 +391,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
     hasUnsavedChanges: Boolean(hasUnsavedChanges),
   })
 
-  // Dev-only: log fe* store key changes impacting Flow Editor
-  useEffect(() => {
-    if (import.meta?.env?.MODE === 'production') return
-    const FE_KEYS = [
-      'feNodes','feEdges','feFlowState','feStatus','fePausedNode','feMainFlowContext'
-    ]
-    const pickFe = (s: any) => {
-      const out: any = {}
-      for (const k of FE_KEYS) out[k] = (s as any)[k]
-      // Replace feFlowState with a stable signature so ref-only IPC changes don't spam logs
-      if (out.feFlowState && typeof out.feFlowState === 'object') {
-        try {
-          const sig = Object.entries(out.feFlowState as any)
-            .sort(([a],[b]) => a.localeCompare(b))
-            .map(([id, v]: any) => ({ id, st: v?.status, ch: v?.cacheHit, dm: v?.durationMs, c: v?.costUSD, sb: v?.style?.border, ss: v?.style?.boxShadow }))
-          out.feFlowState = JSON.stringify(sig)
-        } catch {}
-      }
-      // Replace feMainFlowContext with a stable signature as well
-      if (out.feMainFlowContext && typeof out.feMainFlowContext === 'object') {
-        try {
-          const c: any = out.feMainFlowContext
-          out.feMainFlowContext = JSON.stringify({
-            p: c?.provider,
-            m: c?.model,
-            si: (c?.systemInstructions || '').length,
-            mh: Array.isArray(c?.messageHistory) ? c.messageHistory.length : 0
-          })
-        } catch {}
-      }
-      return out
-    }
-    let prev = pickFe((useAppStore as any).getState())
-    const unsub = (useAppStore as any).subscribe((s: any) => {
-      const next = pickFe(s)
-      logStoreDiff('FlowEditor fe* subset', prev, next)
-      prev = next
-    })
-    return () => unsub?.()
-  }, [])
+
 
   // Track measured dimensions in a ref (doesn't trigger re-renders)
   const nodeDimensionsRef = useRef<Record<string, { width?: number; height?: number }>>({})
@@ -389,7 +426,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
 
   // ===== MERGE: Execution state with local nodes for display =====
   const displayNodes = useMemo(() => {
-    const fs = flowStateRef.current as any
+    const fs = runtimeNodeStateRef.current as any
     return localNodes.map(node => {
       const execState = fs?.[node.id]
       const dims = nodeDimensionsRef.current[node.id]
@@ -415,7 +452,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
         },
       }
     })
-  }, [localNodes, flowStateSig, handleNodeLabelChange, handleNodeConfigChange, handleNodeExpandToggle])
+  }, [localNodes, nodeStateSig, handleNodeLabelChange, handleNodeConfigChange, handleNodeExpandToggle])
 
   // Auto-layout handler - operates on local state
   const handleAutoLayout = useCallback(() => {
@@ -583,7 +620,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
       }}>
         <Group gap="xs">
 
-          <Text size="sm" c="#ccc">Current Flow:</Text>
+          <Text size="sm" c="#ccc">Editing</Text>
 
           {/* Hybrid Flow Selector with CRUD operations */}
           <Menu shadow="md" width={280} position="bottom-start">
@@ -605,32 +642,136 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
             <Menu.Dropdown>
               {/* Flow selection section */}
               <Menu.Label>Select Flow</Menu.Label>
-              {templateOptions && templateOptions.length > 0 ? (
-                templateOptions.map((group: any) => (
-                  <div key={group.group}>
-                    <Menu.Label style={{ fontSize: 10, color: '#888', paddingLeft: 12 }}>
-                      {group.group}
-                    </Menu.Label>
-                    {group.items.map((item: any) => (
-                      <Menu.Item
-                        key={item.value}
-                        onClick={() => handleSelectionChange(item.value)}
-                        style={{
-                          fontSize: 12,
-                          backgroundColor: selectedTemplate === item.value ? 'rgba(66, 153, 225, 0.1)' : undefined
-                        }}
-                      >
-                        {item.label}
-                        {selectedTemplate === item.value && ' ✓'}
-                      </Menu.Item>
-                    ))}
-                  </div>
-                ))
-              ) : (
+              <TextInput
+                placeholder="Type to filter flows"
+                value={templateFilter}
+                onChange={(e) => setTemplateFilter(e.currentTarget.value)}
+                size="xs"
+                styles={{ input: { background: '#1e1e1e', color: '#ddd' } }}
+              />
+              <Menu.Divider />
+
+              {allTemplates.length === 0 ? (
                 <Menu.Item disabled style={{ fontSize: 12 }}>
                   {templatesLoaded ? 'No flows available' : 'Loading...'}
                 </Menu.Item>
-              )}
+              ) : ((templateFilter || '').trim().length > 0 ? (
+                // Typeahead across all templates
+                (() => {
+                  const q = (templateFilter || '').trim().toLowerCase()
+                  const matches = allTemplates.filter((t: any) =>
+                    String(t.name || t.id || '').toLowerCase().includes(q) ||
+                    String(t.id || '').toLowerCase().includes(q)
+                  )
+                  return matches.length > 0
+                    ? matches.map((t: any) => {
+                      const lib =
+                        t.library === 'system'
+                          ? 'System'
+                          : t.library === 'workspace'
+                            ? 'Workspace'
+                            : 'User'
+                      return (
+                        <Menu.Item
+                          key={t.id}
+                          onClick={() => handleSelectionChange(t.id)}
+                          style={{
+                            fontSize: 12,
+                            backgroundColor: selectedTemplate === t.id ? 'rgba(66, 153, 225, 0.1)' : undefined,
+                          }}
+                        >
+                          <Group gap={6}>
+                            <Text size="xs" c="#999" style={{ width: 86 }}>{`[${getLibraryLabel(t.library)}]`}</Text>
+                            <Text size="sm">{t.name}</Text>
+                          </Group>
+                        </Menu.Item>
+                      )
+                    })
+                    : (
+                      <Menu.Item disabled style={{ fontSize: 12 }}>
+                        No flows
+                      </Menu.Item>
+                    )
+                })()
+              ) : (
+                // Library groups: System, User, Workspace
+                <>
+                  {systemTemplates.length > 0 && (
+                    <Menu withinPortal offset={6} position="right-start" trigger="hover" openDelay={80} closeDelay={120}>
+                      <Menu.Target>
+                        <Menu.Item rightSection={<IconChevronRight size={12} />}>System Library</Menu.Item>
+                      </Menu.Target>
+                      <Menu.Dropdown style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+                        {systemTemplates.map((t: any) => (
+                          <Menu.Item
+                            key={t.id}
+                            onClick={() => handleSelectionChange(t.id)}
+                            style={{
+                              fontSize: 12,
+                              backgroundColor: selectedTemplate === t.id ? 'rgba(66, 153, 225, 0.1)' : undefined,
+                            }}
+                          >
+                            {t.name}
+                            {selectedTemplate === t.id && ' ✓'}
+                          </Menu.Item>
+                        ))}
+                      </Menu.Dropdown>
+                    </Menu>
+                  )}
+
+                  {userTemplates.length > 0 && (
+                    <Menu withinPortal offset={6} position="right-start" trigger="hover" openDelay={80} closeDelay={120}>
+                      <Menu.Target>
+                        <Menu.Item rightSection={<IconChevronRight size={12} />}>User Library</Menu.Item>
+                      </Menu.Target>
+                      <Menu.Dropdown style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+                        {userTemplates.map((t: any) => (
+                          <Menu.Item
+                            key={t.id}
+                            onClick={() => handleSelectionChange(t.id)}
+                            style={{
+                              fontSize: 12,
+                              backgroundColor: selectedTemplate === t.id ? 'rgba(66, 153, 225, 0.1)' : undefined,
+                            }}
+                          >
+                            {t.name}
+                            {selectedTemplate === t.id && ' ✓'}
+                          </Menu.Item>
+                        ))}
+                      </Menu.Dropdown>
+                    </Menu>
+                  )}
+
+                  {workspaceTemplates.length > 0 && (
+                    <Menu withinPortal offset={6} position="right-start" trigger="hover" openDelay={80} closeDelay={120}>
+                      <Menu.Target>
+                        <Menu.Item rightSection={<IconChevronRight size={12} />}>Workspace Library</Menu.Item>
+                      </Menu.Target>
+                      <Menu.Dropdown style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+                        {workspaceTemplates.map((t: any) => (
+                          <Menu.Item
+                            key={t.id}
+                            onClick={() => handleSelectionChange(t.id)}
+                            style={{
+                              fontSize: 12,
+                              backgroundColor: selectedTemplate === t.id ? 'rgba(66, 153, 225, 0.1)' : undefined,
+                            }}
+                          >
+                            {t.name}
+                            {selectedTemplate === t.id && ' ✓'}
+                          </Menu.Item>
+                        ))}
+                      </Menu.Dropdown>
+                    </Menu>
+                  )}
+
+                  {(systemTemplates.length + userTemplates.length + workspaceTemplates.length === 0) && (
+                    <Menu.Item disabled style={{ fontSize: 12 }}>
+                      No flows
+                    </Menu.Item>
+                  )}
+                </>
+              ))}
 
             </Menu.Dropdown>
           </Menu>
@@ -657,7 +798,16 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
             size="xs"
             variant="default"
             leftSection={<IconCopy size={14} />}
-            onClick={() => dispatch('feSetSaveAsModalOpen', { open: true })}
+            onClick={() => {
+              try {
+                const tpl = (availableTemplates || []).find((t: any) => t.id === selectedTemplate)
+                const lib = tpl?.library === 'workspace' ? 'workspace' : 'user'
+                setSaveAsLibrary(lib)
+              } catch {
+                setSaveAsLibrary('workspace')
+              }
+              setSaveAsModalOpen(true)
+            }}
           >
             Save As
           </Button>
@@ -671,7 +821,33 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
             onClick={async () => {
               if (!selectedTemplate || isSystemTemplate(selectedTemplate)) return
               if (confirm(`Delete profile "${selectedTemplate}"?`)) {
-                await dispatch('feDeleteProfile', { name: selectedTemplate })
+                const client = getBackendClient()
+                try {
+                  const res: any = await client?.rpc('flowEditor.deleteProfile', { name: selectedTemplate })
+                  if (res?.ok) {
+                    // Refresh templates/meta and current graph
+                    const t: any = await client?.rpc('flowEditor.getTemplates', {})
+                    if (t?.ok) {
+                      setAvailableTemplates(t.templates || [])
+                      setTemplatesLoaded(!!t.templatesLoaded)
+                      setSelectedTemplate(t.selectedTemplate || '')
+                    }
+                    const g: any = await client?.rpc('flowEditor.getGraph', {})
+                    if (g?.ok) {
+                      const nodes = Array.isArray(g.nodes) ? g.nodes : []
+                      const edges = Array.isArray(g.edges) ? g.edges : []
+                      hydrateFromMain({ nodes, edges })
+                      try {
+                        const n = (nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
+                        const e = (edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
+                        const sig = JSON.stringify({ n, e })
+                        ;(lastLoadedTemplateRef as any).currentSig = sig
+                        lastSyncedSigRef.current = sig
+                        setHasUnsavedChanges(false)
+                      } catch {}
+                    }
+                  }
+                } catch {}
               }
             }}
           >
@@ -692,32 +868,6 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
           )}
         </Group>
 
-        <Group gap="xs">
-          {/* Collapse button */}
-          <UnstyledButton
-            onClick={() => {
-              setFlowCanvasCollapsed(true)
-              dispatch('updateWindowState', { flowCanvasCollapsed: true })
-            }}
-            style={{
-              color: '#cccccc',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 20,
-              height: 20,
-              cursor: 'pointer',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = '#ffffff'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = '#cccccc'
-            }}
-          >
-            <IconChevronRight size={16} />
-          </UnstyledButton>
-        </Group>
       </div>
 
       {/* Save As Modal */}
@@ -752,7 +902,33 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
                 setNewFlowError(`A flow named "${name}" already exists. Please choose another name.`)
                 return
               }
-              await dispatch('feCreateNewFlowNamed', { name })
+              const client = getBackendClient()
+              try {
+                const res: any = await client?.rpc('flowEditor.createNewFlowNamed', { name })
+                if (res?.ok) {
+                  // Refresh templates/meta and current graph
+                  const t: any = await client?.rpc('flowEditor.getTemplates', {})
+                  if (t?.ok) {
+                    setAvailableTemplates(t.templates || [])
+                    setTemplatesLoaded(!!t.templatesLoaded)
+                    setSelectedTemplate(t.selectedTemplate || name)
+                  }
+                  const g: any = await client?.rpc('flowEditor.getGraph', {})
+                  if (g?.ok) {
+                    const nodes = Array.isArray(g.nodes) ? g.nodes : []
+                    const edges = Array.isArray(g.edges) ? g.edges : []
+                    hydrateFromMain({ nodes, edges })
+                    try {
+                      const n = (nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
+                      const e = (edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
+                      const sig = JSON.stringify({ n, e })
+                      ;(lastLoadedTemplateRef as any).currentSig = sig
+                      lastSyncedSigRef.current = sig
+                      setHasUnsavedChanges(false)
+                    } catch {}
+                  }
+                }
+              } catch {}
               resetNewFlowModal()
             }
           }}
@@ -784,7 +960,32 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
                 setNewFlowError(`A flow named "${name}" already exists. Please choose another name.`)
                 return
               }
-              await dispatch('feCreateNewFlowNamed', { name })
+              const client = getBackendClient()
+              try {
+                const res: any = await client?.rpc('flowEditor.createNewFlowNamed', { name })
+                if (res?.ok) {
+                  const t: any = await client?.rpc('flowEditor.getTemplates', {})
+                  if (t?.ok) {
+                    setAvailableTemplates(t.templates || [])
+                    setTemplatesLoaded(!!t.templatesLoaded)
+                    setSelectedTemplate(t.selectedTemplate || name)
+                  }
+                  const g: any = await client?.rpc('flowEditor.getGraph', {})
+                  if (g?.ok) {
+                    const nodes = Array.isArray(g.nodes) ? g.nodes : []
+                    const edges = Array.isArray(g.edges) ? g.edges : []
+                    hydrateFromMain({ nodes, edges })
+                    try {
+                      const n = (nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
+                      const e = (edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
+                      const sig = JSON.stringify({ n, e })
+                      ;(lastLoadedTemplateRef as any).currentSig = sig
+                      lastSyncedSigRef.current = sig
+                      setHasUnsavedChanges(false)
+                    } catch {}
+                  }
+                }
+              } catch {}
               resetNewFlowModal()
             }}
             disabled={!newFlowName.trim()}
@@ -797,7 +998,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
       <Modal
         opened={saveAsModalOpen}
         onClose={() => {
-          dispatch('feSetSaveAsModalOpen', { open: false })
+          setSaveAsModalOpen(false)
           setLocalProfileName('')
         }}
         title="Save Flow Profile As"
@@ -815,11 +1016,31 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
           }}
           autoFocus
         />
+        <Text size="xs" mt="sm">
+          Save to
+        </Text>
+        <Group mt="xs" gap="xs">
+          <Button
+            size="xs"
+            variant={saveAsLibrary === 'workspace' ? 'filled' : 'default'}
+            onClick={() => setSaveAsLibrary('workspace')}
+          >
+            Workspace (.hifide-public/flows)
+          </Button>
+          <Button
+            size="xs"
+            variant={saveAsLibrary === 'user' ? 'filled' : 'default'}
+            onClick={() => setSaveAsLibrary('user')}
+          >
+            User (global)
+          </Button>
+        </Group>
+
         <Group mt="md" justify="flex-end">
           <Button
             variant="subtle"
             onClick={() => {
-              dispatch('feSetSaveAsModalOpen', { open: false })
+              setSaveAsModalOpen(false)
               setLocalProfileName('')
             }}
           >

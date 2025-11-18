@@ -291,6 +291,8 @@ export interface FlowExecutionArgs {
   flowDef: FlowDefinition
   input?: string
   sessionId?: string
+  /** Optional workspace identifier (absolute path) to scope tool execution and events */
+  workspaceId?: string
   // Session context is the single source of truth for provider/model/messageHistory
   initialContext?: {
     provider: string

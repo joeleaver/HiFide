@@ -18,13 +18,31 @@ export async function loadSessions(): Promise<{ sessions: Session[]; currentId: 
   }
 }
 
+function formatShortDateTime(ts: number): string {
+  const d = new Date(ts)
+  const yyyy = String(d.getFullYear())
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mi = String(d.getMinutes()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`
+}
+
 /**
- * Derive a title from message content
+ * Initial title shown when a session is created (date/time only)
  */
-export function deriveTitle(content: string): string {
+export function initialSessionTitle(ts?: number): string {
+  return formatShortDateTime(typeof ts === 'number' ? ts : Date.now())
+}
+
+/**
+ * Derive a session title from the first user message: "<date> — <short subject>"
+ * If content is empty, returns date/time only.
+ */
+export function deriveTitle(content: string, baseTimestamp?: number): string {
+  const datePart = formatShortDateTime(typeof baseTimestamp === 'number' ? baseTimestamp : Date.now())
   const s = (content || '').trim().replace(/\s+/g, ' ')
-  // Take first 60 chars, ensure not empty
-  const t = s.slice(0, 60)
-  return t.length > 0 ? t : 'New Session'
+  const subject = s.slice(0, 60)
+  return subject.length > 0 ? `${datePart} — ${subject}` : datePart
 }
 

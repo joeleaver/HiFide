@@ -7,7 +7,7 @@
  */
 
 import { create } from 'zustand'
-import { useDispatch } from './index'
+import { getBackendClient } from '../lib/backend/bootstrap'
 
 export type LocalFlowNode = any
 export type LocalFlowEdge = any
@@ -32,7 +32,7 @@ interface FlowEditorLocalState {
 export const useFlowEditorLocal = create<FlowEditorLocalState>((set, get) => {
   // Internal debounce + suppression controls
   let saveTimeout: any = null
-  let savesEnabled = true
+  let savesEnabled = false
   const cancelPendingSave = () => {
     if (saveTimeout) {
       clearTimeout(saveTimeout)
@@ -46,13 +46,12 @@ export const useFlowEditorLocal = create<FlowEditorLocalState>((set, get) => {
       return
     }
     cancelPendingSave()
-    saveTimeout = setTimeout(() => {
+    saveTimeout = setTimeout(async () => {
       if (!savesEnabled) return
       const { nodes, edges } = get()
-      const dispatch = useDispatch()
-      // Sync latest UI graph to main store (main will handle persistence/normalization)
-      dispatch('feSetNodes', { nodes })
-      dispatch('feSetEdges', { edges })
+      try {
+        await getBackendClient()?.rpc('flowEditor.setGraph', { nodes, edges })
+      } catch {}
     }, 500)
   }
 

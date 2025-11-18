@@ -1,44 +1,35 @@
-import { useAppStore, useDispatch, selectModelsByProvider, selectProviderValid, selectDefaultModels, selectAutoRetry, selectSettingsApiKeys, selectSettingsSaving, selectSettingsSaved, selectStartupMessage } from './store'
+import { getBackendClient } from './lib/backend/bootstrap'
 import { Button, Group, Stack, Text, TextInput, Title, Select, Switch, Progress, Divider, Card, Alert, NumberInput } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import PricingSettings from './components/PricingSettings'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 export default function SettingsPane() {
-  // Use selectors for better performance
-  const modelsByProvider = useAppStore(selectModelsByProvider)
-  const providerValid = useAppStore(selectProviderValid)
-  const defaultModels = useAppStore(selectDefaultModels)
-  const autoRetry = useAppStore(selectAutoRetry)
+  // Local UI state hydrated from backend snapshots
+  const [modelsByProvider, setModelsByProvider] = useState<Record<string, any>>({})
+  const [providerValid, setProviderValid] = useState<Record<string, boolean>>({})
+  const [defaultModels, setDefaultModels] = useState<Record<string, string>>({})
+  const [autoRetry, setAutoRetry] = useState(false)
 
-  const settingsApiKeys = useAppStore(selectSettingsApiKeys)
-  const settingsSaving = useAppStore(selectSettingsSaving)
-  const settingsSaved = useAppStore(selectSettingsSaved)
-  const settingsSaveResult = useAppStore((s) => s.settingsSaveResult)
-  const settingsValidateResult = useAppStore((s) => s.settingsValidateResult)
-  const startupMessage = useAppStore(selectStartupMessage)
+  const [settingsApiKeys, setSettingsApiKeys] = useState<any>({})
+  const [settingsSaving, setSettingsSaving] = useState(false)
+  const [settingsSaved, setSettingsSaved] = useState(false)
+  const [startupMessage, setStartupMessage] = useState<string | null>(null)
 
-  // Use dispatch to call actions
-  const dispatch = useDispatch()
-
-  // Use local state for API keys to avoid IPC calls on every keystroke
-  const [localApiKeys, setLocalApiKeys] = useState(settingsApiKeys)
+  // Local-only edits
+  const [localApiKeys, setLocalApiKeys] = useState<any>({})
   const [newFwModel, setNewFwModel] = useState('')
-
-  // Gate toasts to only fire after an explicit Save & Validate click
-  const awaitingValidationRef = useRef(false)
-
+  const [fireworksAllowed, setFireworksAllowed] = useState<string[]>([])
   // Hydrate local state once on mount to avoid clobbering in-progress edits
   useEffect(() => {
     setLocalApiKeys(settingsApiKeys)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const openaiOptions = modelsByProvider.openai || []
-  const anthropicOptions = modelsByProvider.anthropic || []
-  const geminiOptions = modelsByProvider.gemini || []
+  const openaiOptions = (modelsByProvider as any).openai || []
+  const anthropicOptions = (modelsByProvider as any).anthropic || []
+  const geminiOptions = (modelsByProvider as any).gemini || []
   const fireworksOptions = (modelsByProvider as any).fireworks || []
-  const fireworksAllowed = useAppStore((s) => (s as any).fireworksAllowedModels || [])
   const xaiOptions = (modelsByProvider as any).xai || []
 
 
@@ -46,15 +37,15 @@ export default function SettingsPane() {
 
 
   // Indexing state (centralized)
-  const idxStatus = useAppStore((s) => s.idxStatus)
-  const idxLoading = useAppStore((s) => s.idxLoading)
-  const idxQuery = useAppStore((s) => s.idxQuery ?? '')
-  const idxResults = useAppStore((s) => s.idxResults ?? [])
-  const idxProg = useAppStore((s) => s.idxProg)
+  const [idxStatus, setIdxStatus] = useState<any>(null)
+  const [idxLoading, setIdxLoading] = useState(false)
+  const [idxQuery, setIdxQuery] = useState('')
+  const [idxResults, setIdxResults] = useState<any[]>([])
+  const [idxProg, setIdxProg] = useState<any>(null)
 
   // Index auto-refresh configuration
-  const idxAutoRefresh = useAppStore((s) => s.idxAutoRefresh)
-  const idxLastRebuildAt = useAppStore((s) => s.idxLastRebuildAt)
+  const [idxAutoRefresh, setIdxAutoRefresh] = useState<any>(null)
+  const [idxLastRebuildAt, setIdxLastRebuildAt] = useState<number | null>(null)
 
 
   // Use local state for index query to avoid IPC calls on every keystroke
@@ -65,106 +56,118 @@ export default function SettingsPane() {
     setLocalIdxQuery(idxQuery)
   }, [idxQuery])
 
-  // Refresh index status on mount and ensure progress subscription from main store
+  // Hydrate settings + indexing snapshots and subscribe to progress on mount
   useEffect(() => {
-    dispatch('ensureIndexProgressSubscription')
-    void dispatch('refreshIndexStatus')
-  }, [dispatch])
+    const client = getBackendClient(); if (!client) return
 
-  // Handle save/validate results reactively but only after explicit user action
-  // 1) Show immediate error toast if save failed
-  useEffect(() => {
-    if (!settingsSaveResult) return
-    if (!settingsSaveResult.ok) {
-      notifications.show({
-        color: 'red',
-        title: 'Save failed',
-        message: settingsSaveResult.failures.join(' | ') || 'Failed to save API keys'
-      })
-    }
-  }, [settingsSaveResult])
+    // Settings snapshot
+    client.rpc<any>('settings.get', {}).then((snap) => {
+      if (!snap?.ok) return
+      setModelsByProvider(snap.modelsByProvider || {})
+      setProviderValid(snap.providerValid || {})
+      setDefaultModels(snap.defaultModels || {})
+      setAutoRetry(!!snap.autoRetry)
+      setSettingsApiKeys(snap.settingsApiKeys || {})
+      setStartupMessage(snap.startupMessage || null)
+      setFireworksAllowed(snap.fireworksAllowedModels || [])
+      setLocalApiKeys(snap.settingsApiKeys || {})
+    }).catch(() => {})
 
-  // 2) Show validation result toast once per Save click
-  useEffect(() => {
-    if (!awaitingValidationRef.current) return
-    if (!settingsValidateResult) return
+    // Index snapshot
+    client.rpc<any>('idx.status', {}).then((s) => {
+      if (!s?.ok) return
+      setIdxStatus(s.status || null)
+      setIdxProg(s.progress || null)
+      setIdxAutoRefresh(s.autoRefresh || null)
+      setIdxLastRebuildAt(s.lastRebuildAt ?? null)
+    }).catch(() => {})
 
-    if (settingsValidateResult.ok) {
-      notifications.show({
-        color: 'teal',
-        title: 'API keys saved',
-        message: 'Settings have been saved and validated successfully.'
-      })
-    } else {
-      const failures = settingsValidateResult.failures || []
-      notifications.show({
-        color: 'orange',
-        title: 'Some keys failed validation',
-        message: failures.join(' | ') || 'Unknown error'
-      })
-    }
+    // Subscribe to progress
+    client.rpc('idx.subscribe', {}).catch(() => {})
+    const unsub = client.subscribe('idx.progress', (p: any) => {
+      setIdxStatus(p?.status || null)
+      setIdxProg(p?.progress || null)
+    })
+    return () => { try { unsub?.() } catch {} }
+  }, [])
 
-    // Prevent duplicate toasts from subsequent unrelated updates
-    awaitingValidationRef.current = false
-    dispatch('clearSettingsResults')
-  }, [settingsValidateResult])
 
 
   const doRebuildIndex = async () => {
-    const res = await dispatch('rebuildIndex')
-    if (res?.ok) {
-      notifications.show({ color: 'teal', title: 'Index rebuilt', message: `Chunks: ${res?.status?.chunks ?? 0}` })
-    } else if (res?.error) {
-      notifications.show({ color: 'red', title: 'Index rebuild failed', message: String(res.error) })
+    const client = getBackendClient(); if (!client) return
+    setIdxLoading(true)
+    try {
+      const res: any = await client.rpc('idx.rebuild', {})
+      if (res?.ok) {
+        notifications.show({ color: 'teal', title: 'Index rebuilt', message: `Chunks: ${res?.status?.chunks ?? 0}` })
+        // Refresh status
+        const s: any = await client.rpc('idx.status', {})
+        if (s?.ok) {
+          setIdxStatus(s.status || null)
+          setIdxProg(s.progress || null)
+          setIdxLastRebuildAt(s.lastRebuildAt ?? null)
+        }
+      } else if (res?.error) {
+        notifications.show({ color: 'red', title: 'Index rebuild failed', message: String(res.error) })
+      }
+    } catch (e: any) {
+      notifications.show({ color: 'red', title: 'Index rebuild failed', message: e?.message || String(e) })
+    } finally {
+      setIdxLoading(false)
     }
   }
 
-  const doClearIndex = async () => { try { await dispatch('clearIndex') } catch {} }
+  const doClearIndex = async () => {
+    const client = getBackendClient(); if (!client) return
+    try { await client.rpc('idx.clear', {}) } catch {}
+  }
 
   const doSearchIndex = async () => {
+    const client = getBackendClient(); if (!client) return
     try {
-      // Update store with local query before searching
-      dispatch('setIdxQuery', localIdxQuery)
-      await dispatch('searchIndex')
+      setIdxQuery(localIdxQuery)
+      const res: any = await client.rpc('idx.search', { query: localIdxQuery, limit: 20 })
+      if (res?.ok) setIdxResults(res.results || [])
     } catch {}
   }
 
-
-
   const save = async () => {
+    const client = getBackendClient(); if (!client) return
     try {
-      // Clear previous results and mark that user initiated a validation run
-      awaitingValidationRef.current = true
-      dispatch('clearSettingsResults')
+      setSettingsSaving(true)
+      // Clear previous results (backend clears any transient result state)
+      await client.rpc('settings.clearResults', {})
 
-      // Update store with local API keys
-      if (localApiKeys.openai !== settingsApiKeys.openai) {
-        dispatch('setOpenAiApiKey', localApiKeys.openai)
-      }
-      if (localApiKeys.anthropic !== settingsApiKeys.anthropic) {
-        dispatch('setAnthropicApiKey', localApiKeys.anthropic)
-      }
-      if (localApiKeys.gemini !== settingsApiKeys.gemini) {
-        dispatch('setGeminiApiKey', localApiKeys.gemini)
-      }
-      if ((localApiKeys as any).fireworks !== (settingsApiKeys as any).fireworks) {
-        dispatch('setFireworksApiKey', (localApiKeys as any).fireworks)
-      }
-      if ((localApiKeys as any).xai !== (settingsApiKeys as any).xai) {
-        dispatch('setXaiApiKey', (localApiKeys as any).xai)
+      // Send partial keys update then persist
+      await client.rpc('settings.setApiKeys', { apiKeys: localApiKeys })
+      await client.rpc('settings.saveKeys', {})
+
+      // Validate
+      const v: any = await client.rpc('settings.validateKeys', {})
+      if (v?.ok) {
+        notifications.show({ color: 'teal', title: 'API keys saved', message: 'Settings have been saved and validated successfully.' })
+        setSettingsSaved(true)
+      } else {
+        const failures = v?.failures || []
+        notifications.show({ color: 'orange', title: 'Some keys failed validation', message: failures.join(' | ') || 'Unknown error' })
       }
 
-      // First save (marks as saved, auto-persisted via Zustand middleware)
-      await dispatch('saveSettingsApiKeys')
-
-      // Then validate the keys
-      await dispatch('validateApiKeys')
-
-      // Results will be handled by the validation effect and then cleared
+      // Refresh snapshot (models, providerValid, etc.)
+      const snap: any = await client.rpc('settings.get', {})
+      if (snap?.ok) {
+        setModelsByProvider(snap.modelsByProvider || {})
+        setProviderValid(snap.providerValid || {})
+        setDefaultModels(snap.defaultModels || {})
+        setAutoRetry(!!snap.autoRetry)
+        setSettingsApiKeys(snap.settingsApiKeys || {})
+        setStartupMessage(snap.startupMessage || null)
+        setFireworksAllowed(snap.fireworksAllowedModels || [])
+      }
     } catch (e: any) {
       console.error('[SettingsPane] Save error:', e)
       notifications.show({ color: 'red', title: 'Save failed', message: e?.message || String(e) })
-      awaitingValidationRef.current = false
+    } finally {
+      setSettingsSaving(false)
     }
   }
 
@@ -242,15 +245,30 @@ export default function SettingsPane() {
                   onChange={(e) => setNewFwModel(e.currentTarget.value)}
                 />
                 <Button
-                  onClick={() => { const v = newFwModel.trim(); if (v) { dispatch('addFireworksModel', { model: v }); setNewFwModel('') } }}
+                  onClick={async () => {
+                    const v = newFwModel.trim(); if (!v) return
+                    const client = getBackendClient(); if (!client) return
+                    await client.rpc('provider.fireworks.add', { model: v })
+                    setNewFwModel('')
+                    const snap: any = await client.rpc('settings.get', {})
+                    if (snap?.ok) { setFireworksAllowed(snap.fireworksAllowedModels || []); setModelsByProvider(snap.modelsByProvider || {}) }
+                  }}
                   disabled={!newFwModel.trim()}
                 >
                   Add
                 </Button>
-                <Button variant="light" onClick={() => dispatch('loadFireworksRecommendedDefaults')}>
+                <Button variant="light" onClick={async () => {
+                  const client = getBackendClient(); if (!client) return
+                  await client.rpc('provider.fireworks.loadDefaults', {})
+                  const snap: any = await client.rpc('settings.get', {}); if (snap?.ok) setFireworksAllowed(snap.fireworksAllowedModels || [])
+                }}>
                   Load Recommended Defaults
                 </Button>
-                <Button variant="light" onClick={() => dispatch('refreshModels', 'fireworks')}>
+                <Button variant="light" onClick={async () => {
+                  const client = getBackendClient(); if (!client) return
+                  await client.rpc('provider.refreshModels', { provider: 'fireworks' })
+                  const snap: any = await client.rpc('settings.get', {}); if (snap?.ok) setModelsByProvider(snap.modelsByProvider || {})
+                }}>
                   Refresh
                 </Button>
               </Group>
@@ -264,7 +282,7 @@ export default function SettingsPane() {
                     <Group key={m} justify="space-between" wrap="nowrap">
                       <Text size="xs" c="#ccc" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</Text>
 
-                      <Button size="xs" variant="light" color="red" onClick={() => dispatch('removeFireworksModel', { model: m })}>Remove</Button>
+                      <Button size="xs" variant="light" color="red" onClick={async () => { const client = getBackendClient(); if (!client) return; await client.rpc('provider.fireworks.remove', { model: m }); const snap: any = await client.rpc('settings.get', {}); if (snap?.ok) setFireworksAllowed(snap.fireworksAllowedModels || []) }}>Remove</Button>
                     </Group>
                   ))
                 )}
@@ -298,7 +316,7 @@ export default function SettingsPane() {
             placeholder="Select a model..."
             data={openaiOptions}
             value={defaultModels?.openai || null}
-            onChange={(v) => v && dispatch('setDefaultModel', { provider: 'openai', model: v })}
+            onChange={(v) => { if (!v) return; const client = getBackendClient(); if (!client) return; client.rpc('provider.setDefaultModel', { provider: 'openai', model: v }); setDefaultModels((d) => ({ ...d, openai: v as string })) }}
             disabled={!providerValid.openai || openaiOptions.length === 0}
             description={!providerValid.openai ? 'Add an OpenAI API key first' : openaiOptions.length === 0 ? 'Loading models...' : undefined}
           />
@@ -307,7 +325,7 @@ export default function SettingsPane() {
             placeholder="Select a model..."
             data={anthropicOptions}
             value={defaultModels?.anthropic || null}
-            onChange={(v) => v && dispatch('setDefaultModel', { provider: 'anthropic', model: v })}
+            onChange={(v) => { if (!v) return; const client = getBackendClient(); if (!client) return; client.rpc('provider.setDefaultModel', { provider: 'anthropic', model: v }); setDefaultModels((d) => ({ ...d, anthropic: v as string })) }}
             disabled={!providerValid.anthropic || anthropicOptions.length === 0}
             description={!providerValid.anthropic ? 'Add an Anthropic API key first' : anthropicOptions.length === 0 ? 'Loading models...' : undefined}
           />
@@ -316,7 +334,7 @@ export default function SettingsPane() {
             placeholder="Select a model..."
             data={geminiOptions}
             value={defaultModels?.gemini || null}
-            onChange={(v) => v && dispatch('setDefaultModel', { provider: 'gemini', model: v })}
+            onChange={(v) => { if (!v) return; const client = getBackendClient(); if (!client) return; client.rpc('provider.setDefaultModel', { provider: 'gemini', model: v }); setDefaultModels((d) => ({ ...d, gemini: v as string })) }}
             disabled={!providerValid.gemini || geminiOptions.length === 0}
             description={!providerValid.gemini ? 'Add a Gemini API key first' : geminiOptions.length === 0 ? 'Loading models...' : undefined}
           />
@@ -326,7 +344,7 @@ export default function SettingsPane() {
               placeholder="Select a model..."
               data={fireworksOptions}
               value={(defaultModels as any)?.fireworks || null}
-              onChange={(v) => v && dispatch('setDefaultModel', { provider: 'fireworks', model: v })}
+              onChange={(v) => { if (!v) return; const client = getBackendClient(); if (!client) return; client.rpc('provider.setDefaultModel', { provider: 'fireworks', model: v }); setDefaultModels((d) => ({ ...d, fireworks: v as string })) }}
               disabled={fireworksOptions.length === 0}
               description={fireworksOptions.length === 0 ? 'Populate allowlist or refresh models' : undefined}
             />
@@ -336,7 +354,7 @@ export default function SettingsPane() {
             placeholder="Select a model..."
             data={xaiOptions}
             value={(defaultModels as any)?.xai || null}
-            onChange={(v) => v && dispatch('setDefaultModel', { provider: 'xai', model: v })}
+            onChange={(v) => { if (!v) return; const client = getBackendClient(); if (!client) return; client.rpc('provider.setDefaultModel', { provider: 'xai', model: v }); setDefaultModels((d) => ({ ...d, xai: v as string })) }}
             disabled={!(providerValid as any).xai || xaiOptions.length === 0}
             description={!(providerValid as any).xai ? 'Add an xAI API key first' : xaiOptions.length === 0 ? 'Loading models...' : undefined}
           />
@@ -358,7 +376,7 @@ export default function SettingsPane() {
             label="Auto-retry on stream errors"
             description="Automatically retry when streaming responses fail"
             checked={autoRetry}
-            onChange={(e) => dispatch('setAutoRetry', e.currentTarget.checked)}
+            onChange={(e) => { const v = e.currentTarget.checked; const client = getBackendClient(); if (client) client.rpc('provider.setAutoRetry', { value: v }); setAutoRetry(v) }}
           />
 
 
@@ -413,7 +431,7 @@ export default function SettingsPane() {
                   Clear
                 </Button>
                 {idxProg?.inProgress && (
-                  <Button variant="light" color="orange" onClick={() => dispatch('cancelIndexing')} size="sm">
+                  <Button variant="light" color="orange" onClick={async () => { const client = getBackendClient(); if (client) await client.rpc('idx.cancel', {}) }} size="sm">
                     Cancel
                   </Button>
                 )}
@@ -455,7 +473,7 @@ export default function SettingsPane() {
             <Switch
               label="Enable auto-refresh"
               checked={!!idxAutoRefresh?.enabled}
-              onChange={(e) => dispatch('setIndexAutoRefresh', { config: { enabled: e.currentTarget.checked } })}
+              onChange={(e) => { const v = e.currentTarget.checked; const client = getBackendClient(); if (client) client.rpc('idx.setAutoRefresh', { config: { enabled: v } }); setIdxAutoRefresh((c: any) => ({ ...(c || {}), enabled: v })) }}
             />
 
             <Group grow>
@@ -466,7 +484,7 @@ export default function SettingsPane() {
                 max={1440}
                 step={5}
                 value={idxAutoRefresh?.ttlMinutes ?? 120}
-                onChange={(v) => typeof v === 'number' && dispatch('setIndexAutoRefresh', { config: { ttlMinutes: Math.max(5, Math.min(1440, v)) } })}
+                onChange={(v) => { if (typeof v !== 'number') return; const val = Math.max(5, Math.min(1440, v)); const client = getBackendClient(); if (client) client.rpc('idx.setAutoRefresh', { config: { ttlMinutes: val } }); setIdxAutoRefresh((c: any) => ({ ...(c || {}), ttlMinutes: val })) }}
               />
               <NumberInput
                 label="Min interval (minutes)"
@@ -475,7 +493,7 @@ export default function SettingsPane() {
                 max={120}
                 step={1}
                 value={idxAutoRefresh?.minIntervalMinutes ?? 10}
-                onChange={(v) => typeof v === 'number' && dispatch('setIndexAutoRefresh', { config: { minIntervalMinutes: Math.max(1, Math.min(120, v)) } })}
+                onChange={(v) => { if (typeof v !== 'number') return; const val = Math.max(1, Math.min(120, v)); const client = getBackendClient(); if (client) client.rpc('idx.setAutoRefresh', { config: { minIntervalMinutes: val } }); setIdxAutoRefresh((c: any) => ({ ...(c || {}), minIntervalMinutes: val })) }}
               />
             </Group>
 
@@ -486,7 +504,7 @@ export default function SettingsPane() {
                 min={0}
                 step={10}
                 value={idxAutoRefresh?.changeAbsoluteThreshold ?? 100}
-                onChange={(v) => typeof v === 'number' && dispatch('setIndexAutoRefresh', { config: { changeAbsoluteThreshold: Math.max(0, v) } })}
+                onChange={(v) => { if (typeof v !== 'number') return; const val = Math.max(0, v); const client = getBackendClient(); if (client) client.rpc('idx.setAutoRefresh', { config: { changeAbsoluteThreshold: val } }); setIdxAutoRefresh((c: any) => ({ ...(c || {}), changeAbsoluteThreshold: val })) }}
               />
               <NumberInput
                 label="File change threshold (%)"
@@ -496,7 +514,7 @@ export default function SettingsPane() {
                 step={0.01}
 
                 value={idxAutoRefresh?.changePercentThreshold ?? 0.02}
-                onChange={(v) => typeof v === 'number' && dispatch('setIndexAutoRefresh', { config: { changePercentThreshold: Math.max(0, Math.min(1, v)) } })}
+                onChange={(v) => { if (typeof v !== 'number') return; const val = Math.max(0, Math.min(1, v)); const client = getBackendClient(); if (client) client.rpc('idx.setAutoRefresh', { config: { changePercentThreshold: val } }); setIdxAutoRefresh((c: any) => ({ ...(c || {}), changePercentThreshold: val })) }}
               />
             </Group>
 
@@ -504,7 +522,7 @@ export default function SettingsPane() {
               label="Trigger on lockfile changes"
               description="Rebuild when package lockfiles change"
               checked={!!idxAutoRefresh?.lockfileTrigger}
-              onChange={(e) => dispatch('setIndexAutoRefresh', { config: { lockfileTrigger: e.currentTarget.checked } })}
+              onChange={(e) => { const v = e.currentTarget.checked; const client = getBackendClient(); if (client) client.rpc('idx.setAutoRefresh', { config: { lockfileTrigger: v } }); setIdxAutoRefresh((c: any) => ({ ...(c || {}), lockfileTrigger: v })) }}
             />
             <TextInput
               label="Lockfile globs"
@@ -512,7 +530,7 @@ export default function SettingsPane() {
               value={(idxAutoRefresh?.lockfileGlobs || []).join(', ')}
               onChange={(e) => {
                 const arr = e.currentTarget.value.split(',').map(s => s.trim()).filter(Boolean)
-                dispatch('setIndexAutoRefresh', { config: { lockfileGlobs: arr } })
+                { const client = getBackendClient(); if (client) client.rpc('idx.setAutoRefresh', { config: { lockfileGlobs: arr } }); setIdxAutoRefresh((c: any) => ({ ...(c || {}), lockfileGlobs: arr })) }
               }}
               placeholder="pnpm-lock.yaml, package-lock.json, yarn.lock"
             />
@@ -521,7 +539,7 @@ export default function SettingsPane() {
               <Switch
                 label="Trigger on embedding model change"
                 checked={!!idxAutoRefresh?.modelChangeTrigger}
-                onChange={(e) => dispatch('setIndexAutoRefresh', { config: { modelChangeTrigger: e.currentTarget.checked } })}
+                onChange={(e) => { const v = e.currentTarget.checked; const client = getBackendClient(); if (client) client.rpc('idx.setAutoRefresh', { config: { modelChangeTrigger: v } }); setIdxAutoRefresh((c: any) => ({ ...(c || {}), modelChangeTrigger: v })) }}
               />
               <NumberInput
                 label="Max rebuilds per hour"
@@ -529,7 +547,7 @@ export default function SettingsPane() {
                 max={12}
                 step={1}
                 value={idxAutoRefresh?.maxRebuildsPerHour ?? 3}
-                onChange={(v) => typeof v === 'number' && dispatch('setIndexAutoRefresh', { config: { maxRebuildsPerHour: Math.max(0, Math.min(12, v)) } })}
+                onChange={(v) => { if (typeof v !== 'number') return; const val = Math.max(0, Math.min(12, v)); const client = getBackendClient(); if (client) client.rpc('idx.setAutoRefresh', { config: { maxRebuildsPerHour: val } }); setIdxAutoRefresh((c: any) => ({ ...(c || {}), maxRebuildsPerHour: val })) }}
               />
             </Group>
           </Stack>

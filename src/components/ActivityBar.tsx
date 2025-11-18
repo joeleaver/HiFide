@@ -1,15 +1,19 @@
 import { Stack, UnstyledButton, Tooltip } from '@mantine/core'
 import {
-  IconMessageCircle,
+  IconTopologyStar,
   IconFolder,
   IconGitBranch,
   IconSettings,
   IconBook,
   IconLayoutKanban,
+  IconChevronLeft,
 } from '@tabler/icons-react'
-import { useAppStore, useDispatch, selectCurrentView, type ViewType } from '../store'
 import { useRerenderTrace } from '../utils/perf'
 import type { ReactNode, MouseEvent } from 'react'
+import { useUiStore } from '../store/ui'
+import { getBackendClient } from '../lib/backend/bootstrap'
+
+type ViewType = 'flow' | 'explorer' | 'sourceControl' | 'knowledgeBase' | 'kanban' | 'settings'
 
 const ACTIVITY_BAR_WIDTH = 48
 
@@ -59,47 +63,168 @@ function ActivityButton({ icon, label, active, onClick }: ActivityButtonProps) {
   )
 }
 
+
 export default function ActivityBar() {
-  const currentView = useAppStore(selectCurrentView)
-  const dispatch = useDispatch()
+  const currentView = useUiStore((s) => s.currentView)
+  const setCurrentViewLocal = useUiStore((s) => (s as any).setCurrentViewLocal)
 
   useRerenderTrace('ActivityBar', { currentView })
+  const mainCollapsed = useUiStore((s) => (s as any).mainCollapsed)
+  const setMainCollapsed = useUiStore((s) => (s as any).setMainCollapsed)
+
+  const setSessionPanelWidth = useUiStore((s) => s.setSessionPanelWidth)
+
 
   const buttons: ActivityButtonProps[] = [
     {
-      icon: <IconMessageCircle size={24} stroke={1.5} />,
-      label: 'Agent',
-      view: 'agent',
-      active: currentView === 'agent',
-      onClick: () => dispatch('setCurrentView', { view: 'agent' }),
+      icon: <IconTopologyStar size={24} stroke={1.5} />,
+      label: 'Flow',
+      view: 'flow',
+      active: !mainCollapsed && currentView === 'flow',
+      onClick: async () => {
+        setCurrentViewLocal('flow')
+        try { await getBackendClient()?.rpc('view.set', { view: 'flow' }) } catch {}
+        if (mainCollapsed) {
+          try {
+            const res = await window.workspace?.getSettings?.()
+            const prev = (res && (res as any).settings) || {}
+            const prevLayout = prev.layout || {}
+            const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
+            const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
+
+            // Exit collapsed first and restore prior panel width locally
+            setMainCollapsed(false)
+            try { setSessionPanelWidth(persistedSessionWidth) } catch {}
+
+            // Persist only collapse state (do not overwrite sessionPanelWidth here)
+            await window.workspace?.setSetting?.('layout', { ...prevLayout, mainCollapsed: false })
+
+            // Allow effect cleanup to remove collapsed auto-resize handler before resizing window
+            await new Promise((r) => setTimeout(r, 0))
+
+            const currentContentWidth = Math.max(0, window.innerWidth || 0)
+            const currentContentHeight = Math.max(0, window.innerHeight || 0)
+            const targetWidth = Math.max(800, Math.floor(prevExpandedWidth || currentContentWidth))
+            await getBackendClient()?.rpc('window.setContentSize', { width: targetWidth, height: currentContentHeight })
+          } catch {}
+        }
+      },
     },
     {
       icon: <IconFolder size={24} stroke={1.5} />,
       label: 'Explorer',
       view: 'explorer',
-      active: currentView === 'explorer',
-      onClick: () => dispatch('setCurrentView', { view: 'explorer' }),
+      active: !mainCollapsed && currentView === 'explorer',
+      onClick: async () => {
+        setCurrentViewLocal('explorer')
+        try { await getBackendClient()?.rpc('view.set', { view: 'explorer' }) } catch {}
+        if (mainCollapsed) {
+          try {
+            const res = await window.workspace?.getSettings?.()
+            const prev = (res && (res as any).settings) || {}
+            const prevLayout = prev.layout || {}
+            const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
+            const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
+
+            setMainCollapsed(false)
+            try { setSessionPanelWidth(persistedSessionWidth) } catch {}
+            await window.workspace?.setSetting?.('layout', { ...prevLayout, mainCollapsed: false })
+            await new Promise((r) => setTimeout(r, 0))
+
+            const currentContentWidth = Math.max(0, window.innerWidth || 0)
+            const currentContentHeight = Math.max(0, window.innerHeight || 0)
+            const targetWidth = Math.max(800, Math.floor(prevExpandedWidth || currentContentWidth))
+            await getBackendClient()?.rpc('window.setContentSize', { width: targetWidth, height: currentContentHeight })
+          } catch {}
+        }
+      },
     },
     {
       icon: <IconLayoutKanban size={24} stroke={1.5} />,
       label: 'Kanban',
       view: 'kanban',
-      active: currentView === 'kanban',
-      onClick: () => dispatch('setCurrentView', { view: 'kanban' }),
+      active: !mainCollapsed && currentView === 'kanban',
+      onClick: async () => {
+        setCurrentViewLocal('kanban')
+        try { await getBackendClient()?.rpc('view.set', { view: 'kanban' }) } catch {}
+        if (mainCollapsed) {
+          try {
+            const res = await window.workspace?.getSettings?.()
+            const prev = (res && (res as any).settings) || {}
+            const prevLayout = prev.layout || {}
+            const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
+            const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
+
+            setMainCollapsed(false)
+            try { setSessionPanelWidth(persistedSessionWidth) } catch {}
+            await window.workspace?.setSetting?.('layout', { ...prevLayout, mainCollapsed: false })
+            await new Promise((r) => setTimeout(r, 0))
+
+            const currentContentWidth = Math.max(0, window.innerWidth || 0)
+            const currentContentHeight = Math.max(0, window.innerHeight || 0)
+            const targetWidth = Math.max(800, Math.floor(prevExpandedWidth || currentContentWidth))
+            await getBackendClient()?.rpc('window.setContentSize', { width: targetWidth, height: currentContentHeight })
+          } catch {}
+        }
+      },
     },
     {
       icon: <IconGitBranch size={24} stroke={1.5} />,
       label: 'Source Control',
       view: 'sourceControl',
-      active: currentView === 'sourceControl',
-      onClick: () => dispatch('setCurrentView', { view: 'sourceControl' }),
+      active: !mainCollapsed && currentView === 'sourceControl',
+      onClick: async () => {
+        setCurrentViewLocal('sourceControl')
+        try { await getBackendClient()?.rpc('view.set', { view: 'sourceControl' }) } catch {}
+        if (mainCollapsed) {
+          try {
+            const res = await window.workspace?.getSettings?.()
+            const prev = (res && (res as any).settings) || {}
+            const prevLayout = prev.layout || {}
+            const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
+            const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
+
+            setMainCollapsed(false)
+            try { setSessionPanelWidth(persistedSessionWidth) } catch {}
+            await window.workspace?.setSetting?.('layout', { ...prevLayout, mainCollapsed: false })
+            await new Promise((r) => setTimeout(r, 0))
+
+            const currentContentWidth = Math.max(0, window.innerWidth || 0)
+            const currentContentHeight = Math.max(0, window.innerHeight || 0)
+            const targetWidth = Math.max(800, Math.floor(prevExpandedWidth || currentContentWidth))
+            await getBackendClient()?.rpc('window.setContentSize', { width: targetWidth, height: currentContentHeight })
+          } catch {}
+        }
+      },
     },
     {
       icon: <IconBook size={24} stroke={1.5} />,
       label: 'Knowledge Base',
       view: 'knowledgeBase',
-      active: currentView === 'knowledgeBase',
-      onClick: () => dispatch('setCurrentView', { view: 'knowledgeBase' }),
+      active: !mainCollapsed && currentView === 'knowledgeBase',
+      onClick: async () => {
+        setCurrentViewLocal('knowledgeBase')
+        try { await getBackendClient()?.rpc('view.set', { view: 'knowledgeBase' }) } catch {}
+        if (mainCollapsed) {
+          try {
+            const res = await window.workspace?.getSettings?.()
+            const prev = (res && (res as any).settings) || {}
+            const prevLayout = prev.layout || {}
+            const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
+            const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
+
+            setMainCollapsed(false)
+            try { setSessionPanelWidth(persistedSessionWidth) } catch {}
+            await window.workspace?.setSetting?.('layout', { ...prevLayout, mainCollapsed: false })
+            await new Promise((r) => setTimeout(r, 0))
+
+            const currentContentWidth = Math.max(0, window.innerWidth || 0)
+            const currentContentHeight = Math.max(0, window.innerHeight || 0)
+            const targetWidth = Math.max(800, Math.floor(prevExpandedWidth || currentContentWidth))
+            await getBackendClient()?.rpc('window.setContentSize', { width: targetWidth, height: currentContentHeight })
+          } catch {}
+        }
+      },
     },
   ]
 
@@ -112,8 +237,58 @@ export default function ActivityBar() {
         backgroundColor: '#333333',
         borderRight: '1px solid #1e1e1e',
         flexShrink: 0,
-      }}
-    >
+      }}>
+      {!mainCollapsed && (
+        <Tooltip label={'Collapse Main'} position="right" withArrow>
+          <UnstyledButton
+            onClick={async () => {
+              const next = true // collapsing only
+              setMainCollapsed(next)
+
+              const uiState: any = (useUiStore as any).getState?.() || {}
+              const sessionWidth: number = Number(uiState.sessionPanelWidth) || 300
+              const currentContentWidth = Math.max(0, window.innerWidth || 0)
+              const currentContentHeight = Math.max(0, window.innerHeight || 0)
+
+              try {
+                const res = await window.workspace?.getSettings?.()
+                const prev = (res && (res as any).settings) || {}
+                const prevLayout = prev.layout || {}
+
+                const layout: any = {
+                  ...prevLayout,
+                  mainCollapsed: true,
+                  sessionPanelWidth: sessionWidth,
+                  expandedWindowWidth: currentContentWidth, // remember expanded width
+                }
+                await window.workspace?.setSetting?.('layout', layout)
+
+                try {
+                  const client = getBackendClient()
+                  if (client) {
+                    const targetWidth = Math.max(300, Math.floor(sessionWidth + ACTIVITY_BAR_WIDTH))
+                    await client.rpc('window.setContentSize', { width: targetWidth, height: currentContentHeight })
+                  }
+                } catch {}
+              } catch {}
+            }}
+            style={{
+              width: ACTIVITY_BAR_WIDTH,
+              height: ACTIVITY_BAR_WIDTH,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#cccccc',
+              backgroundColor: 'transparent',
+              borderLeft: '2px solid transparent',
+              cursor: 'pointer',
+            }}
+          >
+            <IconChevronLeft size={20} stroke={1.5} />
+          </UnstyledButton>
+        </Tooltip>
+      )}
+
       {buttons.map((props) => (
         <ActivityButton key={props.label} {...props} />
       ))}
@@ -124,8 +299,30 @@ export default function ActivityBar() {
         icon={<IconSettings size={24} stroke={1.5} />}
         label="Settings"
         view="settings"
-        active={currentView === 'settings'}
-        onClick={() => dispatch('setCurrentView', { view: 'settings' })}
+        active={!mainCollapsed && currentView === 'settings'}
+        onClick={async () => {
+          setCurrentViewLocal('settings')
+          try { await getBackendClient()?.rpc('view.set', { view: 'settings' }) } catch {}
+          if (mainCollapsed) {
+            try {
+              const res = await window.workspace?.getSettings?.()
+              const prev = (res && (res as any).settings) || {}
+              const prevLayout = prev.layout || {}
+              const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
+              const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
+
+              setMainCollapsed(false)
+              try { setSessionPanelWidth(persistedSessionWidth) } catch {}
+              await window.workspace?.setSetting?.('layout', { ...prevLayout, mainCollapsed: false })
+              await new Promise((r) => setTimeout(r, 0))
+
+              const currentContentWidth = Math.max(0, window.innerWidth || 0)
+              const currentContentHeight = Math.max(0, window.innerHeight || 0)
+              const targetWidth = Math.max(800, Math.floor(prevExpandedWidth || currentContentWidth))
+              await getBackendClient()?.rpc('window.setContentSize', { width: targetWidth, height: currentContentHeight })
+            } catch {}
+          }
+        }}
       />
     </Stack>
   )

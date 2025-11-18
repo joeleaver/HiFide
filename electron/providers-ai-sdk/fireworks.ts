@@ -1,4 +1,4 @@
-import { streamText, tool as aiTool, stepCountIs, jsonSchema } from 'ai'
+import { streamText, tool as aiTool, stepCountIs, jsonSchema, wrapLanguageModel, extractReasoningMiddleware } from 'ai'
 import { createFireworks } from '@ai-sdk/fireworks'
 import { z } from 'zod'
 import { UiPayloadCache } from '../core/uiPayloadCache'
@@ -52,9 +52,14 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
 export const FireworksAiSdkProvider: ProviderAdapter = {
   id: 'fireworks',
 
-  async agentStream({ apiKey, model, system, messages, temperature, tools, responseSchema: _responseSchema, emit: _emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, system, messages, temperature, tools, responseSchema: _responseSchema, emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const fw = createFireworks({ apiKey })
     const llm = fw(model)
+    // Wrap model to extract <think> reasoning into separate reasoning chunks
+    const enhancedModel = wrapLanguageModel({
+      model: llm as any,
+      middleware: extractReasoningMiddleware({ tagName: 'think' })
+    })
 
     const { tools: aiTools, nameMap } = buildAiSdkTools(tools, toolMeta)
 
@@ -73,7 +78,7 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
         console.log('[ai-sdk:fireworks] streamText start', { model, msgs: msgs.length, tools: Object.keys(aiTools).length })
       }
       const result = streamText({
-        model: llm,
+        model: enhancedModel,
         system: systemText,
         messages: msgs as any,
         tools: Object.keys(aiTools).length ? aiTools : undefined,
@@ -94,6 +99,13 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
               case 'text-delta': {
                 const d = chunk.text || ''
                 if (d) onTextChunk?.(d)
+                break
+              }
+              case 'reasoning-delta': {
+                const d = chunk.text || ''
+                if (d) {
+                  try { emit?.({ type: 'reasoning', provider: 'fireworks', model, reasoning: d }) } catch {}
+                }
                 break
               }
               case 'tool-input-start': {

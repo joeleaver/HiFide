@@ -13,7 +13,7 @@ import type { RecentFolder, FileWatchEvent, ContextRefreshResult } from '../type
 import { MAX_RECENT_FOLDERS } from '../utils/constants'
 import { bootstrapWorkspace } from '../utils/workspace-helpers'
 import { buildMenu } from '../../ipc/menu'
-import { getIndexer, resetIndexer, startKanbanWatcher, stopKanbanWatcher } from '../../core/state'
+import { resetIndexer, resetKbIndexer, startKanbanWatcher, stopKanbanWatcher, startKbWatcher, stopKbWatcher } from '../../core/state'
 
 export interface WorkspaceSlice {
   workspaceRoot: string | null
@@ -36,6 +36,7 @@ type WorkspaceStore = WorkspaceSlice & {
   idxLastRebuildAt?: number | undefined
   appBootstrapping?: boolean
   setStartupMessage?: (message: string | null) => void
+  setWorkspaceBoot?: (params: { workspaceId: string; bootstrapping?: boolean; message?: string | null }) => void
   saveCurrentSession?: () => Promise<void>
   clearExplorer?: () => Promise<void>
   loadExplorer?: (root: string) => Promise<void>
@@ -61,9 +62,14 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
 
     if (previous && previous !== folder) {
       try {
-        stopKanbanWatcher()
+        stopKanbanWatcher(previous)
       } catch (error) {
         console.error('[workspace] Failed to stop Kanban watcher:', error)
+      }
+      try {
+        stopKbWatcher(previous)
+      } catch (error) {
+        console.error('[workspace] Failed to stop KB watcher:', error)
       }
     }
 
@@ -79,8 +85,12 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
         startKanbanWatcher(folder).catch((error) => {
           console.error('[workspace] Failed to start Kanban watcher:', error)
         })
+        startKbWatcher(folder).catch((error) => {
+          console.error('[workspace] Failed to start KB watcher:', error)
+        })
       } else {
         stopKanbanWatcher()
+        stopKbWatcher()
       }
     } catch (error) {
       console.error('[workspace] Failed to sync workspace environment variable:', error)
@@ -133,7 +143,11 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
 
   hasUnsavedChanges() {
     const state = store.getState() as any
-    const current = state.sessions?.find((session: any) => session.id === state.currentId)
+    const ws = state.workspaceRoot || null
+    if (!ws) return false
+    const list = (state.sessionsByWorkspace?.[ws] || []) as any[]
+    const cur = (state.currentIdByWorkspace?.[ws] ?? null) as string | null
+    const current = list.find((s: any) => s.id === cur)
     if (!current) return false
     return Boolean(current.items?.length)
   },
@@ -142,9 +156,10 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
     const normalized = normalizePath(folderPath)
     const state = store.getState() as WorkspaceStore
 
+    // Allow opening a folder during app bootstrap; do not block user action.
+    // initializeApp may still be running (e.g., validating keys), but workspace open is safe.
     if (state.appBootstrapping) {
-      console.warn('[workspace] Attempted to open folder while bootstrapping')
-      return { ok: false, error: 'App is still initializing' }
+      console.warn('[workspace] openFolder called during app bootstrap; proceeding with open')
     }
 
     try {
@@ -158,22 +173,21 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
       console.warn('[workspace] Unsaved changes detected before switching workspace')
     }
 
-    set({ appBootstrapping: true } as any)
-    state.setStartupMessage?.('Opening workspace...')
+    { const __fn = (store.getState() as any).setWorkspaceBoot; if (typeof __fn === 'function') __fn({ workspaceId: normalized, bootstrapping: true, message: 'Opening workspace...' }) }
 
     try {
       if (state.saveCurrentSession) {
-        state.setStartupMessage?.('Saving current session...')
+        { const __fn = (store.getState() as any).setWorkspaceBoot; if (typeof __fn === 'function') __fn({ workspaceId: normalized, message: 'Saving current session...' }) }
         await state.saveCurrentSession()
       }
 
-      state.setStartupMessage?.('Ensuring workspace context...')
+      { const __fn = (store.getState() as any).setWorkspaceBoot; if (typeof __fn === 'function') __fn({ workspaceId: normalized, message: 'Ensuring workspace context...' }) }
       const ready = await (get() as WorkspaceSlice).ensureWorkspaceReady({ baseDir: normalized })
       if (!ready.ok) {
         throw new Error('Failed to prepare workspace')
       }
 
-      state.setStartupMessage?.('Resetting explorers...')
+      { const __fn = (store.getState() as any).setWorkspaceBoot; if (typeof __fn === 'function') __fn({ workspaceId: normalized, message: 'Resetting explorers...' }) }
       if (state.clearExplorer) {
         await state.clearExplorer()
       }
@@ -182,31 +196,48 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
       ;(get() as WorkspaceSlice).addRecentFolder(normalized)
 
       if (state.loadExplorer) {
-        state.setStartupMessage?.('Loading workspace files...')
+        { const __fn = (store.getState() as any).setWorkspaceBoot; if (typeof __fn === 'function') __fn({ workspaceId: normalized, message: 'Loading workspace files...' }) }
         await state.loadExplorer(normalized)
       }
 
-      try {
-        (await getIndexer()).switchRoot(normalized)
-      } catch (error) {
-        console.error('[workspace] Failed to switch indexer root:', error)
-      }
+      { const __fn = (store.getState() as any).setWorkspaceBoot; if (typeof __fn === 'function') __fn({ workspaceId: normalized, message: 'Switching search index…' }) }
+
 
       (get() as WorkspaceSlice).setWorkspaceRoot(normalized)
 
-      state.setStartupMessage?.(null)
-      set({ appBootstrapping: false } as any)
+      // Load sessions for this workspace and ensure one is selected/initialized (strict gating)
+      { const __fn = (store.getState() as any).setWorkspaceBoot; if (typeof __fn === 'function') __fn({ workspaceId: normalized, message: 'Loading sessions…' }) }
+      const anyState = get() as any
+      if (anyState.loadSessionsFor) await anyState.loadSessionsFor({ workspaceId: normalized })
+      // Ensure at least one session exists and a currentId is set
+      let createdNewSession = false
+      if (typeof anyState.ensureSessionPresentFor === 'function') {
+        createdNewSession = anyState.ensureSessionPresentFor({ workspaceId: normalized })
+      }
+      const list = (typeof anyState.getSessionsFor === 'function') ? (anyState.getSessionsFor({ workspaceId: normalized }) || []) : []
+      const cur = (typeof anyState.getCurrentIdFor === 'function') ? anyState.getCurrentIdFor({ workspaceId: normalized }) : null
+      if (!Array.isArray(list) || list.length === 0 || !cur) {
+        throw new Error('Sessions not available after load')
+      }
+      if (!createdNewSession) {
+        { const __fn = (store.getState() as any).setWorkspaceBoot; if (typeof __fn === 'function') __fn({ workspaceId: normalized, message: 'Initializing session…' }) }
+        if (typeof anyState.initializeSessionFor === 'function') {
+          await anyState.initializeSessionFor({ workspaceId: normalized })
+        }
+      }
+
+      { const __fn = (store.getState() as any).setWorkspaceBoot; if (typeof __fn === 'function') __fn({ workspaceId: normalized, bootstrapping: false, message: null }) }
       return { ok: true }
     } catch (error) {
       console.error('[workspace] Failed to open workspace:', error)
-      set({ appBootstrapping: false } as any)
-      state.setStartupMessage?.(null)
+      { const __fn = (store.getState() as any).setWorkspaceBoot; if (typeof __fn === 'function') __fn({ workspaceId: normalized, bootstrapping: false, message: null }) }
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
   },
 
   closeWorkspace() {
     const state = get()
+    const prevRoot = (state as any).workspaceRoot || null
     state.fileWatchCleanup?.()
     set({
       workspaceRoot: null,
@@ -214,14 +245,24 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
       fileWatchEvent: null,
     })
     try {
-      stopKanbanWatcher()
+      if (prevRoot) stopKanbanWatcher(prevRoot)
     } catch (error) {
       console.error('[workspace] Failed to stop Kanban watcher:', error)
     }
     try {
-      resetIndexer()
+      if (prevRoot) stopKbWatcher(prevRoot)
+    } catch (error) {
+      console.error('[workspace] Failed to stop KB watcher:', error)
+    }
+    try {
+      resetIndexer(prevRoot as any)
     } catch (error) {
       console.error('[workspace] Failed to reset indexer:', error)
+    }
+    try {
+      resetKbIndexer(prevRoot as any)
+    } catch (error) {
+      console.error('[workspace] Failed to reset KB indexer:', error)
     }
   },
 })

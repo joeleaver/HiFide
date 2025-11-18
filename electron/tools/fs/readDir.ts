@@ -5,7 +5,7 @@
  */
 
 import type { AgentTool } from '../../providers/provider'
-import { resolveWithinWorkspace } from '../utils'
+import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot } from '../utils'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -18,9 +18,9 @@ export const readDirTool: AgentTool = {
     required: ['path'],
     additionalProperties: false,
   },
-  run: async ({ path: rel }: { path: string }) => {
+  run: async ({ path: rel }: { path: string }, meta?: any) => {
     try {
-      const abs = resolveWithinWorkspace(rel)
+      const abs = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, rel) : resolveWithinWorkspace(rel)
       const entries = await fs.readdir(abs, { withFileTypes: true })
       return {
         ok: true,

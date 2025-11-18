@@ -1,6 +1,6 @@
-import { memo, useEffect, useCallback } from 'react'
+import { memo, useEffect, useCallback, useState } from 'react'
 import { Stack, Text, Code, Group, Badge, Divider, Button } from '@mantine/core'
-import { useDispatch, useAppStore } from '../store'
+import { getBackendClient } from '../lib/backend/bootstrap'
 import Markdown from './Markdown'
 
 interface Props {
@@ -11,33 +11,34 @@ interface Props {
 
 export const BadgeKnowledgeBaseStoreContent = memo(function BadgeKnowledgeBaseStoreContent({ badgeId, resultKey, fullParams }: Props) {
   void badgeId
-  const dispatch = useDispatch()
 
-  // Ensure result is loaded into renderer state
+  const [result, setResult] = useState<any>(null)
+  const [kbBodies, setKbBodies] = useState<Record<string, string>>({})
+
+  // Ensure result is loaded into local state
   useEffect(() => {
-    const existing = (useAppStore as any).getState().feLoadedToolResults?.[resultKey]
-    if (existing === undefined) {
-      dispatch('loadToolResult', { key: resultKey })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const client = getBackendClient(); if (!client) return
+    client.rpc('tool.getResult', { key: resultKey }).then((res: any) => {
+      const data = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      setResult(data)
+    }).catch(() => {})
   }, [resultKey])
 
-  const paramsFromStore = useAppStore((s) => (s as any).feToolParamsByKey?.[resultKey])
-  const result = useAppStore((s) => (s as any).feLoadedToolResults?.[resultKey] || null) as any
-
-  const pStore: any = paramsFromStore || {}
   const pFull: any = fullParams || {}
 
-  const id: string | undefined = (pStore.id || pFull.id) ? String(pStore.id || pFull.id) : undefined
-  const title: string | undefined = (pStore.title || pFull.title) ? String(pStore.title || pFull.title) : undefined
-  const tags: string[] = Array.isArray(pStore.tags) ? pStore.tags : (Array.isArray(pFull.tags) ? pFull.tags : [])
-  const files: string[] = Array.isArray(pStore.files) ? pStore.files : (Array.isArray(pFull.files) ? pFull.files : [])
-  const descPreview: string | undefined = typeof pStore.descPreview === 'string' ? pStore.descPreview : (typeof pFull.description === 'string' ? String(pFull.description).slice(0, 160) : undefined)
+  const id: string | undefined = pFull.id ? String(pFull.id) : undefined
+  const title: string | undefined = pFull.title ? String(pFull.title) : undefined
+  const tags: string[] = Array.isArray(pFull.tags) ? pFull.tags : []
+  const files: string[] = Array.isArray(pFull.files) ? pFull.files : []
+  const descPreview: string | undefined = typeof pFull.description === 'string' ? String(pFull.description).slice(0, 160) : undefined
 
-  const kbBodies = useAppStore((s) => (s as any).kbBodies || {}) as Record<string, string>
   const handleLoadBody = useCallback((itemId: string) => {
-    dispatch('kbReadItemBody', { id: itemId })
-  }, [dispatch])
+    const client = getBackendClient(); if (!client) return
+    client.rpc('kb.getItemBody', { id: itemId }).then((res: any) => {
+      const body = res && typeof res === 'object' && 'body' in res ? (res as any).body : undefined
+      if (typeof body === 'string') setKbBodies((prev) => ({ ...prev, [itemId]: body }))
+    }).catch(() => {})
+  }, [])
 
   const resultId: string | undefined = result?.id
   const resultPath: string | undefined = result?.path

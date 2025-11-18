@@ -7,7 +7,8 @@
 
 import { Group, Text, Loader, ActionIcon } from '@mantine/core'
 import { IconClock, IconPlayerStop, IconPlayerPlay } from '@tabler/icons-react'
-import { useDispatch } from '../store'
+import { FlowService } from '../services/flow'
+import { useFlowRuntime } from '../store/flowRuntime'
 
 type FlowStatus = 'stopped' | 'running' | 'waitingForInput'
 
@@ -16,7 +17,6 @@ interface FlowStatusIndicatorProps {
 }
 
 export function FlowStatusIndicator({ status }: FlowStatusIndicatorProps) {
-  const dispatch = useDispatch()
 
   if (status === 'stopped') {
     return (
@@ -33,7 +33,7 @@ export function FlowStatusIndicator({ status }: FlowStatusIndicatorProps) {
             variant="filled"
             color="blue"
             title="Start flow"
-            onClick={() => dispatch('flowInit')}
+            onClick={async () => { await FlowService.start().catch(() => {}) }}
           >
             <IconPlayerPlay size={14} />
           </ActionIcon>
@@ -71,7 +71,12 @@ export function FlowStatusIndicator({ status }: FlowStatusIndicatorProps) {
           variant="filled"
           color="red"
           title="Stop flow"
-          onClick={() => dispatch('feStop')}
+          onClick={async () => {
+            try {
+              const rid = useFlowRuntime.getState().requestId
+              await FlowService.cancel(rid)
+            } catch {}
+          }}
         >
           <IconPlayerStop size={14} />
         </ActionIcon>

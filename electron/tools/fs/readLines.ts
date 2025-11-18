@@ -6,7 +6,7 @@
  */
 
 import type { AgentTool } from '../../providers/provider'
-import { resolveWithinWorkspace } from '../utils'
+import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot } from '../utils'
 import fs from 'node:fs/promises'
 import fssync from 'node:fs'
 import readline from 'node:readline'
@@ -224,7 +224,7 @@ export const readLinesTool: AgentTool = {
     // path is optional when handle is provided
     additionalProperties: false,
   },
-  run: async (input: any) => {
+  run: async (input: any, meta?: any) => {
     function fromB64<T=any>(h?: string): T | null {
       if (!h) return null
       try { return JSON.parse(Buffer.from(h, 'base64').toString('utf-8')) as T } catch { return null }
@@ -251,7 +251,7 @@ export const readLinesTool: AgentTool = {
         rel = String(input.path)
       }
 
-      const abs = resolveWithinWorkspace(rel)
+      const abs = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, rel) : resolveWithinWorkspace(rel)
       const st = await fs.stat(abs)
       if (!st.isFile()) return 'Error: Not a file'
 

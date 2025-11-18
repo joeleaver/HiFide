@@ -1,5 +1,5 @@
 import type { AgentTool } from '../../providers/provider'
-import { resolveWithinWorkspace } from '../utils'
+import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot } from '../utils'
 import fs from 'node:fs/promises'
 
 export const moveTool: AgentTool = {
@@ -15,9 +15,9 @@ export const moveTool: AgentTool = {
     required: ['from', 'to'],
     additionalProperties: false,
   },
-  run: async ({ from, to, overwrite = true }: { from: string; to: string; overwrite?: boolean }) => {
-    const src = resolveWithinWorkspace(from)
-    const dst = resolveWithinWorkspace(to)
+  run: async ({ from, to, overwrite = true }: { from: string; to: string; overwrite?: boolean }, meta?: any) => {
+    const src = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, from) : resolveWithinWorkspace(from)
+    const dst = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, to) : resolveWithinWorkspace(to)
     if (overwrite) {
       try { await fs.rm(dst, { recursive: true, force: true }) } catch {}
     }

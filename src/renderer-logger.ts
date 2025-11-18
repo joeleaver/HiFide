@@ -73,6 +73,29 @@ log.hooks.push((message: any) => {
   return message
 })
 
+// Swallow benign flow-cancellation unhandled rejections to avoid noisy logs in devtools
+// Must run before electron-log's catchErrors hooks so we can stop propagation
+try {
+  window.addEventListener(
+    'unhandledrejection',
+    (ev: PromiseRejectionEvent) => {
+      try {
+        const reason: any = (ev as any)?.reason
+        const text = reason?.message || reason?.stack || String(reason)
+        const isCancellation =
+          (reason && reason.name === 'AbortError') || /\b(cancel|canceled|cancelled|abort|aborted|terminate|terminated|stop|stopped)\b/i.test(text)
+        if (isCancellation) {
+          // Swallow cancellation silently; no console spam
+          ev.preventDefault?.()
+          // Stop other listeners (including electron-log) from logging this event
+          try { (ev as any).stopImmediatePropagation?.() } catch {}
+        }
+      } catch {}
+    },
+    { capture: true }
+  )
+} catch {}
+
 ;(log as any).catchErrors?.({ showDialog: false })
 
 // Patch console to also write to file via electron-log

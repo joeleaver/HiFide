@@ -851,6 +851,7 @@ class LLMService {
           const baseStreamOpts = {
             apiKey,
             model,
+            emit, // allow providers to emit rich ExecutionEvents (e.g., reasoning)
             // Sampling + reasoning controls (forwarded to providers when supported)
             ...(typeof updatedContext?.temperature === 'number' ? { temperature: updatedContext.temperature } : {}),
             ...(updatedContext?.reasoningEffort ? { reasoningEffort: updatedContext.reasoningEffort } : {}),
@@ -982,7 +983,7 @@ class LLMService {
                 ...streamOpts,
                 tools: policyTools,
                 responseSchema,
-                toolMeta: { requestId: context.contextId }, // Use contextId as requestId
+                toolMeta: { requestId: context.contextId, workspaceId: (flowAPI as any)?.workspaceId }, // Include workspace for tool scoping
                 onToolStart: onToolStartWrapped,
                 onToolEnd: onToolEndWrapped,
                 onToolError: eventHandlers.onToolError

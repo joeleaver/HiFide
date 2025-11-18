@@ -44,11 +44,13 @@ export interface FlowProfile {
   edges: SerializedEdge[]
 }
 
+export type FlowLibrary = 'system' | 'user' | 'workspace'
+
 export interface FlowTemplate {
   id: string
   name: string
   description: string
-  library: 'system' | 'user'
+  library: FlowLibrary
   profile: FlowProfile
 }
 
@@ -128,6 +130,61 @@ let systemTemplates: Record<string, FlowProfile> | null = null
 
 const DEFAULT_PROFILE_NAME = 'default'
 
+// Cache for workspace templates, keyed by absolute workspace root
+const workspaceTemplatesCache = new Map<string, Record<string, FlowProfile>>()
+
+async function getWorkspaceRoot(): Promise<string> {
+  try {
+    // Prefer main store as single source of truth
+    const { useMainStore } = await import('../store/index.js')
+    const root = (useMainStore as any).getState?.().workspaceRoot
+    if (root) return path.resolve(root)
+  } catch {}
+  // Fallbacks for very early boot or tests
+  return path.resolve(process.env.HIFIDE_WORKSPACE_ROOT || process.cwd())
+}
+
+async function loadWorkspaceTemplates(): Promise<Record<string, FlowProfile>> {
+  const root = await getWorkspaceRoot()
+  const absRoot = path.resolve(root)
+
+  const cached = workspaceTemplatesCache.get(absRoot)
+  if (cached) return cached
+
+  const templates: Record<string, FlowProfile> = {}
+  const flowsDir = path.join(absRoot, '.hifide-public', 'flows')
+
+  try {
+    const files = await fs.readdir(flowsDir)
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue
+      try {
+        const filePath = path.join(flowsDir, file)
+        const content = await fs.readFile(filePath, 'utf-8')
+        const profile = JSON.parse(content) as FlowProfile
+        const id = profile.name || path.basename(file, '.json')
+        templates[id] = profile
+      } catch (error) {
+        console.error(`[flowProfiles] Failed to load workspace flow ${file}:`, error)
+      }
+    }
+  } catch (error: any) {
+    if (error && (error as any).code !== 'ENOENT') {
+      console.error('[flowProfiles] Failed to read workspace flows directory:', error)
+    }
+  }
+
+  workspaceTemplatesCache.set(absRoot, templates)
+  return templates
+}
+
+function invalidateWorkspaceTemplatesCache(root: string | null | undefined): void {
+  if (!root) return
+  const absRoot = path.resolve(root)
+  workspaceTemplatesCache.delete(absRoot)
+}
+
+
 /**
  * Get the system templates directory path
  */
@@ -187,8 +244,9 @@ export async function isSystemTemplate(id: string): Promise<boolean> {
 }
 
 /**
- * Load a flow template by ID (checks system library first, then user library)
- * Returns deserialized nodes and edges ready for ReactFlow
+ * Load a flow template by ID.
+ * Checks libraries in order: system -> workspace -> user.
+ * Returns deserialized nodes and edges ready for ReactFlow.
  */
 export async function loadFlowTemplate(id: string): Promise<{ nodes: Node[]; edges: Edge[] } | null> {
   try {
@@ -199,8 +257,19 @@ export async function loadFlowTemplate(id: string): Promise<{ nodes: Node[]; edg
     if (systemTemplates[id]) {
       rawProfile = systemTemplates[id]
     } else {
-      // Check user library
-      rawProfile = profilesStore.get(id) || null
+      // Then check workspace library (per-workspace flows)
+      try {
+        const workspaceTemplates = await loadWorkspaceTemplates()
+        if (workspaceTemplates[id]) {
+          rawProfile = workspaceTemplates[id]
+        } else {
+          // Finally check user library
+          rawProfile = profilesStore.get(id) || null
+        }
+      } catch {
+        // If workspace templates fail to load, still fall back to user library
+        rawProfile = profilesStore.get(id) || null
+      }
     }
 
     if (!rawProfile || typeof rawProfile !== 'object') return null
@@ -288,6 +357,104 @@ export async function saveFlowProfile(
     }
   }
 }
+/**
+ * Save a flow profile to the current workspace library (.hifide-public/flows).
+ * Note: Cannot save using a name that conflicts with a system template.
+ */
+export async function saveWorkspaceFlowProfile(
+  nodes: Node[],
+  edges: Edge[],
+  profileName: string,
+  description: string = ''
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Prevent overwriting system templates
+    const isSystem = await isSystemTemplate(profileName)
+    if (isSystem) {
+      return {
+        success: false,
+        error: `Cannot overwrite system template "${profileName}". Please use a different name.`,
+      }
+    }
+
+    const root = await getWorkspaceRoot()
+    const absRoot = path.resolve(root)
+    const flowsDir = path.join(absRoot, '.hifide-public', 'flows')
+
+    await fs.mkdir(flowsDir, { recursive: true })
+
+    const profile: FlowProfile = {
+      name: profileName,
+      description,
+      version: '7.0.0',
+      nodes: nodes.map(serializeNode),
+      edges: edges.map(serializeEdge),
+    }
+
+    const filePath = path.join(flowsDir, `${profileName}.json`)
+    await fs.writeFile(filePath, JSON.stringify(profile, null, 2), 'utf-8')
+
+    // Update workspace templates cache for this root
+    const existing = workspaceTemplatesCache.get(absRoot) || {}
+    workspaceTemplatesCache.set(absRoot, { ...existing, [profileName]: profile })
+
+    return { success: true }
+  } catch (error) {
+    console.error('Failed to save workspace flow profile:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
+}
+
+/**
+ * Delete a flow profile from the current workspace library (.hifide-public/flows).
+ * Note: Cannot delete system templates.
+ */
+export async function deleteWorkspaceFlowProfile(
+  profileName: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const isSystem = await isSystemTemplate(profileName)
+    if (isSystem) {
+      return {
+        success: false,
+        error: `Cannot delete system template "${profileName}".`,
+      }
+    }
+
+    const root = await getWorkspaceRoot()
+    const absRoot = path.resolve(root)
+    const flowsDir = path.join(absRoot, '.hifide-public', 'flows')
+    const filePath = path.join(flowsDir, `${profileName}.json`)
+
+    try {
+      await fs.unlink(filePath)
+    } catch (error: any) {
+      if (!error || (error as any).code !== 'ENOENT') {
+        throw error
+      }
+    }
+
+    // Update workspace templates cache for this root
+    const existing = workspaceTemplatesCache.get(absRoot)
+    if (existing) {
+      const next = { ...existing }
+      delete (next as any)[profileName]
+      workspaceTemplatesCache.set(absRoot, next)
+    }
+
+    return { success: true }
+  } catch (error) {
+    console.error('Failed to delete workspace flow profile:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
+}
+
 
 /**
  * Delete a flow profile from user library
@@ -318,7 +485,7 @@ export async function deleteFlowProfile(
 }
 
 /**
- * List all available flow templates (system + user)
+ * List all available flow templates (system + workspace + user)
  */
 export async function listFlowTemplates(): Promise<FlowTemplate[]> {
   try {
@@ -333,15 +500,32 @@ export async function listFlowTemplates(): Promise<FlowTemplate[]> {
         name: profile.name,
         description: profile.description,
         library: 'system',
-        profile
+        profile,
       })
       seenIds.add(id)
     }
 
-    // Add user templates (skip if ID conflicts with system template)
+    // Add workspace templates (per-workspace library)
+    try {
+      const workspaceTemplates = await loadWorkspaceTemplates()
+      for (const [id, profile] of Object.entries(workspaceTemplates)) {
+        if (seenIds.has(id)) continue
+        templates.push({
+          id,
+          name: profile.name,
+          description: profile.description,
+          library: 'workspace',
+          profile,
+        })
+        seenIds.add(id)
+      }
+    } catch (error) {
+      console.error('Failed to list workspace flow templates:', error)
+    }
+
+    // Add user templates (skip if ID conflicts with system or workspace template)
     const store = profilesStore.store
     for (const [profileName, profile] of Object.entries(store)) {
-      // Skip if this ID is already used by a system template
       if (seenIds.has(profileName)) {
         continue
       }
@@ -351,7 +535,7 @@ export async function listFlowTemplates(): Promise<FlowTemplate[]> {
         name: profile.name,
         description: profile.description,
         library: 'user',
-        profile
+        profile,
       })
       seenIds.add(profileName)
     }

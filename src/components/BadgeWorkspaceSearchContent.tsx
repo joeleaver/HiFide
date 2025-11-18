@@ -1,6 +1,6 @@
-import { memo, useEffect } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { Stack, Text, Code, Group, Badge, Divider, Accordion } from '@mantine/core'
-import { useDispatch, useAppStore } from '../store'
+import { getBackendClient } from '../lib/backend/bootstrap'
 
 interface BadgeWorkspaceSearchContentProps {
   badgeId: string
@@ -40,23 +40,18 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
 }: BadgeWorkspaceSearchContentProps) {
   void badgeId
 
-  const dispatch = useDispatch()
+  // Local state for results
+  const [results, setResults] = useState<any>(null)
 
-  // Load results from cache into state
+  // Load results via WS
   useEffect(() => {
-    // Only request load if we don't already have results for this key
-    const existing = (useAppStore as any).getState().feLoadedToolResults?.[searchKey]
-    if (existing === undefined) {
-      dispatch('loadToolResult', { key: searchKey })
-    }
-    // Note: do NOT include `dispatch` as a dependency; its identity may change and cause re-runs
+    const client = getBackendClient()
+    if (!client) return
+    client.rpc('tool.getResult', { key: searchKey }).then((res: any) => {
+      const data = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      setResults(data)
+    }).catch(() => {})
   }, [searchKey])
-
-  // Prefer shallow, sanitized params stored in main store to avoid deep snapshot truncation
-  const paramsFromStore = useAppStore((s) => (s as any).feToolParamsByKey?.[searchKey])
-
-  // Read results from state
-  const results = useAppStore((s) => s.feLoadedToolResults?.[searchKey] || null)
 
   if (!results) {
     return (
@@ -66,23 +61,21 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
     )
   }
 
-  // Extract queries and normalize filters (prefer shallow params, but fall back to fullParams and usedParams)
-  const pStore: any = paramsFromStore as any
+  // Extract queries and normalize filters (fall back to fullParams and usedParams from results)
   const pFull: any = fullParams || {}
   const pUsed: any = (results as any).usedParams || {}
 
   // Prefer non-empty queries[] from store; otherwise fall back to single query or queries[] from full/used params
-  const queriesRawStore: any[] = Array.isArray(pStore?.queries) ? pStore.queries : []
   const queriesRawFull: any[] = Array.isArray(pFull?.queries) ? pFull.queries : (pFull?.query ? [pFull.query] : [])
   const queriesRawUsed: any[] = Array.isArray(pUsed?.queries) ? pUsed.queries : (pUsed?.query ? [pUsed.query] : [])
-  const queriesRaw: any[] = (queriesRawStore && queriesRawStore.length > 0) ? queriesRawStore : (queriesRawFull && queriesRawFull.length > 0 ? queriesRawFull : queriesRawUsed)
+  const queriesRaw: any[] = (queriesRawFull && queriesRawFull.length > 0 ? queriesRawFull : queriesRawUsed)
 
   const isMaxDepthToken = (s: any) => typeof s === 'string' && s.startsWith('[Max Depth Exceeded')
   const queries = queriesRaw.map((s: any) => String(s || '')).filter(Boolean).filter((s: string) => !isMaxDepthToken(s))
 
-  // Merge filter/mode from store first (sanitized), then fall back to full params, then usedParams (normalized defaults)
-  const mode = pStore?.mode || pFull?.mode || pUsed?.mode || 'auto'
-  const f = pStore?.filters || pFull?.filters || pUsed?.filters || {}
+  // Merge filter/mode from full params, then usedParams (normalized defaults)
+  const mode = pFull?.mode || pUsed?.mode || 'auto'
+  const f = pFull?.filters || pUsed?.filters || {}
   const languages: string[] = (Array.isArray(f.languages)
     ? f.languages.map((s: any) => String(s))
     : (typeof f.languages === 'string' ? [String(f.languages)] : [])).filter((s: string) => !isMaxDepthToken(s))

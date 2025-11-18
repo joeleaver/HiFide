@@ -16,6 +16,8 @@ import {
   reindexOrders,
   writeKanbanBoard,
 } from '../utils/kanban'
+import { broadcastWorkspaceNotification } from '../../backend/ws/broadcast'
+
 
 export interface KanbanSlice {
   kanbanBoard: KanbanBoard | null
@@ -84,10 +86,32 @@ async function persistBoard(params: {
     await writeKanbanBoard(workspaceRoot, board)
     // On success, commit the new board. Avoid touching kanbanLastLoadedAt here
     setPartial({ kanbanSaving: false, kanbanBoard: board })
+    // Notify workspace-bound renderers that the board has changed
+    try {
+      const lastLoadedAt = (get() as any).kanbanLastLoadedAt || null
+      broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', {
+        board,
+        loading: false,
+        saving: false,
+        error: null,
+        lastLoadedAt,
+      })
+    } catch {}
   } catch (error) {
     console.error('[kanban] Failed to persist board:', error)
     // Do not revert board here since we didn't optimistically set it
     setPartial({ kanbanSaving: false, kanbanError: String(error) })
+    try {
+      const current = (get() as any).kanbanBoard || null
+      const lastLoadedAt = (get() as any).kanbanLastLoadedAt || null
+      broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', {
+        board: current,
+        loading: false,
+        saving: false,
+        error: String(error),
+        lastLoadedAt,
+      })
+    } catch {}
     throw error
   }
 }
@@ -115,11 +139,17 @@ export const createKanbanSlice: StateCreator<KanbanSlice, [], [], KanbanSlice> =
         const workspaceRoot = resolveWorkspaceRoot(get as () => KanbanStore)
         setPartial({ kanbanLoading: true, kanbanError: null })
         const board = await readKanbanBoard(workspaceRoot)
-        setPartial({ kanbanBoard: board, kanbanLoading: false, kanbanLastLoadedAt: Date.now() })
+        const ts = Date.now()
+        setPartial({ kanbanBoard: board, kanbanLoading: false, kanbanLastLoadedAt: ts })
+        try { broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', { board, loading: false, saving: false, error: null, lastLoadedAt: ts }) } catch {}
         return { ok: true, board }
       } catch (error) {
         console.error('[kanban] Load failed:', error)
         setPartial({ kanbanLoading: false, kanbanError: String(error) })
+        try {
+          const workspaceRoot = resolveWorkspaceRoot(get as () => KanbanStore)
+          broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', { board: null, loading: false, saving: false, error: String(error) })
+        } catch {}
         return { ok: false }
       }
     },
@@ -128,11 +158,17 @@ export const createKanbanSlice: StateCreator<KanbanSlice, [], [], KanbanSlice> =
       try {
         const workspaceRoot = resolveWorkspaceRoot(get as () => KanbanStore)
         const board = await readKanbanBoard(workspaceRoot)
-        setPartial({ kanbanBoard: board, kanbanError: null, kanbanLastLoadedAt: Date.now() })
+        const ts = Date.now()
+        setPartial({ kanbanBoard: board, kanbanError: null, kanbanLastLoadedAt: ts })
+        try { broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', { board, loading: false, saving: false, error: null, lastLoadedAt: ts }) } catch {}
         return { ok: true, board }
       } catch (error) {
         console.error('[kanban] Refresh failed:', error)
         setPartial({ kanbanError: String(error) })
+        try {
+          const workspaceRoot = resolveWorkspaceRoot(get as () => KanbanStore)
+          broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', { board: (get() as any).kanbanBoard || null, loading: false, saving: false, error: String(error), lastLoadedAt: (get() as any).kanbanLastLoadedAt || null })
+        } catch {}
         return { ok: false }
       }
     },
@@ -220,8 +256,9 @@ export const createKanbanSlice: StateCreator<KanbanSlice, [], [], KanbanSlice> =
 
     async kanbanDeleteTask(taskId) {
       const board = get().kanbanBoard
-      if (!board) return { ok: false }
-      if (!findTask(board, taskId)) return { ok: false }
+      if (!board) return { ok: false, error: 'Board not loaded', code: 'NOT_LOADED' }
+      const existing = findTask(board, taskId)
+      if (!existing) return { ok: false, error: 'Task not found', code: 'NOT_FOUND' }
 
       const previous = board
       const filtered = board.tasks.filter((task) => task.id !== taskId)
@@ -229,18 +266,18 @@ export const createKanbanSlice: StateCreator<KanbanSlice, [], [], KanbanSlice> =
 
       try {
         await persistBoard({ board: updatedBoard, previous, get: get as () => KanbanStore, setPartial })
-        return { ok: true }
+        return { ok: true, deleted: { taskId } }
       } catch (error) {
-        return { ok: false }
+        return { ok: false, error: String(error) }
       }
     },
 
     async kanbanMoveTask({ taskId, toStatus, toIndex }) {
       const board = get().kanbanBoard
-      if (!board) return { ok: false }
+      if (!board) return { ok: false, error: 'Board not loaded', code: 'NOT_LOADED' }
 
       const task = findTask(board, taskId)
-      if (!task) return { ok: false }
+      if (!task) return { ok: false, error: 'Task not found', code: 'NOT_FOUND' }
 
       const destinationTasks = board.tasks
         .filter((existing) => existing.id !== taskId && existing.status === toStatus)
@@ -267,9 +304,10 @@ export const createKanbanSlice: StateCreator<KanbanSlice, [], [], KanbanSlice> =
       const previous = board
       try {
         await persistBoard({ board: updatedBoard, previous, get: get as () => KanbanStore, setPartial })
-        return { ok: true }
+        const moved = updatedBoard.tasks.find((t) => t.id === taskId) || null
+        return { ok: true, task: moved }
       } catch (error) {
-        return { ok: false }
+        return { ok: false, error: String(error) }
       }
     },
 
@@ -332,13 +370,14 @@ export const createKanbanSlice: StateCreator<KanbanSlice, [], [], KanbanSlice> =
 
     async kanbanDeleteEpic(epicId) {
       const board = get().kanbanBoard
-      if (!board) return { ok: false }
-      if (!findEpic(board, epicId)) return { ok: false }
+      if (!board) return { ok: false, error: 'Board not loaded', code: 'NOT_LOADED' }
+      const epic = findEpic(board, epicId)
+      if (!epic) return { ok: false, error: 'Epic not found', code: 'NOT_FOUND' }
 
       const previous = board
       const updatedBoard: KanbanBoard = {
         ...board,
-        epics: board.epics.filter((epic) => epic.id !== epicId),
+        epics: board.epics.filter((e) => e.id !== epicId),
         tasks: board.tasks.map((task) =>
           task.epicId === epicId ? { ...task, epicId: null, updatedAt: Date.now() } : task,
         ),
@@ -346,9 +385,9 @@ export const createKanbanSlice: StateCreator<KanbanSlice, [], [], KanbanSlice> =
 
       try {
         await persistBoard({ board: updatedBoard, previous, get: get as () => KanbanStore, setPartial })
-        return { ok: true }
+        return { ok: true, deleted: { epicId } }
       } catch (error) {
-        return { ok: false }
+        return { ok: false, error: String(error) }
       }
     },
   }

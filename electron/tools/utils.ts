@@ -23,6 +23,18 @@ export function resolveWithinWorkspace(p: string): string {
 }
 
 /**
+ * Resolve a path within a provided workspace root, preventing directory traversal
+ */
+export function resolveWithinWorkspaceWithRoot(rootInput: string, p: string): string {
+  const root = path.resolve(rootInput)
+  const abs = path.isAbsolute(p) ? p : path.join(root, p)
+  const norm = path.resolve(abs)
+  const guard = root.endsWith(path.sep) ? root : root + path.sep
+  if (!(norm + path.sep).startsWith(guard)) throw new Error('Path outside workspace')
+  return norm
+}
+
+/**
  * Atomic file write
  */
 export async function atomicWrite(filePath: string, content: string) {

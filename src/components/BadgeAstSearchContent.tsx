@@ -1,6 +1,6 @@
-import { memo, useEffect } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { Stack, Text, Code, Group, Badge, Divider, Accordion } from '@mantine/core'
-import { useDispatch, useAppStore } from '../store'
+import { getBackendClient } from '../lib/backend/bootstrap'
 
 interface BadgeAstSearchContentProps {
   badgeId: string
@@ -41,24 +41,17 @@ export const BadgeAstSearchContent = memo(function BadgeAstSearchContent({
 }: BadgeAstSearchContentProps) {
   void badgeId
 
-  const dispatch = useDispatch()
+  // Local results
+  const [results, setResults] = useState<any>(null)
 
-  // Load results from cache into state
+  // Load results via WS
   useEffect(() => {
-    // Only request load if we don't already have results for this key
-    const existing = (useAppStore as any).getState().feLoadedToolResults?.[searchKey]
-    if (existing === undefined) {
-      dispatch('loadToolResult', { key: searchKey })
-    }
-    // Note: do NOT include `dispatch` as a dependency; its identity may change and cause re-runs
+    const client = getBackendClient(); if (!client) return
+    client.rpc('tool.getResult', { key: searchKey }).then((res: any) => {
+      const data = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      setResults(data)
+    }).catch(() => {})
   }, [searchKey])
-
-  // Prefer shallow params from main-store keyed map to avoid deep snapshot truncation; fallback to badge metadata
-  const paramsFromStore = useAppStore((s) => (s as any).feToolParamsByKey?.[searchKey])
-
-
-  // Read results from state
-  const results = useAppStore((s) => s.feLoadedToolResults?.[searchKey] || null)
 
   if (!results || !results.matches) {
     return (
@@ -68,8 +61,8 @@ export const BadgeAstSearchContent = memo(function BadgeAstSearchContent({
     )
   }
 
-  // Extract parameters (prefer shallow store copy to avoid deep snapshot truncation)
-  const params = (paramsFromStore as any) || fullParams || {}
+  // Extract parameters from badge metadata fallback
+  const params = fullParams || {}
   const pattern = params?.pattern || ''
   const languages = Array.isArray(params?.languages) ? params.languages : []
   const includeGlobs = Array.isArray(params?.includeGlobs) ? params.includeGlobs : []

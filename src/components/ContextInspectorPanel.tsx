@@ -1,10 +1,11 @@
 import { ScrollArea, Text, Tabs } from '@mantine/core'
-import { useAppStore, useDispatch } from '../store'
 import { useUiStore } from '../store/ui'
-import { useEffect } from 'react'
 import CollapsiblePanel from './CollapsiblePanel'
 import JsonView from '@uiw/react-json-view'
 import { darkTheme } from '@uiw/react-json-view/dark'
+import { useFlowContexts } from '../store/flowContexts'
+import { getBackendClient } from '../lib/backend/bootstrap'
+import { useEffect } from 'react'
 
 // Context colors (matching connection-colors.ts)
 const CONTEXT_COLORS = {
@@ -13,36 +14,28 @@ const CONTEXT_COLORS = {
 }
 
 export default function ContextInspectorPanel() {
-  const dispatch = useDispatch()
-
-  // Read persisted state from main store
-  const persistedCollapsed = useAppStore((s) => s.windowState.contextInspectorCollapsed)
-  const persistedHeight = useAppStore((s) => s.windowState.contextInspectorHeight)
-
   // Use UI store for local state
   const collapsed = useUiStore((s) => s.contextInspectorCollapsed)
   const height = useUiStore((s) => s.contextInspectorHeight)
   const setCollapsed = useUiStore((s) => s.setContextInspectorCollapsed)
   const setHeight = useUiStore((s) => s.setContextInspectorHeight)
 
-  // Sync UI store with persisted state ONLY on mount
-  // Don't sync during runtime to avoid race conditions
+  // Context state comes from store (backend events wired in bootstrap)
+  const mainContext = useFlowContexts((s: any) => s.mainContext)
+  const isolatedContexts = useFlowContexts((s: any) => s.isolatedContexts)
+
+  // Hydrate persisted UI state on mount (renderer-only)
+  // Keep this one effect for per-window UI persistence; it doesn't mirror backend data
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    setCollapsed(persistedCollapsed)
-    setHeight(persistedHeight)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // Only run on mount
+    const client = getBackendClient(); if (!client) return
+    client.rpc('ui.getWindowState', {}).then((res: any) => {
+      const ws = (res && res.windowState) || {}
+      setCollapsed(ws.contextInspectorCollapsed ?? false)
+      setHeight(ws.contextInspectorHeight ?? 240)
+    }).catch(() => {})
+  }, [])
 
-  // Get main flow context from flow editor state (ephemeral, only exists during flow execution)
-  const mainFlowContext = useAppStore((s) => s.feMainFlowContext)
-  const isolatedContexts = useAppStore((s) => s.feIsolatedContexts)
-
-  // Fall back to session.currentContext if no main flow context (flow not running)
-  const currentId = useAppStore((s) => s.currentId)
-  const sessions = useAppStore((s) => s.sessions)
-  const currentSession = sessions.find((s: any) => s.id === currentId)
-
-  const mainContext = mainFlowContext || currentSession?.currentContext || null
   const hasIsolatedContexts = Object.keys(isolatedContexts).length > 0
 
   return (
@@ -52,12 +45,12 @@ export default function ContextInspectorPanel() {
       onToggleCollapse={() => {
         const newCollapsed = !collapsed
         setCollapsed(newCollapsed)
-        dispatch('updateWindowState', { contextInspectorCollapsed: newCollapsed })
+        const client = getBackendClient(); if (client) client.rpc('ui.updateWindowState', { updates: { contextInspectorCollapsed: newCollapsed } }).catch(() => {})
       }}
       height={height}
       onHeightChange={(newHeight) => {
         setHeight(newHeight)
-        dispatch('updateWindowState', { contextInspectorHeight: newHeight })
+        const client = getBackendClient(); if (client) client.rpc('ui.updateWindowState', { updates: { contextInspectorHeight: newHeight } }).catch(() => {})
       }}
       minHeight={150}
       maxHeight={400}

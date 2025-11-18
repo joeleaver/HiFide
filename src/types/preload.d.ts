@@ -26,19 +26,6 @@ declare global {
       save: (session: any) => Promise<{ ok: boolean; error?: string }>;
       delete: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
     };
-    pty?: {
-      create: (opts?: { shell?: string; cwd?: string; cols?: number; rows?: number; env?: Record<string, string>; log?: boolean }) => Promise<{ sessionId: string }>;
-      write: (sessionId: string, data: string) => Promise<{ ok: boolean }>;
-      resize: (sessionId: string, cols: number, rows: number) => Promise<{ ok: boolean }>;
-      dispose: (sessionId: string) => Promise<{ ok: boolean }>;
-      execAgent: (sessionId: string, command: string) => Promise<{ ok: boolean; blocked?: boolean; error?: string }>;
-
-      onData: (listener: (payload: { sessionId: string; data: string }) => void) => () => void;
-      onExit: (listener: (payload: { sessionId: string; exitCode: number }) => void) => () => void;
-        attachAgent: (opts?: { requestId?: string; sessionId?: string; tailBytes?: number }) => Promise<{ ok: boolean; sessionId?: string; error?: string }>;
-        detachAgent: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
-
-    };
 
       tsRefactor?: {
         rename: (filePath: string, oldName: string, newName: string, opts?: { verify?: boolean; tsconfigPath?: string }) => Promise<{ ok: boolean; verification?: { ok: boolean; exitCode: number; stdout: string; stderr: string }; error?: string }>;
@@ -86,26 +73,7 @@ declare global {
           error?: string;
         }>;
       };
-      flows?: {
-        list: () => Promise<{ ok: boolean; flows?: Array<{ id: string; label: string; location: 'builtin'|'workspace'; path: string }>; error?: string }>;
-        load: (idOrPath: string) => Promise<{ ok: boolean; def?: any; error?: string }>;
-        save: (id: string, def: any) => Promise<{ ok: boolean; path?: string; error?: string }>;
-        getTools: () => Promise<Array<{ name: string; description: string; category?: string }>>;
-      };
-      flowExec?: {
-        run: (args: { requestId: string; flowId?: string; flowDef?: any; input?: string; model?: string; provider?: string; sessionId?: string; policy?: { redactor?: { enabled?: boolean; rules?: string[] }; budgetGuard?: { maxUSD?: number; blockOnExceed?: boolean }; errorDetection?: { enabled?: boolean; blockOnFlag?: boolean; patterns?: string[] }; pricing?: { inputCostPer1M?: number; outputCostPer1M?: number } } }) => Promise<{ ok: boolean }>;
-        stop: (requestId: string) => Promise<{ ok: boolean }>;
-      pause: (requestId: string) => Promise<{ ok: boolean }>;
-      resume: (requestId: string) => Promise<{ ok: boolean }>;
-      step: (requestId: string) => Promise<{ ok: boolean }>;
 
-      flowTrace?: {
-        export: (events: any[], label?: string) => Promise<{ ok: boolean; file?: string; error?: string }>;
-      };
-
-      setBreakpoints: (args: { requestId: string; nodeIds: string[] }) => Promise<{ ok: boolean }>;
-        onEvent: (listener: (ev: { requestId: string; type: string; nodeId?: string; data?: any; error?: string }) => void) => () => void;
-      };
     models?: {
       cheapestClassifier: (provider: string) => Promise<{ ok: boolean; model?: string; error?: string }>;
     };
@@ -162,15 +130,14 @@ declare global {
       on: (name: string, listener: (payload?: any) => void) => () => void;
       off: (name: string, listener: (payload?: any) => void) => void;
     };
-    windowControls?: {
-      minimize: () => Promise<any>;
-      maximize: () => Promise<any>;
-      close: () => Promise<any>;
-    };
     app?: {
       setView: (view: string) => Promise<any>;
     };
+    wsBackend?: {
+      getBootstrap: () => { url: string; token: string; windowId: string };
+    };
   }
+
 }
 
 

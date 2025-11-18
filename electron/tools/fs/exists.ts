@@ -1,5 +1,5 @@
 import type { AgentTool } from '../../providers/provider'
-import { resolveWithinWorkspace } from '../utils'
+import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot } from '../utils'
 import fs from 'node:fs/promises'
 
 export const existsTool: AgentTool = {
@@ -11,8 +11,8 @@ export const existsTool: AgentTool = {
     required: ['path'],
     additionalProperties: false,
   },
-  run: async ({ path: rel }: { path: string }) => {
-    const abs = resolveWithinWorkspace(rel)
+  run: async ({ path: rel }: { path: string }, meta?: any) => {
+    const abs = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, rel) : resolveWithinWorkspace(rel)
     try { await fs.access(abs); return { ok: true, exists: true } } catch { return { ok: true, exists: false } }
   },
 }

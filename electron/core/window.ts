@@ -8,7 +8,8 @@ import { app, BrowserWindow, screen } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setWindow, windowStateStore } from './state'
-import { registerWindow, unregisterWindow } from '../store/bridge'
+
+import { startWsBackend } from '../backend/ws/server'
 
 // Environment variables from Vite
 const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
@@ -177,10 +178,29 @@ function debouncedSaveWindowState(): void {
 /**
  * Create the main application window
  */
-export function createWindow(): BrowserWindow {
+export function createWindow(opts?: { offsetFromCurrent?: boolean }): BrowserWindow {
   console.time('[window] createWindow')
-  // Load saved window state
-  const windowState = loadWindowState()
+  // Determine initial window state
+  const useOffset = Boolean(opts?.offsetFromCurrent)
+  let windowState: WindowState
+  if (useOffset) {
+    // Fixed default size, offset from the currently focused (or first) window by ~100px
+    const base = getDefaultWindowState()
+    const anchor = BrowserWindow.getFocusedWindow() || getWindow()
+    let x = base.x
+    let y = base.y
+    try {
+      if (anchor) {
+        const ab = anchor.getBounds()
+        x = ab.x + 100
+        y = ab.y + 100
+      }
+    } catch {}
+    windowState = validateWindowState({ ...base, x, y, isMaximized: false })
+  } else {
+    // First/main window restores saved state (position/size or sensible centered default)
+    windowState = loadWindowState()
+  }
 
   const win = new BrowserWindow({
     icon: path.join(VITE_PUBLIC || '', 'hifide-logo.png'),
@@ -217,8 +237,7 @@ export function createWindow(): BrowserWindow {
       clearTimeout(saveWindowStateTimeout)
     }
     saveWindowState()
-    // Unregister from store bridge
-    unregisterWindow(win)
+
   })
 
   // Test active push message to Renderer-process
@@ -240,18 +259,46 @@ export function createWindow(): BrowserWindow {
   } catch {}
 
 
-  // Load URL
-  if (VITE_DEV_SERVER_URL) {
-    console.time('[window] loadURL(dev)')
-    win.loadURL(VITE_DEV_SERVER_URL)
-    console.timeEnd('[window] loadURL(dev)')
-    win.webContents.openDevTools({ mode: 'detach' })
-  } else {
-    console.time('[window] loadFile(prod)')
-    win.loadFile(path.join(DIRNAME, '../dist/index.html'))
-    console.timeEnd('[window] loadFile(prod)')
-    // DevTools disabled in production
-  }
+  // Start WS backend and wait for bootstrap, then load the renderer with query params
+  ;(async () => {
+    try {
+      const boot = await startWsBackend()
+      const wsUrl = boot.url
+      const wsToken = boot.token
+
+      // Load URL with query parameters for preload to consume
+      if (VITE_DEV_SERVER_URL) {
+        console.time('[window] loadURL(dev)')
+        try {
+          const devUrl = new URL(VITE_DEV_SERVER_URL)
+          devUrl.searchParams.set('wsUrl', wsUrl)
+          devUrl.searchParams.set('wsToken', wsToken)
+          devUrl.searchParams.set('windowId', String(win.id))
+          await win.loadURL(devUrl.toString())
+        } catch {
+          // Fallback if VITE_DEV_SERVER_URL is not a full URL
+          await win.loadURL(`${VITE_DEV_SERVER_URL}?wsUrl=${encodeURIComponent(wsUrl)}&wsToken=${encodeURIComponent(wsToken)}&windowId=${win.id}`)
+        }
+        console.timeEnd('[window] loadURL(dev)')
+        win.webContents.openDevTools({ mode: 'detach' })
+      } else {
+        console.time('[window] loadFile(prod)')
+        await win.loadFile(path.join(DIRNAME, '../dist/index.html'), {
+          query: { wsUrl, wsToken, windowId: String(win.id) }
+        } as any)
+        console.timeEnd('[window] loadFile(prod)')
+        // DevTools disabled in production
+      }
+    } catch (e) {
+      console.error('[window] failed to start WS backend', e)
+      // Fallback: load without ws params
+      if (VITE_DEV_SERVER_URL) {
+        await win.loadURL(VITE_DEV_SERVER_URL)
+      } else {
+        await win.loadFile(path.join(DIRNAME, '../dist/index.html'))
+      }
+    }
+  })()
 
   // Add F12 shortcut to toggle dev tools (dev only)
   if (!app.isPackaged) {
@@ -265,12 +312,9 @@ export function createWindow(): BrowserWindow {
   // Update global state
   setWindow(win)
 
-  // Register window with store bridge
-  console.time('[window] registerWindow')
-  registerWindow(win)
-  console.timeEnd('[window] registerWindow')
 
-  // Re-assert global error capture AFTER zubridge bridge subscribes windows.
+
+  // Re-assert global error capture at end of setup.
   // Some libraries set their own uncaughtException capture callbacks; we want
   // to ignore benign PTY teardown errors so the app doesn't crash on restart.
   try {

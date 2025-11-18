@@ -32,9 +32,9 @@ new code
     required: ['payload'],
     additionalProperties: false
   },
-  run: async ({ payload }: { payload: string }) => {
+  run: async ({ payload }: { payload: string }, meta?: any) => {
     try {
-      return await applyEditsPayload(String(payload || ''))
+      return await applyEditsPayload(String(payload || ''), meta?.workspaceId)
     } catch (e: any) {
       return { ok: false, applied: 0, results: [], error: e?.message || String(e) }
     }

@@ -63,14 +63,19 @@ export interface FlowAPI {
    */
   executionId: string
 
+  /**
+   * Optional workspace identifier (absolute path) that this flow is scoped to
+   */
+  workspaceId?: string
+
   // ===== Cancellation =====
-  
+
   /**
    * Abort signal for cancellation
    * Nodes can check signal.aborted or listen to 'abort' event
    */
   signal: AbortSignal
-  
+
   /**
    * Check if execution has been cancelled
    * Throws an error if cancelled

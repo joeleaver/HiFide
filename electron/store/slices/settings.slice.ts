@@ -1,15 +1,15 @@
 /**
  * Settings Slice
- * 
+ *
  * Manages application settings and configuration.
- * 
+ *
  * Responsibilities:
  * - API keys management (load, save, validate)
 
  * - Auto-enforce edits schema
  * - Pricing configuration
  * - Rate limit configuration
- * 
+ *
  * Dependencies:
  * - Provider slice (for provider validation updates)
  * - App slice (for startup message clearing)
@@ -81,7 +81,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
   pricingConfig: DEFAULT_PRICING,
   defaultPricingConfig: DEFAULT_PRICING,  // Immutable reference for UI comparison
 
-  // API Keys Actions - separate action for each provider (zubridge dispatch only supports single payload)
+  // API Keys Actions - separate action per provider for clarity; renderer calls these via JSON-RPC
   setOpenAiApiKey: (value: string) => {
     set((state) => ({
       settingsApiKeys: {
@@ -137,7 +137,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
     // This function is kept for compatibility but is a no-op
     // The actual loading happens in app.slice.ts initializeApp()
   },
-  
+
   saveSettingsApiKeys: async () => {
     // API keys are stored in settingsApiKeys state and automatically persisted
     // via the Zustand persist middleware to electron-store in the main process
@@ -175,107 +175,117 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
     try {
       const state = get()
       const keys = state.settingsApiKeys
-      const failures: string[] = []
 
-      // Validate OpenAI
-      if (keys.openai?.trim()) {
+      // Ensure validation cannot hang forever: add a soft timeout to each network call
+      const FETCH_TIMEOUT_MS = 7000
+      const fetchWithTimeout = async (url: string, options: any) => {
+        const f: any = (globalThis as any).fetch
+        if (!f) throw new Error('Fetch API unavailable')
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
         try {
-          const { default: OpenAI } = await import('openai')
-          const client = new OpenAI({ apiKey: keys.openai })
-          await client.models.list()
-        } catch (e: any) {
-          failures.push(`OpenAI: ${e?.message || String(e)}`)
+          return await f(url, { ...(options || {}), signal: controller.signal })
+        } finally {
+          clearTimeout(timer)
         }
       }
 
-      // Validate Anthropic
+      // Run all provider validations in parallel (much faster than sequential)
+      const checks: Array<Promise<string | null>> = []
+
+      if (keys.openai?.trim()) {
+        checks.push((async () => {
+          try {
+            const resp = await fetchWithTimeout('https://api.openai.com/v1/models', {
+              method: 'GET',
+              headers: { Authorization: `Bearer ${keys.openai}` },
+            })
+            if (!resp.ok) {
+              const txt = await resp.text().catch(() => '')
+              return `OpenAI: HTTP ${resp.status}: ${txt.slice(0, 100)}`
+            }
+          } catch (e: any) {
+            return `OpenAI: ${e?.message || String(e)}`
+          }
+          return null
+        })())
+      }
+
       if (keys.anthropic?.trim()) {
-        try {
-          // Use the free /v1/models endpoint instead of making a paid API call
-          const f: any = (globalThis as any).fetch
-          if (!f) {
-            failures.push('Anthropic: Fetch API unavailable')
-          } else {
-            const resp = await f('https://api.anthropic.com/v1/models', {
+        checks.push((async () => {
+          try {
+            const resp = await fetchWithTimeout('https://api.anthropic.com/v1/models', {
               method: 'GET',
               headers: {
                 'x-api-key': keys.anthropic,
-                'anthropic-version': '2023-06-01'
+                'anthropic-version': '2023-06-01',
               },
             })
-            if (resp.ok) {
-            } else {
+            if (!resp.ok) {
               const txt = await resp.text().catch(() => '')
-              failures.push(`Anthropic: HTTP ${resp.status}: ${txt.slice(0, 100)}`)
+              return `Anthropic: HTTP ${resp.status}: ${txt.slice(0, 100)}`
             }
+          } catch (e: any) {
+            return `Anthropic: ${e?.message || String(e)}`
           }
-        } catch (e: any) {
-          failures.push(`Anthropic: ${e?.message || String(e)}`)
-        }
+          return null
+        })())
       }
 
-      // Validate Gemini
       if (keys.gemini?.trim()) {
-        try {
-          const url = `https://generativelanguage.googleapis.com/v1/models?key=${encodeURIComponent(keys.gemini)}`
-          const f: any = (globalThis as any).fetch
-          if (!f) {
-            failures.push('Gemini: Fetch API unavailable')
-          } else {
-            const resp = await f(url, { method: 'GET' })
-            if (resp.ok) {
-            } else {
+        checks.push((async () => {
+          try {
+            const url = `https://generativelanguage.googleapis.com/v1/models?key=${encodeURIComponent(keys.gemini)}`
+            const resp = await fetchWithTimeout(url, { method: 'GET' })
+            if (!resp.ok) {
               const txt = await resp.text().catch(() => '')
-              failures.push(`Gemini: HTTP ${resp.status}: ${txt.slice(0, 100)}`)
+              return `Gemini: HTTP ${resp.status}: ${txt.slice(0, 100)}`
             }
+          } catch (e: any) {
+            return `Gemini: ${e?.message || String(e)}`
           }
-        } catch (e: any) {
-          failures.push(`Gemini: ${e?.message || String(e)}`)
-        }
+          return null
+        })())
       }
 
-      // Validate Fireworks
       if (keys.fireworks?.trim()) {
-        try {
-          const f: any = (globalThis as any).fetch
-          if (!f) {
-            failures.push('Fireworks: Fetch API unavailable')
-          } else {
-            const resp = await f('https://api.fireworks.ai/inference/v1/models', {
+        checks.push((async () => {
+          try {
+            const resp = await fetchWithTimeout('https://api.fireworks.ai/inference/v1/models', {
               method: 'GET',
               headers: { Authorization: `Bearer ${keys.fireworks}` },
             })
-            if (resp.ok) {
-            } else {
+            if (!resp.ok) {
               const txt = await resp.text().catch(() => '')
-              failures.push(`Fireworks: HTTP ${resp.status}: ${txt.slice(0, 100)}`)
+              return `Fireworks: HTTP ${resp.status}: ${txt.slice(0, 100)}`
             }
+          } catch (e: any) {
+            return `Fireworks: ${e?.message || String(e)}`
           }
-        } catch (e: any) {
-          failures.push(`Fireworks: ${e?.message || String(e)}`)
-        }
+          return null
+        })())
       }
 
-      // Validate xAI
       if ((keys as any).xai?.trim()) {
-        try {
-          const f: any = (globalThis as any).fetch
-          if (!f) {
-            failures.push('xAI: Fetch API unavailable')
-          } else {
-            const resp = await f('https://api.x.ai/v1/models', {
+        checks.push((async () => {
+          try {
+            const resp = await fetchWithTimeout('https://api.x.ai/v1/models', {
               method: 'GET',
               headers: { Authorization: `Bearer ${(keys as any).xai}` },
             })
             if (!resp.ok) {
               const txt = await resp.text().catch(() => '')
-              failures.push(`xAI: HTTP ${resp.status}: ${txt.slice(0, 100)}`)
+              return `xAI: HTTP ${resp.status}: ${txt.slice(0, 100)}`
             }
+          } catch (e: any) {
+            return `xAI: ${e?.message || String(e)}`
           }
-        } catch (e: any) {
-          failures.push(`xAI: ${e?.message || String(e)}`)
-        }
+          return null
+        })())
       }
+
+      const results = await Promise.all(checks)
+      const failures = results.filter((r): r is string => !!r)
 
       const result = failures.length > 0
         ? { ok: false, failures }
@@ -297,7 +307,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
         if (map.openai || map.anthropic || map.gemini || map.fireworks || map.xai) {
           anyState.setStartupMessage?.(null)
         }
-        // Fetch models for newly valid providers
+        // Fetch models for newly valid providers (non-blocking)
         void anyState.refreshAllModels?.()
       } catch {}
 
@@ -320,7 +330,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
   clearSettingsResults: () => {
     set({ settingsSaveResult: null, settingsValidateResult: null })
   },
-  
+
 
 
   // Pricing Actions
@@ -343,7 +353,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
   resetPricingToDefaults: () => {
     set({ pricingConfig: DEFAULT_PRICING })
   },
-  
+
   resetProviderPricing: (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai') => {
     set((state) => {
       const newConfig = {
@@ -367,7 +377,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
     })
 
   },
-  
+
   calculateCost: (provider: string, model: string, usage: TokenUsage): TokenCost | null => {
     const state = get()
     const config = state.pricingConfig[provider as keyof PricingConfig]

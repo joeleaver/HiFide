@@ -1,9 +1,10 @@
 import { Group, Stack, Text, ScrollArea, UnstyledButton } from '@mantine/core'
 import { IconFile, IconFolder, IconChevronRight, IconChevronDown } from '@tabler/icons-react'
 import Editor from '@monaco-editor/react'
-import { Profiler } from 'react'
-import { useAppStore, useDispatch, selectOpenedFile, selectWorkspaceRoot, selectExplorerOpenFolders, selectExplorerChildrenByDir, selectExplorerTerminalPanelOpen, selectExplorerTerminalPanelHeight } from '../store'
+import { Profiler, useEffect, useState } from 'react'
 import TerminalPanel from './TerminalPanel'
+import { getBackendClient } from '../lib/backend/bootstrap'
+import { useTerminalStore } from '../store/terminal'
 
 interface FileTreeItemProps {
   name: string
@@ -68,16 +69,73 @@ function FileTreeItem({ name, type, level, path, isOpen, onToggle, onFileClick }
 
 
 export default function ExplorerView() {
-  // Use selectors for better performance
-  const openedFile = useAppStore(selectOpenedFile)
-  const workspaceRoot = useAppStore(selectWorkspaceRoot)
-  const openFolders = useAppStore(selectExplorerOpenFolders)
-  const childrenByDir = useAppStore(selectExplorerChildrenByDir)
-  const explorerTerminalPanelOpen = useAppStore(selectExplorerTerminalPanelOpen)
-  const explorerTerminalPanelHeight = useAppStore(selectExplorerTerminalPanelHeight)
+  // Local explorer state (hydrated via WS RPC)
+  const [openedFile, setOpenedFile] = useState<any>(null)
+  const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(null)
+  const [openFolders, setOpenFolders] = useState<string[]>([])
+  const [childrenByDir, setChildrenByDir] = useState<Record<string, any[]>>({})
+  // Local explorer terminal tabs (hydrated via WS) for parity and potential fit logic
+  const [explorerTerminalTabs, setExplorerTerminalTabs] = useState<string[]>([])
+  const [explorerActiveTerminal, setExplorerActiveTerminal] = useState<string | null>(null)
 
-  // Use dispatch for actions
-  const dispatch = useDispatch()
+  useEffect(() => {
+    (async () => {
+      try {
+        const res: any = await getBackendClient()?.rpc('terminal.getTabs', {})
+        if (res?.ok) {
+          setExplorerTerminalTabs(Array.isArray(res.explorerTabs) ? res.explorerTabs : [])
+          setExplorerActiveTerminal(res.explorerActive || null)
+        }
+      } catch {}
+    })()
+  }, [])
+
+  // Subscribe to terminal tabs changes for this connection only
+  useEffect(() => {
+    const client = getBackendClient()
+    if (!client) return
+    const off = client.subscribe('terminal.tabs.changed', (p: any) => {
+      try {
+        setExplorerTerminalTabs(Array.isArray(p?.explorerTabs) ? p.explorerTabs : [])
+        setExplorerActiveTerminal(p?.explorerActive || null)
+      } catch {}
+    })
+    return () => { try { off?.() } catch {} }
+  }, [])
+
+  // Hydrate explorer state from backend snapshot
+  useEffect(() => {
+    const client = getBackendClient()
+    if (!client) return
+    ;(async () => {
+      try {
+        const res: any = await client.rpc('explorer.getState', {})
+        if (res?.ok) {
+          setWorkspaceRoot(res.workspaceRoot || null)
+          setOpenFolders(Array.isArray(res.openFolders) ? res.openFolders : [])
+          setChildrenByDir(res.childrenByDir || {})
+          setOpenedFile(res.openedFile || null)
+        }
+      } catch {}
+    })()
+  }, [])
+
+  // Fit active explorer terminal when it changes and panel is open
+  const fitTerminal = useTerminalStore((s) => s.fitTerminal)
+  const explorerOpen = useTerminalStore((s) => s.explorerTerminalPanelOpen)
+  useEffect(() => {
+    if (!explorerOpen) return
+    if (!explorerActiveTerminal) return
+    const id = requestAnimationFrame(() => fitTerminal(explorerActiveTerminal))
+    return () => cancelAnimationFrame(id)
+  }, [explorerActiveTerminal, explorerOpen, fitTerminal])
+  // When explorer tabs list changes, ensure each tab is fitted if panel is open
+  useEffect(() => {
+    if (!explorerOpen) return
+    if (!explorerTerminalTabs || explorerTerminalTabs.length === 0) return
+    const raf = requestAnimationFrame(() => explorerTerminalTabs.forEach((tid) => fitTerminal(tid)))
+    return () => cancelAnimationFrame(raf)
+  }, [explorerTerminalTabs, explorerOpen, fitTerminal])
 
   // Render a directory's entries recursively
   const renderDir = (dirPath: string, level: number) => {
@@ -92,7 +150,15 @@ export default function ExplorerView() {
               type="folder"
               level={level}
               isOpen={isOpen}
-              onToggle={() => dispatch('toggleExplorerFolder', entry.path)}
+              onToggle={async () => {
+                try {
+                  const res: any = await getBackendClient()?.rpc('explorer.toggleFolder', { path: entry.path })
+                  if (res?.ok) {
+                    setOpenFolders(Array.isArray(res.openFolders) ? res.openFolders : [])
+                    setChildrenByDir(res.childrenByDir || {})
+                  }
+                } catch {}
+              }}
             />
             {isOpen && <>{renderDir(entry.path, level + 1)}</>}
           </div>
@@ -114,7 +180,10 @@ export default function ExplorerView() {
 
 
   const handleFileClick = async (filePath: string, _fileName: string) => {
-    try { await dispatch('openFile', filePath) } catch {}
+    try {
+      const res: any = await getBackendClient()?.rpc('editor.openFile', { path: filePath })
+      if (res?.ok && res.openedFile) setOpenedFile(res.openedFile)
+    } catch {}
   }
 
   return (
@@ -169,7 +238,17 @@ export default function ExplorerView() {
                   type="folder"
                   level={0}
                   isOpen={openFolders.includes(workspaceRoot)}
-                  onToggle={() => dispatch('toggleExplorerFolder', workspaceRoot)}
+                  onToggle={async () => {
+                    const root = workspaceRoot
+                    if (!root) return
+                    try {
+                      const res: any = await getBackendClient()?.rpc('explorer.toggleFolder', { path: root })
+                      if (res?.ok) {
+                        setOpenFolders(Array.isArray(res.openFolders) ? res.openFolders : [])
+                        setChildrenByDir(res.childrenByDir || {})
+                      }
+                    } catch {}
+                  }}
                 />
                 {openFolders.includes(workspaceRoot) && (
                   <>
@@ -225,14 +304,7 @@ export default function ExplorerView() {
 
         {/* Monaco Editor + Terminal Panel (explorer context) */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
-          <div style={{
-            flex: 1,
-            overflow: 'hidden',
-            minHeight: 0,
-            height: explorerTerminalPanelOpen
-              ? `calc(100% - ${explorerTerminalPanelHeight}px)`
-              : 'calc(100% - 28px)'
-          }}>
+          <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
             <Editor
               height="100%"
               language={openedFile?.language || 'typescript'}

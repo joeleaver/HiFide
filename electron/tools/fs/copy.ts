@@ -1,5 +1,5 @@
 import type { AgentTool } from '../../providers/provider'
-import { resolveWithinWorkspace } from '../utils'
+import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot } from '../utils'
 import fs from 'node:fs/promises'
 
 export const copyTool: AgentTool = {
@@ -16,9 +16,9 @@ export const copyTool: AgentTool = {
     required: ['from', 'to'],
     additionalProperties: false,
   },
-  run: async ({ from, to, recursive = true, overwrite = true }: { from: string; to: string; recursive?: boolean; overwrite?: boolean }) => {
-    const src = resolveWithinWorkspace(from)
-    const dst = resolveWithinWorkspace(to)
+  run: async ({ from, to, recursive = true, overwrite = true }: { from: string; to: string; recursive?: boolean; overwrite?: boolean }, meta?: any) => {
+    const src = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, from) : resolveWithinWorkspace(from)
+    const dst = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, to) : resolveWithinWorkspace(to)
     // Prefer fs.cp if available (Node 16.7+)
     const anyFs: any = fs as any
     if (overwrite) {

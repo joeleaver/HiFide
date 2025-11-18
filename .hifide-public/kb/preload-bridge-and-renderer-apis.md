@@ -7,15 +7,16 @@ createdAt: 2025-11-03T21:29:20.236Z
 updatedAt: 2025-11-03T21:29:20.236Z
 ---
 
-## Zubridge setup
-- `electron/preload.ts` initializes `@zubridge/electron` handlers and exposes them as `window.zubridge`, enabling the renderer store (`src/store/index.ts`) to sync with the main-process Zustand store.
+## WebSocket JSON-RPC backend bootstrap
+- `electron/preload.ts` exposes a minimal `window.wsBackend.getBootstrap()` that provides the WS URL/token/windowId via query string. The renderer connects using `BackendClient` (src/lib/backend) and subscribes to notifications.
 
 ## Exposed preload APIs
-- **Menu & window controls:** `window.menu.popup/on` for custom menu surfaces; `window.windowControls` wraps minimize/maximize/close.
+- **Menu:** `window.menu.popup/on` for custom menu surfaces.
+- **Window controls (WS JSON-RPC, not preload):** use `window.minimize`, `window.toggleMaximize` (alias: `window.maximize`), and `window.close` via the backend WebSocket JSON‑RPC.
 - **App state:** `window.app.setView` keeps main-process menu state aligned with the active renderer view.
 - **Filesystem:** `window.fs` supports cwd discovery, directory watching, and file read helpers via IPC.
 - **Sessions & capabilities:** `window.sessions` CRUDs agent sessions; `window.capabilities.get` retrieves provider/tool capabilities.
-- **PTY/terminal:** `window.pty` covers creation, write/resize/dispose, agent execution hooks, and data/exit event subscriptions.
+- **Backend connection:** `window.wsBackend.getBootstrap()` only. Terminal, agent PTY, and other features are accessed via JSON-RPC methods (e.g., `terminal.*`, `agent-pty.*`) using the `BackendClient`.
 - **Agent metrics & TypeScript refactors:** `window.agent.onMetrics` streams live agent telemetry; `window.tsRefactor` exposes MVP codemod endpoints.
 
 ## Listener hygiene

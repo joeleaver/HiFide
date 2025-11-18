@@ -1,24 +1,23 @@
-import { z } from 'zod'
 import type { AgentTool } from '../../providers/provider'
-import type { KanbanTask } from '../../store'
-
-const statusEnum = z.enum(['backlog', 'todo', 'inProgress', 'done'])
-
-const inputSchema = z.object({
-  title: z.string().min(1, 'Task title is required'),
-  description: z.string().optional(),
-  status: statusEnum.default('backlog'),
-  epicId: z.string().min(1).optional().nullable(),
-  assignees: z.array(z.string().min(1)).optional(),
-  tags: z.array(z.string().min(1)).optional(),
-})
+import type { KanbanTask, KanbanStatus } from '../../store'
 
 export const kanbanCreateTaskTool: AgentTool = {
-  name: 'kanban:createTask',
+  name: 'kanbanCreateTask',
   description: 'Create a new task on the Kanban board.',
-  parameters: inputSchema,
-  async *run({ input }) {
-    const params = inputSchema.parse(input ?? {})
+  parameters: {
+    type: 'object',
+    properties: {
+      title: { type: 'string', minLength: 1, description: 'Task title' },
+      description: { type: 'string' },
+      status: { type: 'string', enum: ['backlog', 'todo', 'inProgress', 'done'], default: 'backlog' },
+      epicId: { type: 'string' },
+      assignees: { type: 'array', items: { type: 'string' } },
+      tags: { type: 'array', items: { type: 'string' } },
+    },
+    required: ['title'],
+    additionalProperties: false,
+  },
+  run: async (input: { title: string; description?: string; status?: KanbanStatus; epicId?: string | null; assignees?: string[]; tags?: string[] }) => {
     const { useMainStore } = await import('../../store')
     const state = useMainStore.getState() as any
 
@@ -27,24 +26,21 @@ export const kanbanCreateTaskTool: AgentTool = {
     }
 
     const task: KanbanTask | null = await state.kanbanCreateTask({
-      title: params.title,
-      status: params.status,
-      epicId: params.epicId ?? null,
-      description: params.description,
-      assignees: params.assignees,
-      tags: params.tags,
+      title: input.title,
+      status: input.status ?? 'backlog',
+      epicId: input.epicId ?? null,
+      description: input.description,
+      assignees: input.assignees,
+      tags: input.tags,
     })
 
     if (!task) {
       throw new Error('Failed to create task')
     }
 
-    yield {
-      type: 'object',
-      data: {
-        summary: `Created task "${task.title}" in ${task.status}.`,
-        task,
-      },
+    return {
+      summary: `Created task "${task.title}" in ${task.status}.`,
+      task,
     }
   },
 }

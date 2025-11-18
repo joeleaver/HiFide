@@ -1,6 +1,6 @@
-import { memo, useEffect } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { Group, Stack, Text, Table, Badge } from '@mantine/core'
-import { useAppStore, useDispatch } from '../store'
+import { getBackendClient } from '../lib/backend/bootstrap'
 
 export interface BadgeUsageBreakdownContentProps {
   badgeId: string
@@ -9,16 +9,16 @@ export interface BadgeUsageBreakdownContentProps {
 
 export const BadgeUsageBreakdownContent = memo(function BadgeUsageBreakdownContent({ badgeId, usageKey }: BadgeUsageBreakdownContentProps) {
   void badgeId
-  const dispatch = useDispatch()
+
+  const [breakdown, setBreakdown] = useState<any>(null)
 
   useEffect(() => {
-    const existing = (useAppStore as any).getState().feLoadedToolResults?.[usageKey]
-    if (existing === undefined) {
-      dispatch('loadToolResult', { key: usageKey })
-    }
+    const client = getBackendClient(); if (!client) return
+    client.rpc('tool.getResult', { key: usageKey }).then((res: any) => {
+      const data = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      setBreakdown(data)
+    }).catch(() => {})
   }, [usageKey])
-
-  const breakdown = useAppStore((s) => (s as any).feLoadedToolResults?.[usageKey] || null) as any
 
   if (!breakdown) {
     return <Text size="xs" c="dimmed">No usage data</Text>

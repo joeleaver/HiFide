@@ -1,5 +1,4 @@
 import { ipcRenderer, contextBridge } from 'electron'
-import { preloadBridge } from '@zubridge/electron/preload'
 import { EventEmitter as NodeEventEmitter } from 'events'
 
 // Raise listener limits to avoid noisy MaxListeners warnings during bursts of dispatches
@@ -7,9 +6,24 @@ try { NodeEventEmitter.defaultMaxListeners = 50 } catch {}
 try { (ipcRenderer as any)?.setMaxListeners?.(50) } catch {}
 
 
-// --------- Set up zubridge for state synchronization ---------
-const { handlers } = preloadBridge()
-contextBridge.exposeInMainWorld('zubridge', handlers)
+
+
+// --------- WS Backend bootstrap (query-string based) ---------
+contextBridge.exposeInMainWorld('wsBackend', {
+  getBootstrap: () => {
+    try {
+      const search = typeof location !== 'undefined' ? location.search : ''
+      const params = new URLSearchParams(search || '')
+      return {
+        url: params.get('wsUrl') || '',
+        token: params.get('wsToken') || '',
+        windowId: params.get('windowId') || ''
+      }
+    } catch {
+      return { url: '', token: '', windowId: '' }
+    }
+  }
+})
 
 
 
@@ -49,12 +63,6 @@ contextBridge.exposeInMainWorld('menu', {
   },
 })
 
-// Window controls API
-contextBridge.exposeInMainWorld('windowControls', {
-  minimize: () => ipcRenderer.invoke('window:minimize'),
-  maximize: () => ipcRenderer.invoke('window:maximize'),
-  close: () => ipcRenderer.invoke('window:close'),
-})
 
 // App API
 contextBridge.exposeInMainWorld('app', {
@@ -100,40 +108,7 @@ contextBridge.exposeInMainWorld('agent', {
   },
 })
 
-// PTY (embedded terminal) API
-contextBridge.exposeInMainWorld('pty', {
-  create: (opts?: { shell?: string; cwd?: string; cols?: number; rows?: number; env?: Record<string, string>; log?: boolean }) =>
-    ipcRenderer.invoke('pty:create', opts || {}),
-
-
-  write: (sessionId: string, data: string) =>
-    ipcRenderer.invoke('pty:write', { sessionId, data }),
-  resize: (sessionId: string, cols: number, rows: number) =>
-    ipcRenderer.invoke('pty:resize', { sessionId, cols, rows }),
-  dispose: (sessionId: string) =>
-    ipcRenderer.invoke('pty:dispose', { sessionId }),
-  // Agent-only execution path
-  execAgent: (sessionId: string, command: string) =>
-    ipcRenderer.invoke('pty:exec-agent', { sessionId, command }),
-	  attachAgent: (opts?: { requestId?: string; sessionId?: string; tailBytes?: number }) =>
-	    ipcRenderer.invoke('agent-pty:attach', opts || {}),
-	  detachAgent: (sessionId: string) =>
-	    ipcRenderer.invoke('agent-pty:detach', { sessionId }),
-	  killAgent: (requestId: string) =>
-	    ipcRenderer.invoke('agent-pty:kill', { requestId }),
-
-  onData: (listener: (payload: { sessionId: string; data: string }) => void) => {
-    const fn = (_: any, payload: any) => listener(payload)
-    ipcRenderer.on('pty:data', fn)
-    return () => ipcRenderer.off('pty:data', fn)
-  },
-  onExit: (listener: (payload: { sessionId: string; exitCode: number }) => void) => {
-    const fn = (_: any, payload: any) => listener(payload)
-    ipcRenderer.on('pty:exit', fn)
-    return () => ipcRenderer.off('pty:exit', fn)
-  },
-})
-
+// PTY API removed: terminal now uses JSON-RPC over WebSocket (see src/services/pty.ts)
 
 // TypeScript refactor API (MVP)
 contextBridge.exposeInMainWorld('tsRefactor', {
@@ -234,23 +209,5 @@ contextBridge.exposeInMainWorld('ratelimits', {
 })
 
 
-// Flows API (Flow definitions & execution)
-contextBridge.exposeInMainWorld('flows', {
-  list: () => ipcRenderer.invoke('flows:list'),
-  load: (flowIdOrPath: string) => ipcRenderer.invoke('flows:load', { idOrPath: flowIdOrPath }),
-  save: (flowId: string, def: any) => ipcRenderer.invoke('flows:save', { id: flowId, def }),
-  getTools: () => ipcRenderer.invoke('flows:getTools'),
-})
-// NOTE: Flow execution is now handled via store actions (flowInit, feStop, feResume)
-// No need for window.flowExec.run/stop/resume anymore - use dispatch() instead!
-
-// Flow events are still sent via IPC for real-time updates
-contextBridge.exposeInMainWorld('flowExec', {
-  onEvent: (listener: (ev: { requestId: string; type: string; nodeId?: string; data?: any; error?: string; prompt?: string }) => void) => {
-    const fn = (_: any, payload: any) => listener(payload)
-    ipcRenderer.on('flow:event', fn)
-    return () => ipcRenderer.off('flow:event', fn)
-  },
-})
 
 

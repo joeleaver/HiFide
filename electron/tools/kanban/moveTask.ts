@@ -1,20 +1,20 @@
-import { z } from 'zod'
 import type { AgentTool } from '../../providers/provider'
-
-const statusEnum = z.enum(['backlog', 'todo', 'inProgress', 'done'])
-
-const inputSchema = z.object({
-  taskId: z.string().min(1, 'taskId is required'),
-  status: statusEnum,
-  index: z.number().int().min(0).default(0),
-})
+import type { KanbanStatus } from '../../store'
 
 export const kanbanMoveTaskTool: AgentTool = {
-  name: 'kanban:moveTask',
+  name: 'kanbanMoveTask',
   description: 'Move a task to a different column and position on the Kanban board.',
-  parameters: inputSchema,
-  async *run({ input }) {
-    const params = inputSchema.parse(input ?? {})
+  parameters: {
+    type: 'object',
+    properties: {
+      taskId: { type: 'string', minLength: 1 },
+      status: { type: 'string', enum: ['backlog', 'todo', 'inProgress', 'done'] },
+      index: { type: 'integer', minimum: 0, default: 0 },
+    },
+    required: ['taskId', 'status'],
+    additionalProperties: false,
+  },
+  run: async (input: { taskId: string; status: KanbanStatus; index?: number }) => {
     const { useMainStore } = await import('../../store')
     const state = useMainStore.getState() as any
 
@@ -22,21 +22,21 @@ export const kanbanMoveTaskTool: AgentTool = {
       throw new Error('Kanban store is not initialized')
     }
 
+    const idx = typeof input.index === 'number' && input.index >= 0 ? input.index : 0
+
     const result = await state.kanbanMoveTask({
-      taskId: params.taskId,
-      toStatus: params.status,
-      toIndex: params.index,
+      taskId: input.taskId,
+      toStatus: input.status,
+      toIndex: idx,
     })
 
     if (!result?.ok) {
-      throw new Error(`Failed to move task ${params.taskId}`)
+      throw new Error(`Failed to move task ${input.taskId}`)
     }
 
-    yield {
-      type: 'object',
-      data: {
-        summary: `Moved task ${params.taskId} to ${params.status} at index ${params.index}.`,
-      },
+    return {
+      summary: `Moved task ${input.taskId} to ${input.status} at index ${idx}.`,
+      task: result.task || null,
     }
   },
 }

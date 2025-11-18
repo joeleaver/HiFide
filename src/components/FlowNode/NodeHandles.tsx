@@ -1,5 +1,5 @@
 import { Handle, Position } from 'reactflow'
-import { useAppStore } from '../../store'
+import { useFlowEditorLocal } from '../../store/flowEditorLocal'
 import { CONNECTION_COLORS } from '../../../shared/connection-colors'
 
 interface NodeHandlesProps {
@@ -20,9 +20,9 @@ export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
   const isIntentRouter = nodeType === 'intentRouter'
   const intentRoutes = isIntentRouter ? Object.keys(config?.routes || {}) : []
 
-  // Get flow graph for portal output dynamic handles
-  const feNodes = useAppStore((s) => s.feNodes)
-  const feEdges = useAppStore((s) => s.feEdges)
+  // Get flow graph for portal output dynamic handles (renderer-local)
+  const feNodes = useFlowEditorLocal((s) => s.nodes)
+  const feEdges = useFlowEditorLocal((s) => s.edges)
 
   // Define inputs and outputs based on node type
   const inputs: Array<{ id: string; label: string; color?: string }> = []

@@ -2,13 +2,13 @@
  * Main Process Zustand Store
  *
  * This is the single source of truth for application state.
- * The renderer process will sync with this store via @zubridge/electron.
+ * Renderer communicates with this store via JSON‑RPC over WebSocket.
  *
  * Architecture:
  * - Main process owns the store and can directly read/write
- * - Renderer process gets a synced copy via zubridge
- * - Actions from renderer are sent via IPC to main, which updates the store
- * - Store updates are automatically broadcast to all renderer windows
+ * - Renderer process does NOT hold a mirrored store
+ * - Renderer hydrates snapshots and receives notifications via JSON‑RPC
+ * - Renderer maintains small UI-only local stores; all domain mutations call RPCs
  */
 
 import { create } from 'zustand'
@@ -33,6 +33,8 @@ import { createKnowledgeBaseSlice, type KnowledgeBaseSlice } from './slices/know
 import { electronStorage } from './storage'
 
 import { getIndexer, getKbIndexer } from '../core/state'
+import * as agentPty from '../services/agentPty'
+
 
 // Combined store type
 export type AppStore = ViewSlice &
@@ -55,8 +57,8 @@ export type AppStore = ViewSlice &
 /**
  * Main process store - single source of truth
  *
- * This store is identical to the renderer store but lives in the main process.
- * The renderer will get a synced copy via zubridge.
+ * Domain state lives only in the main process. The renderer queries and mutates
+ * via JSON-RPC; there is no mirrored store in the renderer.
  *
  * Uses persist middleware with electron-store backend for Node.js-compatible persistence.
  */
@@ -136,51 +138,23 @@ export const useMainStore = create<AppStore>()(
         restartAgentTerminal: async (_params: { tabId: string }) => {
           // Get the current session ID to find the PTY
           const state = get() as any
-          const currentSessionId = state.currentId
+          const ws = state.workspaceRoot || null
+          const currentSessionId = (ws && typeof state.getCurrentIdFor === 'function')
+            ? state.getCurrentIdFor({ workspaceId: ws })
+            : null
 
           if (!currentSessionId) {
             console.error('[terminal] Cannot restart - no current session')
             return
           }
 
-          // Get the agent PTY globals (exposed by electron/ipc/pty.ts)
-          const agentPtyAssignments = (globalThis as any).__agentPtyAssignments as Map<string, string> | undefined
-          const agentPtySessions = (globalThis as any).__agentPtySessions as Map<string, any> | undefined
-
-          if (!agentPtyAssignments || !agentPtySessions) {
-            console.error('[terminal] Cannot restart - agent PTY globals not available')
-            return
-          }
-
           console.log('[terminal] Restarting agent PTY for session:', currentSessionId)
-          console.log('[terminal] Current assignments:', Array.from(agentPtyAssignments.entries()))
-          console.log('[terminal] Current PTY sessions:', Array.from(agentPtySessions.keys()))
-
-          // Get the PTY session ID for this request
-          const sessionId = agentPtyAssignments.get(currentSessionId)
-
-          if (sessionId) {
-            console.log('[terminal] Found PTY session:', sessionId)
-
-            // Kill the existing PTY
-            const session = agentPtySessions.get(sessionId)
-            if (session?.p) {
-              try {
-                // Remove the assignment BEFORE killing so a new PTY will be created on reconnect
-                agentPtyAssignments.delete(currentSessionId)
-
-                // Kill the PTY - this will trigger onExit which will notify the renderer
-                // and clean up the session
-                session.p.kill()
-
-                console.log('[terminal] Agent PTY killed, renderer will reconnect automatically')
-              } catch (e) {
-                console.error('[terminal] Failed to kill PTY:', e)
-              }
-            }
-          } else {
-            console.warn('[terminal] No PTY session found for session:', currentSessionId)
-            console.warn('[terminal] Available assignments:', Array.from(agentPtyAssignments.keys()))
+          try {
+            // Dispose existing PTY (if any). Renderer will reattach and backend will create if needed.
+            agentPty.dispose(currentSessionId)
+            console.log('[terminal] Agent PTY disposed; renderer will reattach and recreate as needed')
+          } catch (e) {
+            console.error('[terminal] Failed to dispose PTY:', e)
           }
         },
         clearAgentTerminals: async () => {
@@ -197,7 +171,10 @@ export const useMainStore = create<AppStore>()(
         },
         ensureSessionTerminal: async () => {
           const state = get() as any
-          const currentSessionId = state.currentId
+          const ws = state.workspaceRoot || null
+          const currentSessionId = (ws && typeof state.getCurrentIdFor === 'function')
+            ? state.getCurrentIdFor({ workspaceId: ws })
+            : null
 
           if (!currentSessionId) {
             console.warn('[terminal] ensureSessionTerminal: no current session')
@@ -270,9 +247,9 @@ export const useMainStore = create<AppStore>()(
         workspaceRoot: state.workspaceRoot,
         recentFolders: state.recentFolders,
 
-        // Sessions (list and current ID, but not runtime state)
-        sessions: state.sessions,
-        currentId: state.currentId,
+        // Sessions (persist workspace-scoped only)
+        sessionsByWorkspace: (state as any).sessionsByWorkspace,
+        currentIdByWorkspace: (state as any).currentIdByWorkspace,
 
         // Planning
         approvedPlan: state.approvedPlan,
@@ -358,17 +335,19 @@ export const initializeMainStore = async () => {
     // Initialize Flow Editor slice (loads templates, persistence)
     await store.initFlowEditor()
 
-    // Start index watchers (workspace + KB) - best effort
-    try { (await getIndexer()).startWatch() } catch {}
-    try { (await getKbIndexer()).startWatch() } catch {}
-    // Ensure KB index exists/ready at startup (non-blocking)
-    try {
-      const kb = await getKbIndexer()
-      const s = kb.status()
-      if (!s.inProgress && (!s.exists || !s.ready)) {
-        kb.rebuild(() => {}).catch(() => {})
-      }
-    } catch {}
+    // Start index watchers (workspace + KB) - best effort (only when a workspace is set)
+    if (useMainStore.getState().workspaceRoot) {
+      try { (await getIndexer()).startWatch() } catch {}
+      try { (await getKbIndexer()).startWatch() } catch {}
+      // Ensure KB index exists/ready at startup (non-blocking)
+      try {
+        const kb = await getKbIndexer()
+        const s = kb.status()
+        if (!s.inProgress && (!s.exists || !s.ready)) {
+          kb.rebuild(() => {}).catch(() => {})
+        }
+      } catch {}
+    }
 
   } catch (error) {
     console.error('[main-store] Failed to initialize:', error)

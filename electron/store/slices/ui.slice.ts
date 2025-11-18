@@ -117,7 +117,7 @@ export const createUiSlice: StateCreator<UiSlice> = (set) => ({
     })
   },
 
-  // Persist-only update (no zubridge broadcast)
+  // Persist-only update (renderer observes via explicit JSON-RPC notifications)
   persistWindowState: ({ updates }) => {
     try {
       const key = 'hifide-store'

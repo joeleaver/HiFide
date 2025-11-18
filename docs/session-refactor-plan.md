@@ -3,7 +3,7 @@
 ## Overview
 
 This document outlines the comprehensive refactor of the session/chat system to address the following issues:
-1. Chat history not being saved properly after zubridge migration
+1. Chat history not being saved properly after the JSONRPC migration
 2. Missing badge persistence (intent, tools, etc.)
 3. Lack of session metadata (context, provider/model, flow state)
 4. Inconsistent terminology (chat vs session)
@@ -19,7 +19,7 @@ This document outlines the comprehensive refactor of the session/chat system to 
 - ✅ Badges are displayed in UI (intent, tools, cache hits)
 
 ### What's Broken
-- ❌ **Session saving is broken**: Uses `window.sessions` which doesn't exist in zubridge architecture
+- ❌ **Session saving is broken**: Uses `window.sessions` which doesn't exist in the current JSONRPC architecture (no window APIs)
 - ❌ **Badges not persisted**: Intent and tool badges are only in `currentTurnToolCalls` state, not saved to disk
 - ❌ **No debouncing**: Every message triggers immediate save (excessive disk I/O)
 - ❌ **Missing metadata**: No tracking of current context, provider/model per message

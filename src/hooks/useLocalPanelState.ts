@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useDispatch } from '../store'
+import { getBackendClient } from '../lib/backend/bootstrap'
 
 /**
  * Hook for managing panel UI state locally with debounced persistence to the store.
@@ -16,7 +16,6 @@ export function useLocalPanelState<T>(
   persistAction: string,
   debounceMs: number = 500
 ): [T, (value: T) => void] {
-  const dispatch = useDispatch()
   const [localValue, setLocalValue] = useState<T>(initialValue)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -35,8 +34,11 @@ export function useLocalPanelState<T>(
     }
 
     // Set new timeout for persistence
-    timeoutRef.current = setTimeout(() => {
-      dispatch(persistAction, value)
+    timeoutRef.current = setTimeout(async () => {
+      try {
+        const client = getBackendClient(); if (!client) return
+        await client.rpc('ui.updateWindowState', { updates: { [persistAction]: value } })
+      } catch {}
     }, debounceMs)
   }
 

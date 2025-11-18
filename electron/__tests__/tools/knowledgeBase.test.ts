@@ -3,6 +3,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { knowledgeBaseStoreTool } from '../../tools/kb/store'
 import { knowledgeBaseSearchTool } from '../../tools/kb/search'
+import { knowledgeBaseDeleteTool } from '../../tools/kb/delete'
+
 import { readById } from '../../store/utils/knowledgeBase'
 
 describe('Knowledge Base tools', () => {
@@ -70,6 +72,16 @@ describe('Knowledge Base tools', () => {
     expect(Array.isArray((found!.meta as any).files)).toBe(true)
     expect((found!.meta as any).files).toEqual(expect.arrayContaining(['src/systems/economy.ts', 'docs/design/economy.md']))
   })
+  it('deletes entries', async () => {
+    const createRes: any = await knowledgeBaseStoreTool.run({ title: 'To Delete', description: 'Temp body' })
+    expect(createRes.ok).toBe(true)
+    const id = createRes?.data?.id
+    const delRes: any = await knowledgeBaseDeleteTool.run({ id })
+    expect(delRes.ok).toBe(true)
+    const found = await readById(process.env.HIFIDE_WORKSPACE_ROOT || '', id)
+    expect(found).toBeNull()
+  })
+
 
 
 })

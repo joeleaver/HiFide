@@ -1,5 +1,8 @@
 import type { AgentTool } from '../../providers/provider'
 import { sanitizeTerminalOutput, redactOutput } from '../utils'
+import { useMainStore } from '../../store/index'
+import * as agentPty from '../../services/agentPty'
+
 
 export const sessionSearchOutputTool: AgentTool = {
   name: 'terminalSessionSearchOutput',
@@ -17,21 +20,19 @@ export const sessionSearchOutputTool: AgentTool = {
   },
   run: async (
     args: { query: string; caseSensitive?: boolean; in?: 'commands'|'live'|'all'; maxResults?: number },
-    meta?: { requestId?: string }
+    _meta?: { requestId?: string }
   ) => {
-    const req = meta?.requestId
-    if (!req) {
-      console.error('[terminal.session_search_output] No requestId provided in meta')
-      return { ok: false, error: 'no-request-id' }
+    const stAny: any = useMainStore.getState()
+    const ws = stAny.workspaceRoot || null
+    const sessionId = (ws && typeof stAny.getCurrentIdFor === 'function') ? stAny.getCurrentIdFor({ workspaceId: ws }) : null
+    if (!sessionId) {
+      console.error('[terminal.session_search_output] No active sessionId')
+      return { ok: false, error: 'no-session' }
     }
-    console.log('[terminal.session_search_output] Called with:', { requestId: req, query: args.query, meta })
 
-    const sid = (globalThis as any).__agentPtyAssignments.get(req)
-    console.log('[terminal.session_search_output] Session ID from assignment:', sid)
-
-    const rec = sid ? (globalThis as any).__agentPtySessions.get(sid) : undefined
-    if (!sid || !rec) {
-      console.error('[terminal.session_search_output] No session found:', { requestId: req, sessionId: sid, hasRecord: !!rec })
+    const rec = agentPty.getSessionRecord(sessionId)
+    if (!rec) {
+      console.error('[terminal.session_search_output] No session found:', { sessionId })
       return { ok: false, error: 'no-session' }
     }
     const st = rec.state
@@ -63,8 +64,8 @@ export const sessionSearchOutputTool: AgentTool = {
     if (where === 'all' || where === 'live') {
       findIn(st.ring, { type: 'live' })
     }
-    console.log('[terminal.session_search_output] Returning results:', { sessionId: sid, hitCount: results.length })
-    return { ok: true, sessionId: sid, hits: results }
+    console.log('[terminal.session_search_output] Returning results:', { sessionId, hitCount: results.length })
+    return { ok: true, sessionId, hits: results }
   }
 }
 

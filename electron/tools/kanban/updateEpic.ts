@@ -1,20 +1,21 @@
-import { z } from 'zod'
 import type { AgentTool } from '../../providers/provider'
 import type { KanbanEpic } from '../../store'
 
-const inputSchema = z.object({
-  epicId: z.string().min(1, 'epicId is required'),
-  name: z.string().min(1).optional(),
-  color: z.string().optional(),
-  description: z.string().optional().nullable(),
-})
-
 export const kanbanUpdateEpicTool: AgentTool = {
-  name: 'kanban:updateEpic',
+  name: 'kanbanUpdateEpic',
   description: 'Update an existing epic on the Kanban board.',
-  parameters: inputSchema,
-  async *run({ input }) {
-    const params = inputSchema.parse(input ?? {})
+  parameters: {
+    type: 'object',
+    properties: {
+      epicId: { type: 'string', minLength: 1 },
+      name: { type: 'string', minLength: 1 },
+      color: { type: 'string' },
+      description: { type: 'string' },
+    },
+    required: ['epicId'],
+    additionalProperties: false,
+  },
+  run: async (input: { epicId: string; name?: string; color?: string; description?: string | null }) => {
     const { useMainStore } = await import('../../store')
     const state = useMainStore.getState() as any
 
@@ -23,21 +24,18 @@ export const kanbanUpdateEpicTool: AgentTool = {
     }
 
     const patch: Partial<KanbanEpic> = {}
-    if (params.name !== undefined) patch.name = params.name
-    if (params.color !== undefined) patch.color = params.color
-    if (params.description !== undefined) patch.description = params.description ?? undefined
+    if (input.name !== undefined) patch.name = input.name
+    if (input.color !== undefined) patch.color = input.color
+    if (input.description !== undefined) patch.description = input.description ?? undefined
 
-    const epic: KanbanEpic | null = await state.kanbanUpdateEpic(params.epicId, patch)
+    const epic: KanbanEpic | null = await state.kanbanUpdateEpic(input.epicId, patch)
     if (!epic) {
-      throw new Error(`Failed to update epic ${params.epicId}`)
+      throw new Error(`Failed to update epic ${input.epicId}`)
     }
 
-    yield {
-      type: 'object',
-      data: {
-        summary: `Updated epic "${epic.name}".`,
-        epic,
-      },
+    return {
+      summary: `Updated epic "${epic.name}".`,
+      epic,
     }
   },
 }

@@ -637,3 +637,75 @@
 
 /* Ensure nested spans do not reintroduce light backgrounds inside code */
 [data-theme='dark'] .mdxeditor-root code * { background: transparent !important; }
+
+
+/* Compact toolbar variant for SessionInput */
+[data-theme='dark'] .kb-mde-toolbar-compact {
+  padding: 2px 4px !important;
+  gap: 4px !important;
+  min-height: 28px !important;
+}
+[data-theme='dark'] .kb-mde-toolbar-compact button,
+[data-theme='dark'] .kb-mde-toolbar-compact [role='combobox'] {
+  width: 24px !important;
+  height: 24px !important;
+  padding: 0 4px !important;
+}
+[data-theme='dark'] .kb-mde-toolbar-compact svg {
+  width: 14px !important;
+  height: 14px !important;
+}
+
+
+/* SessionInput: make editor box obvious and ensure caret shows immediately */
+[data-theme='dark'] .kb-mdx-root {
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  background: #1e1e1e;
+}
+[data-theme='dark'] .kb-mdx-root:focus-within {
+  border-color: #5a9cf0;
+  box-shadow: 0 0 0 2px rgba(90,156,240,0.2);
+}
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content {
+  min-height: 56px;
+  padding: 8px 10px;
+  cursor: text;
+}
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content p:first-child {
+  margin-top: 0;
+}
+/* Force caret color in our SessionInput instance */
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content,
+[data-theme='dark'] .kb-mdx-root .kb-mdx-content * {
+  caret-color: #e6e6e6 !important;
+}
+
+/* SessionInput placeholder overlay (shows even with NBSP sentinel) */
+[data-theme='dark'] .kb-mdx-root.is-empty .kb-mdx-content {
+  position: relative;
+}
+[data-theme='dark'] .kb-mdx-root.is-empty .kb-mdx-content::before {
+  content: var(--kb-placeholder, "Ask your agent... (Ctrl+Enter to send)");
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  color: var(--kb-muted);
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+
+
+/* Hide MDXEditor built-in placeholder for SessionInput instance */
+[data-theme='dark'] .kb-session-input [data-placeholder],
+[data-theme='dark'] .kb-session-input [data-placeholder]::before,
+[data-theme='dark'] .kb-session-input [data-placeholder]::after {
+  display: none !important;
+  content: none !important;
+}
+
+/* Hide MDXEditor sibling placeholder element (class contains 'placeholder') */
+[data-theme='dark'] .kb-session-input .mdxeditor-root-contenteditable [class*='placeholder'] {
+  display: none !important;
+}

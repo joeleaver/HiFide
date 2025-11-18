@@ -1,6 +1,6 @@
-import { memo, useEffect } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { Stack, Text, Group, Badge as MantineBadge, Divider } from '@mantine/core'
-import { useDispatch, useAppStore } from '../store'
+import { getBackendClient } from '../lib/backend/bootstrap'
 
 interface BadgeAgentAssessTaskContentProps {
   badgeId: string
@@ -12,17 +12,16 @@ export const BadgeAgentAssessTaskContent = memo(function BadgeAgentAssessTaskCon
   assessKey
 }: BadgeAgentAssessTaskContentProps) {
   void badgeId
-  const dispatch = useDispatch()
+
+  const [data, setData] = useState<any>(null)
 
   useEffect(() => {
-    const existing = (useAppStore as any).getState().feLoadedToolResults?.[assessKey]
-    if (existing === undefined) {
-      dispatch('loadToolResult', { key: assessKey })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const client = getBackendClient(); if (!client) return
+    client.rpc('tool.getResult', { key: assessKey }).then((res: any) => {
+      const val = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      setData(val)
+    }).catch(() => {})
   }, [assessKey])
-
-  const data = useAppStore((s) => (s as any).feLoadedToolResults?.[assessKey] || null) as any
 
   if (!data) {
     return <Text size="xs" c="dimmed">No assessment data</Text>

@@ -1,5 +1,5 @@
 import { Text, Select, Checkbox, NumberInput } from '@mantine/core'
-import { useAppStore } from '../../store'
+import { useFlowEditorLocal } from '../../store/flowEditorLocal'
 import { useMemo } from 'react'
 
 interface InjectMessagesConfigProps {
@@ -10,8 +10,8 @@ interface InjectMessagesConfigProps {
 
 export default function InjectMessagesConfig({ nodeId, config, onConfigChange }: InjectMessagesConfigProps) {
   // Get edges to check if handles are connected
-  const feEdges = useAppStore((s) => s.feEdges)
-  
+  const feEdges = useFlowEditorLocal((s) => s.edges)
+
   // Check if userMessage or assistantMessage handles are connected
   const isUserMessageConnected = useMemo(() => {
     return feEdges.some((e: any) => e.target === nodeId && e.targetHandle === 'userMessage')

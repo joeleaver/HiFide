@@ -143,8 +143,12 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         if (!sid) {
           // Use workspace root as cwd if available
           try {
-            const { useAppStore } = await import('../store')
-            const cwd = useAppStore.getState().workspaceRoot || undefined
+            const { getBackendClient } = await import('../lib/backend/bootstrap')
+            const cli = getBackendClient()
+            let cwd: string | undefined = undefined
+            if (cli) {
+              try { const w: any = await cli.rpc('workspace.get', {}); cwd = w?.root || undefined } catch {}
+            }
             const res = await ptySvc.create({ cols: cols || 80, rows: rows || 24, cwd })
             if (!res || !res.sessionId) throw new Error('Failed to create PTY')
             sid = res.sessionId

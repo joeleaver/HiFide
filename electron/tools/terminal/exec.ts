@@ -1,9 +1,8 @@
 import type { AgentTool } from '../../providers/provider'
-import { getWebContents } from '../../core/state'
-
 import { useMainStore } from '../../store/index'
 import path from 'node:path'
 import { sanitizeTerminalOutput, redactOutput } from '../utils'
+import * as agentPty from '../../services/agentPty'
 
 export const terminalExecTool: AgentTool = {
   name: 'terminalExec',
@@ -22,41 +21,37 @@ export const terminalExecTool: AgentTool = {
   },
   run: async (
     args: { command: string; cwd?: string; timeoutMs?: number; idleMs?: number; tailBytes?: number },
-    meta?: { requestId?: string }
+    meta?: { requestId?: string; [key: string]: any }
   ) => {
-    const req = meta?.requestId
-    if (!req) {
-      console.error('[terminal.exec] No requestId provided in meta')
-      return { ok: false, error: 'no-request-id' }
+    // Always use the current session ID for the agent PTY (one terminal per session)
+    const stAny: any = useMainStore.getState()
+    const ws = stAny.workspaceRoot || null
+    const sessionId = (ws && typeof stAny.getCurrentIdFor === 'function') ? stAny.getCurrentIdFor({ workspaceId: ws }) : null
+    if (!sessionId) {
+      console.error('[terminal.exec] No active sessionId')
+      return { ok: false, error: 'no-session' }
     }
-    console.log('[terminal.exec] Called with:', { command: args.command, requestId: req, meta })
+    const req = meta?.requestId
+    console.log('[terminal.exec] Called with:', { command: args.command, requestId: req, sessionId })
 
     // Get or create session with optional cwd
-    const root = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
+    const root = path.resolve((meta as any)?.workspaceId || useMainStore.getState().workspaceRoot || process.cwd())
     const desiredCwd = args.cwd ? (path.isAbsolute(args.cwd) ? args.cwd : path.join(root, args.cwd)) : undefined
-    console.log('[terminal.exec] Getting or creating PTY session:', { requestId: req, desiredCwd })
+    console.log('[terminal.exec] Getting or creating PTY session:', { sessionId, desiredCwd })
 
-    const sid = await (globalThis as any).__getOrCreateAgentPtyFor(req, desiredCwd ? { cwd: desiredCwd } : undefined)
+    const sid = await agentPty.getOrCreateAgentPtyFor(sessionId, desiredCwd ? { cwd: desiredCwd } : undefined)
     console.log('[terminal.exec] Got session ID:', sid)
 
-    const rec = (globalThis as any).__agentPtySessions.get(sid)
+    const rec = agentPty.getSessionRecord(sid)
     if (!rec) {
       console.error('[terminal.exec] No session record found for sessionId:', sid)
       return { ok: false, error: 'no-session' }
     }
     console.log('[terminal.exec] Got session record:', { sessionId: sid, shell: rec.shell, cwd: rec.cwd })
 
-    // Ensure the calling window is attached so output streams to the visible terminal
-    try {
-      const wc = getWebContents()
-      if (wc) rec.attachedWcIds.add(wc.id)
-    } catch {}
-
-
-
     // Execute command
     console.log('[terminal.exec] Executing command:', args.command)
-    await (globalThis as any).__beginAgentCommand(rec.state, args.command)
+    await agentPty.beginCommand(rec.state, args.command)
     try {
       // On Windows/PSReadLine, wrap the command in Bracketed Paste markers to
       // ensure the entire command is processed atomically and avoid falling into
@@ -78,7 +73,7 @@ export const terminalExecTool: AgentTool = {
       // Other shells also support it, but we keep scope conservative to avoid echoing
       // the markers on exotic shells that might not have it enabled.
       const payload = isWin ? (BP_START + cmd + BP_END + ENTER) : (cmd + ENTER)
-      rec.p.write(payload)
+      agentPty.write(sid, payload)
       console.log('[terminal.exec] Command written to PTY')
 
       // Heuristic: if PSReadLine falls into continuation prompt (" >> ")
@@ -89,7 +84,7 @@ export const terminalExecTool: AgentTool = {
           const tail = String(rec.state.ring).slice(-200)
           if (/\n>> $/.test(tail) && !/\nPS [^\n]*> $/.test(tail)) {
             console.log('[terminal.exec] Detected continuation prompt, sending Ctrl+C to recover')
-            rec.p.write('\x03') // Ctrl+C
+            agentPty.write(sid, '\x03') // Ctrl+C
           }
         } catch {}
       }

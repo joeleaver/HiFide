@@ -14,8 +14,8 @@ export const knowledgeBaseSearchTool: AgentTool = {
       limit: { type: 'number', description: 'Maximum number of results to return (default 50).' }
     },
   },
-  run: async (input: any) => {
-    const baseDir = useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+  run: async (input: any, meta?: any) => {
+    const baseDir = meta?.workspaceId || useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
     const query = typeof input?.query === 'string' ? input.query : ''
     const tags: string[] = Array.isArray(input?.tags) ? (input.tags as any[]).map((t) => String(t)) : []
     const limit = typeof input?.limit === 'number' ? input.limit : 50

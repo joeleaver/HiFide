@@ -54,7 +54,7 @@ export const LS_KEYS = {
 
 export const DEFAULTS = {
   // View
-  CURRENT_VIEW: 'agent' as const,
+  CURRENT_VIEW: 'flow' as const,
 
   // UI State
   AGENT_MODE: 'chat' as const,

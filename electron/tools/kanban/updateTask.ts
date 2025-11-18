@@ -1,25 +1,24 @@
-import { z } from 'zod'
 import type { AgentTool } from '../../providers/provider'
 import type { KanbanTask, KanbanStatus } from '../../store'
 
-const statusEnum = z.enum(['backlog', 'todo', 'inProgress', 'done'])
-
-const inputSchema = z.object({
-  taskId: z.string().min(1, 'taskId is required'),
-  title: z.string().min(1).optional(),
-  description: z.string().optional(),
-  status: statusEnum.optional(),
-  epicId: z.string().min(1).optional().nullable(),
-  assignees: z.array(z.string().min(1)).optional(),
-  tags: z.array(z.string().min(1)).optional(),
-})
-
 export const kanbanUpdateTaskTool: AgentTool = {
-  name: 'kanban:updateTask',
+  name: 'kanbanUpdateTask',
   description: 'Update a task on the Kanban board.',
-  parameters: inputSchema,
-  async *run({ input }) {
-    const params = inputSchema.parse(input ?? {})
+  parameters: {
+    type: 'object',
+    properties: {
+      taskId: { type: 'string', minLength: 1 },
+      title: { type: 'string', minLength: 1 },
+      description: { type: 'string' },
+      status: { type: 'string', enum: ['backlog', 'todo', 'inProgress', 'done'] },
+      epicId: { type: 'string' },
+      assignees: { type: 'array', items: { type: 'string' } },
+      tags: { type: 'array', items: { type: 'string' } },
+    },
+    required: ['taskId'],
+    additionalProperties: false,
+  },
+  run: async (input: { taskId: string; title?: string; description?: string; status?: KanbanStatus; epicId?: string | null; assignees?: string[]; tags?: string[] }) => {
     const { useMainStore } = await import('../../store')
     const state = useMainStore.getState() as any
 
@@ -28,24 +27,21 @@ export const kanbanUpdateTaskTool: AgentTool = {
     }
 
     const patch: Partial<KanbanTask> & { status?: KanbanStatus } = {}
-    if (params.title !== undefined) patch.title = params.title
-    if (params.description !== undefined) patch.description = params.description
-    if (params.status !== undefined) patch.status = params.status
-    if (params.epicId !== undefined) patch.epicId = params.epicId ?? null
-    if (params.assignees !== undefined) patch.assignees = params.assignees
-    if (params.tags !== undefined) patch.tags = params.tags
+    if (input.title !== undefined) patch.title = input.title
+    if (input.description !== undefined) patch.description = input.description
+    if (input.status !== undefined) patch.status = input.status
+    if (input.epicId !== undefined) patch.epicId = input.epicId ?? null
+    if (input.assignees !== undefined) patch.assignees = input.assignees
+    if (input.tags !== undefined) patch.tags = input.tags
 
-    const updated: KanbanTask | null = await state.kanbanUpdateTask(params.taskId, patch)
+    const updated: KanbanTask | null = await state.kanbanUpdateTask(input.taskId, patch)
     if (!updated) {
-      throw new Error(`Failed to update task ${params.taskId}`)
+      throw new Error(`Failed to update task ${input.taskId}`)
     }
 
-    yield {
-      type: 'object',
-      data: {
-        summary: `Updated task "${updated.title}" (${updated.status}).`,
-        task: updated,
-      },
+    return {
+      summary: `Updated task "${updated.title}" (${updated.status}).`,
+      task: updated,
     }
   },
 }

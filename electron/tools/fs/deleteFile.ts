@@ -1,5 +1,5 @@
 import type { AgentTool } from '../../providers/provider'
-import { resolveWithinWorkspace } from '../utils'
+import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot } from '../utils'
 import fs from 'node:fs/promises'
 
 export const deleteFileTool: AgentTool = {
@@ -14,7 +14,7 @@ export const deleteFileTool: AgentTool = {
     required: ['path'],
     additionalProperties: false,
   },
-  run: async (input: any) => {
+  run: async (input: any, meta?: any) => {
     const rel = input?.path
     const force: boolean = typeof input?.force === 'boolean' ? input.force : true
 
@@ -22,7 +22,7 @@ export const deleteFileTool: AgentTool = {
       throw new Error('fsDeleteFile: missing required parameter "path" (workspace-relative file path)')
     }
 
-    const abs = resolveWithinWorkspace(rel)
+    const abs = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, rel) : resolveWithinWorkspace(rel)
     try {
       await fs.unlink(abs)
     } catch (e: any) {

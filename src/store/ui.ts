@@ -8,13 +8,15 @@
  * - Drag states
  * - Other ephemeral UI state
  *
- * This is separate from the main zubridge store because:
- * 1. This state is renderer-only (doesn't need to sync to main)
+ * This lives outside the main (backend) store because:
+ * 1. This state is renderer-only (doesn't need to sync to backend)
  * 2. This state is transient (doesn't need persistence)
- * 3. This state changes frequently during interactions (would spam IPC if in main store)
+ * 3. This state changes frequently during interactions (keeps JSON-RPC chatter minimal)
  */
 
 import { create } from 'zustand'
+
+type ViewType = 'welcome' | 'flow' | 'explorer' | 'sourceControl' | 'knowledgeBase' | 'kanban' | 'settings'
 
 interface UiStore {
   // Panel Resize State
@@ -22,6 +24,9 @@ interface UiStore {
   metaPanelWidth: number
   isDraggingSessionPanel: boolean
   isDraggingMetaPanel: boolean
+
+  // App-level current view (renderer-only mirror of backend)
+  currentView: ViewType
 
   // Scroll State
   shouldAutoScroll: boolean
@@ -31,7 +36,6 @@ interface UiStore {
 
   // Collapsible Panel States (renderer store; persisted to main debounced)
   metaPanelOpen: boolean
-  flowCanvasCollapsed: boolean
   debugPanelCollapsed: boolean
   debugPanelHeight: number
   debugPanelUserScrolledUp: boolean
@@ -40,6 +44,8 @@ interface UiStore {
   tokensCostsCollapsed: boolean
   tokensCostsHeight: number
   rightPaneCollapsed: boolean
+  mainCollapsed: boolean
+
 
   // Flow Editor: New Flow Modal (renderer-only)
   newFlowModalOpen: boolean
@@ -51,16 +57,18 @@ interface UiStore {
   setMetaPanelWidth: (width: number) => void
   setIsDraggingSessionPanel: (dragging: boolean) => void
   setIsDraggingMetaPanel: (dragging: boolean) => void
+  setCurrentViewLocal: (view: ViewType) => void
   setShouldAutoScroll: (should: boolean) => void
   setSessionInputValue: (value: string) => void
   setMetaPanelOpen: (open: boolean) => void
-  setFlowCanvasCollapsed: (collapsed: boolean) => void
   setDebugPanelCollapsed: (collapsed: boolean) => void
   setDebugPanelHeight: (height: number) => void
   setDebugPanelUserScrolledUp: (scrolledUp: boolean) => void
   setContextInspectorCollapsed: (collapsed: boolean) => void
   setContextInspectorHeight: (height: number) => void
   setTokensCostsCollapsed: (collapsed: boolean) => void
+  setMainCollapsed: (collapsed: boolean) => void
+
   setTokensCostsHeight: (height: number) => void
   setRightPaneCollapsed: (collapsed: boolean) => void
 
@@ -97,16 +105,19 @@ interface UiStore {
 export const useUiStore = create<UiStore>((set) => ({
   // State - initialized with defaults, will be synced from main store on mount
   sessionPanelWidth: 300,
+  mainCollapsed: false,
+
   metaPanelWidth: 300,
   isDraggingSessionPanel: false,
   isDraggingMetaPanel: false,
   rightPaneCollapsed: false,
+  // App-level view defaults to 'welcome' until hydrated from backend or workspace binds
+  currentView: 'welcome',
   shouldAutoScroll: true,
   sessionInputValue: '',
 
   // Collapsible panel states - defaults, will be synced from main store
   metaPanelOpen: false,
-  flowCanvasCollapsed: false,
   debugPanelCollapsed: false,
   debugPanelHeight: 300,
   debugPanelUserScrolledUp: false,
@@ -137,10 +148,10 @@ export const useUiStore = create<UiStore>((set) => ({
   setMetaPanelWidth: (width) => set({ metaPanelWidth: width }),
   setIsDraggingSessionPanel: (dragging) => set({ isDraggingSessionPanel: dragging }),
   setIsDraggingMetaPanel: (dragging) => set({ isDraggingMetaPanel: dragging }),
+  setCurrentViewLocal: (view) => set({ currentView: view }),
   setShouldAutoScroll: (should) => set({ shouldAutoScroll: should }),
   setSessionInputValue: (value) => set({ sessionInputValue: value }),
   setMetaPanelOpen: (open) => set({ metaPanelOpen: open }),
-  setFlowCanvasCollapsed: (collapsed) => set({ flowCanvasCollapsed: collapsed }),
   // Diff actions
   openDiffPreview: (data) => set({ diffPreviewData: data, diffPreviewOpen: true }),
   closeDiffPreview: () => set({ diffPreviewOpen: false, diffPreviewData: null }),
@@ -161,6 +172,8 @@ export const useUiStore = create<UiStore>((set) => ({
 
   setDebugPanelCollapsed: (collapsed) => set({ debugPanelCollapsed: collapsed }),
   setDebugPanelHeight: (height) => set({ debugPanelHeight: height }),
+  setMainCollapsed: (collapsed) => set({ mainCollapsed: collapsed }),
+
   setDebugPanelUserScrolledUp: (scrolledUp) => set({ debugPanelUserScrolledUp: scrolledUp }),
   setContextInspectorCollapsed: (collapsed) => set({ contextInspectorCollapsed: collapsed }),
   setContextInspectorHeight: (height) => set({ contextInspectorHeight: height }),

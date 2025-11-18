@@ -1,5 +1,5 @@
 import type { AgentTool } from '../../providers/provider'
-import { resolveWithinWorkspace, atomicWrite } from '../utils'
+import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot, atomicWrite } from '../utils'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -331,7 +331,7 @@ export const applyPatchTool: AgentTool = {
     },
     required: ['patch']
   },
-  run: async (args: { patch: string; strip?: number; dryRun?: boolean }) => {
+  run: async (args: { patch: string; strip?: number; dryRun?: boolean }, meta?: any) => {
     try {
       const raw = String(args?.patch || '')
       const payload = extractPatchPayload(raw)
@@ -353,7 +353,7 @@ export const applyPatchTool: AgentTool = {
           const parts = relPath.split('/')
           if (parts.length > stripN) relPath = parts.slice(stripN).join('/')
         }
-        const wsAbs = resolveWithinWorkspace(relPath)
+        const wsAbs = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, relPath) : resolveWithinWorkspace(relPath)
 
         let before = ''
         let exists = true

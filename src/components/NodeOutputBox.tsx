@@ -7,7 +7,7 @@
 
 import { Stack, Text, Group } from '@mantine/core'
 import type { ReactNode } from 'react'
-import type { TokenCost } from '../store'
+import type { TokenCost } from '../../electron/store/types'
 import { getNodeColor, formatNodeTitle } from '../../shared/node-colors'
 
 interface NodeOutputBoxProps {

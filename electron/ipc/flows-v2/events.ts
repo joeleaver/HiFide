@@ -4,7 +4,7 @@
 
 import { EventEmitter } from 'events'
 
-export type FlowEvent =
+export type FlowEvent = (
   | { type: 'nodeStart'; nodeId: string }
   | { type: 'nodeEnd'; nodeId: string; durationMs?: number }
   | { type: 'io'; nodeId: string; data: string }
@@ -12,11 +12,14 @@ export type FlowEvent =
   | { type: 'waitingForInput'; nodeId: string }
   | { type: 'done' }
   | { type: 'chunk'; nodeId: string; text: string }
-  | { type: 'toolStart'; nodeId: string; toolName: string; callId?: string }
-  | { type: 'toolEnd'; nodeId: string; toolName: string; callId?: string }
+  | { type: 'reasoning'; nodeId: string; text: string }
+  | { type: 'toolStart'; nodeId: string; toolName: string; callId?: string; toolArgs?: any }
+  | { type: 'toolEnd'; nodeId: string; toolName: string; callId?: string; result?: any }
   | { type: 'toolError'; nodeId: string; toolName: string; error: string; callId?: string }
   | { type: 'intentDetected'; nodeId: string; intent: string }
   | { type: 'tokenUsage'; nodeId: string; provider: string; model: string; usage: { inputTokens: number; outputTokens: number; totalTokens: number } }
+  | { type: 'usageBreakdown'; nodeId: string; provider: string; model: string; breakdown: any }
+) & { executionId?: string; sessionId?: string }
 
 /**
  * Flow event emitter - decouples flow execution from IPC layer
@@ -35,6 +38,8 @@ class FlowEventEmitter extends EventEmitter {
 
     // Emit on the requestId channel
     this.emit(requestId, payload)
+    // Also emit on a broadcast channel so other subsystems (e.g., WS server) can forward without per-request wiring
+    try { this.emit('broadcast', payload) } catch {}
   }
 
   /**

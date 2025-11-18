@@ -45,10 +45,17 @@ export const toolsNode: NodeFunction = async (flow, context, dataIn, inputs, con
     selectedTools = allTools
     flow.log.debug('Providing all tools', { count: allTools.length })
   } else if (Array.isArray(toolsConfig)) {
-    // Specific tools mode - filter by name
-    selectedTools = allTools.filter((t: any) => toolsConfig.includes(t.name))
+    // Specific tools mode - filter by name (support legacy colon names like "kanban:getBoard")
+    const requested = toolsConfig.map((n: string) => {
+      if (typeof n === 'string' && n.includes(':')) {
+        const [pre, suf] = n.split(':')
+        return pre + (suf ? suf.charAt(0).toUpperCase() + suf.slice(1) : '')
+      }
+      return n
+    })
+    selectedTools = allTools.filter((t: any) => requested.includes(t.name))
     flow.log.debug('Providing specific tools', {
-      requested: toolsConfig,
+      requested,
       found: selectedTools.length
     })
   }
@@ -61,9 +68,16 @@ export const toolsNode: NodeFunction = async (flow, context, dataIn, inputs, con
     try {
       const inputTools = JSON.parse(dynamicInput)
       if (Array.isArray(inputTools)) {
-        selectedTools = allTools.filter((t: any) => inputTools.includes(t.name))
+        const requested = inputTools.map((n: string) => {
+          if (typeof n === 'string' && n.includes(':')) {
+            const [pre, suf] = n.split(':')
+            return pre + (suf ? suf.charAt(0).toUpperCase() + suf.slice(1) : '')
+          }
+          return n
+        })
+        selectedTools = allTools.filter((t: any) => requested.includes(t.name))
         flow.log.debug('Dynamic tool selection from input', {
-          requested: inputTools,
+          requested,
           found: selectedTools.length
         })
       }

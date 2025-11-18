@@ -30,6 +30,19 @@ function normalizeFilters(f?: SearchWorkspaceParams['filters']) {
   }
 }
 
+function normalizeLanguageAliases(langs?: string[]): string[] | undefined {
+  if (!langs) return langs
+  const map: Record<string, string> = {
+    typescript: 'ts', javascript: 'js',
+  }
+  const out = [] as string[]
+  for (const l of langs) {
+    const k = String(l || '').toLowerCase()
+    out.push(map[k] || l)
+  }
+  return out
+}
+
 function makeCacheKey(root: string, args: SearchWorkspaceParams) {
   const queries = Array.isArray(args.queries) && args.queries.length
     ? [...args.queries].map((q) => (q || '').trim()).filter(Boolean).sort()
@@ -106,7 +119,8 @@ export interface SearchWorkspaceResult {
 }
 
 // ---- Helpers -------------------------------------------------------------------------
-async function getWorkspaceRoot(): Promise<string> {
+async function getWorkspaceRoot(hint?: string): Promise<string> {
+  if (hint) return path.resolve(hint)
   try {
     // Prefer main store as single source of truth
     const { useMainStore } = await import('../../store/index')
@@ -225,8 +239,8 @@ function looksLikeFilename(q: string): boolean {
   return extractFilenameTokens(q).length > 0
 }
 
-async function runPathSearch(term: string, include: string[]|undefined, exclude: string[]|undefined, maxResults: number, maxSnippetLines: number) {
-  const root = await getWorkspaceRoot()
+async function runPathSearch(term: string, include: string[]|undefined, exclude: string[]|undefined, maxResults: number, maxSnippetLines: number, rootHint?: string) {
+  const root = await getWorkspaceRoot(rootHint)
   const t = (term || '').replace(/^re:|^text:|^ast:/i, '').trim()
   if (!t) return []
 
@@ -529,8 +543,68 @@ function isLikelyAstPattern(q: string): boolean {
 }
 
 
+function nlToAstPatterns(query: string, languages?: string[]): string[] {
+  const q = (query || '').toLowerCase().trim()
+  if (!q) return []
+  const wantsTsJs = !languages || !languages.length || languages.some(l => /^(ts|tsx|js|jsx|typescript|javascript)$/i.test(String(l)))
+  const pats: string[] = []
+
+  // Map common NL intents to AST patterns (TypeScript/JavaScript)
+  if (wantsTsJs) {
+    // "function definition", "method", "handler", etc.
+    if (/\b(function|method|handler)\b/.test(q)) {
+      pats.push(
+        // Function declarations
+        'function $NAME($$$) { $$$ }',
+        // Arrow/function expressions assigned to vars
+        'const $NAME = ($$$) => { $$$ }',
+        'let $NAME = ($$$) => { $$$ }',
+        'var $NAME = ($$$) => { $$$ }',
+        'const $NAME = function ($$$) { $$$ }',
+        'let $NAME = function ($$$) { $$$ }',
+        'var $NAME = function ($$$) { $$$ }',
+        // Class or object methods (shorthand)
+        'class $C { $NAME($$$) { $$$ } }'
+      )
+    }
+    // "exported function" / "export function"
+    if (/\bexport(ed)?\b/.test(q) && /\bfunction\b/.test(q)) {
+      pats.push('export function $NAME($$$) { $$$ }', 'export const $NAME = ($$$) => { $$$ }')
+    }
+  }
+
+  // De-duplicate while preserving order
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const p of pats) { if (!seen.has(p)) { seen.add(p); out.push(p) } }
+  return out
+}
+
 async function runAstGrep(query: string, languages: string[]|undefined, include: string[]|undefined, exclude: string[]|undefined, maxResults: number) {
-  if (!isLikelyAstPattern(query)) return []
+  // If not a direct AST pattern, try NL→AST mapping; if still nothing, return []
+  if (!isLikelyAstPattern(query)) {
+    const pats = nlToAstPatterns(query, languages)
+    if (!pats.length) return []
+    const tasks = pats.map(p => async () => {
+      try {
+        const r = await astGrepSearch({ pattern: p, languages: (languages && languages.length) ? languages : 'auto', includeGlobs: include, excludeGlobs: exclude, maxMatches: Math.max(1, Math.floor(maxResults / pats.length) || 1), contextLines: 1 })
+        return r.matches.map(m => ({ path: m.filePath, startLine: m.startLine, endLine: m.endLine, text: m.snippet }))
+      } catch { return [] }
+    })
+    const settled = await allWithLimit(tasks, 4)
+    // Flatten and de-dup by file + startLine
+    const flat = ([] as any[]).concat(...settled)
+    const seen = new Set<string>()
+    const merged: any[] = []
+    for (const it of flat) {
+      const key = `${it.path}:${it.startLine}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      merged.push(it)
+      if (merged.length >= maxResults) break
+    }
+    return merged
+  }
   try {
     const res = await astGrepSearch({ pattern: query, languages: (languages && languages.length) ? languages : 'auto', includeGlobs: include, excludeGlobs: exclude, maxMatches: maxResults, contextLines: 1 })
     return res.matches.map(m => ({ path: m.filePath, startLine: m.startLine, endLine: m.endLine, text: m.snippet }))
@@ -541,10 +615,10 @@ function toHandle(pathRel: string, start: number, end: number) {
   return b64({ t: 'h', p: pathRel, s: start|0, e: end|0 })
 }
 
-async function expandFromHandle(handle: string, opts?: { extraBefore?: number; extraAfter?: number; clampTo?: number }) {
+async function expandFromHandle(handle: string, opts?: { extraBefore?: number; extraAfter?: number; clampTo?: number }, rootHint?: string) {
   const parsed = fromB64<{ t:string; p:string; s:number; e:number }>(handle)
   if (!parsed || parsed.t !== 'h') return { ok: false, error: 'Invalid handle' }
-  const root = await getWorkspaceRoot()
+  const root = await getWorkspaceRoot(rootHint)
   const abs = path.resolve(root, parsed.p)
   let content = ''
   try { content = await fs.readFile(abs, 'utf-8') } catch (e: any) { return { ok: false, error: e?.message || 'Failed to read file' } }
@@ -621,12 +695,12 @@ export const searchWorkspaceTool: AgentTool = {
     additionalProperties: false
   },
 
-  run: async (args: SearchWorkspaceParams): Promise<any> => {
+  run: async (args: SearchWorkspaceParams, meta?: any): Promise<any> => {
     const t0 = Date.now()
 
     // Handle expand action fast-path
     if (args.action === 'expand' && args.handle) {
-      const exp = await expandFromHandle(args.handle, { extraBefore: 25, extraAfter: 25, clampTo: (args?.filters?.maxSnippetLines ?? 60) })
+      const exp = await expandFromHandle(args.handle, { extraBefore: 25, extraAfter: 25, clampTo: (args?.filters?.maxSnippetLines ?? 60) }, meta?.workspaceId)
       if (!exp.ok) return { ok: false, error: (exp as any).error }
       const elapsedMs = Date.now() - t0
       const pathOut = String((exp as any).path || '').replace(/\\/g, '/')
@@ -640,12 +714,12 @@ export const searchWorkspaceTool: AgentTool = {
     const terms = rawTerms.map((q) => String(q || '').trim()).filter(Boolean)
     if (!terms.length) return { ok: false, error: 'query or queries is required' }
 
-    const root = await getWorkspaceRoot()
+    const root = await getWorkspaceRoot(meta?.workspaceId)
 
     const filters = normalizeFilters(args.filters)
     const include = filters.pathsInclude
     const exclude = [ ...(filters.pathsExclude || []), '.hifide-public/**', '.hifide_public/**', '.hifide-private/**', '.hifide_private/**' ]
-    const languages = filters.languages
+    const languages = normalizeLanguageAliases(filters.languages)
     let maxResults = filters.maxResults
     const maxSnippetLines = filters.maxSnippetLines
     if ((args as any)?.searchOnce) { maxResults = Math.min(1, maxResults) }
@@ -706,11 +780,11 @@ export const searchWorkspaceTool: AgentTool = {
         addTermStrategy('grep', rawTerm, () => runGrep(term, includeNorm, exclude, Math.min(500, maxResults*20), literal))
       }
       if (effectiveMode === 'path') {
-        addTermStrategy('path', rawTerm, () => runPathSearch(term, includeNorm, exclude, Math.min(200, maxResults), maxSnippetLines))
+        addTermStrategy('path', rawTerm, () => runPathSearch(term, includeNorm, exclude, Math.min(200, maxResults), maxSnippetLines, meta?.workspaceId))
       } else if (effectiveMode === 'auto') {
         const fnameTokens = extractFilenameTokens(rawTerm)
         for (const tok of fnameTokens) {
-          addTermStrategy('path', tok, () => runPathSearch(tok, includeNorm, exclude, Math.min(200, maxResults), maxSnippetLines))
+          addTermStrategy('path', tok, () => runPathSearch(tok, includeNorm, exclude, Math.min(200, maxResults), maxSnippetLines, meta?.workspaceId))
         }
         // If include is present, also run path search on bare tokens (not only filename-like)
         if (includeNorm && includeNorm.length) {
@@ -718,7 +792,7 @@ export const searchWorkspaceTool: AgentTool = {
           const seen = new Set(fnameTokens.map(t => t.toLowerCase()))
           for (const tok of bare) {
             if (seen.has(tok.toLowerCase())) continue
-            addTermStrategy('path', tok, () => runPathSearch(tok, includeNorm, exclude, Math.min(200, maxResults), maxSnippetLines))
+            addTermStrategy('path', tok, () => runPathSearch(tok, includeNorm, exclude, Math.min(200, maxResults), maxSnippetLines, meta?.workspaceId))
           }
         }
       }
@@ -809,7 +883,8 @@ export const searchWorkspaceTool: AgentTool = {
         const preview = clampPreview(n.text, maxSnippetLines)
         const handle = toHandle(pathRel, n.startLine, n.endLine)
         const matchedQueries = Array.from(n.matched)
-        hits.push({ type: 'SNIPPET', path: pathRel, lines: { start: n.startLine, end: n.endLine }, score, preview, language: extOf(pathRel), reasons: Array.from(new Set(n.reasons)), matchedQueries, handle, corpus: n.corpus })
+        const type = (n.reasons || []).includes('ast') ? 'AST' : 'SNIPPET'
+        hits.push({ type, path: pathRel, lines: { start: n.startLine, end: n.endLine }, score, preview, language: extOf(pathRel), reasons: Array.from(new Set(n.reasons)), matchedQueries, handle, corpus: n.corpus })
       }
     }
 
@@ -903,11 +978,43 @@ export const searchWorkspaceTool: AgentTool = {
       const topHandles = Array.isArray((resultData as any)?.topHandles)
         ? (resultData as any).topHandles.map((h: any) => (h && typeof h.handle === 'string') ? h.handle : undefined).filter(Boolean).slice(0, 8)
         : []
-      const bestHandle = (resultData as any)?.bestHandle && typeof (resultData as any).bestHandle.handle === 'string'
-        ? (resultData as any).bestHandle.handle
-        : (topHandles[0] || undefined)
+      const bestHandleObj = (resultData as any)?.bestHandle && typeof (resultData as any).bestHandle.handle === 'string'
+        ? (resultData as any).bestHandle
+        : undefined
+      const bestHandle = bestHandleObj?.handle || (topHandles[0] || undefined)
+
+      // Enriched minimal payload while preserving backward compatibility
+      const minimal: any = { ok: true, previewKey, previewCount: resultCount, topHandles, bestHandle }
+
+      // Add detailed handles for better model ergonomics
+      if (bestHandleObj) minimal.bestHandleDetailed = bestHandleObj
+      if (Array.isArray((resultData as any)?.topHandles)) minimal.topHandlesDetailed = (resultData as any).topHandles.slice(0, 8)
+
+      // If this is an expand response, include bounded preview directly in minimal
+      if (resultData?.preview && resultData?.lines && resultData?.path) {
+        const prev = typeof resultData.preview === 'string' ? resultData.preview.slice(0, 4000) : resultData.preview
+        minimal.path = String(resultData.path || '')
+        minimal.lines = resultData.lines
+        minimal.preview = prev
+        minimal.expanded = { path: minimal.path, lines: minimal.lines, preview: prev }
+      }
+
+      // Provide a couple of snippets for quick context in search results (size-capped)
+      try {
+        const resultsArr = Array.isArray(resultData?.results) ? resultData.results : []
+        const snippets: any[] = []
+        for (const r of resultsArr) {
+          if (!r || !r.path || !r.lines || !r.preview) continue
+          if (r.type !== 'SNIPPET' && r.type !== 'AST') continue
+          const prev = String(r.preview).slice(0, 600)
+          snippets.push({ filePath: r.path, lineStart: r.lines.start, lineEnd: r.lines.end, preview: prev, handle: r.handle })
+          if (snippets.length >= 3) break
+        }
+        if (snippets.length) minimal.snippets = snippets
+      } catch {}
+
       return {
-        minimal: { ok: true, previewKey, previewCount: resultCount, topHandles, bestHandle },
+        minimal,
         ui: resultData,
         previewKey
       }
