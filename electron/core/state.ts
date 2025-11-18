@@ -127,7 +127,6 @@ function scheduleKanbanReload(workspaceRoot: string): void {
 
 async function triggerKanbanReload(workspaceRoot: string): Promise<void> {
   try {
-    const dir = path.join(workspaceRoot, '.hifide-public', 'kanban')
     const { readKanbanBoard } = await import('../store/utils/kanban.js')
     const board = await readKanbanBoard(workspaceRoot)
     const ts = Date.now()

@@ -665,12 +665,6 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
                   )
                   return matches.length > 0
                     ? matches.map((t: any) => {
-                      const lib =
-                        t.library === 'system'
-                          ? 'System'
-                          : t.library === 'workspace'
-                            ? 'Workspace'
-                            : 'User'
                       return (
                         <Menu.Item
                           key={t.id}

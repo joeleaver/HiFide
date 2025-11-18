@@ -396,7 +396,7 @@ export class FlowScheduler {
         return { ok: true }
       }
       console.error('[FlowScheduler] Error:', error)
-      try { emitFlowEvent(this.requestId, { type: 'error', error, sessionId: (this as any).sessionId }) } catch {}
+      try { emitFlowEvent(this.requestId, { type: 'error', error, sessionId: this.sessionId }) } catch {}
       return { ok: false, error }
     }
   }
@@ -459,7 +459,7 @@ export class FlowScheduler {
     console.log(`[Scheduler] ${nodeId} - Starting execution ${executionId}, isPull: ${isPull}, callerId: ${callerId}, pushedInputs:`, Object.keys(pushedInputs))
 
     const store = await this.getStore()
-    try { emitFlowEvent(this.requestId, { type: 'nodeStart', nodeId, executionId, sessionId: (this as any).sessionId }) } catch {}
+    try { emitFlowEvent(this.requestId, { type: 'nodeStart', nodeId, executionId, sessionId: this.sessionId }) } catch {}
     // Track running node for snapshot/status queries
     try { this.activeNodeIds.add(nodeId) } catch {}
 
@@ -539,7 +539,7 @@ export class FlowScheduler {
 
       const durationMs = Date.now() - startTime
       // Reduced logging
-    try { emitFlowEvent(this.requestId, { type: 'nodeEnd', nodeId, durationMs, executionId, sessionId: (this as any).sessionId }) } catch {}
+    try { emitFlowEvent(this.requestId, { type: 'nodeEnd', nodeId, durationMs, executionId, sessionId: this.sessionId }) } catch {}
     // Mark node as no longer active
     try { this.activeNodeIds.delete(nodeId) } catch {}
 
@@ -798,7 +798,7 @@ export class FlowScheduler {
         console.log('[FlowAPI.waitForUserInput] Waiting for input, nodeId:', nodeId)
 
         // Notify renderer that we're waiting for input
-    try { emitFlowEvent(this.requestId, { type: 'waitingForInput', nodeId, sessionId: (this as any).sessionId }) } catch {}
+    try { emitFlowEvent(this.requestId, { type: 'waitingForInput', nodeId, sessionId: this.sessionId }) } catch {}
     // Record paused state for snapshot/status queries
     try { this.pausedNodeId = nodeId } catch {}
 
@@ -860,7 +860,7 @@ export class FlowScheduler {
             const brief = (event.chunk || '').slice(0, 60).replace(/\n/g, '\\n')
             console.log(`[FlowAPI] chunk node=${event.nodeId} exec=${event.executionId} len=${event.chunk.length} brief=${brief}`)
           }
-          try { emitFlowEvent(this.requestId, { type: 'chunk', nodeId: event.nodeId, text: event.chunk, executionId: event.executionId, sessionId: (this as any).sessionId }) } catch {}
+          try { emitFlowEvent(this.requestId, { type: 'chunk', nodeId: event.nodeId, text: event.chunk, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
         }
         break
 
@@ -870,31 +870,31 @@ export class FlowScheduler {
             const brief = ((event as any).reasoning || '').slice(0, 60).replace(/\n/g, '\\n')
             console.log(`[FlowAPI] reasoning node=${event.nodeId} exec=${event.executionId} len=${(event as any).reasoning.length} brief=${brief}`)
           }
-          try { emitFlowEvent(this.requestId, { type: 'reasoning', nodeId: event.nodeId, text: (event as any).reasoning, executionId: event.executionId, sessionId: (this as any).sessionId }) } catch {}
+          try { emitFlowEvent(this.requestId, { type: 'reasoning', nodeId: event.nodeId, text: (event as any).reasoning, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
         }
         break
 
       case 'tool_start':
         if (event.tool) {
-          try { emitFlowEvent(this.requestId, { type: 'toolStart', nodeId: event.nodeId, toolName: event.tool.toolName, callId: event.tool.toolCallId, toolArgs: event.tool.toolArgs, executionId: event.executionId, sessionId: (this as any).sessionId }) } catch {}
+          try { emitFlowEvent(this.requestId, { type: 'toolStart', nodeId: event.nodeId, toolName: event.tool.toolName, callId: event.tool.toolCallId, toolArgs: event.tool.toolArgs, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
         }
         break
 
       case 'tool_end':
         if (event.tool) {
-          try { emitFlowEvent(this.requestId, { type: 'toolEnd', nodeId: event.nodeId, toolName: event.tool.toolName, callId: event.tool.toolCallId, result: event.tool.toolResult, executionId: event.executionId, sessionId: (this as any).sessionId }) } catch {}
+          try { emitFlowEvent(this.requestId, { type: 'toolEnd', nodeId: event.nodeId, toolName: event.tool.toolName, callId: event.tool.toolCallId, result: event.tool.toolResult, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
         }
         break
 
       case 'tool_error':
         if (event.tool) {
-          try { emitFlowEvent(this.requestId, { type: 'toolError', nodeId: event.nodeId, toolName: event.tool.toolName, error: event.tool.toolError || 'Unknown error', callId: event.tool.toolCallId, executionId: event.executionId, sessionId: (this as any).sessionId }) } catch {}
+          try { emitFlowEvent(this.requestId, { type: 'toolError', nodeId: event.nodeId, toolName: event.tool.toolName, error: event.tool.toolError || 'Unknown error', callId: event.tool.toolCallId, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
         }
         break
 
       case 'usage':
         if (event.usage) {
-          try { emitFlowEvent(this.requestId, { type: 'tokenUsage', nodeId: event.nodeId, provider: event.provider, model: event.model, usage: { inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, totalTokens: event.usage.totalTokens }, executionId: event.executionId, sessionId: (this as any).sessionId }) } catch {}
+          try { emitFlowEvent(this.requestId, { type: 'tokenUsage', nodeId: event.nodeId, provider: event.provider, model: event.model, usage: { inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, totalTokens: event.usage.totalTokens }, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
         }
         break
 
@@ -909,7 +909,7 @@ export class FlowScheduler {
               model: event.model,
               breakdown: (event as any).usageBreakdown,
               executionId: (event as any).executionId,
-              sessionId: (this as any).sessionId
+              sessionId: this.sessionId
             })
           } catch (e) {
             console.warn('[FlowAPI] usageBreakdown emit failed:', e)
@@ -919,12 +919,12 @@ export class FlowScheduler {
 
       case 'done':
         // Flow execution completed
-        try { emitFlowEvent(this.requestId, { type: 'done', sessionId: (this as any).sessionId }) } catch {}
+        try { emitFlowEvent(this.requestId, { type: 'done', sessionId: this.sessionId }) } catch {}
         break
 
       case 'error':
         if (event.error) {
-          try { emitFlowEvent(this.requestId, { type: 'error', nodeId: event.nodeId, error: event.error, sessionId: (this as any).sessionId }) } catch {}
+          try { emitFlowEvent(this.requestId, { type: 'error', nodeId: event.nodeId, error: event.error, sessionId: this.sessionId }) } catch {}
         }
         break
 

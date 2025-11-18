@@ -89,9 +89,9 @@ export function bootstrapBackendFromPreload(): void {
       if (anyClient.whenReady) {
         await anyClient.whenReady(5000)
       }
-      const ping = await client!.rpc('handshake.ping', { windowId: boot.windowId })
+      await client!.rpc('handshake.ping', { windowId: boot.windowId })
 
-      const initRes = await client!.rpc('handshake.init', {
+      await client!.rpc('handshake.init', {
         windowId: boot.windowId,
         capabilities: { client: 'renderer', features: ['terminal', 'agent-pty', 'workspace', 'flow'] }
       })

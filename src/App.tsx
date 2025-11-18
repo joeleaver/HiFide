@@ -18,9 +18,9 @@ import { useUiStore } from './store/ui'
 import { getBackendClient } from './lib/backend/bootstrap'
 
 import { useBackendBinding } from './store/binding'
+import type { BackendBindingState } from './store/binding'
 import { useSessionUi } from './store/sessionUi'
 import { useChatTimeline } from './store/chatTimeline'
-import { useFlowContexts } from './store/flowContexts'
 
 import { useLoadingOverlay } from './store/loadingOverlay'
 
@@ -170,17 +170,17 @@ function App() {
   const { active: wsLoading, message: wsLoadingMessage, overlayAgeMs, hydratingAgeMs, phase: wsPhase } = useLoadingOverlay()
   const showDebugOverlay = (() => { try { return localStorage.getItem('hifide.debug.overlay') === '1' } catch { return false } })()
   // HUD-only selectors (no effects)
-  const bindingRoot = useBackendBinding((s) => s.root)
-  const attached = useBackendBinding((s) => s.attached)
-  const workspaceId = useBackendBinding((s) => s.workspaceId)
-  const sessionsCount = useSessionUi((s) => (s.sessions?.length || 0))
-  const currentSessionId = useSessionUi((s) => s.currentId)
-  const timelineHydrating = useChatTimeline((s) => s.isHydrating)
-  const timelineRenderedOnce = useChatTimeline((s: any) => (s as any).hasRenderedOnce)
-  const hydMeta = useSessionUi((s) => s.isHydratingMeta)
-  const hydUsage = useSessionUi((s) => s.isHydratingUsage)
-  const listHydrated = useSessionUi((s) => s.hasHydratedList)
-  const sessionEventsInited = useSessionUi((s) => (s as any).eventsInited)
+  const bindingRoot = useBackendBinding((s: BackendBindingState) => s.root)
+  const attached = useBackendBinding((s: BackendBindingState) => s.attached)
+  const workspaceId = useBackendBinding((s: BackendBindingState) => s.workspaceId)
+  const sessionsCount = useSessionUi((s: any) => (s.sessions?.length || 0))
+  const currentSessionId = useSessionUi((s: any) => s.currentId)
+  const timelineHydrating = useChatTimeline((s: any) => s.isHydrating)
+  const timelineRenderedOnce = useChatTimeline((s: any) => s.hasRenderedOnce)
+  const hydMeta = useSessionUi((s: any) => s.isHydratingMeta)
+  const hydUsage = useSessionUi((s: any) => s.isHydratingUsage)
+  const listHydrated = useSessionUi((s: any) => s.hasHydratedList)
+  const sessionEventsInited = useSessionUi((s: any) => s.eventsInited)
   const boot = (window as any)?.wsBackend?.getBootstrap?.()
   const bootUrl = boot?.url || null
   const bootWindowId = boot?.windowId || null
@@ -297,6 +297,8 @@ function App() {
 
 	      // Tick while overlay/hydration is active so timeouts can elapse without other state changes
 	      const [nowTick, setNowTick] = useState<number>(0)
+  if (false) { setNowTick(nowTick) }
+
 	      /* useEffect(() => {
 	        const watching = overlaySince !== null || hydratingSince !== null
 	        if (!watching) return

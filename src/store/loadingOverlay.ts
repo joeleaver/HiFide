@@ -71,8 +71,8 @@ export const useLoadingOverlay = create<LoadingOverlayStore>((set, get) => {
   // Subscribe to dependencies and recompute on change
   const unsubscribers: Array<() => void> = []
   try {
-    unsubscribers.push(useBackendBinding.subscribe((s) => s.attached, () => get()._recompute()))
-    unsubscribers.push(useSessionUi.subscribe((s) => [s.sessions, s.currentId, s.isHydratingMeta, s.isHydratingUsage, s.hasHydratedList], () => get()._recompute()))
+    unsubscribers.push(useBackendBinding.subscribe((s: any) => s.attached, () => get()._recompute()))
+    unsubscribers.push(useSessionUi.subscribe((s: any) => [s.sessions, s.currentId, s.isHydratingMeta, s.isHydratingUsage, s.hasHydratedList], () => get()._recompute()))
     unsubscribers.push(useChatTimeline.subscribe((s: any) => [s.isHydrating, (s as any).hasRenderedOnce], () => get()._recompute()))
   } catch {}
 

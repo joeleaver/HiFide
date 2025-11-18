@@ -66,12 +66,7 @@ function SessionPane() {
   const lastRenderTs = useRef(performance.now())
   renderCountRef.current += 1
   if (DEBUG_RENDERS) {
-    const now = performance.now()
-    const delta = now - lastRenderTs.current
-    lastRenderTs.current = now
-    const len = sessionItems.length
-    const last = len ? sessionItems[len - 1] : null
-    const lastSummary = last ? `${last.type}:${last.id}:${Array.isArray(last.content) ? last.content.length : 0}` : 'none'
+    lastRenderTs.current = performance.now()
   }
 
   // Smart auto-scroll: only scroll to bottom if user is already near bottom

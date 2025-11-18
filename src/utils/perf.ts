@@ -90,6 +90,7 @@ function shallowDiff(prev: Record<string, any>, next: Record<string, any>) {
 }
 
 export function useRerenderTrace(name: string, watched: Record<string, any>) {
+  void name
   const prevRef = useRef<Record<string, any> | null>(null)
   const tsRef = useRef<number>(performance.now())
 
@@ -100,7 +101,6 @@ export function useRerenderTrace(name: string, watched: Record<string, any>) {
     if (prev) {
       const diffs = shallowDiff(prev, watched)
       if (diffs.length > 0) {
-        const since = (now - (tsRef.current || now)).toFixed(1)
         // Log concise change list to a DevTools-friendly store if needed
         // (console logging is disabled here to keep renderer console focused on backend events)
       }

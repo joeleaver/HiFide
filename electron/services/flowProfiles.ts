@@ -178,11 +178,6 @@ async function loadWorkspaceTemplates(): Promise<Record<string, FlowProfile>> {
   return templates
 }
 
-function invalidateWorkspaceTemplatesCache(root: string | null | undefined): void {
-  if (!root) return
-  const absRoot = path.resolve(root)
-  workspaceTemplatesCache.delete(absRoot)
-}
 
 
 /**
