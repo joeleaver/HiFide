@@ -167,23 +167,15 @@ function App() {
 
   const [appBootstrapping, setAppBootstrapping] = useState<boolean>(true)
   const [startupMessage, setStartupMessage] = useState<string | null>(null)
-  const { active: wsLoading, message: wsLoadingMessage, overlayAgeMs, hydratingAgeMs, phase: wsPhase } = useLoadingOverlay()
-  const showDebugOverlay = (() => { try { return localStorage.getItem('hifide.debug.overlay') === '1' } catch { return false } })()
-  // HUD-only selectors (no effects)
-  const bindingRoot = useBackendBinding((s: BackendBindingState) => s.root)
+  const { active: wsLoading, message: wsLoadingMessage } = useLoadingOverlay()
+  // Selectors for loading overlay gating (no effects)
   const attached = useBackendBinding((s: BackendBindingState) => s.attached)
-  const workspaceId = useBackendBinding((s: BackendBindingState) => s.workspaceId)
   const sessionsCount = useSessionUi((s: any) => (s.sessions?.length || 0))
-  const currentSessionId = useSessionUi((s: any) => s.currentId)
   const timelineHydrating = useChatTimeline((s: any) => s.isHydrating)
   const timelineRenderedOnce = useChatTimeline((s: any) => s.hasRenderedOnce)
   const hydMeta = useSessionUi((s: any) => s.isHydratingMeta)
   const hydUsage = useSessionUi((s: any) => s.isHydratingUsage)
   const listHydrated = useSessionUi((s: any) => s.hasHydratedList)
-  const sessionEventsInited = useSessionUi((s: any) => s.eventsInited)
-  const boot = (window as any)?.wsBackend?.getBootstrap?.()
-  const bootUrl = boot?.url || null
-  const bootWindowId = boot?.windowId || null
 
 
   // Keep overlay visible if workspace bound but either the sessions list is not hydrated yet
@@ -530,17 +522,6 @@ function App() {
       {overlayActive && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.4)', zIndex: 10000 }}>
           <LoadingScreen message={wsLoadingMessage || 'Opening workspace…'} />
-        </div>
-      )}
-      {showDebugOverlay && (
-        <div style={{ position: 'fixed', right: 8, bottom: 8, background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 11, padding: '8px 10px', borderRadius: 6, zIndex: 10001, pointerEvents: 'none' }}>
-          <div><strong>Loading Debug</strong></div>
-          <div>view: {currentView}</div>
-          <div>root: {bindingRoot || '-'} | attached: {String(attached)} | wsId: {workspaceId || '-'} | sessions: {sessionsCount} | sel: {currentSessionId || '-'} | list: {String(listHydrated)} | sEv: {String(sessionEventsInited)}</div>
-          <div>hydrating: t={String(timelineHydrating)} m={String(hydMeta)} u={String(hydUsage)} | wsLoading: {String(wsLoading)} | show: {String(overlayActive)}</div>
-          <div>msg: {wsLoadingMessage || '-'} | phase: {wsPhase}</div>
-          <div>overlayAge: {overlayAgeMs} | hydAge: {hydratingAgeMs}</div>
-    <div>ws: {bootUrl || '-'} | windowId: {String(bootWindowId || '-')}</div>
         </div>
       )}
 
