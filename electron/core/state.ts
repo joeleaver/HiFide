@@ -66,7 +66,8 @@ const legacySecureStore = new Store({
  * Get provider API key from Zustand store or environment
  */
 export async function getProviderKey(provider: string): Promise<string | null> {
-  const { useMainStore } = await import('../store')
+  // NOTE: Use explicit index.js path for compatibility with bundled Electron builds
+  const { useMainStore } = await import('../store/index.js')
   const state = useMainStore.getState()
 
   // 1) Try Zustand store first (primary storage)

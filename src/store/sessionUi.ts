@@ -187,7 +187,19 @@ function createSessionUiStore() {
     __setSelected: (id) => set((s) => ({ currentId: id, hasHydratedList: s.hasHydratedList || !!id })),
     __setUsage: (tokenUsage, costs, requestsLog) => set({ tokenUsage, costs, requestsLog }),
     __setMeta: (meta) => set((s) => ({ ...s, ...meta })),
-    __setSettings: (providerValid, modelsByProvider) => set({ providerValid, modelsByProvider }),
+    __setSettings: (providerValid, modelsByProvider) => {
+      set({ providerValid, modelsByProvider })
+      try {
+        const snapshot = get()
+        const modelCounts = Object.fromEntries(
+          Object.entries(snapshot.modelsByProvider || {}).map(([k, v]) => [k, Array.isArray(v) ? v.length : -1]),
+        )
+        console.log('[sessionUi] __setSettings applied', {
+          providerValid: snapshot.providerValid,
+          modelCounts,
+        })
+      } catch {}
+    },
     __setFlows: (flows) => set({ flows }),
     __reset: () => set({
       sessions: [],
@@ -512,10 +524,37 @@ export async function hydrateSessionUiSettingsAndFlows(): Promise<void> {
     const settingsRes = getVal(0)
     const templates = getVal(1)
 
+    let providerValidMap: Record<string, boolean> = settingsRes?.providerValid || {}
+    const modelsMap = settingsRes?.modelsByProvider || {}
+    const modelCounts = Object.fromEntries(
+      Object.entries(modelsMap).map(([k, v]) => [k, Array.isArray(v) ? v.length : -1]),
+    )
+
+    // Derive key presence per known provider; ignore any weird extra keys in settingsApiKeys
+    const rawKeys = (settingsRes?.settingsApiKeys || {}) as Record<string, unknown>
+    const hasKey = {
+      openai: !!String(rawKeys.openai ?? '').trim(),
+      anthropic: !!String(rawKeys.anthropic ?? '').trim(),
+      gemini: !!String(rawKeys.gemini ?? '').trim(),
+      fireworks: !!String(rawKeys.fireworks ?? '').trim(),
+      xai: !!String((rawKeys as any).xai ?? '').trim(),
+    }
+
+    // If backend says all providers are invalid but we clearly have keys, fall back to treating
+    // key presence as “valid” so the UI can still trigger model refresh per provider.
+    const anyValidFromBackend = Object.values(providerValidMap || {}).some(Boolean)
+    const anyKeysPresent = Object.values(hasKey).some(Boolean)
+    if (!anyValidFromBackend && anyKeysPresent) {
+      providerValidMap = { ...hasKey }
+    }
+
     console.log('[sessionUi] hydrateSessionUiSettingsAndFlows: settings.get ->', {
       ok: settingsRes?.ok,
-      providerKeys: settingsRes?.providerValid ? Object.keys(settingsRes.providerValid) : [],
-      modelProviderKeys: settingsRes?.modelsByProvider ? Object.keys(settingsRes.modelsByProvider) : [],
+      providerKeys: Object.keys(providerValidMap),
+      modelProviderKeys: Object.keys(modelsMap),
+      providerValid: providerValidMap,
+      hasKey,
+      modelCounts,
     })
     console.log('[sessionUi] hydrateSessionUiSettingsAndFlows: flowEditor.getTemplates ->', {
       ok: templates?.ok,
@@ -524,10 +563,43 @@ export async function hydrateSessionUiSettingsAndFlows(): Promise<void> {
 
     if (settingsRes?.ok) {
       try {
-        useSessionUi.getState().__setSettings(settingsRes.providerValid || {}, settingsRes.modelsByProvider || {})
+        useSessionUi.getState().__setSettings(providerValidMap, settingsRes.modelsByProvider || {})
       } catch (e) {
         console.warn('[sessionUi] hydrateSessionUiSettingsAndFlows: __setSettings failed', e)
       }
+    }
+
+    // Proactively fetch models for valid providers on first hydrate if none are loaded yet.
+    try {
+      const anyValid = Object.values(providerValidMap || {}).some(Boolean)
+      const totalLoaded = Object.values(modelCounts || {}).reduce(
+        (acc: number, n: any) => acc + (typeof n === 'number' && n > 0 ? n : 0),
+        0,
+      )
+
+      if (anyValid && totalLoaded === 0) {
+        const providersToRefresh = (['openai', 'anthropic', 'gemini', 'fireworks', 'xai'] as const)
+          .filter((pid) => (providerValidMap as any)[pid])
+        console.log('[sessionUi] hydrateSessionUiSettingsAndFlows: prefetching models for', providersToRefresh)
+
+        await Promise.allSettled(
+          providersToRefresh.map(async (pid) => {
+            try {
+              const res: any = await client.rpc('provider.refreshModels', { provider: pid })
+              if (res?.ok) {
+                const cur = useSessionUi.getState()
+                const curModels = Array.isArray(res.models) ? res.models : []
+                const nextMap = { ...(cur.modelsByProvider || {}), [pid]: curModels }
+                useSessionUi.getState().__setSettings(cur.providerValid || {}, nextMap)
+              }
+            } catch (e) {
+              console.warn('[sessionUi] hydrateSessionUiSettingsAndFlows: prefetch failed for', pid, e)
+            }
+          }),
+        )
+      }
+    } catch (e) {
+      console.warn('[sessionUi] hydrateSessionUiSettingsAndFlows: prefetch block failed', e)
     }
 
     if (templates?.ok) {

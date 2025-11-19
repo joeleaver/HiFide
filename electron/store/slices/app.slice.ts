@@ -135,6 +135,16 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
             validMap.fireworks = !!fkey && !failures.some((f: string) => f.toLowerCase().includes('fireworks'))
             validMap.xai = !!xkey && !failures.some((f: string) => f.toLowerCase().includes('xai'))
           }
+          console.log('[app:init] provider valid map from validateApiKeys', {
+            validMap,
+            hasKeys: {
+              openai: !!okey,
+              anthropic: !!akey,
+              gemini: !!gkey,
+              fireworks: !!fkey,
+              xai: !!xkey,
+            },
+          })
         } else {
           validMap.openai = !!okey
           validMap.anthropic = !!akey
@@ -155,50 +165,9 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
         state.setProvidersValid(validMap)
       }
 
-      // 5. Load models for valid providers (parallel, soft timeouts so boot can't hang)
-      try {
-        if (state.setStartupMessage) state.setStartupMessage('Loading models…')
-        const t = Date.now()
-
-        const withTimeout = (p: Promise<any>, ms: number, onTimeout: () => void): Promise<void> => {
-          return new Promise<void>((resolve) => {
-            const timer = setTimeout(() => {
-              try { onTimeout() } catch {}
-              resolve()
-            }, ms)
-            p.then(() => { clearTimeout(timer); resolve() })
-             .catch(() => { clearTimeout(timer); resolve() })
-          })
-        }
-
-        const providers: Array<'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai'> = ['openai','anthropic','gemini','fireworks','xai']
-        const tasks = providers.map((p) => {
-          if (!validMap[p]) {
-            try { state.setModelsForProvider?.({ provider: p, models: [] }) } catch {}
-            return Promise.resolve()
-          }
-          // 7s soft timeout per provider
-          const work = (async () => {
-            try {
-              await state.refreshModels?.(p)
-            } catch (e) {
-              console.error(`[app] Failed to refresh models for ${p}:`, e)
-              try { state.setModelsForProvider?.({ provider: p, models: [] }) } catch {}
-            }
-          })()
-          return withTimeout(work, 7000, () => {
-            console.warn(`[app] Model refresh timed out for ${p} (continuing boot)`)
-            try { state.setModelsForProvider?.({ provider: p, models: [] }) } catch {}
-          })
-        })
-
-        await Promise.allSettled(tasks)
-        log(`models loaded (or timed out) in ${Date.now() - t}ms`)
-      } catch (e) {
-        console.error('[app] Failed to load models:', e)
-      }
-
-
+      // 5. Models are now loaded centrally by settings.validateApiKeys via refreshAllModels.
+      //    We intentionally avoid a second refresh pass here; renderer listens to
+      //    settings.models.changed for the canonical snapshot.
 
       // 7. Load sessions (only when a workspace is set)
       if (hasWorkspace) {

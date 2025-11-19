@@ -291,6 +291,19 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
         ? { ok: false, failures }
         : { ok: true, failures: [] }
 
+      console.log('[settings] validateApiKeys results', {
+        ok: result.ok,
+        failureCount: failures.length,
+        failures,
+        hasKeys: {
+          openai: !!keys.openai?.trim(),
+          anthropic: !!keys.anthropic?.trim(),
+          gemini: !!keys.gemini?.trim(),
+          fireworks: !!keys.fireworks?.trim(),
+          xai: !!(keys as any).xai?.trim(),
+        },
+      })
+
       // Update provider validity map and refresh models so UI reacts immediately
       try {
         const lc = failures.map((f) => f.toLowerCase())

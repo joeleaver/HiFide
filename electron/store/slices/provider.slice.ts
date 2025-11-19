@@ -18,7 +18,6 @@
 import type { StateCreator } from 'zustand'
 import type { ModelOption, RouteRecord } from '../types'
 import { MAX_ROUTE_HISTORY } from '../utils/constants'
-import { getProviderKey } from '../../core/state'
 
 // ============================================================================
 // Types
@@ -173,8 +172,26 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
 
   refreshModels: async (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai') => {
     try {
-      // Inline the models fetching logic directly here
-      const key = await getProviderKey(provider)
+      // Resolve API key directly from store + environment to avoid dynamic imports
+      const anyState: any = get()
+      const keys: any = anyState.settingsApiKeys || {}
+
+      let key: string | null = null
+      if (provider === 'openai') key = (keys.openai || '').trim()
+      else if (provider === 'anthropic') key = (keys.anthropic || '').trim()
+      else if (provider === 'gemini') key = (keys.google || keys.gemini || '').trim()
+      else if (provider === 'fireworks') key = (keys.fireworks || '').trim()
+      else if (provider === 'xai') key = (keys.xai || '').trim()
+
+      // Fallback to environment variables for convenience (matches validateApiKeys)
+      if (!key) {
+        if (provider === 'openai' && process.env.OPENAI_API_KEY) key = process.env.OPENAI_API_KEY.trim()
+        else if (provider === 'anthropic' && process.env.ANTHROPIC_API_KEY) key = process.env.ANTHROPIC_API_KEY.trim()
+        else if (provider === 'gemini' && (process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY)) key = (process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '').trim()
+        else if (provider === 'fireworks' && process.env.FIREWORKS_API_KEY) key = process.env.FIREWORKS_API_KEY.trim()
+        else if (provider === 'xai' && process.env.XAI_API_KEY) key = process.env.XAI_API_KEY.trim()
+      }
+
       if (!key) {
         set((state) => ({
           modelsByProvider: {
@@ -188,10 +205,16 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
       let list: ModelOption[] = []
 
       if (provider === 'openai') {
-        const { default: OpenAI } = await import('openai')
-        const client = new OpenAI({ apiKey: key })
-        const res: any = await client.models.list()
-        const ids: string[] = (res?.data || [])
+        // Use direct HTTP call instead of the OpenAI Node SDK so this works reliably in packaged builds
+        const f: any = (globalThis as any).fetch
+        if (!f) throw new Error('Fetch API unavailable')
+        const resp = await f('https://api.openai.com/v1/models', {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${key}` },
+        })
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+        const data = await resp.json()
+        const ids: string[] = (Array.isArray((data as any)?.data) ? (data as any).data : [])
           .map((m: any) => m?.id)
           .filter((id: any) => typeof id === 'string')
 
