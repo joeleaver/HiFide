@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState, useRef } from 'react'
-import { Button, Group, Stack, TextInput, TagsInput, Title, ScrollArea, Badge, Divider, Modal, Kbd } from '@mantine/core'
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react'
+import { Button, Group, Stack, TextInput, TagsInput, Title, ScrollArea, Badge, Divider, Modal, Kbd, Center, Skeleton, Text, Box } from '@mantine/core'
 import { getBackendClient } from '../lib/backend/bootstrap'
-import { IconPlus } from '@tabler/icons-react'
+import { IconPlus, IconRefresh, IconAlertTriangle } from '@tabler/icons-react'
+import { useKnowledgeBase } from '@/store/knowledgeBase'
+import { useKnowledgeBaseHydration } from '@/store/screenHydration'
 
 
 // MDX Editor (dark theme)
@@ -103,11 +105,46 @@ function sanitizeMarkdownForEditor(text: string): string {
   return sanitizeUnknownCodeFences(norm)
 }
 
-export default function KnowledgeBaseView() {
-  const [itemsMap, setItemsMap] = useState<Record<string, any>>({})
-  const [, setLoading] = useState(false)
-  const [searchResults, setSearchResults] = useState<any[]>([])
+/**
+ * Skeleton for Knowledge Base while loading
+ */
+function KnowledgeBaseSkeleton() {
+  return (
+    <Box style={{ display: 'flex', height: '100%', padding: 16, gap: 16 }}>
+      {/* Sidebar skeleton */}
+      <Box style={{ width: 280, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Skeleton width="100%" height={36} radius="sm" />
+        <Skeleton width="100%" height={36} radius="sm" />
+        <Skeleton width="100%" height={28} radius="sm" />
+        {Array.from({ length: 8 }).map((_, i) => (
+          <Skeleton key={i} width="100%" height={40} radius="sm" />
+        ))}
+      </Box>
+      {/* Editor skeleton */}
+      <Box style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Skeleton width={200} height={32} radius="sm" />
+        <Skeleton width="100%" height="100%" radius="sm" />
+      </Box>
+    </Box>
+  )
+}
 
+export default function KnowledgeBaseView() {
+  // Screen hydration state
+  const screenPhase = useKnowledgeBaseHydration((s) => s.phase)
+  const screenError = useKnowledgeBaseHydration((s) => s.error)
+  const startLoading = useKnowledgeBaseHydration((s) => s.startLoading)
+  const setReady = useKnowledgeBaseHydration((s) => s.setReady)
+  const setScreenError = useKnowledgeBaseHydration((s) => s.setError)
+
+  // Get state from store (not local state!)
+  const itemsMap = useKnowledgeBase((s) => s.itemsMap)
+  const workspaceFiles = useKnowledgeBase((s) => s.workspaceFiles)
+  const setWorkspaceFiles = useKnowledgeBase((s) => s.setWorkspaceFiles)
+  const setLoading = useKnowledgeBase((s) => s.setLoading)
+  const setItemsMap = useKnowledgeBase((s) => s.setItemsMap)
+
+  const [searchResults, setSearchResults] = useState<any[]>([])
   const [query, setQuery] = useState('')
   const [tags, setTags] = useState<string[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -121,32 +158,31 @@ export default function KnowledgeBaseView() {
   const [pickerIndex, setPickerIndex] = useState(0)
   const editorRef = useRef<MDXEditorMethods | null>(null)
 
+  // Load knowledge base data
+  const loadKnowledgeBase = useCallback(async () => {
+    try {
+      const client = getBackendClient()
+      if (!client) throw new Error('No backend connection')
 
-  // Workspace files index (WS-only now)
-  const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([])
+      const res: any = await client.rpc('kb.reloadIndex', {})
+      if (res?.ok) {
+        setItemsMap(res.items || {})
+        setReady()
+      } else {
+        throw new Error(res?.error || 'Failed to load knowledge base')
+      }
+    } catch (e) {
+      setScreenError(e instanceof Error ? e.message : 'Failed to load knowledge base')
+    }
+  }, [setItemsMap, setReady, setScreenError])
 
-
-
-  // Load index on mount (WS)
+  // Auto-load on mount if in idle state
   useEffect(() => {
-    const client = getBackendClient(); if (!client) return
-    setLoading(true)
-    client.rpc('kb.reloadIndex', {}).then((res: any) => {
-      if (res?.ok) setItemsMap(res.items || {})
-    }).catch(() => {}).finally(() => setLoading(false))
-  }, [])
-
-  // Realtime subscriptions: items and workspace files
-  useEffect(() => {
-    const client = getBackendClient(); if (!client) return
-    const off1 = (client as any).subscribe?.('kb.items.changed', (p: any) => {
-      setItemsMap(p?.items || {})
-    })
-    const off2 = (client as any).subscribe?.('kb.files.changed', (p: any) => {
-      setWorkspaceFiles(Array.isArray(p?.files) ? p.files : [])
-    })
-    return () => { try { off1?.() } catch {}; try { off2?.() } catch {} }
-  }, [])
+    if (screenPhase === 'idle') {
+      startLoading()
+      loadKnowledgeBase()
+    }
+  }, [screenPhase, startLoading, loadKnowledgeBase])
 
 
   // When search changes, trigger WS search
@@ -217,6 +253,35 @@ export default function KnowledgeBaseView() {
   }, [pickerOpen])
 
 
+
+  // Render based on screen phase
+  if (screenPhase === 'idle' || screenPhase === 'loading') {
+    return <KnowledgeBaseSkeleton />
+  }
+
+  if (screenPhase === 'error') {
+    return (
+      <Center h="100%">
+        <Stack align="center" gap="md">
+          <IconAlertTriangle size={48} color="var(--mantine-color-red-6)" />
+          <Text size="sm" c="dimmed" ta="center">
+            {screenError ?? 'Failed to load knowledge base'}
+          </Text>
+          <Button
+            variant="light"
+            size="sm"
+            leftSection={<IconRefresh size={16} />}
+            onClick={() => {
+              startLoading()
+              loadKnowledgeBase()
+            }}
+          >
+            Retry
+          </Button>
+        </Stack>
+      </Center>
+    )
+  }
 
   return (
     <div style={{ display: 'flex', height: '100%', backgroundColor: '#1e1e1e', color: '#ddd' }}>

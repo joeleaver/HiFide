@@ -8,13 +8,9 @@ import { astGrepSearch } from '../astGrep'
 import { getIndexer } from '../../core/state'
 
 
-async function getWorkspaceRoot(): Promise<string> {
-  try {
-    const { useMainStore } = await import('../../store/index')
-    const root = (useMainStore as any).getState?.().workspaceRoot
-    if (root) return path.resolve(root)
-  } catch {}
-  return path.resolve(process.env.HIFIDE_WORKSPACE_ROOT || process.cwd())
+async function getWorkspaceRoot(workspaceId?: string): Promise<string> {
+  const { resolveWorkspaceRootAsync } = await import('../../utils/workspace')
+  return resolveWorkspaceRootAsync(workspaceId)
 }
 
 function uniq<T>(arr: T[]): T[] { return Array.from(new Set(arr)) }
@@ -47,9 +43,9 @@ export const workspaceMapTool: AgentTool = {
     },
     additionalProperties: false
   },
-  run: async (args: { maxPerSection?: number; mode?: 'basic'|'enriched'; timeBudgetMs?: number } = {}) => {
+  run: async (args: { maxPerSection?: number; mode?: 'basic'|'enriched'; timeBudgetMs?: number } = {}, meta?: any) => {
     const t0 = Date.now()
-    const root = await getWorkspaceRoot()
+    const root = await getWorkspaceRoot(meta?.workspaceId)
     const maxPerSection = Math.max(1, args?.maxPerSection ?? 12)
     const mode = args?.mode ?? 'enriched'
     const budgetMs = Math.max(150, args?.timeBudgetMs ?? 10_000)

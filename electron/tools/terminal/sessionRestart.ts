@@ -8,16 +8,16 @@ export const sessionRestartTool: AgentTool = {
   name: 'terminalSessionRestart',
   description: 'Restart the presented terminal session (kills and recreates).',
   parameters: { type: 'object', properties: { shell: { type: 'string' }, cwd: { type: 'string' }, cols: { type: 'integer' }, rows: { type: 'integer' } }, additionalProperties: false },
-  run: async (args: { shell?: string; cwd?: string; cols?: number; rows?: number }, _meta?: { requestId?: string }) => {
+  run: async (args: { shell?: string; cwd?: string; cols?: number; rows?: number }, meta?: { requestId?: string; workspaceId?: string }) => {
     const stAny: any = useMainStore.getState()
-    const ws = stAny.workspaceRoot || null
+    const ws = meta?.workspaceId || stAny.workspaceRoot || null
     const sessionId = (ws && typeof stAny.getCurrentIdFor === 'function') ? stAny.getCurrentIdFor({ workspaceId: ws }) : null
     if (!sessionId) {
       console.error('[terminal.session_restart] No active sessionId')
       return { ok: false, error: 'no-session' }
     }
 
-    const root = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
+    const root = path.resolve(meta?.workspaceId || useMainStore.getState().workspaceRoot || process.cwd())
     const desiredCwd = args.cwd ? (path.isAbsolute(args.cwd) ? args.cwd : path.join(root, args.cwd)) : undefined
 
     try {

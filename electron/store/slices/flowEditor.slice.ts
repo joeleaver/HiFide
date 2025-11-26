@@ -311,7 +311,7 @@ export interface FlowEditorSlice {
   feComputeResolvedModel: () => void
 
   feClearLogs: () => void
-  flowInit: () => Promise<void>
+  flowInit: () => Promise<{ ok: boolean; error?: string; code?: string; requestId?: string }>
   feResumeFromState: (requestId: string) => Promise<void>
   feStop: () => Promise<void>
   feResume: (params: { userInput?: string }) => Promise<void>
@@ -807,7 +807,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     } catch { set({ feResolvedModel: null }) }
   },
 
-  flowInit: async () => {
+  flowInit: async (): Promise<{ ok: boolean; error?: string; code?: string; requestId?: string }> => {
     // Execute the flow by finding the Context Start node and running it
     // Kick-off should ACK to renderer immediately; heavy work runs async.
 
@@ -816,10 +816,32 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     const storeState: any = (store as any).getState()
     const ws = storeState.workspaceRoot || null
     const currentSessionId = ws ? (storeState.currentIdByWorkspace?.[ws] ?? null) : null
-    const requestId = currentSessionId || `flow-init-${Date.now()}`
+
+    if (!ws) {
+      console.error('[flowInit] No workspace bound - cannot initialize flow')
+      return { ok: false, error: 'No workspace bound', code: 'no-workspace' }
+    }
+
+    if (!currentSessionId) {
+      console.error('[flowInit] No current session for workspace - cannot initialize flow')
+      return { ok: false, error: 'No current session', code: 'no-current-session' }
+    }
 
     const list = ws ? (storeState.sessionsByWorkspace?.[ws] || []) : []
     const currentSession = Array.isArray(list) ? list.find((s: any) => s.id === currentSessionId) : null
+    if (!currentSession) {
+      console.error('[flowInit] Current session not found in sessionsByWorkspace - cannot initialize flow')
+      return { ok: false, error: 'Current session not found', code: 'session-not-found' }
+    }
+
+    const sessionContext = currentSession?.currentContext
+    if (!sessionContext) {
+      console.error('[flowInit] No session context found - cannot initialize flow')
+      __queueFeEvent(set, get, { requestId: currentSessionId, type: 'error', timestamp: Date.now(), message: 'No session context' } as any)
+      set({ feStatus: 'stopped' })
+      return { ok: false, error: 'No session context', code: 'no-session-context' }
+    }
+
     const executedFlowId = currentSession?.lastUsedFlow || 'default'
 
     // Reset node styles only if the editor is currently showing the executed flow
@@ -832,6 +854,8 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       }))
       set({ feNodes: resetNodes })
     }
+
+    const requestId = currentSessionId || `flow-init-${Date.now()}`
 
     set({
       feRequestId: requestId,
@@ -849,24 +873,24 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         const ws2 = storeState.workspaceRoot || null
         const curId2 = ws2 ? (storeState.currentIdByWorkspace?.[ws2] ?? null) : null
         const list2 = ws2 ? (storeState.sessionsByWorkspace?.[ws2] || []) : []
-        const currentSession = Array.isArray(list2) ? list2.find((s: any) => s.id === curId2) : null
-        const sessionContext = currentSession?.currentContext
-        if (!sessionContext) {
-          console.error('[flowInit] No session context found - cannot initialize flow')
+        const currentSession2 = Array.isArray(list2) ? list2.find((s: any) => s.id === curId2) : null
+        const sessionContext2 = currentSession2?.currentContext
+        if (!sessionContext2) {
+          console.error('[flowInit] No session context found on deferred read - cannot initialize flow')
           __queueFeEvent(set, get, { requestId, type: 'error', timestamp: Date.now(), message: 'No session context' } as any)
           set({ feStatus: 'stopped' })
           return
         }
 
         const pricingConfig: PricingConfig | undefined = storeState.pricingConfig
-        const modelPricing = (pricingConfig as any)?.[sessionContext.provider || '']?.[sessionContext.model || ''] || null
+        const modelPricing = (pricingConfig as any)?.[sessionContext2.provider || '']?.[sessionContext2.model || ''] || null
 
         if (process.env.HF_FLOW_DEBUG === '1') {
           console.log('[flowInit] Initializing flow from session context:', {
-            sessionId: currentSession?.id,
-            provider: sessionContext.provider,
-            model: sessionContext.model,
-            messageCount: sessionContext.messageHistory?.length || 0
+            sessionId: currentSession2?.id,
+            provider: sessionContext2.provider,
+            model: sessionContext2.model,
+            messageCount: sessionContext2.messageHistory?.length || 0
           })
         }
 
@@ -878,7 +902,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
         const maxUSD = (() => { const v = parseFloat(get().feBudgetUSD); return isNaN(v) ? undefined : v })()
 
         // Build FlowDefinition from the executed flow (not necessarily the editor graph)
-        const execFlowId = currentSession?.lastUsedFlow || 'default'
+        const execFlowId = currentSession2?.lastUsedFlow || executedFlowId || 'default'
         let execNodes = get().feNodes
         let execEdges = get().feEdges
         if (!(Array.isArray(execNodes) && execNodes.length > 0 && get().feSelectedTemplate === execFlowId)) {
@@ -901,7 +925,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
           sessionId: currentSessionId,
           flowId: execFlowId,
           flowDef,
-          initialContext: sessionContext,
+          initialContext: sessionContext2,
           workspaceId: storeState.workspaceRoot || undefined,
           policy: {
             redactor: { enabled: get().feRedactorEnabled, rules },
@@ -925,7 +949,7 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
       }
     })
 
-    // Return immediately so JSON-RPC can ACK without waiting for execution
+    return { ok: true, requestId }
   },
 
   /**
@@ -3195,54 +3219,29 @@ export const createFlowEditorSlice: StateCreator<FlowEditorSlice> = (set, get, s
     }
   },
 
-  // Debounced sync to session.currentContext
-  // Now handles both main and isolated contexts
-  feUpdateMainFlowContext: (() => {
-    let syncTimeout: NodeJS.Timeout | null = null
-
-    return (context: MainFlowContext) => {
-      if (process.env.HF_FLOW_DEBUG === '1') {
-        console.log('[feUpdateMainFlowContext] Updating context:', {
-          contextId: context.contextId,
-          contextType: context.contextType,
-          provider: context.provider,
-          model: context.model,
-          systemInstructions: context.systemInstructions?.substring(0, 50) + '...',
-          messageHistoryLength: context.messageHistory.length,
-        })
-      }
-
-      // Update the appropriate context based on type
-      if (context.contextType === 'isolated') {
-        // Update isolated context
-        __queueFeIsolatedContext(set, get, context.contextId, context)
-      } else {
-        // Update main context
-        __queueFeMainContext(set, get, context)
-
-        // Debounce sync to session.currentContext (1 second) - only for main context
-        if (syncTimeout) clearTimeout(syncTimeout)
-        syncTimeout = setTimeout(() => {
-          const state = store.getState() as any
-          if (state.updateCurrentContext) {
-            if (process.env.HF_FLOW_DEBUG === '1') {
-              console.log('[feUpdateMainFlowContext] Syncing to session.currentContext', {
-                messageHistoryLength: context.messageHistory.length
-              })
-            }
-            // Sync shallow copy to session (only fields that exist in both)
-            state.updateCurrentContext({
-              provider: context.provider,
-              model: context.model,
-              systemInstructions: context.systemInstructions,
-              messageHistory: context.messageHistory,
-              // temperature is not in MainFlowContext, only in Session.currentContext
-            })
-          }
-        }, 1000)
-      }
+  // Update flow context for UI display (context inspector)
+  // messageHistory is NOT synced to session.currentContext - it's runtime state only
+  feUpdateMainFlowContext: (context: MainFlowContext) => {
+    if (process.env.HF_FLOW_DEBUG === '1') {
+      console.log('[feUpdateMainFlowContext] Updating context:', {
+        contextId: context.contextId,
+        contextType: context.contextType,
+        provider: context.provider,
+        model: context.model,
+        systemInstructions: context.systemInstructions?.substring(0, 50) + '...',
+        messageHistoryLength: context.messageHistory.length,
+      })
     }
-  })(),
+
+    // Update the appropriate context based on type
+    if (context.contextType === 'isolated') {
+      // Update isolated context
+      __queueFeIsolatedContext(set, get, context.contextId, context)
+    } else {
+      // Update main context
+      __queueFeMainContext(set, get, context)
+    }
+  },
 
   // User input management - used by userInput node
   // This replaces the scheduler.waitForUserInput() pattern

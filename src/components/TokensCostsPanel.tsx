@@ -87,7 +87,7 @@ export default function TokensCostsPanel() {
                   <span style={{ color: '#81c784' }}>{total.outputTokens.toLocaleString()}</span>
                   <span style={{ color: '#666' }}> out</span>
                   <span style={{ color: '#666' }}> = </span>
-                  <span style={{ color: '#fff' }}>{(total.inputTokens + (total.cachedTokens || 0) + total.outputTokens).toLocaleString()}</span>
+                  <span style={{ color: '#fff' }}>{(total.inputTokens + total.outputTokens).toLocaleString()}</span>
                 </Text>
               </Group>
               {totalCost > 0 && (

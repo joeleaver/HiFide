@@ -181,7 +181,11 @@ export async function writeKanbanBoard(workspaceRoot: string, board: KanbanBoard
     tasks: board.tasks.map(normalizeTask),
   })
   const payload = JSON.stringify(normalized, null, 2)
-  const tmpPath = `${boardPath}.tmp`
+
+  // Atomic write: use unique temp file to prevent race conditions
+  // Use timestamp + random to ensure uniqueness (same pattern as session persistence)
+  const tmpPath = `${boardPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 9)}`
+
   await fs.writeFile(tmpPath, payload, 'utf8')
   await fs.rename(tmpPath, boardPath)
 }
@@ -189,3 +193,87 @@ export async function writeKanbanBoard(workspaceRoot: string, board: KanbanBoard
 export function nextOrderForStatus(board: KanbanBoard, status: KanbanStatus): number {
   return board.tasks.filter((task) => task.status === status).length
 }
+
+/**
+ * Debounced Kanban board saver
+ *
+ * Prevents concurrent writes to the same workspace's board.
+ * Similar to DebouncedSessionSaver but for Kanban boards.
+ */
+class DebouncedKanbanSaver {
+  private saveTimeouts = new Map<string, NodeJS.Timeout>()
+  private activeSaves = new Map<string, Promise<void>>()
+  private readonly debounceMs: number
+
+  constructor(debounceMs = 300) {
+    this.debounceMs = debounceMs
+  }
+
+  /**
+   * Save a board with optional debouncing
+   * Returns a Promise when immediate=true, void when debounced
+   */
+  save(workspaceRoot: string, board: KanbanBoard, immediate = false): Promise<void> | void {
+    // Clear existing timeout for this workspace
+    const existingTimeout = this.saveTimeouts.get(workspaceRoot)
+    if (existingTimeout) {
+      clearTimeout(existingTimeout)
+      this.saveTimeouts.delete(workspaceRoot)
+    }
+
+    if (immediate) {
+      // Immediate save - return Promise so caller can await
+      return this.performSave(workspaceRoot, board)
+    } else {
+      // Debounced save - fire and forget
+      const timeout = setTimeout(() => {
+        this.performSave(workspaceRoot, board)
+        this.saveTimeouts.delete(workspaceRoot)
+      }, this.debounceMs)
+
+      this.saveTimeouts.set(workspaceRoot, timeout)
+    }
+  }
+
+  /**
+   * Perform the actual save, preventing concurrent saves to the same workspace
+   */
+  private async performSave(workspaceRoot: string, board: KanbanBoard): Promise<void> {
+    // Wait for any active save to complete
+    const activeSave = this.activeSaves.get(workspaceRoot)
+    if (activeSave) {
+      await activeSave.catch(() => {
+        // Ignore errors from previous save
+      })
+    }
+
+    // Start new save
+    const savePromise = writeKanbanBoard(workspaceRoot, board)
+      .catch(e => {
+        console.error('[kanban-persistence] Save failed:', e)
+        throw e // Re-throw so caller can handle
+      })
+      .finally(() => {
+        // Clean up active save tracking
+        if (this.activeSaves.get(workspaceRoot) === savePromise) {
+          this.activeSaves.delete(workspaceRoot)
+        }
+      })
+
+    this.activeSaves.set(workspaceRoot, savePromise)
+    await savePromise
+  }
+
+  /**
+   * Cancel all pending saves
+   */
+  cancelAll(): void {
+    for (const timeout of this.saveTimeouts.values()) {
+      clearTimeout(timeout)
+    }
+    this.saveTimeouts.clear()
+  }
+}
+
+// Singleton instance
+export const kanbanSaver = new DebouncedKanbanSaver(300)

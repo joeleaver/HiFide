@@ -2,14 +2,17 @@ import { Group, Text, UnstyledButton, Badge } from '@mantine/core'
 import { IconPlus, IconX, IconChevronUp, IconChevronDown } from '@tabler/icons-react'
 import { useEffect, useState } from 'react'
 import { useTerminalStore } from '../store/terminal'
+import { useTerminalTabs } from '../store/terminalTabs'
 import { usePanelResize } from '../hooks/usePanelResize'
 import TerminalView from './TerminalView'
 import { getBackendClient } from '../lib/backend/bootstrap'
 
 export default function TerminalPanel({ context }: { context: 'agent' | 'explorer' }) {
-  // Local tabs + active (hydrated via WS RPC + notification)
-  const [tabs, setTabs] = useState<string[]>([])
-  const [activeTab, setActiveTab] = useState<string | null>(null)
+  // Get tabs from store (not local state!)
+  const tabs = useTerminalTabs((s) => context === 'agent' ? s.agentTabs : s.explorerTabs)
+  const activeTab = useTerminalTabs((s) => context === 'agent' ? s.agentActive : s.explorerActive)
+  const hydrateTabs = useTerminalTabs((s) => s.hydrateTabs)
+
   const [panelHeight, setPanelHeight] = useState<number>(300)
 
   // Use renderer-local terminal store for xterm operations and UI state
@@ -17,16 +20,10 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
   const open = useTerminalStore((s) => context === 'agent' ? s.agentTerminalPanelOpen : s.explorerTerminalPanelOpen)
   const setTerminalPanelOpen = useTerminalStore((s) => s.setTerminalPanelOpen)
 
-  // Hydrate tabs/active and height on mount
+  // Hydrate tabs and height on mount
   useEffect(() => {
-    (async () => {
-      try {
-        const res: any = await getBackendClient()?.rpc('terminal.getTabs', {})
-        if (res?.ok) {
-          setTabs(Array.isArray(context === 'agent' ? res.agentTabs : res.explorerTabs) ? (context === 'agent' ? res.agentTabs : res.explorerTabs) : [])
-          setActiveTab((context === 'agent' ? res.agentActive : res.explorerActive) || null)
-        }
-      } catch {}
+    hydrateTabs()
+    ;(async () => {
       try {
         const w: any = await getBackendClient()?.rpc('ui.getWindowState', {})
         const ws = w?.windowState || {}
@@ -37,50 +34,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
         )
       } catch {}
     })()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Subscribe to live tab/active changes and workspace changes
-  useEffect(() => {
-    const client = getBackendClient()
-    if (!client) return
-
-    const applyTabs = (p: any) => {
-      try {
-        const nextTabs = Array.isArray(context === 'agent' ? p?.agentTabs : p?.explorerTabs)
-          ? (context === 'agent' ? p.agentTabs : p.explorerTabs)
-          : []
-        setTabs(nextTabs)
-        setActiveTab((context === 'agent' ? p?.agentActive : p?.explorerActive) || null)
-      } catch {}
-    }
-
-    const offTabs = client.subscribe('terminal.tabs.changed', applyTabs)
-
-    // On workspace bind/ready, rehydrate terminal tabs for the new workspace
-    const rehydrate = async () => {
-      try {
-        const res: any = await client.rpc('terminal.getTabs', {})
-        if (res?.ok) {
-          applyTabs({
-            agentTabs: res.agentTabs,
-            explorerTabs: res.explorerTabs,
-            agentActive: res.agentActive,
-            explorerActive: res.explorerActive,
-          })
-        } else {
-          applyTabs({ agentTabs: [], explorerTabs: [], agentActive: null, explorerActive: null })
-        }
-      } catch {
-        applyTabs({ agentTabs: [], explorerTabs: [], agentActive: null, explorerActive: null })
-      }
-    }
-    const offBound = client.subscribe('workspace.bound', rehydrate)
-    const offReady = client.subscribe('workspace.ready', rehydrate)
-
-    return () => { try { offTabs?.(); offBound?.(); offReady?.() } catch {} }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [hydrateTabs, context])
 
   const addTab = async () => {
     try { await getBackendClient()?.rpc('terminal.addTab', { context }) } catch {}

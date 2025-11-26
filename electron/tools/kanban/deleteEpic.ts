@@ -9,7 +9,7 @@ export const kanbanDeleteEpicTool: AgentTool = {
     required: ['epicId'],
     additionalProperties: false,
   },
-  run: async (input: { epicId: string }) => {
+  run: async (input: { epicId: string }, meta?: any) => {
     const { useMainStore } = await import('../../store')
     const state = useMainStore.getState() as any
 
@@ -17,7 +17,7 @@ export const kanbanDeleteEpicTool: AgentTool = {
       throw new Error('Kanban store is not initialized')
     }
 
-    const result = await state.kanbanDeleteEpic(input.epicId)
+    const result = await state.kanbanDeleteEpic(input.epicId, meta?.workspaceId)
     if (!result?.ok) {
       throw new Error(`Failed to delete epic ${input.epicId}`)
     }

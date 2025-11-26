@@ -134,14 +134,8 @@ const DEFAULT_PROFILE_NAME = 'default'
 const workspaceTemplatesCache = new Map<string, Record<string, FlowProfile>>()
 
 async function getWorkspaceRoot(): Promise<string> {
-  try {
-    // Prefer main store as single source of truth
-    const { useMainStore } = await import('../store/index.js')
-    const root = (useMainStore as any).getState?.().workspaceRoot
-    if (root) return path.resolve(root)
-  } catch {}
-  // Fallbacks for very early boot or tests
-  return path.resolve(process.env.HIFIDE_WORKSPACE_ROOT || process.cwd())
+  const { resolveWorkspaceRootAsync } = await import('../utils/workspace.js')
+  return resolveWorkspaceRootAsync()
 }
 
 async function loadWorkspaceTemplates(): Promise<Record<string, FlowProfile>> {

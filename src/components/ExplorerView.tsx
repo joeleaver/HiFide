@@ -1,10 +1,12 @@
-import { Group, Stack, Text, ScrollArea, UnstyledButton } from '@mantine/core'
-import { IconFile, IconFolder, IconChevronRight, IconChevronDown } from '@tabler/icons-react'
+import { Group, Stack, Text, ScrollArea, UnstyledButton, Center, Skeleton, Button, Box } from '@mantine/core'
+import { IconFile, IconFolder, IconChevronRight, IconChevronDown, IconRefresh, IconAlertTriangle } from '@tabler/icons-react'
 import Editor from '@monaco-editor/react'
-import { Profiler, useEffect, useState } from 'react'
+import { Profiler, useEffect, useState, useCallback } from 'react'
 import TerminalPanel from './TerminalPanel'
 import { getBackendClient } from '../lib/backend/bootstrap'
 import { useTerminalStore } from '../store/terminal'
+import { useTerminalTabs } from '../store/terminalTabs'
+import { useExplorerHydration } from '../store/screenHydration'
 
 interface FileTreeItemProps {
   name: string
@@ -68,57 +70,87 @@ function FileTreeItem({ name, type, level, path, isOpen, onToggle, onFileClick }
 }
 
 
+/**
+ * Skeleton for Explorer while loading
+ */
+function ExplorerSkeleton() {
+  return (
+    <Group gap={0} style={{ flex: 1, height: '100%', overflow: 'hidden' }} align="stretch">
+      {/* Sidebar skeleton */}
+      <Box style={{ width: 260, backgroundColor: '#252526', borderRight: '1px solid #3e3e42', padding: 8 }}>
+        <Skeleton width="100%" height={20} radius="sm" mb={12} />
+        {Array.from({ length: 12 }).map((_, i) => (
+          <Skeleton key={i} width={`${70 + Math.random() * 30}%`} height={20} radius="sm" mb={4} ml={i % 3 * 16} />
+        ))}
+      </Box>
+      {/* Editor skeleton */}
+      <Box style={{ flex: 1, backgroundColor: '#1e1e1e', display: 'flex', flexDirection: 'column', gap: 8, padding: 16 }}>
+        <Skeleton width={200} height={24} radius="sm" />
+        <Skeleton width="100%" height="100%" radius="sm" />
+      </Box>
+    </Group>
+  )
+}
+
 export default function ExplorerView() {
+  // Screen hydration state
+  const screenPhase = useExplorerHydration((s) => s.phase)
+  const screenError = useExplorerHydration((s) => s.error)
+  const startLoading = useExplorerHydration((s) => s.startLoading)
+  const setReady = useExplorerHydration((s) => s.setReady)
+  const setScreenError = useExplorerHydration((s) => s.setError)
+
   // Local explorer state (hydrated via WS RPC)
   const [openedFile, setOpenedFile] = useState<any>(null)
   const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(null)
   const [openFolders, setOpenFolders] = useState<string[]>([])
   const [childrenByDir, setChildrenByDir] = useState<Record<string, any[]>>({})
-  // Local explorer terminal tabs (hydrated via WS) for parity and potential fit logic
-  const [explorerTerminalTabs, setExplorerTerminalTabs] = useState<string[]>([])
-  const [explorerActiveTerminal, setExplorerActiveTerminal] = useState<string | null>(null)
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res: any = await getBackendClient()?.rpc('terminal.getTabs', {})
-        if (res?.ok) {
-          setExplorerTerminalTabs(Array.isArray(res.explorerTabs) ? res.explorerTabs : [])
-          setExplorerActiveTerminal(res.explorerActive || null)
-        }
-      } catch {}
-    })()
-  }, [])
+  // Get terminal tabs from store (not local state!)
+  const explorerTerminalTabs = useTerminalTabs((s) => s.explorerTabs)
+  const explorerActiveTerminal = useTerminalTabs((s) => s.explorerActive)
+  const hydrateTabs = useTerminalTabs((s) => s.hydrateTabs)
 
-  // Subscribe to terminal tabs changes for this connection only
-  useEffect(() => {
-    const client = getBackendClient()
-    if (!client) return
-    const off = client.subscribe('terminal.tabs.changed', (p: any) => {
-      try {
-        setExplorerTerminalTabs(Array.isArray(p?.explorerTabs) ? p.explorerTabs : [])
-        setExplorerActiveTerminal(p?.explorerActive || null)
-      } catch {}
-    })
-    return () => { try { off?.() } catch {} }
-  }, [])
+  // Load explorer data
+  const loadExplorer = useCallback(async () => {
+    try {
+      const client = getBackendClient()
+      if (!client) throw new Error('No backend connection')
 
-  // Hydrate explorer state from backend snapshot
+      // Load explorer state and tabs in parallel
+      const [explorerRes] = await Promise.all([
+        client.rpc('explorer.getState', {}),
+        hydrateTabs(),
+      ])
+
+      if ((explorerRes as any)?.ok) {
+        const res = explorerRes as any
+        setWorkspaceRoot(res.workspaceRoot || null)
+        setOpenFolders(Array.isArray(res.openFolders) ? res.openFolders : [])
+        setChildrenByDir(res.childrenByDir || {})
+        setOpenedFile(res.openedFile || null)
+        setReady()
+      } else {
+        throw new Error('Failed to load explorer state')
+      }
+    } catch (e) {
+      setScreenError(e instanceof Error ? e.message : 'Failed to load explorer')
+    }
+  }, [hydrateTabs, setReady, setScreenError])
+
+  // Auto-load on mount
+  // Note: We need to load every time the component mounts because local useState
+  // resets on unmount, but the hydration store persists. So if phase is 'ready'
+  // but workspaceRoot is null, we need to reload.
   useEffect(() => {
-    const client = getBackendClient()
-    if (!client) return
-    ;(async () => {
-      try {
-        const res: any = await client.rpc('explorer.getState', {})
-        if (res?.ok) {
-          setWorkspaceRoot(res.workspaceRoot || null)
-          setOpenFolders(Array.isArray(res.openFolders) ? res.openFolders : [])
-          setChildrenByDir(res.childrenByDir || {})
-          setOpenedFile(res.openedFile || null)
-        }
-      } catch {}
-    })()
-  }, [])
+    if (screenPhase === 'idle') {
+      startLoading()
+      loadExplorer()
+    } else if (screenPhase === 'ready' && workspaceRoot === null) {
+      // Component remounted - local state was lost, reload silently
+      loadExplorer()
+    }
+  }, [screenPhase, startLoading, loadExplorer, workspaceRoot])
 
   // Fit active explorer terminal when it changes and panel is open
   const fitTerminal = useTerminalStore((s) => s.fitTerminal)
@@ -184,6 +216,35 @@ export default function ExplorerView() {
       const res: any = await getBackendClient()?.rpc('editor.openFile', { path: filePath })
       if (res?.ok && res.openedFile) setOpenedFile(res.openedFile)
     } catch {}
+  }
+
+  // Render based on screen phase
+  if (screenPhase === 'idle' || screenPhase === 'loading') {
+    return <ExplorerSkeleton />
+  }
+
+  if (screenPhase === 'error') {
+    return (
+      <Center h="100%">
+        <Stack align="center" gap="md">
+          <IconAlertTriangle size={48} color="var(--mantine-color-red-6)" />
+          <Text size="sm" c="dimmed" ta="center">
+            {screenError ?? 'Failed to load explorer'}
+          </Text>
+          <Button
+            variant="light"
+            size="sm"
+            leftSection={<IconRefresh size={16} />}
+            onClick={() => {
+              startLoading()
+              loadExplorer()
+            }}
+          >
+            Retry
+          </Button>
+        </Stack>
+      </Center>
+    )
   }
 
   return (

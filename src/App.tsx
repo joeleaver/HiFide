@@ -17,12 +17,8 @@ import { useRerenderTrace } from './utils/perf'
 import { useUiStore } from './store/ui'
 import { getBackendClient } from './lib/backend/bootstrap'
 
-import { useBackendBinding } from './store/binding'
-import type { BackendBindingState } from './store/binding'
-import { useSessionUi } from './store/sessionUi'
-import { useChatTimeline } from './store/chatTimeline'
-
-import { useLoadingOverlay } from './store/loadingOverlay'
+import { useAppBoot } from './store/appBoot'
+import { useHydration, type HydrationState } from './store/hydration'
 
 let handlersRegistered = false
 
@@ -165,85 +161,23 @@ function App() {
   const setSessionPanelWidth = useUiStore((s) => s.setSessionPanelWidth)
   const setMainCollapsed = useUiStore((s) => (s as any).setMainCollapsed)
 
-  const [appBootstrapping, setAppBootstrapping] = useState<boolean>(true)
-  const [startupMessage, setStartupMessage] = useState<string | null>(null)
-  const { active: wsLoading, message: wsLoadingMessage } = useLoadingOverlay()
-  // Selectors for loading overlay gating (no effects)
-  const attached = useBackendBinding((s: BackendBindingState) => s.attached)
-  const sessionsCount = useSessionUi((s: any) => (s.sessions?.length || 0))
-  const timelineHydrating = useChatTimeline((s: any) => s.isHydrating)
-  const timelineRenderedOnce = useChatTimeline((s: any) => s.hasRenderedOnce)
-  const hydMeta = useSessionUi((s: any) => s.isHydratingMeta)
-  const hydUsage = useSessionUi((s: any) => s.isHydratingUsage)
-  const listHydrated = useSessionUi((s: any) => s.hasHydratedList)
+  // Get boot status from store (not local state!)
+  const appBootstrapping = useAppBoot((s) => s.appBootstrapping)
+  const startupMessage = useAppBoot((s) => s.startupMessage)
+  const hydrateBootStatus = useAppBoot((s) => s.hydrateBootStatus)
 
+  // Read directly from hydration store for reliable React re-renders
+  const hydrationPhase = useHydration((s: HydrationState) => s.phase)
+  const overlayActive = useHydration((s: HydrationState) => s.isLoading)
+  const wsLoadingMessage = useHydration((s: HydrationState) => s.loadingMessage)
 
-  // Keep overlay visible if workspace bound but either the sessions list is not hydrated yet
-  // OR timeline/meta/usage are hydrating
-  // OR there is at least one session but the timeline has not completed its
-  // first render yet (closes any recompute gap between flags and the actual
-  // UI becoming stable). For a truly empty workspace (no sessions), don't gate
-  // on hasRenderedOnce.
-  const overlayActive = wsLoading || (
-    attached && (
-      !listHydrated ||
-      (sessionsCount > 0 && !timelineRenderedOnce) ||
-      timelineHydrating ||
-      hydMeta ||
-      hydUsage
-    )
-  )
+  // DEBUG: Log every render to see what values the component sees
+  console.log('[App render] hydrationPhase:', hydrationPhase, 'overlayActive:', overlayActive, 'appBootstrapping:', appBootstrapping)
 
-
-
-
-  // Hydrate boot status via snapshot-after-subscribe (race-proof). Show a connecting message until WS is ready.
+  // Hydrate boot status on mount
   useEffect(() => {
-    let off: (() => void) | undefined
-    let pollTimer: any
-    const run = async () => {
-      const client = getBackendClient()
-      if (!client) {
-        setStartupMessage('Connecting to backend…')
-        return
-      }
-      // Distinct pre-WS message
-      setStartupMessage('Connecting to backend…')
-      try {
-        await (client as any).whenReady?.(7000)
-      } catch {}
-      // Subscribe first to avoid missing an in-flight state change between snapshot and subscribe
-      off = client.subscribe('app.boot.changed', (p: any) => {
-        setAppBootstrapping(!!p?.appBootstrapping)
-        setStartupMessage(p?.startupMessage || null)
-      })
-      // Then request a snapshot of current boot status
-      try {
-        const res: any = await client.rpc('app.getBootStatus', {})
-        if (res?.ok) {
-          setAppBootstrapping(!!res.appBootstrapping)
-          setStartupMessage(res.startupMessage || null)
-        }
-      } catch {}
-
-      // Fallback: while bootstrapping, poll snapshot periodically in case a WS event is missed
-      // This avoids getting visually "stuck" on an old message if a notification is dropped
-      pollTimer = setInterval(async () => {
-        try {
-          // If we already finished bootstrapping, stop polling
-          if (!appBootstrapping) { clearInterval(pollTimer); pollTimer = null; return }
-          const snap: any = await client.rpc('app.getBootStatus', {})
-          if (snap?.ok) {
-            setAppBootstrapping(!!snap.appBootstrapping)
-            setStartupMessage(snap.startupMessage || null)
-            if (!snap.appBootstrapping && pollTimer) { clearInterval(pollTimer); pollTimer = null }
-          }
-        } catch {}
-      }, 1500)
-    }
-    run()
-    return () => { try { off?.() } catch {}; if (pollTimer) clearInterval(pollTimer) }
-  }, [appBootstrapping])
+    hydrateBootStatus()
+  }, [hydrateBootStatus])
 
   useRerenderTrace('App', {
     currentView,

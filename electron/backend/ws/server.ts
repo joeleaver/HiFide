@@ -1,21 +1,22 @@
 import { randomBytes } from 'node:crypto'
 import { createServer, Server as HttpServer } from 'node:http'
 import { WebSocketServer, WebSocket } from 'ws'
-import { createMessageConnection, MessageConnection } from 'vscode-jsonrpc'
-import { WebSocketMessageReader, WebSocketMessageWriter, toSocket } from 'vscode-ws-jsonrpc'
+import { JSONRPCServer, JSONRPCServerAndClient, JSONRPCClient } from 'json-rpc-2.0'
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { BrowserWindow } from 'electron'
 
 import { redactOutput } from '../../utils/security'
-import { registerConnection, unregisterConnection, setConnectionWorkspace, setConnectionWindowId, getConnectionWorkspaceId, broadcastWorkspaceNotification, activeConnections, setConnectionSelectedSessionId } from './broadcast'
+import { registerConnection, unregisterConnection, setConnectionWorkspace, setConnectionWindowId, getConnectionWorkspaceId, broadcastWorkspaceNotification, activeConnections, setConnectionSelectedSessionId, transitionConnectionPhase, type RpcConnection } from './broadcast'
+import { sendWorkspaceSnapshot } from './snapshot'
 import * as agentPty from '../../services/agentPty'
 import { flowEvents } from '../../ipc/flows-v2/events'
 
 import { useMainStore } from '../../store/index'
 import { sessionSaver } from '../../store/utils/session-persistence'
 import { UiPayloadCache } from '../../core/uiPayloadCache'
+import { getWorkspaceIdForSessionId } from '../../utils/workspace-session'
 
 import { readById, normalizeMarkdown, extractTrailingMeta } from '../../store/utils/knowledgeBase'
 import { deriveTitle as deriveSessionTitle, initialSessionTitle as initialSessionTitleUtil } from '../../store/utils/sessions'
@@ -27,23 +28,10 @@ import { getKbIndexer, getIndexer } from '../../core/state'
 
 const require = createRequire(import.meta.url)
 
-// Workspace-aware flow.event routing helper
-function __getWorkspaceIdForSessionId(sessionId: string | null): string | null {
-  if (!sessionId) return null
-  try {
-    const st: any = useMainStore.getState()
-    const map = st.sessionsByWorkspace || {}
-    for (const [ws, list] of Object.entries(map as Record<string, any[]>)) {
-      if (Array.isArray(list) && (list as any[]).some((s: any) => s?.id === sessionId)) return ws
-    }
-  } catch {}
-  return null
-}
-
 function broadcastFlowEvent(ev: any): void {
   try {
     const sid = (ev && typeof ev === 'object') ? (ev.sessionId || null) : null
-    const wsFromSid = __getWorkspaceIdForSessionId(sid)
+    const wsFromSid = getWorkspaceIdForSessionId(sid)
     const fallback = (useMainStore.getState() as any).workspaceRoot || null
     const target = wsFromSid || fallback
     if (target) {
@@ -132,7 +120,7 @@ type IPty = {
 }
 
 // Per-connection terminal registries
-function createTerminalService(connection: MessageConnection) {
+function createTerminalService(addMethod: (method: string, handler: (params: any) => any) => void, connection: RpcConnection) {
   const ptySessions = new Map<string, { p: IPty }>()
 
   function loadPtyModule(): any | null {
@@ -144,7 +132,7 @@ function createTerminalService(connection: MessageConnection) {
     }
   }
 
-  connection.onRequest('terminal.create', async (opts: { shell?: string; cwd?: string; cols?: number; rows?: number; env?: Record<string, string>; log?: boolean } = {}) => {
+  addMethod('terminal.create', async (opts: { shell?: string; cwd?: string; cols?: number; rows?: number; env?: Record<string, string>; log?: boolean } = {}) => {
     const isWin = process.platform === 'win32'
     const shell = opts.shell || (isWin ? 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe' : (process.env.SHELL || '/bin/bash'))
     const cols = opts.cols || 80
@@ -174,19 +162,19 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
     return { sessionId }
   })
 
-  connection.onRequest('terminal.write', async ({ sessionId, data }: { sessionId: string; data: string }) => {
+  addMethod('terminal.write', async ({ sessionId, data }: { sessionId: string; data: string }) => {
     const s = ptySessions.get(sessionId)
     if (!s) return { ok: false }
     try { s.p.write(data); return { ok: true } } catch { return { ok: false } }
   })
 
-  connection.onRequest('terminal.resize', async ({ sessionId, cols, rows }: { sessionId: string; cols: number; rows: number }) => {
+  addMethod('terminal.resize', async ({ sessionId, cols, rows }: { sessionId: string; cols: number; rows: number }) => {
     const s = ptySessions.get(sessionId)
     if (s) try { s.p.resize(cols, rows) } catch {}
     return { ok: !!s }
   })
 
-  connection.onRequest('terminal.dispose', async ({ sessionId }: { sessionId: string }) => {
+  addMethod('terminal.dispose', async ({ sessionId }: { sessionId: string }) => {
     const s = ptySessions.get(sessionId)
     if (s) {
       try { s.p.kill() } catch {}
@@ -196,7 +184,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   })
 
   // Agent PTY service (via shared service module)
-  connection.onRequest('agent-pty.attach', async (args: { requestId?: string; sessionId?: string; tailBytes?: number } = {}) => {
+  addMethod('agent-pty.attach', async (args: { requestId?: string; sessionId?: string; tailBytes?: number } = {}) => {
     const sid = args.sessionId || args.requestId
     if (!sid) return { ok: false, error: 'no-session' }
 
@@ -216,15 +204,15 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
     return { ok: true, sessionId: sid }
   })
 
-  connection.onRequest('agent-pty.resize', async ({ sessionId, cols, rows }: { sessionId: string; cols: number; rows: number }) => {
+  addMethod('agent-pty.resize', async ({ sessionId, cols, rows }: { sessionId: string; cols: number; rows: number }) => {
     return agentPty.resize(sessionId, cols, rows)
   })
 
-  connection.onRequest('agent-pty.write', async ({ sessionId, data }: { sessionId: string; data: string }) => {
+  addMethod('agent-pty.write', async ({ sessionId, data }: { sessionId: string; data: string }) => {
     return agentPty.write(sessionId, data)
   })
 
-  connection.onRequest('agent-pty.exec', async ({ sessionId, command }: { sessionId: string; command: string }) => {
+  addMethod('agent-pty.exec', async ({ sessionId, command }: { sessionId: string; command: string }) => {
     const rec = agentPty.getSessionRecord(sessionId)
     if (!rec) return { ok: false, error: 'no-session' }
     await agentPty.beginCommand(rec.state, command)
@@ -238,13 +226,13 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
     try { rec.p.write(payload); return { ok: true } } catch { return { ok: false } }
   })
 
-  connection.onRequest('agent-pty.detach', async (_args: { sessionId: string }) => {
+  addMethod('agent-pty.detach', async (_args: { sessionId: string }) => {
     // No-op for now; session persists until killed
     return { ok: true }
   })
 
   // Terminal UI state: list of tabs and active terminals
-  connection.onRequest('terminal.getTabs', async () => {
+  addMethod('terminal.getTabs', async () => {
     try {
       const st: any = useMainStore.getState()
       const agentTabs = Array.isArray(st.agentTerminalTabs) ? st.agentTerminalTabs : []
@@ -262,7 +250,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   })
 
 	  // Terminal tab management RPCs
-	  connection.onRequest('terminal.addTab', async ({ context }: { context: 'agent' | 'explorer' }) => {
+	  addMethod('terminal.addTab', async ({ context }: { context: 'agent' | 'explorer' }) => {
 	    try {
 	      const st: any = useMainStore.getState()
 	      const id = typeof st.addTerminalTab === 'function' ? st.addTerminalTab(context) : null
@@ -272,7 +260,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 	    }
 	  })
 
-	  connection.onRequest('terminal.removeTab', async ({ context, tabId }: { context: 'agent' | 'explorer'; tabId: string }) => {
+	  addMethod('terminal.removeTab', async ({ context, tabId }: { context: 'agent' | 'explorer'; tabId: string }) => {
 	    try {
 	      const st: any = useMainStore.getState()
 	      if (typeof st.removeTerminalTab === 'function') st.removeTerminalTab({ context, tabId })
@@ -282,7 +270,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 	    }
 	  })
 
-	  connection.onRequest('terminal.setActive', async ({ context, tabId }: { context: 'agent' | 'explorer'; tabId: string }) => {
+	  addMethod('terminal.setActive', async ({ context, tabId }: { context: 'agent' | 'explorer'; tabId: string }) => {
 	    try {
 	      const st: any = useMainStore.getState()
 	      if (typeof st.setActiveTerminal === 'function') st.setActiveTerminal({ context, tabId })
@@ -292,7 +280,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 	    }
 	  })
 
-	  connection.onRequest('terminal.restartAgent', async ({ tabId }: { tabId: string }) => {
+	  addMethod('terminal.restartAgent', async ({ tabId }: { tabId: string }) => {
 	    try {
 	      const st: any = useMainStore.getState()
 	      if (typeof st.restartAgentTerminal === 'function') await st.restartAgentTerminal({ tabId })
@@ -305,7 +293,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 
 
 	  // Kanban RPCs
-	  connection.onRequest('kanban.getBoard', async () => {
+	  addMethod('kanban.getBoard', async () => {
 	    try {
 	      const st: any = useMainStore.getState()
 	      return {
@@ -321,7 +309,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 	    }
 	  })
 
-	  connection.onRequest('kanban.load', async () => {
+	  addMethod('kanban.load', async () => {
 	    try {
 	      const st: any = useMainStore.getState()
 	      const res = await st.kanbanLoad?.()
@@ -331,7 +319,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 	    }
 	  })
 
-	  connection.onRequest('kanban.refresh', async () => {
+	  addMethod('kanban.refresh', async () => {
 	    try {
 	      const st: any = useMainStore.getState()
 	      const res = await st.kanbanRefreshFromDisk?.()
@@ -341,7 +329,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 	    }
 	  })
 
-	  connection.onRequest('kanban.save', async () => {
+	  addMethod('kanban.save', async () => {
 	    try {
 	      const st: any = useMainStore.getState()
 	      const res = await st.kanbanSave?.()
@@ -351,7 +339,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 	    }
 	  })
 
-	  connection.onRequest('kanban.createTask', async ({ input }: { input: { title: string; status?: string; epicId?: string | null; description?: string; assignees?: string[]; tags?: string[] } }) => {
+	  addMethod('kanban.createTask', async ({ input }: { input: { title: string; status?: string; epicId?: string | null; description?: string; assignees?: string[]; tags?: string[] } }) => {
 	    try {
 	      const st: any = useMainStore.getState()
 	      const task = await st.kanbanCreateTask?.(input)
@@ -361,7 +349,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 	    }
 	  })
 
-	  connection.onRequest('kanban.updateTask', async ({ taskId, patch }: { taskId: string; patch: any }) => {
+	  addMethod('kanban.updateTask', async ({ taskId, patch }: { taskId: string; patch: any }) => {
 	    try {
 	      const st: any = useMainStore.getState()
 	      const task = await st.kanbanUpdateTask?.(taskId, patch)
@@ -371,7 +359,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 	    }
 	  })
 
-	  connection.onRequest('kanban.deleteTask', async ({ taskId }: { taskId: string }) => {
+	  addMethod('kanban.deleteTask', async ({ taskId }: { taskId: string }) => {
 	    try {
 	      const st: any = useMainStore.getState()
 	      const res = await st.kanbanDeleteTask?.(taskId)
@@ -381,7 +369,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 	    }
 	  })
 
-	  connection.onRequest('kanban.moveTask', async ({ taskId, toStatus, toIndex }: { taskId: string; toStatus: string; toIndex: number }) => {
+	  addMethod('kanban.moveTask', async ({ taskId, toStatus, toIndex }: { taskId: string; toStatus: string; toIndex: number }) => {
 	    try {
 	      const st: any = useMainStore.getState()
 	      const res = await st.kanbanMoveTask?.({ taskId, toStatus, toIndex })
@@ -391,7 +379,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 	    }
 	  })
 
-	  connection.onRequest('kanban.createEpic', async ({ input }: { input: { name: string; color?: string; description?: string } }) => {
+	  addMethod('kanban.createEpic', async ({ input }: { input: { name: string; color?: string; description?: string } }) => {
 	    try {
 	      const st: any = useMainStore.getState()
 	      const epic = await st.kanbanCreateEpic?.(input)
@@ -401,7 +389,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 	    }
 	  })
 
-	  connection.onRequest('kanban.updateEpic', async ({ epicId, patch }: { epicId: string; patch: any }) => {
+	  addMethod('kanban.updateEpic', async ({ epicId, patch }: { epicId: string; patch: any }) => {
 	    try {
 	      const st: any = useMainStore.getState()
 	      const epic = await st.kanbanUpdateEpic?.(epicId, patch)
@@ -411,7 +399,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 	    }
 	  })
 
-	  connection.onRequest('kanban.deleteEpic', async ({ epicId }: { epicId: string }) => {
+	  addMethod('kanban.deleteEpic', async ({ epicId }: { epicId: string }) => {
 	    try {
 	      const st: any = useMainStore.getState()
 	      const res = await st.kanbanDeleteEpic?.(epicId)
@@ -422,12 +410,16 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 	  })
 
   // Flow execution service (JSON-RPC)
-  connection.onRequest('flow.start', async (_args: any = {}) => {
+  addMethod('flow.start', async (_args: any = {}) => {
     try {
       const st: any = useMainStore.getState()
       // Prefer using the main store action which resets UI state and builds args
       if (typeof st.flowInit === 'function') {
-        await st.flowInit()
+        const res = await st.flowInit()
+        // If flowInit explicitly reports a failure, propagate it to the renderer
+        if (res && res.ok === false) {
+          return { ok: false, error: res.error || 'Flow could not be started', code: (res as any).code }
+        }
         // Return the requestId if the store populated it
         try {
           const ns: any = useMainStore.getState()
@@ -490,7 +482,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
     }
   })
 
-  connection.onRequest('flow.resume', async ({ requestId, userInput }: { requestId?: string; userInput: string }) => {
+  addMethod('flow.resume', async ({ requestId, userInput }: { requestId?: string; userInput: string }) => {
     try {
       // Prefer explicit requestId if provided
       let id = requestId
@@ -567,7 +559,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
     }
   })
 
-  connection.onRequest('flow.cancel', async ({ requestId }: { requestId?: string }) => {
+  addMethod('flow.cancel', async ({ requestId }: { requestId?: string }) => {
     try {
       let id = requestId
 
@@ -596,19 +588,19 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   })
 
 
-  connection.onRequest('flow.getActive', async () => {
+  addMethod('flow.getActive', async () => {
     try {
       const { listActiveFlows } = await import('../../ipc/flows-v2/index.js')
       const all = listActiveFlows()
       const bound = getConnectionWorkspaceId(connection)
       if (!bound) return all
-      return all.filter((rid: string) => __getWorkspaceIdForSessionId(rid) === bound)
+      return all.filter((rid: string) => getWorkspaceIdForSessionId(rid) === bound)
     } catch (e: any) {
       return []
     }
   })
 
-  connection.onRequest('flow.status', async ({ requestId }: { requestId?: string } = {}) => {
+  addMethod('flow.status', async ({ requestId }: { requestId?: string } = {}) => {
     try {
       const { getFlowSnapshot, getAllFlowSnapshots } = await import('../../ipc/flows-v2/index.js')
       if (requestId) {
@@ -618,14 +610,14 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       const bound = getConnectionWorkspaceId(connection)
       const all = getAllFlowSnapshots()
       if (!bound) return all
-      return all.filter((s: any) => __getWorkspaceIdForSessionId(s.requestId) === bound)
+      return all.filter((s: any) => getWorkspaceIdForSessionId(s.requestId) === bound)
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
     }
   })
 
 
-  connection.onRequest('flows.getTools', async () => {
+  addMethod('flows.getTools', async () => {
     try {
       const allTools: any[] = (globalThis as any).__agentTools || []
       const getCategory = useMainStore.getState().getToolCategory as any
@@ -640,7 +632,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
     }
   })
   // Session snapshot for initial hydration of timeline
-  connection.onRequest('session.getCurrent', async () => {
+  addMethod('session.getCurrent', async () => {
     try {
       const st: any = useMainStore.getState()
       const bound = getConnectionWorkspaceId(connection)
@@ -663,7 +655,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   })
 
       // Strict session snapshot for initial hydration of timeline (workspace-scoped only)
-      connection.onRequest('session.getCurrentStrict', async () => {
+      addMethod('session.getCurrentStrict', async () => {
         try {
           const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
@@ -687,7 +679,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 
 
       // Sessions: list/select/new (lightweight, no timeline)
-      connection.onRequest('session.list', async () => {
+      addMethod('session.list', async () => {
         try {
           const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
@@ -701,7 +693,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('session.select', async ({ id }: { id: string }) => {
+      addMethod('session.select', async ({ id }: { id: string }) => {
         try {
           const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
@@ -717,8 +709,8 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
             }
           } catch {}
 
-          // Workspace-scoped only
-          st.selectFor({ workspaceId: bound, id })
+          // Workspace-scoped only - await to ensure save completes
+          await st.selectFor({ workspaceId: bound, id })
 
           const next: any = useMainStore.getState()
           const cur = (typeof next.getCurrentIdFor === 'function') ? next.getCurrentIdFor({ workspaceId: bound }) : null
@@ -753,7 +745,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('session.new', async ({ title }: { title?: string } = {}) => {
+      addMethod('session.new', async ({ title }: { title?: string } = {}) => {
         try {
           const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
@@ -766,6 +758,13 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
               if (isRunning && typeof st.feStop === 'function') {
                 await st.feStop()
               }
+            }
+          } catch {}
+
+          // Save current session before creating new one
+          try {
+            if (st.workspaceRoot === bound && typeof st.saveCurrentSession === 'function') {
+              await st.saveCurrentSession(true)
             }
           } catch {}
 
@@ -793,7 +792,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
       // Session: get current meta (id, title, lastUsedFlow)
-      connection.onRequest('session.getCurrentMeta', async () => {
+      addMethod('session.getCurrentMeta', async () => {
         try {
           const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
@@ -810,7 +809,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
       // Session: set executed flow (stop current run then switch)
-      connection.onRequest('session.setExecutedFlow', async ({ sessionId, flowId }: { sessionId: string; flowId: string }) => {
+      addMethod('session.setExecutedFlow', async ({ sessionId, flowId }: { sessionId: string; flowId: string }) => {
         try {
           const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
@@ -837,15 +836,53 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
       // Session: set provider/model (session-scoped); update context immediately without stopping
-      connection.onRequest('session.setProviderModel', async ({ sessionId, providerId, modelId }: { sessionId: string; providerId: string; modelId: string }) => {
+      addMethod('session.setProviderModel', async ({ sessionId, providerId, modelId }: { sessionId: string; providerId: string; modelId: string }) => {
         try {
           const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
 
-          if (typeof st.getSessionsFor === 'function' && typeof st.setSessionsFor === 'function') {
+          // Only mutate when this connection is bound to the current workspaceRoot
+          if (!bound || st.workspaceRoot !== bound) {
+            return { ok: false, error: 'workspace-mismatch' }
+          }
+
+          let updatedSess: any | null = null
+
+          if (typeof st.setSessionProviderModel === 'function') {
+            await st.setSessionProviderModel({ sessionId, provider: providerId, model: modelId })
+            // Re-read from store to build an accurate payload for this bound workspace/session
+            const fresh: any = useMainStore.getState()
+            const list = typeof fresh.getSessionsFor === 'function' ? (fresh.getSessionsFor({ workspaceId: bound }) || []) : []
+            updatedSess = Array.isArray(list) ? list.find((s: any) => s.id === sessionId) : null
+          } else if (typeof st.getSessionsFor === 'function' && typeof st.setSessionsFor === 'function') {
+            // Fallback for older stores: inline update by workspace
             const list = st.getSessionsFor({ workspaceId: bound }) || []
-            const nextList = list.map((s: any) => (s.id === sessionId ? { ...s, currentContext: { ...(s.currentContext || {}), provider: providerId, model: modelId }, updatedAt: Date.now() } : s))
+            const nextList = list.map((s: any) => (s.id === sessionId
+              ? { ...s, currentContext: { ...(s.currentContext || {}), provider: providerId, model: modelId }, updatedAt: Date.now() }
+              : s))
             st.setSessionsFor({ workspaceId: bound, sessions: nextList })
+            updatedSess = nextList.find((s: any) => s.id === sessionId) || null
+          }
+
+          // Proactively notify this connection so Context Inspector updates immediately,
+          // even if this workspace is not the currently active workspaceRoot for subscriptions.
+          try {
+            if (updatedSess) {
+              const payload = {
+                mainContext: updatedSess.currentContext || null,
+                isolatedContexts: {},
+              }
+              connection.sendNotification('flow.contexts.changed', payload)
+            }
+          } catch {}
+
+
+          try {
+            // Also update any active main flow scheduler whose requestId === sessionId
+            const { updateActiveFlowProviderModelForSession } = await import('../../ipc/flows-v2/index.js')
+            updateActiveFlowProviderModelForSession(sessionId, providerId, modelId)
+          } catch (e) {
+            try { console.warn('[ws] Failed to update active flow provider/model', e) } catch {}
           }
 
           return { ok: true }
@@ -857,7 +894,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 
 
       // Session: start a brand-new context (clear timeline + reset messageHistory)
-      connection.onRequest('session.newContext', async () => {
+      addMethod('session.newContext', async () => {
         try {
           const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
@@ -935,7 +972,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 
 
   // Generic tool result fetch (for badges with interactive.data.key)
-  connection.onRequest('tool.getResult', async ({ key }: { key: string }) => {
+  addMethod('tool.getResult', async ({ key }: { key: string }) => {
     try {
       const data = UiPayloadCache.peek(String(key))
       return { ok: true, data: typeof data === 'undefined' ? null : data }
@@ -945,7 +982,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   })
 
   // Convenience alias for diffs
-  connection.onRequest('edits.preview', async ({ key }: { key: string }) => {
+  addMethod('edits.preview', async ({ key }: { key: string }) => {
     try {
       const data = UiPayloadCache.peek(String(key)) || []
       const arr = Array.isArray(data) ? data : []
@@ -956,7 +993,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   })
 
   // Knowledge Base: get item body
-  connection.onRequest('kb.getItemBody', async ({ id }: { id: string }) => {
+  addMethod('kb.getItemBody', async ({ id }: { id: string }) => {
     try {
       const st: any = useMainStore.getState()
       const baseDir = st?.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
@@ -971,7 +1008,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
     }
   })
   // Knowledge Base: index reload
-  connection.onRequest('kb.reloadIndex', async () => {
+  addMethod('kb.reloadIndex', async () => {
     try {
       const st: any = useMainStore.getState()
       const baseDir = st?.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
@@ -986,7 +1023,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   })
 
   // Knowledge Base: search
-  connection.onRequest('kb.search', async ({ query, tags, limit }: { query?: string; tags?: string[]; limit?: number }) => {
+  addMethod('kb.search', async ({ query, tags, limit }: { query?: string; tags?: string[]; limit?: number }) => {
     try {
       const st: any = useMainStore.getState()
       const baseDir = st?.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
@@ -1048,7 +1085,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   })
 
   // Knowledge Base: create, update, delete
-  connection.onRequest('kb.createItem', async ({ title, description, tags, files }: { title: string; description: string; tags?: string[]; files?: string[] }) => {
+  addMethod('kb.createItem', async ({ title, description, tags, files }: { title: string; description: string; tags?: string[]; files?: string[] }) => {
     try {
       const st: any = useMainStore.getState()
       const baseDir = st?.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
@@ -1060,7 +1097,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
     }
   })
 
-  connection.onRequest('kb.updateItem', async ({ id, patch }: { id: string; patch: Partial<{ title: string; description: string; tags: string[]; files: string[] }> }) => {
+  addMethod('kb.updateItem', async ({ id, patch }: { id: string; patch: Partial<{ title: string; description: string; tags: string[]; files: string[] }> }) => {
     try {
       const st: any = useMainStore.getState()
       const baseDir = st?.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
@@ -1073,7 +1110,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
     }
   })
 
-  connection.onRequest('kb.deleteItem', async ({ id }: { id: string }) => {
+  addMethod('kb.deleteItem', async ({ id }: { id: string }) => {
     try {
       const st: any = useMainStore.getState()
       const baseDir = st?.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
@@ -1096,7 +1133,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   })
 
   // Knowledge Base: refresh workspace file index
-  connection.onRequest('kb.refreshWorkspaceFileIndex', async ({ includeExts, max }: { includeExts?: string[]; max?: number } = {}) => {
+  addMethod('kb.refreshWorkspaceFileIndex', async ({ includeExts, max }: { includeExts?: string[]; max?: number } = {}) => {
     try {
       const st: any = useMainStore.getState()
       const baseDir = st?.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
@@ -1110,7 +1147,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 
 
       // Flow Editor: templates and graph management
-      connection.onRequest('flowEditor.getTemplates', async () => {
+      addMethod('flowEditor.getTemplates', async () => {
         try {
           // Ensure templates are loaded before responding (handles early renderer hydrate)
           let st: any = useMainStore.getState()
@@ -1135,7 +1172,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('flowEditor.getGraph', async () => {
+      addMethod('flowEditor.getGraph', async () => {
         try {
           const st: any = useMainStore.getState()
           return {
@@ -1150,7 +1187,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 
       // Flow contexts snapshot (main + isolated)
       // Canonical source is the current session's persisted context; ephemeral FE contexts are shown only while running
-      connection.onRequest('flow.getContexts', async () => {
+      addMethod('flow.getContexts', async () => {
         try {
           const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
@@ -1173,7 +1210,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
       // Flow cache operations
-      connection.onRequest('flow.getNodeCache', async ({ nodeId }: { nodeId: string }) => {
+      addMethod('flow.getNodeCache', async ({ nodeId }: { nodeId: string }) => {
         try {
           const st: any = useMainStore.getState()
           const fn = typeof st.getNodeCache === 'function' ? st.getNodeCache : undefined
@@ -1184,7 +1221,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('flow.clearNodeCache', async ({ nodeId }: { nodeId: string }) => {
+      addMethod('flow.clearNodeCache', async ({ nodeId }: { nodeId: string }) => {
         try {
           const st: any = useMainStore.getState()
           if (typeof st.clearNodeCache === 'function') await st.clearNodeCache(nodeId)
@@ -1196,7 +1233,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 
 
 
-      connection.onRequest('flowEditor.setGraph', async ({ nodes, edges }: { nodes: any[]; edges: any[] }) => {
+      addMethod('flowEditor.setGraph', async ({ nodes, edges }: { nodes: any[]; edges: any[] }) => {
         try {
           const st: any = useMainStore.getState()
           const curNodes = Array.isArray(st.feNodes) ? st.feNodes : []
@@ -1214,7 +1251,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('flowEditor.loadTemplate', async ({ templateId }: { templateId: string }) => {
+      addMethod('flowEditor.loadTemplate', async ({ templateId }: { templateId: string }) => {
         try {
           const st: any = useMainStore.getState()
           if (typeof st.feLoadTemplate === 'function') {
@@ -1227,7 +1264,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('flowEditor.saveAsProfile', async ({ name, library }: { name: string; library?: string }) => {
+      addMethod('flowEditor.saveAsProfile', async ({ name, library }: { name: string; library?: string }) => {
         try {
           const st: any = useMainStore.getState()
           if (typeof st.feSaveAsProfile === 'function') {
@@ -1240,7 +1277,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('flowEditor.deleteProfile', async ({ name }: { name: string }) => {
+      addMethod('flowEditor.deleteProfile', async ({ name }: { name: string }) => {
         try {
           const st: any = useMainStore.getState()
           if (typeof st.feDeleteProfile === 'function') {
@@ -1252,7 +1289,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('flowEditor.createNewFlowNamed', async ({ name }: { name: string }) => {
+      addMethod('flowEditor.createNewFlowNamed', async ({ name }: { name: string }) => {
         try {
           const st: any = useMainStore.getState()
           if (typeof st.feCreateNewFlowNamed === 'function') {
@@ -1264,7 +1301,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
           return { ok: false, error: String(e) }
         }
 
-      connection.onRequest('flowEditor.exportFlow', async () => {
+      addMethod('flowEditor.exportFlow', async () => {
         try {
           const st: any = useMainStore.getState()
           if (typeof st.feExportFlow === 'function') {
@@ -1277,7 +1314,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('flowEditor.importFlow', async () => {
+      addMethod('flowEditor.importFlow', async () => {
         try {
           const st: any = useMainStore.getState()
           if (typeof st.feImportFlow === 'function') {
@@ -1294,7 +1331,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 
       // UI: update window state (persisted in main store)
       // UI: get full window state snapshot
-      connection.onRequest('window.setContentSize', async ({ width, height }: { width: number; height: number }) => {
+      addMethod('window.setContentSize', async ({ width, height }: { width: number; height: number }) => {
         try {
           const { BrowserWindow } = await import('electron')
           const { getWindow } = await import('../../core/window.js')
@@ -1311,7 +1348,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
       // Window control handlers via WebSocket JSON-RPC
-      connection.onRequest('window.minimize', async () => {
+      addMethod('window.minimize', async () => {
         try {
           const { BrowserWindow } = await import('electron')
           const { getWindow } = await import('../../core/window.js')
@@ -1323,7 +1360,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('window.toggleMaximize', async () => {
+      addMethod('window.toggleMaximize', async () => {
         try {
           const { BrowserWindow } = await import('electron')
           const { getWindow } = await import('../../core/window.js')
@@ -1345,7 +1382,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
       // Alias: window.maximize -> same behavior as toggleMaximize for convenience
-      connection.onRequest('window.maximize', async () => {
+      addMethod('window.maximize', async () => {
         try {
           const { BrowserWindow } = await import('electron')
           const { getWindow } = await import('../../core/window.js')
@@ -1367,7 +1404,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
 
-      connection.onRequest('window.close', async () => {
+      addMethod('window.close', async () => {
         try {
           const { BrowserWindow } = await import('electron')
           const { getWindow } = await import('../../core/window.js')
@@ -1379,7 +1416,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('ui.getWindowState', async () => {
+      addMethod('ui.getWindowState', async () => {
         try {
           const st: any = useMainStore.getState()
           const ws = st && typeof st.windowState === 'object' ? st.windowState : {}
@@ -1390,7 +1427,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
 	      // App boot status snapshot
-	      connection.onRequest('app.getBootStatus', async () => {
+	      addMethod('app.getBootStatus', async () => {
 	        try {
 	          const st: any = useMainStore.getState()
 	          return { ok: true, appBootstrapping: !!st.appBootstrapping, startupMessage: st.startupMessage || null }
@@ -1400,7 +1437,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 	      })
 
 
-      connection.onRequest('ui.updateWindowState', async ({ updates }: { updates: Record<string, any> }) => {
+      addMethod('ui.updateWindowState', async ({ updates }: { updates: Record<string, any> }) => {
         try {
           const st: any = useMainStore.getState()
           if (typeof st.updateWindowState === 'function') st.updateWindowState(updates)
@@ -1412,7 +1449,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
       // UI: toggle a boolean window state key (no renderer read of current value)
-      connection.onRequest('ui.toggleWindowState', async ({ key }: { key: string }) => {
+      addMethod('ui.toggleWindowState', async ({ key }: { key: string }) => {
         try {
           const st: any = useMainStore.getState()
           const current = (st.windowState && typeof st.windowState === 'object') ? st.windowState[key] : undefined
@@ -1426,7 +1463,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
       // Settings: snapshot of settings, provider, and indexing (lightweight)
-      connection.onRequest('settings.get', async () => {
+      addMethod('settings.get', async () => {
         try {
           const st: any = useMainStore.getState()
           return {
@@ -1452,7 +1489,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
       // Settings: set (partial) API keys in store
-      connection.onRequest('settings.setApiKeys', async ({ apiKeys }: { apiKeys: Partial<any> }) => {
+      addMethod('settings.setApiKeys', async ({ apiKeys }: { apiKeys: Partial<any> }) => {
         try {
           useMainStore.setState((s: any) => ({ settingsApiKeys: { ...(s.settingsApiKeys || {}), ...(apiKeys || {}) }, settingsSaved: false }))
           return { ok: true }
@@ -1462,7 +1499,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
       // Settings: save keys (persist via store middleware)
-      connection.onRequest('settings.saveKeys', async () => {
+      addMethod('settings.saveKeys', async () => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.saveSettingsApiKeys === 'function') {
@@ -1475,7 +1512,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
       // Settings: validate keys (updates providerValid and may refresh models)
-      connection.onRequest('settings.validateKeys', async () => {
+      addMethod('settings.validateKeys', async () => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.validateApiKeys === 'function') {
@@ -1488,7 +1525,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('settings.clearResults', async () => {
+      addMethod('settings.clearResults', async () => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.clearSettingsResults === 'function') anyState.clearSettingsResults()
@@ -1499,7 +1536,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
       // Settings: pricing operations
-      connection.onRequest('settings.resetPricingToDefaults', async () => {
+      addMethod('settings.resetPricingToDefaults', async () => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.resetPricingToDefaults === 'function') anyState.resetPricingToDefaults()
@@ -1510,7 +1547,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('settings.resetProviderPricing', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {
+      addMethod('settings.resetProviderPricing', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.resetProviderPricing === 'function') anyState.resetProviderPricing(provider)
@@ -1521,7 +1558,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('settings.setPricingForModel', async ({ provider, model, pricing }: { provider: string; model: string; pricing: any }) => {
+      addMethod('settings.setPricingForModel', async ({ provider, model, pricing }: { provider: string; model: string; pricing: any }) => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.setPricingForModel === 'function') anyState.setPricingForModel({ provider, model, pricing })
@@ -1534,7 +1571,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 
 
       // Provider/model management
-      connection.onRequest('provider.refreshModels', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {
+      addMethod('provider.refreshModels', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.refreshModels === 'function') {
@@ -1547,7 +1584,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('provider.setDefaultModel', async ({ provider, model }: { provider: string; model: string }) => {
+      addMethod('provider.setDefaultModel', async ({ provider, model }: { provider: string; model: string }) => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.setDefaultModel === 'function') anyState.setDefaultModel({ provider, model })
@@ -1558,7 +1595,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('provider.setAutoRetry', async ({ value }: { value: boolean }) => {
+      addMethod('provider.setAutoRetry', async ({ value }: { value: boolean }) => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.setAutoRetry === 'function') anyState.setAutoRetry(value)
@@ -1569,7 +1606,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
       // Fireworks allowlist helpers
-      connection.onRequest('provider.fireworks.add', async ({ model }: { model: string }) => {
+      addMethod('provider.fireworks.add', async ({ model }: { model: string }) => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.addFireworksModel === 'function') anyState.addFireworksModel({ model })
@@ -1579,7 +1616,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('provider.fireworks.remove', async ({ model }: { model: string }) => {
+      addMethod('provider.fireworks.remove', async ({ model }: { model: string }) => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.removeFireworksModel === 'function') anyState.removeFireworksModel({ model })
@@ -1591,7 +1628,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 
 
       // Provider selection RPCs for StatusBar
-      connection.onRequest('provider.setSelectedProvider', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {
+      addMethod('provider.setSelectedProvider', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.setSelectedProvider === 'function') anyState.setSelectedProvider(provider)
@@ -1602,7 +1639,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('provider.setSelectedModel', async ({ model }: { model: string }) => {
+      addMethod('provider.setSelectedModel', async ({ model }: { model: string }) => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.setSelectedModel === 'function') anyState.setSelectedModel(model)
@@ -1613,7 +1650,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('provider.fireworks.loadDefaults', async () => {
+      addMethod('provider.fireworks.loadDefaults', async () => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.loadFireworksRecommendedDefaults === 'function') anyState.loadFireworksRecommendedDefaults()
@@ -1624,7 +1661,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       })
 
       // Indexing APIs
-      connection.onRequest('idx.status', async () => {
+      addMethod('idx.status', async () => {
         try {
           const st: any = useMainStore.getState()
           return {
@@ -1645,7 +1682,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 
       // Subscribe to progress updates for this connection
       let idxSubscribed = false
-      connection.onRequest('idx.subscribe', async () => {
+      addMethod('idx.subscribe', async () => {
         if (idxSubscribed) return { ok: true }
         idxSubscribed = true
 
@@ -1679,7 +1716,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         return { ok: true }
       })
 
-      connection.onRequest('idx.rebuild', async () => {
+      addMethod('idx.rebuild', async () => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.rebuildIndex === 'function') {
@@ -1695,7 +1732,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('idx.clear', async () => {
+      addMethod('idx.clear', async () => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.clearIndex === 'function') return await anyState.clearIndex()
@@ -1705,7 +1742,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('idx.cancel', async () => {
+      addMethod('idx.cancel', async () => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.cancelIndexing === 'function') { await anyState.cancelIndexing(); return { ok: true } }
@@ -1715,7 +1752,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('idx.setAutoRefresh', async ({ config }: { config: Partial<any> }) => {
+      addMethod('idx.setAutoRefresh', async ({ config }: { config: Partial<any> }) => {
         try {
           const anyState: any = useMainStore.getState()
           if (typeof anyState.setIndexAutoRefresh === 'function') anyState.setIndexAutoRefresh({ config })
@@ -1725,7 +1762,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
         }
       })
 
-      connection.onRequest('idx.search', async ({ query, limit }: { query: string; limit?: number }) => {
+      addMethod('idx.search', async ({ query, limit }: { query: string; limit?: number }) => {
         try {
           const indexer = await getIndexer()
           const res = await indexer.search(String(query || '').trim(), typeof limit === 'number' ? limit : 20)
@@ -1795,18 +1832,24 @@ export function startWsBackend(): Promise<WsBootstrap> {
         return
       }
 
-      const socket = toSocket(ws as any)
-      const reader = new WebSocketMessageReader(socket)
-      const writer = new WebSocketMessageWriter(socket)
-      const connection: MessageConnection = createMessageConnection(reader, writer)
+      // Create JSON-RPC server that sends via WebSocket
+      const rpcServer = new JSONRPCServerAndClient(
+        new JSONRPCServer(),
+        new JSONRPCClient((request) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(request))
+          }
+        })
+      )
 
-      // Instrument RPC requests and notifications for debugging (workspace/session/flow only)
-      try {
-        const origSendNotification = connection.sendNotification.bind(connection)
-        ;(connection as any).sendNotification = (method: any, params?: any) => {
+      // Create connection wrapper that implements RpcConnection interface
+      const connection: RpcConnection = {
+        sendNotification: (method: string, params: any) => {
           try {
-            if (typeof method === 'string' &&
-              (method.startsWith('workspace.') || method.startsWith('session.') || method.startsWith('flow.'))
+            if (
+              method.startsWith('workspace.') ||
+              method.startsWith('session.') ||
+              method.startsWith('flow.')
             ) {
               const meta = activeConnections.get(connection) || {}
               console.log('[ws-main] send', method, {
@@ -1815,36 +1858,45 @@ export function startWsBackend(): Promise<WsBootstrap> {
               })
             }
           } catch {}
-          return origSendNotification(method as any, params as any)
+          // Send as notification (no response expected)
+          rpcServer.notify(method, params)
         }
+      }
 
-        const origOnRequest = connection.onRequest.bind(connection)
-        ;(connection as any).onRequest = (method: any, handler?: any) => {
-          if (typeof method === 'string' && typeof handler === 'function') {
-            const wrapped = async (...args: any[]) => {
-              try {
-                if (
-                  method.startsWith('handshake.') ||
-                  method.startsWith('workspace.') ||
-                  method.startsWith('session.') ||
-                  method.startsWith('flow.')
-                ) {
-                  const meta = activeConnections.get(connection) || {}
-                  const firstParam = args[0]
-                  console.log('[ws-main] rpc', method, {
-                    windowId: meta.windowId || null,
-                    workspaceId: meta.workspaceId || null,
-                    params: firstParam ?? null,
-                  })
-                }
-              } catch {}
-              return handler(...args)
-            }
-            return origOnRequest(method as any, wrapped as any)
+      // Handle incoming messages
+      ws.on('message', async (data) => {
+        try {
+          const message = JSON.parse(data.toString())
+          const response = await rpcServer.receiveAndSend(message)
+          if (response !== undefined && response !== null) {
+            ws.send(JSON.stringify(response))
           }
-          return origOnRequest(method as any, handler as any)
+        } catch (e) {
+          console.error('[ws-main] Failed to process message:', e, 'data:', data.toString())
         }
-      } catch {}
+      })
+
+      // Helper to add RPC methods with logging
+      const addMethod = (method: string, handler: (params: any) => any) => {
+        rpcServer.addMethod(method, async (params: any) => {
+          try {
+            if (
+              method.startsWith('handshake.') ||
+              method.startsWith('workspace.') ||
+              method.startsWith('session.') ||
+              method.startsWith('flow.')
+            ) {
+              const meta = activeConnections.get(connection) || {}
+              console.log('[ws-main] rpc', method, {
+                windowId: meta.windowId || null,
+                workspaceId: meta.workspaceId || null,
+                params: params ?? null,
+              })
+            }
+          } catch {}
+          return handler(params)
+        })
+      }
 
       // Add this connection to the broadcast registry early to avoid missing initial broadcasts
       try { registerConnection(connection) } catch {}
@@ -1853,7 +1905,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
       // Rationale: new windows should open to Welcome (unbound) until the user selects a folder
       try {
         const st: any = useMainStore.getState()
-        const wsRoot = st.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || null
+        const wsRoot = st.workspaceRoot || null
         if (wsRoot) {
           let anyBound = false
           try {
@@ -1874,7 +1926,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
       // Health check
 
       // Lightweight snapshots for UI hydration
-      connection.onRequest('workspace.get', async () => {
+      addMethod('workspace.get', async () => {
         try {
           // Prefer the workspace bound to this connection; if none, report null (Welcome)
           const bound = getConnectionWorkspaceId(connection)
@@ -1885,7 +1937,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
         }
       })
 
-      connection.onRequest('view.get', async () => {
+      addMethod('view.get', async () => {
         try {
           const st: any = useMainStore.getState()
           // If this connection is not bound to a workspace, default to 'welcome'
@@ -1897,7 +1949,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
         }
       })
 
-      connection.onRequest('view.set', async ({ view }: { view: 'welcome' | 'flow' | 'explorer' | 'sourceControl' | 'knowledgeBase' | 'kanban' | 'settings' }) => {
+      addMethod('view.set', async ({ view }: { view: 'welcome' | 'flow' | 'explorer' | 'sourceControl' | 'knowledgeBase' | 'kanban' | 'settings' }) => {
         try {
           const st: any = useMainStore.getState()
           if (typeof st.setCurrentView === 'function') st.setCurrentView({ view })
@@ -1908,7 +1960,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
         }
       })
       // Explorer snapshot and mutations
-      connection.onRequest('explorer.getState', async () => {
+      addMethod('explorer.getState', async () => {
         try {
           const st: any = useMainStore.getState()
           return {
@@ -1923,7 +1975,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
         }
       })
 
-      connection.onRequest('explorer.toggleFolder', async ({ path }: { path: string }) => {
+      addMethod('explorer.toggleFolder', async ({ path }: { path: string }) => {
         try {
           const st: any = useMainStore.getState()
           if (typeof st.toggleExplorerFolder === 'function') await st.toggleExplorerFolder(path)
@@ -1938,7 +1990,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
         }
       })
 
-      connection.onRequest('editor.openFile', async ({ path }: { path: string }) => {
+      addMethod('editor.openFile', async ({ path }: { path: string }) => {
         try {
           const st: any = useMainStore.getState()
           if (typeof st.openFile === 'function') await st.openFile(path)
@@ -1951,7 +2003,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
 
 
 
-      connection.onRequest('session.getMetrics', async () => {
+      addMethod('session.getMetrics', async () => {
         try {
           const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
@@ -1964,7 +2016,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
 
 
 	      // Strict usage/costs snapshot for TokensCostsPanel hydration (workspace-scoped only)
-	      connection.onRequest('session.getUsageStrict', async () => {
+	      addMethod('session.getUsageStrict', async () => {
 	        try {
 	          const st: any = useMainStore.getState()
 	          const bound = getConnectionWorkspaceId(connection)
@@ -1989,7 +2041,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
 
 
       // Strict usage/costs snapshot for TokensCostsPanel hydration (workspace-scoped only)
-      connection.onRequest('session.getUsageStrict', async () => {
+      addMethod('session.getUsageStrict', async () => {
         try {
           const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
@@ -2009,7 +2061,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
       })
 
 	      // Current session usage/costs snapshot for TokensCostsPanel hydration
-	      connection.onRequest('session.getUsage', async () => {
+	      addMethod('session.getUsage', async () => {
 	        try {
 	          const st: any = useMainStore.getState()
 	          const bound = getConnectionWorkspaceId(connection)
@@ -2030,7 +2082,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
 
 
       // Capability/boot handshake and optional workspace root
-      connection.onRequest('handshake.init', async (args: { windowId?: string; capabilities?: any; workspaceRoot?: string } = {}) => {
+      addMethod('handshake.init', async (args: { windowId?: string; capabilities?: any; workspaceRoot?: string } = {}) => {
         try {
           if (args.windowId) {
             try { setConnectionWindowId(connection, String(args.windowId)) } catch {}
@@ -2047,7 +2099,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
               const othersBound = Array.from(activeConnections.entries()).some(([conn, meta]) => conn !== connection && !!meta.workspaceId)
               if (!othersBound) {
                 const st: any = useMainStore.getState()
-                const curRoot = st.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || null
+                const curRoot = st.workspaceRoot || null
                 if (curRoot) try { setConnectionWorkspace(connection, String(curRoot)) } catch {}
               }
             } catch {}
@@ -2100,7 +2152,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
         }
       })
       // Strict atomic initial hydration snapshot (workspace-scoped only)
-      connection.onRequest('workspace.hydrateStrict', async () => {
+      addMethod('workspace.hydrateStrict', async () => {
         try {
           const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
@@ -2124,7 +2176,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
 
 
       // Explicit workspace open request (non-blocking; per-window notifications)
-      connection.onRequest('workspace.open', async ({ root }: { root: string }) => {
+      addMethod('workspace.open', async ({ root }: { root: string }) => {
         try {
           // Normalize path for consistent workspace identity
           const requestedRaw = String(root)
@@ -2206,31 +2258,30 @@ export function startWsBackend(): Promise<WsBootstrap> {
           // Kick off heavy initialization in the background and report result to this connection only
           ;(async () => {
             try {
+              // Transition to loading phase
+              transitionConnectionPhase(connection, 'loading')
+
               const res = await useMainStore.getState().openFolder(requested)
               if (res && res.ok) {
+                // Send complete workspace snapshot (replaces piecemeal notifications)
+                const snapshotSent = sendWorkspaceSnapshot(connection, requested)
 
-                try { connection.sendNotification('workspace.ready', { root: requested }) } catch {}
-                try {
-                  const st2: any = useMainStore.getState()
-                  const list = typeof st2.getSessionsFor === 'function' ? st2.getSessionsFor({ workspaceId: requested }) : []
-                  const curId = typeof st2.getCurrentIdFor === 'function' ? st2.getCurrentIdFor({ workspaceId: requested }) : null
-                  if (curId) {
-                    try { setConnectionSelectedSessionId(connection, curId) } catch {}
-                    try { connection.sendNotification('session.selected', { id: curId }) } catch {}
-                    const sess = Array.isArray(list) ? list.find((s: any) => s.id === curId) : null
-                    const items = Array.isArray(sess?.items) ? sess.items : []
-                    try { connection.sendNotification('session.timeline.snapshot', { sessionId: curId, items }) } catch {}
-                    try { connection.sendNotification('flow.contexts.changed', { mainContext: sess?.currentContext || null, isolatedContexts: {} }) } catch {}
-                  }
-                  // Always push sessions list snapshot (even if empty) to flip hasHydratedList in renderer
+                if (snapshotSent) {
+                  // Transition to ready phase
+                  transitionConnectionPhase(connection, 'ready')
+                  try { connection.sendNotification('workspace.ready', { root: requested }) } catch {}
+
+                  // Also update the selected session ID in connection metadata
                   try {
-                    const sessions = (Array.isArray(list) ? list : []).map((s: any) => ({ id: s.id, title: s.title }))
-                    connection.sendNotification('session.list.changed', { sessions, currentId: curId || null })
+                    const st2: any = useMainStore.getState()
+                    const curId = typeof st2.getCurrentIdFor === 'function' ? st2.getCurrentIdFor({ workspaceId: requested }) : null
+                    if (curId) {
+                      try { setConnectionSelectedSessionId(connection, curId) } catch {}
+                    }
                   } catch {}
-                } catch {}
-
-
-
+                } else {
+                  transitionConnectionPhase(connection, 'error')
+                }
 
 
 
@@ -2250,7 +2301,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
       })
 
 	      // Atomic initial hydration snapshot pulled by renderer after workspace.ready
-	      connection.onRequest('workspace.hydrate', async () => {
+	      addMethod('workspace.hydrate', async () => {
 	        try {
 	          const st: any = useMainStore.getState()
 	          const bound = getConnectionWorkspaceId(connection)
@@ -2278,7 +2329,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
 
 
       // Strict hydration: only returns ok:true when sessions are present and a currentId exists
-      connection.onRequest('workspace.hydrateStrict', async () => {
+      addMethod('workspace.hydrateStrict', async () => {
         try {
           const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
@@ -2324,7 +2375,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
 
 
 	      // Recent folders management
-	      connection.onRequest('workspace.clearRecentFolders', async () => {
+	      addMethod('workspace.clearRecentFolders', async () => {
 	        try {
 	          const st: any = useMainStore.getState()
 	          if (typeof st.clearRecentFolders === 'function') st.clearRecentFolders()
@@ -2334,7 +2385,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
 	        }
 	      })
 
-	      connection.onRequest('workspace.listRecentFolders', async () => {
+	      addMethod('workspace.listRecentFolders', async () => {
 	        try {
 	          const st: any = useMainStore.getState()
 	          const items = Array.isArray(st.recentFolders) ? st.recentFolders : []
@@ -2346,10 +2397,10 @@ export function startWsBackend(): Promise<WsBootstrap> {
 	      })
 
 
-      connection.onRequest('handshake.ping', async () => ({ pong: true }))
+      addMethod('handshake.ping', async () => ({ pong: true }))
 
       // Services
-      createTerminalService(connection)
+      createTerminalService(addMethod, connection)
 
       // Subscribe to terminal tabs changes for this connection only
       const unsubTabs = (useMainStore as any).subscribe?.(
@@ -2746,8 +2797,9 @@ export function startWsBackend(): Promise<WsBootstrap> {
         try { unsubFlowContexts?.() } catch {}
       })
 
-      connection.listen()
+      // No need to call listen() with json-rpc-2.0 - messages are handled via ws.on('message')
     } catch (err) {
+      console.error('[ws-main] Connection setup error:', err)
       try { ws.close(1011, 'Internal error') } catch {}
     }
   })

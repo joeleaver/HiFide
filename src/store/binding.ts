@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { subscribeWithSelector } from 'zustand/middleware'
 
 export interface BackendBindingState {
   // Stable identity for this window (assigned at launch)
@@ -16,14 +17,16 @@ export interface BackendBindingState {
 }
 
 function createBindingStore() {
-  return create<BackendBindingState>((set) => ({
-    windowId: null,
-    workspaceId: null,
-    root: null,
-    attached: false,
-    setBinding: (p) => set((s) => ({ ...s, ...p })),
-    clearBinding: () => set({ windowId: null, workspaceId: null, root: null, attached: false })
-  }))
+  return create<BackendBindingState>()(
+    subscribeWithSelector((set) => ({
+      windowId: null,
+      workspaceId: null,
+      root: null,
+      attached: false,
+      setBinding: (p) => set((s) => ({ ...s, ...p })),
+      clearBinding: () => set({ windowId: null, workspaceId: null, root: null, attached: false })
+    }))
+  )
 }
 
 // HMR reuse pattern to keep a single store per window during hot reloads

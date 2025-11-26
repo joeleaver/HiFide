@@ -265,40 +265,28 @@ const kbIndexers = new Map<string, Indexer>()
 /**
  * Get or create the indexer instance for a workspace.
  * If workspaceRoot is omitted, uses the currently active workspace in the store.
+ *
+ * Now delegates to WorkspaceManager for multi-window support.
  */
 export async function getIndexer(workspaceRoot?: string): Promise<Indexer> {
-  const { useMainStore } = await import('../store/index.js')
-  const root = path.resolve(
-    workspaceRoot || useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
-  )
-  let idx = indexers.get(root)
-  if (!idx) {
-    idx = new Indexer(root)
-    indexers.set(root, idx)
-  }
-  return idx
+  const { resolveWorkspaceRootAsync } = await import('../utils/workspace.js')
+  const { getWorkspaceManager } = await import('./workspaceManager.js')
+  const root = await resolveWorkspaceRootAsync(workspaceRoot)
+  const manager = getWorkspaceManager()
+  return manager.getIndexer(root)
 }
 
 /**
  * Get or create the KB indexer instance (indexes .hifide-public/kb) for a workspace.
+ *
+ * Now delegates to WorkspaceManager for multi-window support.
  */
 export async function getKbIndexer(workspaceRoot?: string): Promise<Indexer> {
-  const { useMainStore } = await import('../store/index.js')
-  const root = path.resolve(
-    workspaceRoot || useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
-  )
-  let idx = kbIndexers.get(root)
-  if (!idx) {
-    const kbRoot = path.join(root, '.hifide-public', 'kb')
-    idx = new Indexer(root, {
-      scanRoot: kbRoot,
-      indexSubdir: 'kb-index',
-      useWorkspaceGitignore: false,
-      mode: 'kb',
-    })
-    kbIndexers.set(root, idx)
-  }
-  return idx
+  const { resolveWorkspaceRootAsync } = await import('../utils/workspace.js')
+  const { getWorkspaceManager } = await import('./workspaceManager.js')
+  const root = await resolveWorkspaceRootAsync(workspaceRoot)
+  const manager = getWorkspaceManager()
+  return manager.getKbIndexer(root)
 }
 
 /**

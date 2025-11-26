@@ -142,6 +142,9 @@ importers:
       ignore:
         specifier: ^5.3.2
         version: 5.3.2
+      json-rpc-2.0:
+        specifier: ^1.7.1
+        version: 1.7.1
       markdown-it:
         specifier: ^14.1.0
         version: 14.1.0
@@ -166,15 +169,9 @@ importers:
       ts-morph:
         specifier: ^27.0.0
         version: 27.0.0
-      vscode-jsonrpc:
-        specifier: ^8.2.1
-        version: 8.2.1
       vscode-ripgrep:
         specifier: ^1.13.2
         version: 1.13.2
-      vscode-ws-jsonrpc:
-        specifier: ^3.5.0
-        version: 3.5.0
       ws:
         specifier: ^8.18.3
         version: 8.18.3
@@ -4058,6 +4055,9 @@ packages:
   json-parse-even-better-errors@2.3.1:
     resolution: {integrity: sha512-xyFwyhro/JEof6Ghe2iz2NcXoj2sloNsWr/XsERDK/oiPCfaNhl5ONfp+jQdAZRQQ0IJWNzH9zIZF7li91kh2w==}
 
+  json-rpc-2.0@1.7.1:
+    resolution: {integrity: sha512-JqZjhjAanbpkXIzFE7u8mE/iFblawwlXtONaCvRqI+pyABVz7B4M1EUNpyVW+dZjqgQ2L5HFmZCmOCgUKm00hg==}
+
   json-schema-to-ts@3.1.1:
     resolution: {integrity: sha512-+DWg8jCJG2TEnpy7kOm/7/AxaYoaRbjVB4LFZLySZlWn8exGs3A4OLJR966cVvU26N7X9TWxl+Jsw7dzAqKT6g==}
     engines: {node: '>=16'}
@@ -5617,17 +5617,9 @@ packages:
       terser:
         optional: true
 
-  vscode-jsonrpc@8.2.1:
-    resolution: {integrity: sha512-kdjOSJ2lLIn7r1rtrMbbNCHjyMPfRnowdKjBQ+mGq6NAW5QY2bEZC/khaC5OR8svbbjvLEaIXkOq45e2X9BIbQ==}
-    engines: {node: '>=14.0.0'}
-
   vscode-ripgrep@1.13.2:
     resolution: {integrity: sha512-RlK9U87EokgHfiOjDQ38ipQQX936gWOcWPQaJpYf+kAkz1PQ1pK2n7nhiscdOmLu6XGjTs7pWFJ/ckonpN7twQ==}
     deprecated: This package has been renamed to @vscode/ripgrep, please update to the new name
-
-  vscode-ws-jsonrpc@3.5.0:
-    resolution: {integrity: sha512-13ZDy7Od4AfEPK2HIfY3DtyRi4FVsvFql1yobVJrpIoHOKGGJpIjVvIJpMxkrHzCZzWlYlg+WEu2hrYkCTvM0Q==}
-    engines: {node: '>=20.10.0', npm: '>=10.2.3'}
 
   w3c-keyname@2.2.8:
     resolution: {integrity: sha512-dpojBhNsCNN7T82Tm7k26A6G9ML3NkhDsnw9n/eoxSRlVBB4CEtIQ/KTCLI2Fwf3ataSXRhYFkQi3SlnFwPvPQ==}
@@ -10461,6 +10453,8 @@ snapshots:
 
   json-parse-even-better-errors@2.3.1: {}
 
+  json-rpc-2.0@1.7.1: {}
+
   json-schema-to-ts@3.1.1:
     dependencies:
       '@babel/runtime': 7.28.4
@@ -12331,18 +12325,12 @@ snapshots:
       '@types/node': 24.7.0
       fsevents: 2.3.3
 
-  vscode-jsonrpc@8.2.1: {}
-
   vscode-ripgrep@1.13.2:
     dependencies:
       https-proxy-agent: 4.0.0
       proxy-from-env: 1.1.0
     transitivePeerDependencies:
       - supports-color
-
-  vscode-ws-jsonrpc@3.5.0:
-    dependencies:
-      vscode-jsonrpc: 8.2.1
 
   w3c-keyname@2.2.8: {}
 

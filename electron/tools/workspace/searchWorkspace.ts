@@ -120,15 +120,8 @@ export interface SearchWorkspaceResult {
 
 // ---- Helpers -------------------------------------------------------------------------
 async function getWorkspaceRoot(hint?: string): Promise<string> {
-  if (hint) return path.resolve(hint)
-  try {
-    // Prefer main store as single source of truth
-    const { useMainStore } = await import('../../store/index')
-    const root = useMainStore.getState().workspaceRoot
-    if (root) return path.resolve(root)
-  } catch {}
-  // Fallbacks for very early boot or tests
-  return path.resolve(process.env.HIFIDE_WORKSPACE_ROOT || process.cwd())
+  const { resolveWorkspaceRootAsync } = await import('../../utils/workspace')
+  return resolveWorkspaceRootAsync(hint)
 }
 
 // Simple glob matcher (supports **, *, ?) against POSIX-style paths

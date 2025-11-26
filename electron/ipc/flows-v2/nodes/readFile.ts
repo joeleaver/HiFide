@@ -11,7 +11,7 @@
  */
 
 import fs from 'node:fs/promises'
-import { resolveWithinWorkspace } from '../../../tools/utils'
+import { resolveWithinWorkspace } from '../../../utils/workspace.js'
 import type { NodeFunction, NodeExecutionPolicy } from '../types'
 
 export const metadata = {
@@ -34,7 +34,7 @@ export const readFileNode: NodeFunction = async (flow, context, _dataIn, _inputs
 
   let absPath: string
   try {
-    absPath = resolveWithinWorkspace(filePath)
+    absPath = resolveWithinWorkspace(filePath, flow.workspaceId)
   } catch (err) {
     const msg = `readFile: path outside workspace or invalid: ${String(err)}`
     flow.log.error(msg)

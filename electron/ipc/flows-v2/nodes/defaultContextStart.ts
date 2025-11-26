@@ -145,9 +145,11 @@ export const defaultContextStartNode: NodeFunction = async (flow, context, _data
     } catch {}
   }
 
-  // Always override provider/model with global selection
-  const provider = flow.store?.selectedProvider || 'openai'
-  const model = flow.store?.selectedModel || 'gpt-4o'
+  // Respect provider/model from the incoming context when present.
+  // Fall back to global selection only if either is missing so flows still
+  // behave sensibly when no session context exists.
+  const provider = executionContext.provider || flow.store?.selectedProvider || 'openai'
+  const model = executionContext.model || flow.store?.selectedModel || 'gpt-4o'
   const withProviderModel = flow.context.update(executionContext, { provider, model })
 
   flow.log.debug('Input context', {

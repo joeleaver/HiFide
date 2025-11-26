@@ -14,7 +14,7 @@ export const kanbanMoveTaskTool: AgentTool = {
     required: ['taskId', 'status'],
     additionalProperties: false,
   },
-  run: async (input: { taskId: string; status: KanbanStatus; index?: number }) => {
+  run: async (input: { taskId: string; status: KanbanStatus; index?: number }, meta?: any) => {
     const { useMainStore } = await import('../../store')
     const state = useMainStore.getState() as any
 
@@ -28,6 +28,7 @@ export const kanbanMoveTaskTool: AgentTool = {
       taskId: input.taskId,
       toStatus: input.status,
       toIndex: idx,
+      workspaceId: meta?.workspaceId,
     })
 
     if (!result?.ok) {

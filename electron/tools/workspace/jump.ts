@@ -9,13 +9,9 @@ function toHandle(pathRel: string, start: number, end: number): string {
   return Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64')
 }
 
-async function getWorkspaceRoot(): Promise<string> {
-  try {
-    const { useMainStore } = await import('../../store/index')
-    const root = (useMainStore as any).getState?.().workspaceRoot
-    if (root) return path.resolve(root)
-  } catch {}
-  return path.resolve(process.env.HIFIDE_WORKSPACE_ROOT || process.cwd())
+async function getWorkspaceRoot(workspaceId?: string): Promise<string> {
+  const { resolveWorkspaceRootAsync } = await import('../../utils/workspace')
+  return resolveWorkspaceRootAsync(workspaceId)
 }
 
 export const jumpWorkspaceTool: AgentTool = {
@@ -42,14 +38,14 @@ export const jumpWorkspaceTool: AgentTool = {
     additionalProperties: false
   },
 
-  run: async (args: { target: string; expand?: boolean; filters?: any }) => {
+  run: async (args: { target: string; expand?: boolean; filters?: any }, meta?: any) => {
     const expand = args.expand !== false
     const maxSnippet = Math.max(30, args?.filters?.maxSnippetLines ?? 200)
     const t0 = Date.now()
 
     // 1) Exact path fast-path
     try {
-      const root = await getWorkspaceRoot()
+      const root = await getWorkspaceRoot(meta?.workspaceId)
       const relLike = String(args.target || '').replace(/\\/g, '/')
       const abs = path.resolve(root, relLike)
       const st = await fs.stat(abs).catch(() => null)
@@ -57,7 +53,7 @@ export const jumpWorkspaceTool: AgentTool = {
         const rel = path.relative(root, abs).replace(/\\/g, '/')
         const handle = toHandle(rel, 1, 1) // start-of-file preview via expand path
         if (!expand) return { ok: true, data: { bestHandle: { handle, path: rel, lines: { start: 1, end: 1 } } } }
-        const exp = await searchWorkspaceTool.run({ action: 'expand', handle, filters: { maxSnippetLines: maxSnippet } })
+        const exp = await searchWorkspaceTool.run({ action: 'expand', handle, filters: { maxSnippetLines: maxSnippet } }, meta)
         const elapsedMs = Date.now() - t0
         if (exp?.ok) {
           return { ok: true, data: { ...exp.data, bestHandle: { handle, path: rel, lines: (exp as any).data?.lines }, topHandles: [], meta: { elapsedMs, source: 'path' } } }
@@ -67,7 +63,7 @@ export const jumpWorkspaceTool: AgentTool = {
     } catch {}
 
     // 2) Discovery fallback via workspace.search
-    const sr: any = await searchWorkspaceTool.run({ query: args.target, filters: args?.filters })
+    const sr: any = await searchWorkspaceTool.run({ query: args.target, filters: args?.filters }, meta)
     if (!sr?.ok) return sr
     const best = sr?.data?.bestHandle
     const top = sr?.data?.topHandles || []
@@ -75,7 +71,7 @@ export const jumpWorkspaceTool: AgentTool = {
 
     if (!expand) return { ok: true, data: { bestHandle: best, topHandles: top } }
 
-    const exp: any = await searchWorkspaceTool.run({ action: 'expand', handle: best.handle, filters: { maxSnippetLines: maxSnippet } })
+    const exp: any = await searchWorkspaceTool.run({ action: 'expand', handle: best.handle, filters: { maxSnippetLines: maxSnippet } }, meta)
     if (!exp?.ok) return { ok: true, data: { bestHandle: best, topHandles: top } }
     const elapsedMs = Date.now() - t0
     return { ok: true, data: { ...exp.data, bestHandle: best, topHandles: top, meta: { ...(exp.data?.meta || {}), elapsedMs, source: 'search' } } }

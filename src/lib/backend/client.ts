@@ -1,6 +1,5 @@
-/* JSON-RPC client using vscode-jsonrpc over WebSocket */
-import { createMessageConnection, MessageConnection, Disposable } from 'vscode-jsonrpc'
-import { WebSocketMessageReader, WebSocketMessageWriter, toSocket } from 'vscode-ws-jsonrpc'
+/* JSON-RPC client using json-rpc-2.0 over WebSocket */
+import { JSONRPCClient, JSONRPCServer, JSONRPCServerAndClient } from 'json-rpc-2.0'
 
 export interface BackendClientOptions {
   url: string
@@ -13,13 +12,13 @@ export interface BackendClientOptions {
 
 export class BackendClient {
   private ws: WebSocket | null = null
-  private conn: MessageConnection | null = null
+  private rpcClient: JSONRPCServerAndClient | null = null
   private opts: BackendClientOptions
   private readyResolve: (() => void) | null = null
   private readyPromise: Promise<void>
 
   // Persisted method-specific subscriptions across reconnects
-  private methodSubs: Array<{ method: string; handler: (params: any) => void; disp?: Disposable }> = []
+  private methodSubs: Array<{ method: string; handler: (params: any) => void }> = []
 
   constructor(opts: BackendClientOptions) {
     this.opts = opts
@@ -30,7 +29,7 @@ export class BackendClient {
 
   /** Returns true when the JSON-RPC connection is established */
   isReady(): boolean {
-    return !!this.conn
+    return !!this.rpcClient && !!this.ws && this.ws.readyState === WebSocket.OPEN
   }
 
   /** Resolves when the JSON-RPC connection is established (or immediately if already ready). */
@@ -66,55 +65,80 @@ export class BackendClient {
 
     ws.onopen = () => {
       try {
-        const socket = toSocket(ws as any)
-        const reader = new WebSocketMessageReader(socket)
-        const writer = new WebSocketMessageWriter(socket)
-        const conn = createMessageConnection(reader, writer)
-
-        // Wrap method-specific subscriptions so we can forward every received
-        // notification to the generic onNotify hook before per-method handlers.
-        const origOnNotification = conn.onNotification.bind(conn)
-        ;(conn as any).onNotification = (methodOrType: any, handler?: any) => {
-          if (typeof methodOrType === 'string' && typeof handler === 'function') {
-            const method = methodOrType
-            const wrapped = (params: any) => {
-              try { this.opts.onNotify?.(method, params) } catch {}
-              try { handler(params) } catch {}
-            }
-            return origOnNotification(method, wrapped as any)
+        // Create JSON-RPC server and client
+        const rpcServer = new JSONRPCServer()
+        const rpcClient = new JSONRPCClient((request) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(request))
           }
-          return origOnNotification(methodOrType as any, handler as any)
-        }
+        })
+        const rpcServerAndClient = new JSONRPCServerAndClient(rpcServer, rpcClient)
 
-        conn.listen()
-        this.conn = conn
+        this.rpcClient = rpcServerAndClient
 
-        // Re-attach method-specific subscriptions on this new connection
+        // Re-attach all subscriptions
+        console.log(`[BackendClient] Re-attaching ${this.methodSubs.length} subscriptions`)
+        const handlersByMethod = new Map<string, Array<(params: any) => void>>()
         for (const sub of this.methodSubs) {
-          try { sub.disp = conn.onNotification(sub.method, sub.handler as any) } catch {}
+          if (!handlersByMethod.has(sub.method)) {
+            handlersByMethod.set(sub.method, [])
+          }
+          handlersByMethod.get(sub.method)!.push(sub.handler)
         }
+
+        // Register handlers for each method
+        for (const [method, handlers] of handlersByMethod.entries()) {
+          console.log(`[BackendClient] Attaching ${handlers.length} handler(s) for '${method}'`)
+          rpcServerAndClient.addMethod(method, (params: any) => {
+            try { this.opts.onNotify?.(method, params) } catch {}
+            for (const handler of handlers) {
+              try {
+                handler(params)
+              } catch (e) {
+                console.error(`[BackendClient] Handler error for '${method}':`, e)
+              }
+            }
+          })
+        }
+
+        console.log('[BackendClient] JSON-RPC client ready')
 
         // Resolve readiness exactly once
         try { this.readyResolve?.() } catch {}
         this.retryDelayMs = 250
         this.opts.onOpen?.()
       } catch (err) {
+        console.error('[BackendClient] Failed to initialize RPC client:', err)
         this.scheduleReconnect()
       }
     }
 
+    ws.onmessage = async (event) => {
+      try {
+        const message = JSON.parse(event.data)
+        const response = await this.rpcClient?.receiveAndSend(message)
+        if (response && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(response))
+        }
+      } catch (e) {
+        console.error('[BackendClient] Failed to process message:', e, 'data:', event.data)
+      }
+    }
+
     ws.onclose = (ev) => {
+      console.log('[BackendClient] WebSocket closed:', { code: ev.code, reason: ev.reason, wasClean: ev.wasClean })
       this.opts.onClose?.(ev)
-      try { this.conn?.dispose() } catch {}
-      this.conn = null
-      // Drop disposables; keep entries so we can re-attach on reconnect
-      for (const sub of this.methodSubs) { sub.disp = undefined }
+      this.rpcClient = null
       // Create a fresh promise for potential future reconnects
       this.readyPromise = new Promise<void>((resolve) => { this.readyResolve = resolve })
-      if (!this.intentionalClose) this.scheduleReconnect()
+      if (!this.intentionalClose) {
+        console.log('[BackendClient] Scheduling reconnect...')
+        this.scheduleReconnect()
+      }
     }
 
     ws.onerror = (ev) => {
+      console.error('[BackendClient] WebSocket error:', ev)
       this.opts.onError?.(ev)
       // If error occurs before open, schedule reconnect
       if (!this.intentionalClose && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
@@ -135,33 +159,44 @@ export class BackendClient {
   }
 
   rpc<T = any>(method: string, params?: any): Promise<T> {
-    const conn = this.conn
-    if (!conn) return Promise.reject({ code: -32000, message: 'WebSocket not open' })
-    return conn.sendRequest(method, params) as Promise<T>
+    const client = this.rpcClient
+    if (!client) return Promise.reject({ code: -32000, message: 'WebSocket not open' })
+    return client.request(method, params) as Promise<T>
   }
 
   /** Persistent subscription that survives reconnects. Returns an unsubscribe function. */
   subscribe(method: string, handler: (params: any) => void): () => void {
-    // Add to registry if not already present (allow duplicates of same method with different handlers)
-    const entry = { method, handler, disp: undefined as undefined | Disposable }
+    const entry = { method, handler }
     this.methodSubs.push(entry)
-    // Attach immediately if connected
-    if (this.conn) {
-      try { entry.disp = this.conn.onNotification(method, handler as any) } catch {}
+
+    // If already connected, re-register all handlers for this method
+    if (this.rpcClient) {
+      const handlersForMethod = this.methodSubs.filter(s => s.method === method).map(s => s.handler)
+      // Remove old handler and add new combined handler
+      this.rpcClient.rejectAllPendingRequests('reconnecting')
+      this.rpcClient.addMethod(method, (params: any) => {
+        try { this.opts.onNotify?.(method, params) } catch {}
+        for (const h of handlersForMethod) {
+          try {
+            h(params)
+          } catch (e) {
+            console.error(`[BackendClient] Handler error for '${method}':`, e)
+          }
+        }
+      })
     }
-    // Unsubscribe removes from registry and detaches current connection listener
+
+    // Return unsubscribe function
     return () => {
       const idx = this.methodSubs.indexOf(entry)
       if (idx >= 0) this.methodSubs.splice(idx, 1)
-      try { entry.disp?.dispose() } catch {}
-      entry.disp = undefined
     }
   }
 
   close(): void {
-    try { this.conn?.dispose() } catch {}
+    this.intentionalClose = true
     try { this.ws?.close() } catch {}
-    this.conn = null
+    this.rpcClient = null
     this.ws = null
     // Reset readiness promise
     this.readyPromise = new Promise<void>((resolve) => { this.readyResolve = resolve })

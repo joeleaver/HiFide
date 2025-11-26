@@ -12,9 +12,9 @@ export const sessionTailTool: AgentTool = {
     properties: { maxBytes: { type: 'integer', minimum: 100, maximum: 10000, default: 2000 } },
     additionalProperties: false,
   },
-  run: async (args: { maxBytes?: number }, _meta?: { requestId?: string }) => {
+  run: async (args: { maxBytes?: number }, meta?: { requestId?: string; workspaceId?: string }) => {
     const stAny: any = useMainStore.getState()
-    const ws = stAny.workspaceRoot || null
+    const ws = meta?.workspaceId || stAny.workspaceRoot || null
     const sessionId = (ws && typeof stAny.getCurrentIdFor === 'function') ? stAny.getCurrentIdFor({ workspaceId: ws }) : null
     if (!sessionId) {
       console.error('[terminal.session_tail] No active sessionId')

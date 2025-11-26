@@ -6,20 +6,14 @@ import path from 'node:path'
 import fs from 'node:fs/promises'
 import * as logging from '../utils/logging'
 import * as edits from '../ipc/edits'
-import { useMainStore } from '../store/index'
+import { resolveWithinWorkspace as resolveWithinWorkspaceUtil } from '../utils/workspace'
 
 /**
  * Resolve a path within the workspace, preventing directory traversal
+ * @deprecated Use resolveWithinWorkspace from '../utils/workspace' directly
  */
 export function resolveWithinWorkspace(p: string): string {
-  const envRoot = process.env.HIFIDE_WORKSPACE_ROOT
-  const storeRoot = useMainStore.getState().workspaceRoot
-  const root = path.resolve(envRoot || storeRoot || process.cwd())
-  const abs = path.isAbsolute(p) ? p : path.join(root, p)
-  const norm = path.resolve(abs)
-  const guard = root.endsWith(path.sep) ? root : root + path.sep
-  if (!(norm + path.sep).startsWith(guard)) throw new Error('Path outside workspace')
-  return norm
+  return resolveWithinWorkspaceUtil(p)
 }
 
 /**

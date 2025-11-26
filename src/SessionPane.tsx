@@ -47,15 +47,38 @@ function SessionPane() {
   const hasRenderedOnce = useChatTimeline((s: any) => (s as any).hasRenderedOnce)
   const hydrationVersion = useChatTimeline((s: any) => (s as any).hydrationVersion || 0)
 
+  // Mount log
+  useEffect(() => {
+    console.log('[SessionPane] Component mounted')
+    return () => console.log('[SessionPane] Component unmounted')
+  }, [])
+
   // Mark the timeline as "rendered once" once we've seen at least one
   // snapshot (hydrationVersion > 0) and finished hydrating. This covers both
   // cases where the snapshot arrived before SessionPane mounted (first window)
   // and cases where it arrives later.
+  // Also includes a fallback timeout to prevent getting stuck if hydration never completes.
   useEffect(() => {
     if (!hasRenderedOnce && hydrationVersion > 0 && !isHydratingTimeline) {
+      console.log('[SessionPane] Setting hasRenderedOnce = true (hydration complete)')
       try { useChatTimeline.setState({ hasRenderedOnce: true } as any) } catch {}
     }
   }, [hydrationVersion, isHydratingTimeline, hasRenderedOnce])
+
+  // Fallback: if we're mounted but hasRenderedOnce is still false after 3s, force it
+  useEffect(() => {
+    if (hasRenderedOnce) return
+
+    const fallbackTimeout = setTimeout(() => {
+      const state: any = useChatTimeline.getState()
+      if (!state.hasRenderedOnce) {
+        console.warn('[SessionPane] Fallback: forcing hasRenderedOnce = true after timeout')
+        try { useChatTimeline.setState({ hasRenderedOnce: true, isHydrating: false } as any) } catch {}
+      }
+    }, 3000)
+
+    return () => clearTimeout(fallbackTimeout)
+  }, [hasRenderedOnce])
 
   // Flow execution state - now driven by renderer-side flowRuntime store (WebSocket events)
   const feStatus = useFlowRuntime((s: any) => s.status)
@@ -574,4 +597,4 @@ const InlineBadgeDiff = memo(function InlineBadgeDiff({ badgeId }: { badgeId: st
 
 
 
-export default memo(SessionPane)
+export default SessionPane

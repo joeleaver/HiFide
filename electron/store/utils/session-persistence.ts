@@ -16,12 +16,10 @@ import type { Session } from '../types'
  */
 export async function getSessionsDir(workspaceRoot?: string): Promise<string> {
   // Resolve workspace-relative sessions directory
-  const { useMainStore } = await import('../index')
+  const { resolveWorkspaceRootAsync } = await import('../../utils/workspace.js')
 
   // <workspaceRoot>/.hifide-private/sessions
-  const baseDir = path.resolve(
-    workspaceRoot || useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
-  )
+  const baseDir = await resolveWorkspaceRootAsync(workspaceRoot)
   const privateDir = path.join(baseDir, '.hifide-private')
   const sessionsDir = path.join(privateDir, 'sessions')
   try { await fs.mkdir(privateDir, { recursive: true }) } catch {}
@@ -183,7 +181,8 @@ function upgradeLegacySession(session: any): Session | null {
         model,
         systemInstructions: typeof ctx.systemInstructions === 'string' ? ctx.systemInstructions : undefined,
         temperature: typeof ctx.temperature === 'number' ? ctx.temperature : undefined,
-        messageHistory: Array.isArray(ctx.messageHistory) ? ctx.messageHistory : undefined,
+        // Load messageHistory from disk to preserve conversation context
+        messageHistory: Array.isArray(ctx.messageHistory) ? ctx.messageHistory : [],
       },
       tokenUsage: (session.tokenUsage && typeof session.tokenUsage === 'object') ? session.tokenUsage : { byProvider: {}, byProviderAndModel: {}, total: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
       costs: (session.costs && typeof session.costs === 'object') ? session.costs : { byProviderAndModel: {}, totalCost: 0, currency: 'USD' },
@@ -305,8 +304,9 @@ class DebouncedSessionSaver {
 
   /**
    * Save a session with optional debouncing
+   * Returns a Promise when immediate=true, void when debounced
    */
-  save(session: Session, immediate = false): void {
+  save(session: Session, immediate = false): Promise<void> | void {
     // Clear existing timeout for this session
     const existingTimeout = this.saveTimeouts.get(session.id)
     if (existingTimeout) {
@@ -315,10 +315,10 @@ class DebouncedSessionSaver {
     }
 
     if (immediate) {
-      // Immediate save - but wait for any active save to complete first
-      this.performSave(session)
+      // Immediate save - return Promise so caller can await
+      return this.performSave(session)
     } else {
-      // Debounced save
+      // Debounced save - fire and forget
       const timeout = setTimeout(() => {
         this.performSave(session)
         this.saveTimeouts.delete(session.id)

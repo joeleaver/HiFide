@@ -13,17 +13,30 @@ import type { RecentFolder, FileWatchEvent, ContextRefreshResult } from '../type
 import { MAX_RECENT_FOLDERS } from '../utils/constants'
 import { bootstrapWorkspace } from '../utils/workspace-helpers'
 import { buildMenu } from '../../ipc/menu'
-import { resetIndexer, resetKbIndexer, startKanbanWatcher, stopKanbanWatcher, startKbWatcher, stopKbWatcher } from '../../core/state'
+import { resetIndexer, resetKbIndexer, stopKanbanWatcher, stopKbWatcher } from '../../core/state'
 
 export interface WorkspaceSlice {
+  // Legacy: Global workspace root (deprecated in favor of windowWorkspaces)
+  // Kept for backward compatibility during migration
   workspaceRoot: string | null
+
+  // Multi-window support: Track which workspace each window is viewing
+  windowWorkspaces: Record<number, string> // windowId -> workspaceId (absolute path)
+
   recentFolders: RecentFolder[]
   fileWatchCleanup: (() => void) | null
   fileWatchEvent: FileWatchEvent | null
   ctxRefreshing: boolean
   ctxResult: ContextRefreshResult | null
 
+  // Legacy method (deprecated)
   setWorkspaceRoot: (folder: string | null) => void
+
+  // Multi-window methods
+  setWorkspaceForWindow: (params: { windowId: number; workspaceId: string | null }) => void
+  getWorkspaceForWindow: (params: { windowId: number }) => string | null
+  getCurrentWorkspace: () => string | null // Returns focused window's workspace
+
   addRecentFolder: (folder: string) => void
   clearRecentFolders: () => void
   ensureWorkspaceReady: (params: { baseDir: string; preferAgent?: boolean; overwrite?: boolean }) => Promise<{ ok: boolean }>
@@ -50,6 +63,7 @@ function normalizePath(folderPath: string): string {
 
 export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], WorkspaceSlice> = (set, get, store) => ({
   workspaceRoot: null,
+  windowWorkspaces: {},
   recentFolders: [],
   fileWatchCleanup: null,
   fileWatchEvent: null,
@@ -60,40 +74,53 @@ export const createWorkspaceSlice: StateCreator<WorkspaceSlice, [], [], Workspac
     const state = store.getState() as WorkspaceStore
     const previous = state.workspaceRoot
 
-    if (previous && previous !== folder) {
-      try {
-        stopKanbanWatcher(previous)
-      } catch (error) {
-        console.error('[workspace] Failed to stop Kanban watcher:', error)
-      }
-      try {
-        stopKbWatcher(previous)
-      } catch (error) {
-        console.error('[workspace] Failed to stop KB watcher:', error)
-      }
-    }
+    // Note: Watchers are now managed by WorkspaceManager per-window
+    // This method only updates the global "active" workspace for backward compatibility
+    // Prefer using setWorkspaceForWindow() for multi-window support
 
     if (previous !== folder) {
       set({ workspaceRoot: folder, idxLastRebuildAt: undefined } as any)
     } else {
       set({ workspaceRoot: folder } as any)
     }
+  },
 
+  setWorkspaceForWindow({ windowId, workspaceId }) {
+    const state = get()
+    const updated = { ...state.windowWorkspaces }
+
+    if (workspaceId === null) {
+      delete updated[windowId]
+    } else {
+      updated[windowId] = workspaceId
+    }
+
+    set({ windowWorkspaces: updated })
+
+    // Also update global workspaceRoot for backward compatibility
+    // In the future, this will be removed
+    const { BrowserWindow } = require('electron')
+    const focused = BrowserWindow.getFocusedWindow()
+    if (focused && focused.id === windowId && workspaceId) {
+      set({ workspaceRoot: workspaceId })
+    }
+  },
+
+  getWorkspaceForWindow({ windowId }) {
+    const state = get()
+    return state.windowWorkspaces[windowId] || null
+  },
+
+  getCurrentWorkspace() {
     try {
-      if (folder) {
-        process.env.HIFIDE_WORKSPACE_ROOT = folder
-        startKanbanWatcher(folder).catch((error) => {
-          console.error('[workspace] Failed to start Kanban watcher:', error)
-        })
-        startKbWatcher(folder).catch((error) => {
-          console.error('[workspace] Failed to start KB watcher:', error)
-        })
-      } else {
-        stopKanbanWatcher()
-        stopKbWatcher()
-      }
-    } catch (error) {
-      console.error('[workspace] Failed to sync workspace environment variable:', error)
+      const { BrowserWindow } = require('electron')
+      const focused = BrowserWindow.getFocusedWindow()
+      if (!focused) return get().workspaceRoot // Fallback to global
+
+      const state = get()
+      return state.windowWorkspaces[focused.id] || get().workspaceRoot
+    } catch {
+      return get().workspaceRoot
     }
   },
 

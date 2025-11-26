@@ -400,29 +400,28 @@ export const createSettingsSlice: StateCreator<SettingsSlice, [], [], SettingsSl
     const pricing = (config as any)?.[model] as ModelPricing | undefined
     if (!pricing) return null
 
-    // Calculate costs with cache awareness
+    // IMPORTANT: cachedTokens is SEPARATE from inputTokens, not included in it.
+    // Providers report: inputTokens (total), cachedTokens (subset that was cached)
+    // So we need to calculate: (inputTokens - cachedTokens) at full price + cachedTokens at reduced price
+
     const cachedTokens = usage.cachedTokens || 0
-    const normalInputTokens = usage.inputTokens
+    const totalInputTokens = usage.inputTokens || 0
+    const normalInputTokens = Math.max(0, totalInputTokens - cachedTokens)
 
-    // Normal input tokens at full price
+    // Get cached pricing (fallback to full price if not configured)
+    const cachedInputCostPer1M = (pricing as any).cachedInputCostPer1M ?? pricing.inputCostPer1M
+
+    // Calculate costs
     const normalInputCost = (normalInputTokens / 1_000_000) * pricing.inputCostPer1M
-
-    // Cached tokens at reduced price (provider-aware)
-    // For OpenAI, estimate cached input at 10% of normal input price when no cached rate is configured.
-    const providerId = String(provider || '').toLowerCase()
-    const effectiveCachedPer1M = typeof (pricing as any).cachedInputCostPer1M === 'number'
-      ? (pricing as any).cachedInputCostPer1M
-      : (providerId === 'openai' ? pricing.inputCostPer1M * 0.10 : pricing.inputCostPer1M)
-
-    const cachedInputCost = (cachedTokens / 1_000_000) * effectiveCachedPer1M
-
+    const cachedInputCost = (cachedTokens / 1_000_000) * cachedInputCostPer1M
     const inputCost = normalInputCost + cachedInputCost
     const outputCost = (usage.outputTokens / 1_000_000) * pricing.outputCostPer1M
 
-    // Calculate savings if caching was used (whenever cached rate < full rate)
+    // Calculate savings if caching was used
     let savings = 0
     let savingsPercent = 0
-    if (cachedTokens > 0 && effectiveCachedPer1M < pricing.inputCostPer1M) {
+    if (cachedTokens > 0 && cachedInputCostPer1M < pricing.inputCostPer1M) {
+      // Savings = what we would have paid at full price - what we actually paid
       const fullPriceCost = (cachedTokens / 1_000_000) * pricing.inputCostPer1M
       savings = fullPriceCost - cachedInputCost
       const totalWithoutSavings = inputCost + outputCost + savings

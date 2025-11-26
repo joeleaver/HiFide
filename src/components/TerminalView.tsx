@@ -1,35 +1,19 @@
-import { useRef, useLayoutEffect, useEffect, useState } from 'react'
+import { useRef, useLayoutEffect } from 'react'
 import '@xterm/xterm/css/xterm.css'
 import { useTerminalStore } from '../store/terminal'
+import { useSessionUi, SessionUiState } from '../store/sessionUi'
 import * as terminalInstances from '../services/terminalInstances'
-import { getBackendClient } from '../lib/backend/bootstrap'
 
 export default function TerminalView({ tabId, context = 'explorer' }: { tabId: string; context?: 'agent' | 'explorer' }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
 
-  // For agent terminals, get the session ID from backend snapshot/notifications
-  const [currentId, setCurrentId] = useState<string | null>(null)
+  // For agent terminals, get the session ID from the store (not WebSocket!)
+  const currentId = useSessionUi((s: SessionUiState) => s.currentId)
 
   // Renderer-local terminal actions/state
   const mountTerminal = useTerminalStore((s) => s.mountTerminal)
   const fitTerminal = useTerminalStore((s) => s.fitTerminal)
   const trackedSessionId = useTerminalStore((s) => s.sessionIds[tabId])
-
-  // Hydrate current session id and keep it fresh on timeline deltas
-  useEffect(() => {
-    const client = getBackendClient()
-    if (!client) return
-    ;(async () => {
-      try {
-        const cur: any = await client.rpc('session.getCurrent', {})
-        setCurrentId(cur?.id || null)
-      } catch {}
-    })()
-    const off = client.subscribe('session.timeline.delta', (p: any) => {
-      if (p?.sessionId) setCurrentId(p.sessionId)
-    })
-    return () => { try { off?.() } catch {} }
-  }, [])
 
   useLayoutEffect(() => {
     const container = containerRef.current

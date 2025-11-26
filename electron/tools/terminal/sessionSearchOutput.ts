@@ -20,10 +20,10 @@ export const sessionSearchOutputTool: AgentTool = {
   },
   run: async (
     args: { query: string; caseSensitive?: boolean; in?: 'commands'|'live'|'all'; maxResults?: number },
-    _meta?: { requestId?: string }
+    meta?: { requestId?: string; workspaceId?: string }
   ) => {
     const stAny: any = useMainStore.getState()
-    const ws = stAny.workspaceRoot || null
+    const ws = meta?.workspaceId || stAny.workspaceRoot || null
     const sessionId = (ws && typeof stAny.getCurrentIdFor === 'function') ? stAny.getCurrentIdFor({ workspaceId: ws }) : null
     if (!sessionId) {
       console.error('[terminal.session_search_output] No active sessionId')

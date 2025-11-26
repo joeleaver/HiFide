@@ -239,8 +239,8 @@ Be concise and specific to this repository.`
  */
 export async function bootstrapWorkspace(args: { baseDir?: string; preferAgent?: boolean; overwrite?: boolean }) {
   try {
-    const { useMainStore } = await import('../index.js')
-    const baseDir = path.resolve(String(args?.baseDir || useMainStore.getState().workspaceRoot || process.cwd()))
+    const { resolveWorkspaceRootAsync } = await import('../../utils/workspace.js')
+    const baseDir = path.resolve(String(args?.baseDir || await resolveWorkspaceRootAsync()))
     const publicDir = path.join(baseDir, '.hifide-public')
     const kbDir = path.join(publicDir, 'kb')
     const privateDir = path.join(baseDir, '.hifide-private')

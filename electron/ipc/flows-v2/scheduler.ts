@@ -162,6 +162,48 @@ export class FlowScheduler {
   }
 
   /**
+   * Flush the current messageHistory back to the session
+   * This ensures the session persists the conversation state when the scheduler stops
+   */
+  public async flushToSession(): Promise<void> {
+    try {
+      const store = await this.getStore()
+
+      // Defensive: only flush if we're still the active session
+      const ws = this.workspaceId
+      if (!ws) {
+        console.warn('[Scheduler.flushToSession] No workspaceId, skipping flush')
+        return
+      }
+
+      const currentSessionId = typeof store.getCurrentIdFor === 'function'
+        ? store.getCurrentIdFor({ workspaceId: ws })
+        : null
+
+      if (currentSessionId !== this.sessionId) {
+        console.warn('[Scheduler.flushToSession] Session changed, skipping flush', {
+          schedulerSessionId: this.sessionId,
+          currentSessionId
+        })
+        return
+      }
+
+      // Write final messageHistory back to session
+      if (typeof store.updateCurrentContext === 'function') {
+        console.log('[Scheduler.flushToSession] Flushing messageHistory to session', {
+          sessionId: this.sessionId,
+          messageCount: this.mainContext.messageHistory.length
+        })
+        store.updateCurrentContext({
+          messageHistory: this.mainContext.messageHistory
+        })
+      }
+    } catch (e) {
+      console.error('[Scheduler.flushToSession] Error flushing to session:', e)
+    }
+  }
+
+  /**
    * Cancel the flow execution cooperatively
    * Aborts the shared signal; nodes and providers should listen and stop promptly
    */
@@ -179,6 +221,10 @@ export class FlowScheduler {
       }
       this.userInputResolvers.clear()
     } catch {}
+
+    // Flush final state to session before stopping
+    // Fire and forget - don't block cancellation
+    void this.flushToSession()
   }
 
   /**
@@ -365,22 +411,11 @@ export class FlowScheduler {
         }
       }
 
-      // Before starting, override provider/model from global selection to match UI
-      try {
-        const store = await this.getStore()
-        const provider = store?.selectedProvider || 'openai'
-        const model = store?.selectedModel || 'gpt-4o'
-        this.mainContext.provider = provider
-        this.mainContext.model = model
-        console.log('[Scheduler] Using global selection for main context:', { provider, model })
-      } catch (e) {
-        console.warn('[Scheduler] Could not read global selection; using existing context provider/model')
-      }
-
-      // Execute the entry node with the scheduler's main context
-      // This ensures message history from the session is preserved
-      // This will trigger the flow execution, which should eventually reach a userInput node
-      // and wait indefinitely for user input
+      // Execute the entry node with the scheduler's main context.
+      // Provider/model for main context come from the session's currentContext (initialContext)
+      // and may be updated mid-flow via updateProviderModel. We intentionally do NOT
+      // override them here from the global provider slice so that the per-session
+      // model selector is the single source of truth for main flows.
       await this.executeNode(entryNode.id, { context: this.mainContext }, null)
 
       // Don't return - wait indefinitely for user input
@@ -393,10 +428,14 @@ export class FlowScheduler {
       const error = e?.message || String(e)
       if (isCancellationError(e)) {
         console.log('[FlowScheduler] Cancelled')
+        // Flush already called in cancel(), but call again to be safe
+        await this.flushToSession()
         return { ok: true }
       }
       console.error('[FlowScheduler] Error:', error)
       try { emitFlowEvent(this.requestId, { type: 'error', error, sessionId: this.sessionId }) } catch {}
+      // Flush on error to preserve conversation state
+      await this.flushToSession()
       return { ok: false, error }
     }
   }
@@ -519,6 +558,10 @@ export class FlowScheduler {
             console.log(`[Scheduler] ${nodeId} - About to call feUpdateMainFlowContext`)
             store.feUpdateMainFlowContext(this.mainContext)
             console.log(`[Scheduler] ${nodeId} - feUpdateMainFlowContext returned`)
+
+            // Flush messageHistory to session after each node that updates context
+            // This ensures conversation history is persisted incrementally during execution
+            await this.flushToSession()
           } else if (resultContext.contextType === 'isolated') {
             // Update isolated context
             this.isolatedContexts.set(resultContext.contextId, resultContext)

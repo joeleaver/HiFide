@@ -131,7 +131,7 @@ describe('Scheduler Context Isolation', () => {
       expect(capturedContext.contextType).toBe('isolated')
     })
 
-    it('should inject current provider/model into main context', async () => {
+    it('should preserve provider/model from initial session context for main flows', async () => {
       // Create a simple flow:
       // defaultContextStart -> llmRequest
       const flowDef: FlowDefinition = {
@@ -206,10 +206,10 @@ describe('Scheduler Context Isolation', () => {
       void scheduler.execute().catch(() => {})
       await waitFor(() => !!capturedContext, 5000)
 
-      // Verify that the main context received the current provider/model
+      // Verify that the main context uses the session's provider/model
       expect(capturedContext).toBeDefined()
-      expect(capturedContext.provider).toBe('openai')
-      expect(capturedContext.model).toBe('gpt-4o')
+      expect(capturedContext.provider).toBe('anthropic')
+      expect(capturedContext.model).toBe('claude-3-5-sonnet-20241022')
       expect(capturedContext.contextType).toBe('main')
     })
   })

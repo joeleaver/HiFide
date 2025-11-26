@@ -12,7 +12,7 @@
  */
 
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
+import { persist, createJSONStorage, subscribeWithSelector } from 'zustand/middleware'
 import { createViewSlice, type ViewSlice } from './slices/view.slice'
 import { createUiSlice, type UiSlice } from './slices/ui.slice'
 import { createDebugSlice, type DebugSlice } from './slices/debug.slice'
@@ -63,10 +63,11 @@ export type AppStore = ViewSlice &
  * Uses persist middleware with electron-store backend for Node.js-compatible persistence.
  */
 export const useMainStore = create<AppStore>()(
-  persist(
-    (set, get, store) => {
+  subscribeWithSelector(
+    persist(
+      (set, get, store) => {
 
-      return {
+        return {
         // Simple Slices
         ...createViewSlice(set, get, store),
         ...createUiSlice(set, get, store),
@@ -281,13 +282,13 @@ export const useMainStore = create<AppStore>()(
         // - indexing state, explorer state, planning state
       }),
       onRehydrateStorage: () => (state) => {
-        // workspaceRoot is now the single source of truth - no need to sync to APP_ROOT
+        // workspaceRoot is now the single source of truth
         if (state?.workspaceRoot) {
           console.log('[store] Restored workspaceRoot from persistence:', state.workspaceRoot)
-          try { process.env.HIFIDE_WORKSPACE_ROOT = state.workspaceRoot } catch {}
         }
       },
     }
+    )
   )
 )
 

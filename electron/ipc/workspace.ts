@@ -81,8 +81,8 @@ export function registerWorkspaceHandlers(ipcMain: IpcMain): void {
    * Get workspace root
    */
   ipcMain.handle('workspace:get-root', async () => {
-    const { useMainStore } = await import('../store/index.js')
-    return useMainStore.getState().workspaceRoot || process.cwd()
+    const { resolveWorkspaceRootAsync } = await import('../utils/workspace.js')
+    return resolveWorkspaceRootAsync()
   })
 
   /**
@@ -148,8 +148,9 @@ export function registerWorkspaceHandlers(ipcMain: IpcMain): void {
    */
   ipcMain.handle('workspace:bootstrap', async (_e, args: { baseDir?: string; preferAgent?: boolean; overwrite?: boolean }) => {
     try {
+      const { resolveWorkspaceRootAsync } = await import('../utils/workspace.js')
       const { useMainStore } = await import('../store/index.js')
-      const baseDir = path.resolve(String(args?.baseDir || useMainStore.getState().workspaceRoot || process.cwd()))
+      const baseDir = path.resolve(String(args?.baseDir || await resolveWorkspaceRootAsync()))
       const res = await useMainStore.getState().ensureWorkspaceReady?.({
         baseDir,
         preferAgent: !!args?.preferAgent,

@@ -178,7 +178,7 @@ function debouncedSaveWindowState(): void {
 /**
  * Create the main application window
  */
-export function createWindow(opts?: { offsetFromCurrent?: boolean }): BrowserWindow {
+export function createWindow(opts?: { offsetFromCurrent?: boolean; workspaceId?: string }): BrowserWindow {
   console.time('[window] createWindow')
   // Determine initial window state
   const useOffset = Boolean(opts?.offsetFromCurrent)
@@ -232,12 +232,20 @@ export function createWindow(opts?: { offsetFromCurrent?: boolean }): BrowserWin
   win.on('unmaximize', saveWindowState)
 
   // Save state before closing
-  win.on('close', () => {
+  win.on('close', async () => {
     if (saveWindowStateTimeout) {
       clearTimeout(saveWindowStateTimeout)
     }
     saveWindowState()
 
+    // Unbind window from workspace
+    try {
+      const { getWorkspaceManager } = await import('./workspaceManager.js')
+      const manager = getWorkspaceManager()
+      await manager.unbindWindow(win)
+    } catch (error) {
+      console.error('[window] Failed to unbind workspace:', error)
+    }
   })
 
   // Test active push message to Renderer-process
@@ -258,6 +266,24 @@ export function createWindow(opts?: { offsetFromCurrent?: boolean }): BrowserWin
     })
   } catch {}
 
+
+  // Bind window to workspace if provided
+  if (opts?.workspaceId) {
+    const workspaceId = opts.workspaceId
+    ;(async () => {
+      try {
+        const { getWorkspaceManager } = await import('./workspaceManager.js')
+        const manager = getWorkspaceManager()
+        await manager.bindWindowToWorkspace(win, workspaceId)
+
+        // Update store
+        const { useMainStore } = await import('../store/index.js')
+        useMainStore.getState().setWorkspaceForWindow({ windowId: win.id, workspaceId })
+      } catch (error) {
+        console.error('[window] Failed to bind workspace:', error)
+      }
+    })()
+  }
 
   // Start WS backend and wait for bootstrap, then load the renderer with query params
   ;(async () => {

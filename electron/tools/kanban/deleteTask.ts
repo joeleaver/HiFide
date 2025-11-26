@@ -9,7 +9,7 @@ export const kanbanDeleteTaskTool: AgentTool = {
     required: ['taskId'],
     additionalProperties: false,
   },
-  run: async (input: { taskId: string }) => {
+  run: async (input: { taskId: string }, meta?: any) => {
     const { useMainStore } = await import('../../store')
     const state = useMainStore.getState() as any
 
@@ -17,7 +17,7 @@ export const kanbanDeleteTaskTool: AgentTool = {
       throw new Error('Kanban store is not initialized')
     }
 
-    const result = await state.kanbanDeleteTask(input.taskId)
+    const result = await state.kanbanDeleteTask(input.taskId, meta?.workspaceId)
     if (!result?.ok) {
       throw new Error(`Failed to delete task ${input.taskId}`)
     }

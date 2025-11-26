@@ -65,6 +65,11 @@ export interface IndexingSlice {
   idxResults: IndexSearchResult[]
   idxProg: IndexProgress | null
 
+  // Background indexing state
+  idxBackgroundActive: boolean
+  idxBackgroundProgress: IndexProgress | null
+  idxBackgroundVersion: string | null
+
   // Auto-refresh settings and telemetry
   idxAutoRefresh: AutoRefreshConfig
   idxLastRebuildAt?: number
@@ -80,6 +85,8 @@ export interface IndexingSlice {
   // Heuristics-based rebuild (blocking): triggers rebuild if needed and waits until complete
   maybeAutoRebuildAndWait: () => Promise<{ triggered: boolean }>
   rebuildIndex: () => Promise<{ ok: boolean; status?: IndexStatus | null; error?: unknown } | undefined>
+  // Background rebuild (non-blocking): starts rebuild in background and swaps when done
+  startBackgroundRebuild: (params: { priority?: 'high' | 'low' }) => Promise<void>
   clearIndex: () => Promise<{ ok: boolean } | undefined>
   cancelIndexing: () => Promise<void>
   setIdxQuery: (q: string) => void
@@ -98,6 +105,11 @@ export const createIndexingSlice: StateCreator<IndexingSlice, [], [], IndexingSl
   idxQuery: '',
   idxResults: [],
   idxProg: null,
+
+  // Background indexing state
+  idxBackgroundActive: false,
+  idxBackgroundProgress: null,
+  idxBackgroundVersion: null,
 
   // Auto-refresh settings and telemetry
   idxAutoRefresh: {
@@ -421,6 +433,88 @@ export const createIndexingSlice: StateCreator<IndexingSlice, [], [], IndexingSl
     } catch {}
   },
 
+  /**
+   * Start background rebuild (non-blocking)
+   * Builds new index in versioned directory and swaps when complete
+   */
+  startBackgroundRebuild: async ({ priority = 'low' }: { priority?: 'high' | 'low' } = {}) => {
+    try {
+      const indexer = await getIndexer()
+
+      // Don't start if already running
+      if (get().idxBackgroundActive) {
+        console.log('[indexing] Background rebuild already in progress')
+        return
+      }
+
+      // Create new version directory
+      const newVersion = `v${Date.now()}`
+      const versionInfo = indexer.getVersionInfo()
+      const newIndexDir = require('node:path').join(versionInfo.versionsDir, newVersion)
+
+      console.log(`[indexing] Starting background rebuild to ${newVersion} (priority: ${priority})`)
+
+      set({
+        idxBackgroundActive: true,
+        idxBackgroundVersion: newVersion,
+        idxBackgroundProgress: {
+          inProgress: true,
+          phase: 'scanning',
+          processedFiles: 0,
+          totalFiles: 0,
+          processedChunks: 0,
+          totalChunks: 0,
+          elapsedMs: 0,
+        }
+      })
+
+      // Build into new directory (doesn't touch active index)
+      await indexer.rebuildToDirectory(newIndexDir, (progress) => {
+        // Update background progress
+        set({
+          idxBackgroundProgress: {
+            inProgress: progress.inProgress,
+            phase: progress.phase,
+            processedFiles: progress.processedFiles,
+            totalFiles: progress.totalFiles,
+            processedChunks: progress.processedChunks,
+            totalChunks: progress.totalChunks,
+            elapsedMs: progress.elapsedMs,
+          }
+        })
+      })
+
+      // Atomic swap to new index
+      await indexer.swapToNewIndex(newVersion)
+
+      // Update status to reflect new index
+      const s = indexer.status()
+      set({
+        idxStatus: {
+          ready: s.ready,
+          chunks: s.chunks,
+          modelId: s.modelId,
+          dim: s.dim,
+          indexPath: s.indexPath
+        },
+        idxLastRebuildAt: Date.now(),
+      })
+
+      // Clean up old versions (keep last 2)
+      await indexer.cleanupOldVersions({ keep: 2 })
+
+      console.log(`[indexing] Background rebuild complete: ${newVersion}`)
+
+    } catch (e) {
+      console.error('[indexing] Background rebuild failed:', e)
+    } finally {
+      set({
+        idxBackgroundActive: false,
+        idxBackgroundProgress: null,
+        idxBackgroundVersion: null,
+      })
+    }
+  },
 
   clearIndex: async () => {
     try {

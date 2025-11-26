@@ -24,80 +24,80 @@ export type PricingConfig = {
 
 export const DEFAULT_PRICING: PricingConfig = {
   openai: {
-    // GPT-5 models
-    'gpt-5': { inputCostPer1M: 1.25, outputCostPer1M: 10.00 },
-    'gpt-5-mini': { inputCostPer1M: 0.25, outputCostPer1M: 2.00 },
-    'gpt-5-nano': { inputCostPer1M: 0.05, outputCostPer1M: 0.40 },
-    'gpt-5-chat-latest': { inputCostPer1M: 1.25, outputCostPer1M: 10.00 },
-    'gpt-5-codex': { inputCostPer1M: 1.25, outputCostPer1M: 10.00 },
-    'gpt-5-pro': { inputCostPer1M: 15.00, outputCostPer1M: 120.00 },
+    // GPT-5 models (90% discount on cached tokens)
+    'gpt-5': { inputCostPer1M: 1.25, outputCostPer1M: 10.00, cachedInputCostPer1M: 0.125 },
+    'gpt-5-mini': { inputCostPer1M: 0.25, outputCostPer1M: 2.00, cachedInputCostPer1M: 0.025 },
+    'gpt-5-nano': { inputCostPer1M: 0.05, outputCostPer1M: 0.40, cachedInputCostPer1M: 0.005 },
+    'gpt-5-chat-latest': { inputCostPer1M: 1.25, outputCostPer1M: 10.00, cachedInputCostPer1M: 0.125 },
+    'gpt-5-codex': { inputCostPer1M: 1.25, outputCostPer1M: 10.00, cachedInputCostPer1M: 0.125 },
+    'gpt-5-pro': { inputCostPer1M: 15.00, outputCostPer1M: 120.00, cachedInputCostPer1M: 1.50 },
 
-    // GPT-4.1 models
-    'gpt-4.1': { inputCostPer1M: 2.00, outputCostPer1M: 8.00 },
-    'gpt-4.1-mini': { inputCostPer1M: 0.40, outputCostPer1M: 1.60 },
-    'gpt-4.1-nano': { inputCostPer1M: 0.10, outputCostPer1M: 0.40 },
+    // GPT-4.1 models (90% discount on cached tokens)
+    'gpt-4.1': { inputCostPer1M: 2.00, outputCostPer1M: 8.00, cachedInputCostPer1M: 0.20 },
+    'gpt-4.1-mini': { inputCostPer1M: 0.40, outputCostPer1M: 1.60, cachedInputCostPer1M: 0.04 },
+    'gpt-4.1-nano': { inputCostPer1M: 0.10, outputCostPer1M: 0.40, cachedInputCostPer1M: 0.01 },
 
-    // GPT-4o models
-    'gpt-4o': { inputCostPer1M: 2.50, outputCostPer1M: 10.00 },
-    'gpt-4o-2024-11-20': { inputCostPer1M: 2.50, outputCostPer1M: 10.00 },
-    'gpt-4o-2024-08-06': { inputCostPer1M: 2.50, outputCostPer1M: 10.00 },
-    'gpt-4o-2024-05-13': { inputCostPer1M: 5.00, outputCostPer1M: 15.00 },
-    'gpt-4o-mini': { inputCostPer1M: 0.15, outputCostPer1M: 0.60 },
-    'gpt-4o-mini-2024-07-18': { inputCostPer1M: 0.15, outputCostPer1M: 0.60 },
+    // GPT-4o models (90% discount on cached tokens)
+    'gpt-4o': { inputCostPer1M: 2.50, outputCostPer1M: 10.00, cachedInputCostPer1M: 0.25 },
+    'gpt-4o-2024-11-20': { inputCostPer1M: 2.50, outputCostPer1M: 10.00, cachedInputCostPer1M: 0.25 },
+    'gpt-4o-2024-08-06': { inputCostPer1M: 2.50, outputCostPer1M: 10.00, cachedInputCostPer1M: 0.25 },
+    'gpt-4o-2024-05-13': { inputCostPer1M: 5.00, outputCostPer1M: 15.00, cachedInputCostPer1M: 0.50 },
+    'gpt-4o-mini': { inputCostPer1M: 0.15, outputCostPer1M: 0.60, cachedInputCostPer1M: 0.015 },
+    'gpt-4o-mini-2024-07-18': { inputCostPer1M: 0.15, outputCostPer1M: 0.60, cachedInputCostPer1M: 0.015 },
 
-    // Realtime models
-    'gpt-realtime': { inputCostPer1M: 4.00, outputCostPer1M: 16.00 },
-    'gpt-realtime-mini': { inputCostPer1M: 0.60, outputCostPer1M: 2.40 },
-    'gpt-4o-realtime-preview': { inputCostPer1M: 5.00, outputCostPer1M: 20.00 },
-    'gpt-4o-mini-realtime-preview': { inputCostPer1M: 0.60, outputCostPer1M: 2.40 },
+    // Realtime models (90% discount on cached tokens)
+    'gpt-realtime': { inputCostPer1M: 4.00, outputCostPer1M: 16.00, cachedInputCostPer1M: 0.40 },
+    'gpt-realtime-mini': { inputCostPer1M: 0.60, outputCostPer1M: 2.40, cachedInputCostPer1M: 0.06 },
+    'gpt-4o-realtime-preview': { inputCostPer1M: 5.00, outputCostPer1M: 20.00, cachedInputCostPer1M: 0.50 },
+    'gpt-4o-mini-realtime-preview': { inputCostPer1M: 0.60, outputCostPer1M: 2.40, cachedInputCostPer1M: 0.06 },
 
-    // Audio models
-    'gpt-audio': { inputCostPer1M: 2.50, outputCostPer1M: 10.00 },
-    'gpt-audio-mini': { inputCostPer1M: 0.60, outputCostPer1M: 2.40 },
-    'gpt-4o-audio-preview': { inputCostPer1M: 2.50, outputCostPer1M: 10.00 },
-    'gpt-4o-mini-audio-preview': { inputCostPer1M: 0.15, outputCostPer1M: 0.60 },
+    // Audio models (90% discount on cached tokens)
+    'gpt-audio': { inputCostPer1M: 2.50, outputCostPer1M: 10.00, cachedInputCostPer1M: 0.25 },
+    'gpt-audio-mini': { inputCostPer1M: 0.60, outputCostPer1M: 2.40, cachedInputCostPer1M: 0.06 },
+    'gpt-4o-audio-preview': { inputCostPer1M: 2.50, outputCostPer1M: 10.00, cachedInputCostPer1M: 0.25 },
+    'gpt-4o-mini-audio-preview': { inputCostPer1M: 0.15, outputCostPer1M: 0.60, cachedInputCostPer1M: 0.015 },
 
-    // o-series models
-    'o1': { inputCostPer1M: 15.00, outputCostPer1M: 60.00 },
-    'o1-2024-12-17': { inputCostPer1M: 15.00, outputCostPer1M: 60.00 },
-    'o1-preview': { inputCostPer1M: 15.00, outputCostPer1M: 60.00 },
-    'o1-preview-2024-09-12': { inputCostPer1M: 15.00, outputCostPer1M: 60.00 },
-    'o1-mini': { inputCostPer1M: 1.10, outputCostPer1M: 4.40 },
-    'o1-mini-2024-09-12': { inputCostPer1M: 1.10, outputCostPer1M: 4.40 },
-    'o1-pro': { inputCostPer1M: 150.00, outputCostPer1M: 600.00 },
-    'o3-pro': { inputCostPer1M: 20.00, outputCostPer1M: 80.00 },
-    'o3': { inputCostPer1M: 2.00, outputCostPer1M: 8.00 },
-    'o3-deep-research': { inputCostPer1M: 10.00, outputCostPer1M: 40.00 },
-    'o3-mini': { inputCostPer1M: 1.10, outputCostPer1M: 4.40 },
-    'o4-mini': { inputCostPer1M: 1.10, outputCostPer1M: 4.40 },
-    'o4-mini-deep-research': { inputCostPer1M: 2.00, outputCostPer1M: 8.00 },
+    // o-series models (90% discount on cached tokens)
+    'o1': { inputCostPer1M: 15.00, outputCostPer1M: 60.00, cachedInputCostPer1M: 1.50 },
+    'o1-2024-12-17': { inputCostPer1M: 15.00, outputCostPer1M: 60.00, cachedInputCostPer1M: 1.50 },
+    'o1-preview': { inputCostPer1M: 15.00, outputCostPer1M: 60.00, cachedInputCostPer1M: 1.50 },
+    'o1-preview-2024-09-12': { inputCostPer1M: 15.00, outputCostPer1M: 60.00, cachedInputCostPer1M: 1.50 },
+    'o1-mini': { inputCostPer1M: 1.10, outputCostPer1M: 4.40, cachedInputCostPer1M: 0.11 },
+    'o1-mini-2024-09-12': { inputCostPer1M: 1.10, outputCostPer1M: 4.40, cachedInputCostPer1M: 0.11 },
+    'o1-pro': { inputCostPer1M: 150.00, outputCostPer1M: 600.00, cachedInputCostPer1M: 15.00 },
+    'o3-pro': { inputCostPer1M: 20.00, outputCostPer1M: 80.00, cachedInputCostPer1M: 2.00 },
+    'o3': { inputCostPer1M: 2.00, outputCostPer1M: 8.00, cachedInputCostPer1M: 0.20 },
+    'o3-deep-research': { inputCostPer1M: 10.00, outputCostPer1M: 40.00, cachedInputCostPer1M: 1.00 },
+    'o3-mini': { inputCostPer1M: 1.10, outputCostPer1M: 4.40, cachedInputCostPer1M: 0.11 },
+    'o4-mini': { inputCostPer1M: 1.10, outputCostPer1M: 4.40, cachedInputCostPer1M: 0.11 },
+    'o4-mini-deep-research': { inputCostPer1M: 2.00, outputCostPer1M: 8.00, cachedInputCostPer1M: 0.20 },
 
-    // Codex models
-    'codex-mini-latest': { inputCostPer1M: 1.50, outputCostPer1M: 6.00 },
+    // Codex models (90% discount on cached tokens)
+    'codex-mini-latest': { inputCostPer1M: 1.50, outputCostPer1M: 6.00, cachedInputCostPer1M: 0.15 },
 
-    // Search models
-    'gpt-4o-mini-search-preview': { inputCostPer1M: 0.15, outputCostPer1M: 0.60 },
-    'gpt-4o-search-preview': { inputCostPer1M: 2.50, outputCostPer1M: 10.00 },
+    // Search models (90% discount on cached tokens)
+    'gpt-4o-mini-search-preview': { inputCostPer1M: 0.15, outputCostPer1M: 0.60, cachedInputCostPer1M: 0.015 },
+    'gpt-4o-search-preview': { inputCostPer1M: 2.50, outputCostPer1M: 10.00, cachedInputCostPer1M: 0.25 },
 
-    // Computer use
-    'computer-use-preview': { inputCostPer1M: 3.00, outputCostPer1M: 12.00 },
+    // Computer use (90% discount on cached tokens)
+    'computer-use-preview': { inputCostPer1M: 3.00, outputCostPer1M: 12.00, cachedInputCostPer1M: 0.30 },
 
     // Image generation (output cost is 0 as it's priced per image, not per token)
-    'gpt-image-1': { inputCostPer1M: 5.00, outputCostPer1M: 0.00 },
-    'gpt-image-1-mini': { inputCostPer1M: 2.00, outputCostPer1M: 0.00 },
+    'gpt-image-1': { inputCostPer1M: 5.00, outputCostPer1M: 0.00, cachedInputCostPer1M: 0.50 },
+    'gpt-image-1-mini': { inputCostPer1M: 2.00, outputCostPer1M: 0.00, cachedInputCostPer1M: 0.20 },
 
-    // GPT-4 Turbo (legacy)
-    'gpt-4-turbo': { inputCostPer1M: 10.00, outputCostPer1M: 30.00 },
-    'gpt-4-turbo-2024-04-09': { inputCostPer1M: 10.00, outputCostPer1M: 30.00 },
-    'gpt-4-turbo-preview': { inputCostPer1M: 10.00, outputCostPer1M: 30.00 },
+    // GPT-4 Turbo (legacy, 90% discount on cached tokens)
+    'gpt-4-turbo': { inputCostPer1M: 10.00, outputCostPer1M: 30.00, cachedInputCostPer1M: 1.00 },
+    'gpt-4-turbo-2024-04-09': { inputCostPer1M: 10.00, outputCostPer1M: 30.00, cachedInputCostPer1M: 1.00 },
+    'gpt-4-turbo-preview': { inputCostPer1M: 10.00, outputCostPer1M: 30.00, cachedInputCostPer1M: 1.00 },
 
-    // GPT-4 (legacy)
-    'gpt-4': { inputCostPer1M: 30.00, outputCostPer1M: 60.00 },
-    'gpt-4-0613': { inputCostPer1M: 30.00, outputCostPer1M: 60.00 },
+    // GPT-4 (legacy, 90% discount on cached tokens)
+    'gpt-4': { inputCostPer1M: 30.00, outputCostPer1M: 60.00, cachedInputCostPer1M: 3.00 },
+    'gpt-4-0613': { inputCostPer1M: 30.00, outputCostPer1M: 60.00, cachedInputCostPer1M: 3.00 },
 
-    // GPT-3.5 Turbo (legacy)
-    'gpt-3.5-turbo': { inputCostPer1M: 0.50, outputCostPer1M: 1.50 },
-    'gpt-3.5-turbo-0125': { inputCostPer1M: 0.50, outputCostPer1M: 1.50 },
+    // GPT-3.5 Turbo (legacy, 90% discount on cached tokens)
+    'gpt-3.5-turbo': { inputCostPer1M: 0.50, outputCostPer1M: 1.50, cachedInputCostPer1M: 0.05 },
+    'gpt-3.5-turbo-0125': { inputCostPer1M: 0.50, outputCostPer1M: 1.50, cachedInputCostPer1M: 0.05 },
   },
 
   anthropic: {
@@ -133,6 +133,9 @@ export const DEFAULT_PRICING: PricingConfig = {
   },
 
   gemini: {
+    // Gemini 3.0 Pro Preview (with context caching - 90% discount on cached tokens)
+    'gemini-3-pro-preview': { inputCostPer1M: 2.00, outputCostPer1M: 12.00, cachedInputCostPer1M: 0.20 },
+
     // Gemini 2.5 Pro (with context caching - 75% discount on cached tokens)
     'gemini-2.5-pro': { inputCostPer1M: 1.25, outputCostPer1M: 10.00, cachedInputCostPer1M: 0.3125 },
 
@@ -196,23 +199,23 @@ export const DEFAULT_PRICING: PricingConfig = {
     'gemma-3n': { inputCostPer1M: 0.00, outputCostPer1M: 0.00 },
   },
 
-  // Fireworks.ai
+  // Fireworks.ai (90% discount on cached tokens)
   fireworks: {
     // Sensible defaults requested by user
-    'accounts/fireworks/models/qwen3-coder-480b-a35b-instruct': { inputCostPer1M: 0.45, outputCostPer1M: 1.80 },
-    'accounts/fireworks/models/glm-4p6': { inputCostPer1M: 0.55, outputCostPer1M: 2.19 },
-    'accounts/fireworks/models/kimi-k2-instruct-0905': { inputCostPer1M: 0.60, outputCostPer1M: 2.50 },
-    'accounts/fireworks/models/deepseek-v3p1-terminus': { inputCostPer1M: 0.56, outputCostPer1M: 1.68 },
-    'accounts/fireworks/models/minimax-m2': { inputCostPer1M: 0.30, outputCostPer1M: 1.20 },
+    'accounts/fireworks/models/qwen3-coder-480b-a35b-instruct': { inputCostPer1M: 0.45, outputCostPer1M: 1.80, cachedInputCostPer1M: 0.045 },
+    'accounts/fireworks/models/glm-4p6': { inputCostPer1M: 0.55, outputCostPer1M: 2.19, cachedInputCostPer1M: 0.055 },
+    'accounts/fireworks/models/kimi-k2-instruct-0905': { inputCostPer1M: 0.60, outputCostPer1M: 2.50, cachedInputCostPer1M: 0.06 },
+    'accounts/fireworks/models/deepseek-v3p1-terminus': { inputCostPer1M: 0.56, outputCostPer1M: 1.68, cachedInputCostPer1M: 0.056 },
+    'accounts/fireworks/models/minimax-m2': { inputCostPer1M: 0.30, outputCostPer1M: 1.20, cachedInputCostPer1M: 0.03 },
   },
 
-  // xAI
+  // xAI (90% discount on cached tokens)
   xai: {
     // Default pricing per 1M tokens
-    'grok-code-fast-1': { inputCostPer1M: 0.20, outputCostPer1M: 1.50 },
-    'grok-4-fast-reasoning': { inputCostPer1M: 0.20, outputCostPer1M: 0.50 },
-    'grok-4-fast-non-reasoning': { inputCostPer1M: 0.20, outputCostPer1M: 0.50 },
-    'grok-4-0709': { inputCostPer1M: 3.00, outputCostPer1M: 15.00 },
+    'grok-code-fast-1': { inputCostPer1M: 0.20, outputCostPer1M: 1.50, cachedInputCostPer1M: 0.02 },
+    'grok-4-fast-reasoning': { inputCostPer1M: 0.20, outputCostPer1M: 0.50, cachedInputCostPer1M: 0.02 },
+    'grok-4-fast-non-reasoning': { inputCostPer1M: 0.20, outputCostPer1M: 0.50, cachedInputCostPer1M: 0.02 },
+    'grok-4-0709': { inputCostPer1M: 3.00, outputCostPer1M: 15.00, cachedInputCostPer1M: 0.30 },
   },
 
   customRates: false

@@ -87,7 +87,7 @@ export interface SessionSlice {
   setCurrentIdFor: (params: { workspaceId: string; id: string | null }) => void
 
   // Workspace-scoped actions (Phase 2)
-  selectFor: (params: { workspaceId: string; id: string }) => void
+  selectFor: (params: { workspaceId: string; id: string }) => Promise<void>
   newSessionFor: (params: { workspaceId: string; title?: string }) => string
   loadSessionsFor: (params: { workspaceId: string }) => Promise<void>
   ensureSessionPresentFor: (params: { workspaceId: string }) => boolean
@@ -209,12 +209,13 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 	  },
 
 		  // Workspace-scoped actions (Phase 2)
-		  selectFor: ({ workspaceId, id }: { workspaceId: string; id: string }) => {
+		  selectFor: async ({ workspaceId, id }: { workspaceId: string; id: string }) => {
 		    const state: any = get()
 		    const isActiveWorkspace = state.workspaceRoot === workspaceId
+
 		    // Save current session immediately before switching (only for active workspace)
 		    if (isActiveWorkspace && typeof state.saveCurrentSession === 'function') {
-		      try { state.saveCurrentSession(true) } catch {}
+		      try { await state.saveCurrentSession(true) } catch {}
 		    }
 		    // Update workspace-scoped currentId (and mirror to global if active workspace)
 		    set((s: any) => {
@@ -257,10 +258,24 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 		    const now = Date.now()
 		    const state: any = get()
 		    const isActiveWorkspace = state.workspaceRoot === workspaceId
+
 		    const initialTitle = (typeof title === 'string' && title.trim().length > 0) ? title : initialSessionTitle(now)
 		    const provider = state.selectedProvider || 'openai'
 		    const model = state.selectedModel || 'gpt-4o'
 		    const lastUsedFlow = state.feSelectedTemplate || 'default'
+			    const prevList: Session[] = (typeof state.getSessionsFor === 'function')
+			      ? (state.getSessionsFor({ workspaceId }) || [])
+			      : []
+			    const prevId: string | null = (typeof state.getCurrentIdFor === 'function')
+			      ? (state.getCurrentIdFor({ workspaceId }) ?? null)
+			      : null
+			    const prevSession: Session | null = Array.isArray(prevList)
+			      ? (prevList.find((s) => s.id === prevId) || null)
+			      : null
+			    const effectiveLastUsedFlow = prevSession?.lastUsedFlow || lastUsedFlow
+			    const effectiveProvider = prevSession?.currentContext?.provider || provider
+			    const effectiveModel = prevSession?.currentContext?.model || model
+
 		    const session: Session = {
 		      id: crypto.randomUUID(),
 		      title: initialTitle,
@@ -268,13 +283,18 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 		      createdAt: now,
 		      updatedAt: now,
 		      lastActivityAt: now,
-		      lastUsedFlow,
-		      currentContext: { provider, model },
+		      lastUsedFlow: effectiveLastUsedFlow,
+		      currentContext: {
+		        provider: effectiveProvider,
+		        model: effectiveModel,
+		        messageHistory: [] // Explicitly initialize empty messageHistory
+		      },
 		      flowDebugLogs: [],
 		      tokenUsage: { byProvider: {}, byProviderAndModel: {}, total: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
 		      costs: { byProviderAndModel: {}, totalCost: 0, currency: 'USD' },
 		      requestsLog: [],
 		    }
+
 		    // Active workspace side-effects
 		    if (isActiveWorkspace) {
 		      if (typeof state.clearAgentTerminals === 'function') {
@@ -326,7 +346,9 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
 		      setTimeout(() => { void state.initializeSession() }, 100)
 		    }
 		    if (isActiveWorkspace && typeof state.saveCurrentSession === 'function') {
-		      try { state.saveCurrentSession(true) } catch {}
+		      // Fire off immediate save (don't await to keep function synchronous)
+		      // The save will complete before app can restart due to immediate=true
+		      void state.saveCurrentSession(true)
 
 		    }
 		    return session.id
@@ -521,7 +543,11 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     }
 
     // Save to disk using debounced saver
-    sessionSaver.save(current, immediate)
+    // When immediate=true, await the save to ensure it completes before returning
+    const saveResult = sessionSaver.save(current, immediate)
+    if (immediate && saveResult) {
+      await saveResult
+    }
   },
 
   updateCurrentSessionFlow: async (flowId: string) => {
@@ -886,30 +912,14 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
       const key = `${requestId}:${nodeId}:${executionId}`
       const prev = inFlight[key]?.usage || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
 
-      // Safety net: providers report cumulative usage per-step (running total).
-      // Determine cumulative by totalTokens only; input/output may be non-monotonic between steps.
-      const currTotal = (usage.totalTokens ?? ((usage.inputTokens || 0) + (usage.outputTokens || 0)))
-      const prevTotal = (prev.totalTokens ?? ((prev.inputTokens || 0) + (prev.outputTokens || 0)))
-      const looksCumulative = currTotal >= prevTotal
-
-      const delta: TokenUsage = looksCumulative
-        ? (() => {
-            const dTotal = Math.max(0, currTotal - prevTotal)
-            const dIn = Math.max(0, (usage.inputTokens || 0) - (prev.inputTokens || 0))
-            const dOut = Math.max(0, dTotal - dIn)
-            return {
-              inputTokens: dIn,
-              outputTokens: dOut,
-              totalTokens: Math.max(0, dIn + dOut),
-              cachedTokens: Math.max(0, (usage.cachedTokens || 0) - (prev.cachedTokens || 0)),
-            }
-          })()
-        : {
-            inputTokens: Math.max(0, usage.inputTokens || 0),
-            outputTokens: Math.max(0, usage.outputTokens || 0),
-            totalTokens: Math.max(0, usage.totalTokens ?? ((usage.inputTokens || 0) + (usage.outputTokens || 0))),
-            cachedTokens: Math.max(0, usage.cachedTokens || 0),
-          }
+      // All providers (OpenAI, Anthropic, Gemini, Fireworks, xAI) report CUMULATIVE usage per-step.
+      // Calculate the delta by subtracting previous cumulative from current cumulative.
+      const delta: TokenUsage = {
+        inputTokens: Math.max(0, (usage.inputTokens || 0) - (prev.inputTokens || 0)),
+        outputTokens: Math.max(0, (usage.outputTokens || 0) - (prev.outputTokens || 0)),
+        totalTokens: Math.max(0, (usage.totalTokens || 0) - (prev.totalTokens || 0)),
+        cachedTokens: Math.max(0, (usage.cachedTokens || 0) - (prev.cachedTokens || 0)),
+      }
 
       const cumUsage: TokenUsage = {
         inputTokens: (prev.inputTokens || 0) + (delta.inputTokens || 0),
@@ -930,7 +940,6 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
             executionId,
             provider,
             model,
-            mode: looksCumulative ? 'snapshot->delta' : 'delta',
             received: usage,
             delta,
             cumulative: cumUsage,
@@ -1696,7 +1705,7 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
     })
 
     // Immediate save on finalize
-    get().saveCurrentSession(true)
+    void get().saveCurrentSession(true)
   },
 })
 

@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
   ActionIcon,
   Badge,
   Box,
   Button,
+  Center,
   Drawer,
   Group,
-  Loader,
   Modal,
   Paper,
   Select,
+  Skeleton,
   Stack,
   Text,
   Textarea,
@@ -24,10 +25,12 @@ import {
   Draggable,
   type DropResult,
 } from '@hello-pangea/dnd'
-import { IconPlus, IconEdit, IconTrash, IconColumns3, IconFolderPlus } from '@tabler/icons-react'
+import { IconPlus, IconEdit, IconTrash, IconColumns3, IconFolderPlus, IconRefresh, IconAlertTriangle } from '@tabler/icons-react'
 
 import { getBackendClient } from '../../lib/backend/bootstrap'
 import type { KanbanEpic, KanbanStatus, KanbanTask, KanbanBoard } from '../../../electron/store/types'
+import { useKanban } from '@/store/kanban'
+import { useKanbanHydration } from '@/store/screenHydration'
 import StreamingMarkdown from '../StreamingMarkdown'
 
 const COLUMNS: { status: KanbanStatus; label: string }[] = [
@@ -58,75 +61,83 @@ type EpicFormValues = {
   description?: string
 }
 
+/**
+ * Skeleton for Kanban board while loading
+ */
+function KanbanSkeleton() {
+  return (
+    <Box style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: 16, gap: 16 }}>
+      {/* Header skeleton */}
+      <Group justify="space-between">
+        <Skeleton width={180} height={32} radius="sm" />
+        <Group gap="sm">
+          <Skeleton width={80} height={28} radius="sm" />
+          <Skeleton width={80} height={28} radius="sm" />
+        </Group>
+      </Group>
+      {/* Columns skeleton */}
+      <Box style={{ display: 'flex', gap: 16, flex: 1 }}>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Box key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Skeleton width={100} height={24} radius="sm" />
+            <Skeleton height={80} radius="md" />
+            <Skeleton height={80} radius="md" />
+            <Skeleton height={80} radius="md" />
+          </Box>
+        ))}
+      </Box>
+    </Box>
+  )
+}
+
 export default function KanbanView() {
   const theme = useMantineTheme()
 
-  const [board, setBoard] = useState<KanbanBoard | null>(null)
-  const [loading, setLoading] = useState<boolean>(false)
-  const [saving, setSaving] = useState<boolean>(false)
-  const [error, setError] = useState<string | null>(null)
+  // Screen hydration state
+  const screenPhase = useKanbanHydration((s) => s.phase)
+  const screenError = useKanbanHydration((s) => s.error)
+  const startLoading = useKanbanHydration((s) => s.startLoading)
+  const setReady = useKanbanHydration((s) => s.setReady)
+  const setScreenError = useKanbanHydration((s) => s.setError)
+
+  // Get state from store (not local state!)
+  const board = useKanban((s) => s.board)
+  const saving = useKanban((s) => s.saving)
+  const error = useKanban((s) => s.error)
+  const setBoard = useKanban((s) => s.setBoard)
+
   const epics = board?.epics ?? []
 
+  // Load kanban data
+  const loadKanban = useCallback(async () => {
+    try {
+      const client = getBackendClient()
+      if (!client) throw new Error('No backend connection')
 
-  // Hydrate snapshot
-  useEffect(() => {
-    (async () => {
-      try {
-        const res: any = await getBackendClient()?.rpc('kanban.getBoard', {})
-        if (res?.ok) {
-          setBoard(res.board || null)
-          setLoading(!!res.loading)
-          setSaving(!!res.saving)
-          setError(res.error || null)
-        }
-      } catch {}
-    })()
-  }, [])
+      // First trigger a load from disk if not already loaded
+      await client.rpc('kanban.load', {})
 
-  // Subscribe to live updates (attach even if backend connects later)
-  useEffect(() => {
-    let cancelled = false
-    let off: (() => void) | undefined
-
-    const attach = async () => {
-      // Wait for client instance to exist
-      let client = getBackendClient()
-      while (!client && !cancelled) {
-        await new Promise((r) => setTimeout(r, 150))
-        client = getBackendClient()
+      // Then get the current board state
+      const res: any = await client.rpc('kanban.getBoard', {})
+      if (res?.ok) {
+        // Board can be null if no kanban.yaml exists yet - that's fine
+        setBoard(res.board)
+        setReady()
+      } else {
+        throw new Error(res?.error || 'Failed to load board')
       }
-      if (cancelled || !client) return
-      // Wait until connection is ready
-      try { await (client as any).whenReady?.(5000) } catch {}
-      if (cancelled) return
-      off = client.subscribe('kanban.board.changed', (p: any) => {
-        // Always reflect loading/saving/error promptly
-        setLoading(!!p?.loading)
-        setSaving(!!p?.saving)
-        setError(p?.error || null)
-
-        const nextBoard = p?.board || null
-        const pending = pendingMoveRef.current
-
-        // If we have a pending optimistic move, avoid clobbering it with a stale snapshot
-        if (pending && nextBoard) {
-          const moved = nextBoard.tasks?.find((t: any) => t.id === pending.taskId)
-          if (moved && moved.status !== pending.toStatus) {
-            // Stale server board (hasn't reflected our move yet) — keep optimistic UI
-            return
-          }
-          // Server has caught up (or task missing). Clear pending and accept snapshot
-          pendingMoveRef.current = null
-        }
-
-        setBoard(nextBoard)
-      })
+    } catch (e) {
+      setScreenError(e instanceof Error ? e.message : 'Failed to load kanban board')
     }
+  }, [setBoard, setReady, setScreenError])
 
-    void attach()
-
-    return () => { cancelled = true; try { off?.() } catch {} }
-  }, [])
+  // Auto-load on mount if in idle state
+  useEffect(() => {
+    if (screenPhase === 'idle') {
+      startLoading()
+      loadKanban()
+    }
+  }, [screenPhase, startLoading, loadKanban])
 
   const tasksByStatus = useMemo(() => {
     const grouped: Record<KanbanStatus, KanbanTask[]> = {
@@ -157,39 +168,7 @@ export default function KanbanView() {
   const [epicModal, setEpicModal] = useState<EpicModalState | null>(null)
   const [epicDrawerOpen, setEpicDrawerOpen] = useState(false)
 
-  const triedLoadRef = useRef(false)
-  // Ensure we always kick a load once on mount (even if snapshot says loading)
-  useEffect(() => {
-    if (triedLoadRef.current) return
-    triedLoadRef.current = true
-    setLoading(true)
-    ;(async () => {
-      try {
-        // Wait for backend client and connection to be ready
-        let client = getBackendClient()
-        while (!client) {
-          await new Promise((r) => setTimeout(r, 150))
-          client = getBackendClient()
-        }
-        try { await (client as any).whenReady?.(5000) } catch {}
-
-        const res: any = await client!.rpc('kanban.load', {})
-        if (!res?.ok) {
-          notifications.show({ color: 'red', title: 'Kanban load failed', message: res?.error || 'Unable to load board' })
-        } else {
-          // Seed UI immediately from RPC response in case notifications are delayed
-          if ('board' in res) {
-            try { setBoard(res.board || null) } catch {}
-          }
-          try { setLoading(false) } catch {}
-        }
-      } catch (err) {
-        console.error('[kanban] failed to load board:', err)
-        notifications.show({ color: 'red', title: 'Kanban load failed', message: String(err) })
-        try { setLoading(false) } catch {}
-      }
-    })()
-  }, [])
+  // Board is pre-fetched during loading overlay phase, no need to load on mount
 
   // Track an optimistic move to avoid overwriting with stale server snapshots
   const pendingMoveRef = useRef<{ taskId: string; toStatus: KanbanStatus; startedAt: number } | null>(null)
@@ -232,16 +211,7 @@ export default function KanbanView() {
     }
   }
 
-  // If loading seems stuck without a board, fall back to showing unavailable UI instead of spinning forever
-  useEffect(() => {
-    if (loading && !board) {
-      const t = setTimeout(() => {
-        try { setLoading(false) } catch {}
-      }, 4000)
-      return () => clearTimeout(t)
-    }
-  }, [loading, board])
-
+  // Show error notification when board operations fail
   useEffect(() => {
     if (error) {
       notifications.show({ color: 'red', title: 'Kanban error', message: error })
@@ -385,12 +355,32 @@ export default function KanbanView() {
     }
   }
 
-  if (loading && !board) {
+  // Render based on screen phase
+  if (screenPhase === 'idle' || screenPhase === 'loading') {
+    return <KanbanSkeleton />
+  }
+
+  if (screenPhase === 'error') {
     return (
-      <Box p="xl" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-        <Loader color="blue" size="lg" />
-        <Text c="dimmed">Loading Kanban board…</Text>
-      </Box>
+      <Center h="100%">
+        <Stack align="center" gap="md">
+          <IconAlertTriangle size={48} color="var(--mantine-color-red-6)" />
+          <Text size="sm" c="dimmed" ta="center">
+            {screenError ?? 'Failed to load kanban board'}
+          </Text>
+          <Button
+            variant="light"
+            size="sm"
+            leftSection={<IconRefresh size={16} />}
+            onClick={() => {
+              startLoading()
+              loadKanban()
+            }}
+          >
+            Retry
+          </Button>
+        </Stack>
+      </Center>
     )
   }
 

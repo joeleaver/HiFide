@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
 import { Group, Text, Menu, Button, TextInput, Card, ActionIcon, Tooltip, Loader } from '@mantine/core'
-import { IconPlayerPlay, IconPlayerStop, IconChevronDown, IconChevronRight } from '@tabler/icons-react'
+import { IconPlayerPlay, IconPlayerStop, IconChevronDown, IconChevronRight, IconAlertTriangle, IconX } from '@tabler/icons-react'
 import { FlowService } from '../services/flow'
 import { getBackendClient } from '../lib/backend/bootstrap'
-import { useFlowRuntime } from '../store/flowRuntime'
+import { useFlowRuntime, refreshFlowRuntimeStatus } from '../store/flowRuntime'
 import { useSessionUi } from '../store/sessionUi'
 import { splitFlowsByLibrary, getLibraryLabel } from '../utils/flowLibraries'
 import SessionInput from './SessionInput'
@@ -20,6 +20,8 @@ export default function SessionControlsBar() {
   const setProviderModel = useSessionUi((s: any) => s.setProviderModel)
 
   const [filter, setFilter] = useState('')
+  const [flowError, setFlowError] = useState<string | null>(null)
+
 
   const maybeRefreshModels = async (pid: string) => {
     try {
@@ -100,33 +102,64 @@ export default function SessionControlsBar() {
   const start = async () => {
     try {
       const res = await FlowService.start({})
-      if (res?.ok) {
-        const rid = res.requestId
-        if (rid) {
-          try { useFlowRuntime.getState().setRequestId(rid) } catch {}
-          try { useFlowRuntime.getState().setStatus('running') } catch {}
-          setTimeout(async () => {
-            try {
-              const snap: any = await FlowService.getStatus(rid)
-              if (snap && !Array.isArray(snap) && snap.status === 'waitingForInput') {
-                try { useFlowRuntime.getState().setStatus('waitingForInput') } catch {}
-              }
-            } catch {}
-          }, 200)
-        } else {
-          setTimeout(async () => {
-            try {
-              const act = await FlowService.getActive()
-              if (Array.isArray(act) && act.length > 0) {
-                try { useFlowRuntime.getState().setRequestId(act[0]) } catch {}
-                try { useFlowRuntime.getState().setStatus('running') } catch {}
-              }
-            } catch {}
-          }, 150)
+      if (!res?.ok) {
+        const code = (res as any)?.code
+        let message = res?.error || 'Flow could not be started.'
+        if (code === 'no-workspace') {
+          message = 'No workspace is open. Open a folder before starting a flow.'
+        } else if (code === 'no-current-session' || code === 'session-not-found') {
+          message = 'No active session. Create or select a session first, then try again.'
+        } else if (code === 'no-session-context') {
+          message = 'This session has no conversation context yet. Send a message first, then start the flow.'
         }
+        setFlowError(message)
+        console.warn('[SessionControlsBar] flow.start failed', res?.error || 'unknown error', code)
+        return
+      }
+
+      setFlowError(null)
+
+      const rid = res.requestId
+      if (rid) {
+        try { useFlowRuntime.getState().setRequestId(rid) } catch {}
+        // Do not force status="running" here; let runtime events / snapshots drive it
+        setTimeout(async () => {
+          try {
+            const snap: any = await FlowService.getStatus(rid)
+            if (snap && !Array.isArray(snap)) {
+              const rt = useFlowRuntime.getState()
+              if (snap.status === 'waitingForInput') {
+                try { rt.setStatus('waitingForInput') } catch {}
+              } else if (snap.status === 'running') {
+                try { rt.setStatus('running') } catch {}
+              }
+            }
+          } catch {}
+        }, 200)
+      } else {
+        // Fallback: look for any active flow and hydrate from snapshot
+        setTimeout(async () => {
+          try {
+            const act = await FlowService.getActive()
+            if (Array.isArray(act) && act.length > 0) {
+              const id = act[0]
+              const snap: any = await FlowService.getStatus(id)
+              const rt = useFlowRuntime.getState()
+              try { rt.setRequestId(id) } catch {}
+              if (snap && !Array.isArray(snap)) {
+                if (snap.status === 'waitingForInput') {
+                  try { rt.setStatus('waitingForInput') } catch {}
+                } else if (snap.status === 'running') {
+                  try { rt.setStatus('running') } catch {}
+                }
+              }
+            }
+          } catch {}
+        }, 150)
       }
     } catch (e) {
       console.warn('[SessionControlsBar] start failed', e)
+      setFlowError('Flow could not be started. Check your connection and try again.')
     }
   }
 
@@ -134,12 +167,47 @@ export default function SessionControlsBar() {
     try {
       await FlowService.cancel(requestId)
     } finally {
-      try { useFlowRuntime.getState().setStatus('stopped') } catch {}
+      // Instead of forcing status, resync from backend truth
+      try { await refreshFlowRuntimeStatus() } catch {}
     }
   }
 
   return (
     <div style={{ borderTop: '1px solid #2a2a2a', backgroundColor: '#111', padding: '4px 8px', position: 'sticky', bottom: 0, zIndex: 5, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {flowError && (
+        <Card
+          padding="xs"
+          radius="sm"
+          withBorder
+          style={{
+            width: '100%',
+            background: '#2a1313',
+            borderColor: '#b91c1c',
+            color: '#fecaca',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+          }}
+        >
+          <Group gap="xs" align="center" style={{ flex: 1 }}>
+            <IconAlertTriangle size={14} color="#fecaca" />
+            <Text size="xs" c="#fecaca" style={{ whiteSpace: 'pre-wrap' }}>
+              {flowError}
+            </Text>
+          </Group>
+          <ActionIcon
+            size="xs"
+            variant="subtle"
+            color="red"
+            onClick={() => setFlowError(null)}
+            aria-label="Dismiss flow error"
+          >
+            <IconX size={12} />
+          </ActionIcon>
+        </Card>
+      )}
+
       <Group gap="xs" wrap="nowrap" justify="flex-start" style={{ width: '100%', alignItems: 'center' }}>
         {isHydrating ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 6px', borderRadius: 6, background: '#161616', border: '1px solid #2a2a2a' }}>
@@ -152,6 +220,7 @@ export default function SessionControlsBar() {
             <Text size="xs" c="dimmed">{statusLabel}</Text>
           </div>
         )}
+
         <div style={{ flex: 1 }} />
         {feStatus === 'stopped' ? (
           <Tooltip label="Start">

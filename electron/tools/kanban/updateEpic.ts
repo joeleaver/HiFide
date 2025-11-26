@@ -15,7 +15,7 @@ export const kanbanUpdateEpicTool: AgentTool = {
     required: ['epicId'],
     additionalProperties: false,
   },
-  run: async (input: { epicId: string; name?: string; color?: string; description?: string | null }) => {
+  run: async (input: { epicId: string; name?: string; color?: string; description?: string | null }, meta?: any) => {
     const { useMainStore } = await import('../../store')
     const state = useMainStore.getState() as any
 
@@ -28,10 +28,7 @@ export const kanbanUpdateEpicTool: AgentTool = {
     if (input.color !== undefined) patch.color = input.color
     if (input.description !== undefined) patch.description = input.description ?? undefined
 
-    const epic: KanbanEpic | null = await state.kanbanUpdateEpic(input.epicId, patch)
-    if (!epic) {
-      throw new Error(`Failed to update epic ${input.epicId}`)
-    }
+    const epic: KanbanEpic = await state.kanbanUpdateEpic(input.epicId, patch, meta?.workspaceId)
 
     return {
       summary: `Updated epic "${epic.name}".`,

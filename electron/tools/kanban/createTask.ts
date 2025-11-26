@@ -17,7 +17,7 @@ export const kanbanCreateTaskTool: AgentTool = {
     required: ['title'],
     additionalProperties: false,
   },
-  run: async (input: { title: string; description?: string; status?: KanbanStatus; epicId?: string | null; assignees?: string[]; tags?: string[] }) => {
+  run: async (input: { title: string; description?: string; status?: KanbanStatus; epicId?: string | null; assignees?: string[]; tags?: string[] }, meta?: any) => {
     const { useMainStore } = await import('../../store')
     const state = useMainStore.getState() as any
 
@@ -25,7 +25,8 @@ export const kanbanCreateTaskTool: AgentTool = {
       throw new Error('Kanban store is not initialized')
     }
 
-    const task: KanbanTask | null = await state.kanbanCreateTask({
+    const task: KanbanTask = await state.kanbanCreateTask({
+      workspaceId: meta?.workspaceId,
       title: input.title,
       status: input.status ?? 'backlog',
       epicId: input.epicId ?? null,
@@ -33,10 +34,6 @@ export const kanbanCreateTaskTool: AgentTool = {
       assignees: input.assignees,
       tags: input.tags,
     })
-
-    if (!task) {
-      throw new Error('Failed to create task')
-    }
 
     return {
       summary: `Created task "${task.title}" in ${task.status}.`,

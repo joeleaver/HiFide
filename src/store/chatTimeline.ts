@@ -2,16 +2,10 @@ import { create } from 'zustand'
 import { getBackendClient } from '../lib/backend/bootstrap'
 import { useFlowEditorLocal } from './flowEditorLocal'
 
-// Track current session to ignore deltas from other sessions (multiple windows may have different sessions)
-let currentSessionId: string | null = null
-export function setCurrentTimelineSessionId(id: string | null) {
-  currentSessionId = id
-}
-
 
 export type TimelineItem =
   | { type: 'message'; id: string; role: 'user' | 'assistant'; content: string }
-  | { type: 'node-execution'; id: string; nodeId: string; executionId?: string; nodeLabel?: string; nodeKind?: string; provider?: string; model?: string; cost?: any; content: Array<{ type: 'text'; text: string } | { type: 'reasoning'; text: string } | { type: 'badge'; badge: any }> }
+  | { type: 'node-execution'; id: string; nodeId: string; executionId?: string; nodeLabel?: string; nodeKind?: string; provider?: string; model?: string; cost?: any; content: Array<{ type: 'text'; text: string } | { type: 'reasoning'; text: string } | { type: 'badge'; badge: any }>; badges?: any[] }
 
 interface ChatTimelineState {
   items: TimelineItem[]
@@ -59,17 +53,76 @@ function createChatTimelineStore() {
     hasRenderedOnce: false,
     hydrationVersion: 0,
 
-    clear: () => set({ items: [], sig: '0', hasRenderedOnce: false }),
+    clear: () => {
+      console.log('[chatTimeline] clear() called')
+      set({ items: [], sig: '0', hasRenderedOnce: false })
+    },
 
     hydrateFromSession: (items) => {
       const arr = Array.isArray(items) ? items.slice() as TimelineItem[] : []
-      set((prev: ChatTimelineState) => ({
-        items: arr,
-        sig: computeSig(arr),
-        isHydrating: false,
-        hasRenderedOnce: false,
-        hydrationVersion: (prev?.hydrationVersion || 0) + 1,
-      }))
+
+      // Deduplicate by ID (keep first occurrence)
+      const seen = new Set<string>()
+      const deduped = arr.filter(item => {
+        if (seen.has(item.id)) {
+          console.warn('[chatTimeline] Duplicate item ID detected, skipping:', item.id)
+          return false
+        }
+        seen.add(item.id)
+        return true
+      })
+
+      // Also deduplicate badges within each node-execution item
+      const cleaned = deduped.map(item => {
+        if (item.type === 'node-execution') {
+          // Deduplicate content items (which contain badges)
+          const contentSeen = new Set<string>()
+          const uniqueContent = (item.content || []).filter((c: any) => {
+            if (c.type === 'badge' && c.badge?.id) {
+              if (contentSeen.has(c.badge.id)) {
+                console.warn('[chatTimeline] Duplicate badge in content, skipping:', c.badge.id)
+                return false
+              }
+              contentSeen.add(c.badge.id)
+            }
+            return true
+          })
+
+          // Also check the badges array if it exists
+          let uniqueBadges = item.badges
+          if (Array.isArray(item.badges)) {
+            const badgeSeen = new Set<string>()
+            uniqueBadges = item.badges.filter((badge: any) => {
+              if (badgeSeen.has(badge.id)) {
+                console.warn('[chatTimeline] Duplicate badge in badges array, skipping:', badge.id)
+                return false
+              }
+              badgeSeen.add(badge.id)
+              return true
+            })
+          }
+
+          return { ...item, content: uniqueContent, badges: uniqueBadges }
+        }
+        return item
+      })
+
+      set((prev: ChatTimelineState) => {
+        const newState = {
+          ...prev,
+          items: cleaned,
+          sig: computeSig(cleaned),
+          isHydrating: false,
+          hasRenderedOnce: false,
+          hydrationVersion: (prev?.hydrationVersion || 0) + 1,
+        }
+        console.log('[chatTimeline] hydrateFromSession complete:', { itemCount: cleaned.length, hydrationVersion: newState.hydrationVersion, isHydrating: newState.isHydrating })
+        return newState
+      })
+
+      // Verify the state was actually updated
+      const afterState = get()
+      console.log('[chatTimeline] State after set():', { isHydrating: afterState.isHydrating, hydrationVersion: afterState.hydrationVersion })
     },
 
     appendRawItem: (item) => {
@@ -146,6 +199,17 @@ function createChatTimelineStore() {
         box = items.slice().reverse().find((it) => it.type === 'node-execution' && it.nodeId === nodeId && (!executionId || (it as any).executionId === executionId)) as any
         if (!box) return
       }
+
+      // Check if badge with this ID already exists
+      const badgeId = badge?.id
+      if (badgeId) {
+        const exists = box.content.some((c: any) => c.type === 'badge' && c.badge?.id === badgeId)
+        if (exists) {
+          console.warn('[chatTimeline] Badge already exists, skipping:', badgeId)
+          return
+        }
+      }
+
       box.content.push({ type: 'badge', badge } as any)
       set({ items, sig: computeSig(items) })
     },
@@ -188,20 +252,20 @@ if ((import.meta as any).hot) {
   })
 }
 
-let unsubscribe: (() => void) | null = null
+let _chatTimelineEventsInitialized = false
+
 export function initChatTimelineEvents(): void {
-  // Ensure previous subscription is removed (idempotent across reconnects)
-  try { unsubscribe?.() } catch {}
+  if (_chatTimelineEventsInitialized) {
+    console.log('[chatTimeline] Events already initialized, skipping')
+    return
+  }
+  _chatTimelineEventsInitialized = true
+  console.log('[chatTimeline] Initializing events')
+
   const client = getBackendClient()
   if (!client) return
 
-  // 1) Subscribe to session selection first — backend is the single source of truth
-
   const processDelta = (msg: any) => {
-    try {
-      // Detailed debug logging removed to reduce console noise; rely on ws-render recv logs instead
-    } catch {}
-
     const op = msg?.op
     if (op === 'message' && msg.item) {
       useChatTimeline.getState().appendRawItem(msg.item as TimelineItem)
@@ -243,69 +307,30 @@ export function initChatTimelineEvents(): void {
     }
   }
 
-  unsubscribe = client.subscribe('session.timeline.delta', (msg: any) => {
-    const sid = msg?.sessionId as string | undefined
+  // Timeline deltas
+  client.subscribe('session.timeline.delta', processDelta)
 
-    // If we don't yet know the selected session for this window, adopt the first seen sid.
-    if (!currentSessionId && sid) {
-      try { setCurrentTimelineSessionId(sid) } catch {}
-    }
-
-    if (sid && currentSessionId && sid !== currentSessionId) {
-      return
-    }
-
-    // If still unknown, ignore (no sid provided)
-    if (!currentSessionId) return
-
-    processDelta(msg)
+  // Timeline snapshots (full hydration)
+  client.subscribe('session.timeline.snapshot', (msg: any) => {
+    console.log('[chatTimeline] session.timeline.snapshot received:', { msg, isArray: Array.isArray(msg?.items), itemCount: msg?.items?.length })
+    const items = Array.isArray(msg?.items) ? msg.items as TimelineItem[] : []
+    useChatTimeline.getState().hydrateFromSession(items)
   })
 
-  // Also listen for full timeline snapshots (server broadcasts on items ref changes)
-  try {
-    client.subscribe('session.timeline.snapshot', (msg: any) => {
-      const sid = msg?.sessionId as string | undefined
-      const items = Array.isArray(msg?.items) ? (msg.items as TimelineItem[]) : []
+  // Session selection changes - clear and wait for snapshot
+  client.subscribe('session.selected', () => {
+    console.log('[chatTimeline] session.selected received, clearing timeline')
+    useChatTimeline.setState({ isHydrating: true })
+    useChatTimeline.getState().clear()
+  })
 
-      // If we don't yet know our selected session, adopt the snapshot's sessionId
-      if (!currentSessionId && sid) {
-        try { setCurrentTimelineSessionId(sid) } catch {}
-      }
-      if (sid && currentSessionId && sid !== currentSessionId) {
-        // Adopt server snapshot's sessionId to avoid race with 'session.selected'
-        try { setCurrentTimelineSessionId(sid) } catch {}
-      }
-      if (!currentSessionId && !sid) return
-
-      // Hydrate to reflect canonical store state
-      useChatTimeline.getState().hydrateFromSession(items)
-    })
-  } catch {}
-
-
-  // 2) Subscribe to selection changes and hydrate from backend SoT
-  try {
-    client.subscribe('session.selected', (p: any) => {
-      const sid = p?.id || null
-      try { setCurrentTimelineSessionId(sid) } catch {}
-      // Indicate hydration in progress and clear immediately; expect snapshot to arrive from server
-      try { useChatTimeline.setState({ isHydrating: true }) } catch {}
-      useChatTimeline.getState().clear()
-    })
-  } catch {}
-
-
-  // 2b) On workspace change, rehydrate from the new workspace's current session
-  try {
-    const rehydrateFromWorkspace = async () => {
-      try { useChatTimeline.setState({ isHydrating: true }) } catch {}
-      try { setCurrentTimelineSessionId(null) } catch {}
-      useChatTimeline.getState().clear()
-      // No RPC here; server will push session.timeline.snapshot on workspace.ready
-    }
-    client.subscribe('workspace.bound', rehydrateFromWorkspace)
-    client.subscribe('workspace.ready', rehydrateFromWorkspace)
-  } catch {}
+  // Workspace changes - clear and wait for snapshot
+  // Only clear on workspace.bound (actual workspace change), not workspace.ready (just a ready signal)
+  client.subscribe('workspace.bound', () => {
+    console.log('[chatTimeline] workspace.bound received, clearing timeline')
+    useChatTimeline.setState({ isHydrating: true })
+    useChatTimeline.getState().clear()
+  })
 
 }
 
@@ -318,10 +343,8 @@ export async function switchTimelineToCurrentSession(): Promise<void> {
   try {
     const snap = await client.rpc('session.getCurrentStrict', {})
     if (snap && Array.isArray(snap.items)) {
-      try { setCurrentTimelineSessionId(snap.id || null) } catch {}
       useChatTimeline.getState().hydrateFromSession(snap.items)
     } else {
-      try { setCurrentTimelineSessionId(null) } catch {}
       useChatTimeline.getState().hydrateFromSession([])
     }
   } catch {}

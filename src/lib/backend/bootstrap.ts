@@ -2,10 +2,17 @@ import { BackendClient } from './client'
 import { initFlowRuntimeEvents, useFlowRuntime } from '../../store/flowRuntime'
 import { FlowService } from '../../services/flow'
 import { initChatTimelineEvents } from '../../store/chatTimeline'
-import { initSessionUiEvents, useSessionUi } from '../../store/sessionUi'
+import { initSessionUiEvents } from '../../store/sessionUi'
 import { initFlowContextsEvents } from '../../store/flowContexts'
 import { initWorkspaceUiEvents } from '../../store/workspaceUi'
+import { initKnowledgeBaseEvents } from '../../store/knowledgeBase'
+import { initKanbanEvents } from '../../store/kanban'
+import { initAppBootEvents } from '../../store/appBoot'
+import { initTerminalTabsEvents } from '../../store/terminalTabs'
+import { initFlowEditorEvents } from '../../store/flowEditor'
+import { initHydrationEvents, useHydration } from '../../store/hydration'
 import { useBackendBinding } from '../../store/binding'
+import { useLoadingOverlay } from '../../store/loadingOverlay'
 
 let client: BackendClient | null = null
 
@@ -24,62 +31,77 @@ export function bootstrapBackendFromPreload(): void {
     url: boot.url,
     token: boot.token,
     onOpen: () => {
-      console.log('[backend/bootstrap] onOpen: WebSocket connected, initializing stores')
-      try { useBackendBinding.setState({ windowId: boot.windowId }) } catch {}
-
-      // Ensure event subscriptions are attached (idempotent)
-      try { initFlowRuntimeEvents() } catch {}
-      try { initChatTimelineEvents() } catch {}
-      try { initSessionUiEvents() } catch {}
-      try { initFlowContextsEvents() } catch {}
-      try { initWorkspaceUiEvents() } catch {}
+      useBackendBinding.setState({ windowId: boot.windowId })
+      // Transition hydration from connecting → connected
+      useHydration.getState().setPhase('connected')
     },
-    onClose: () => {},
+    onClose: () => {
+      // Transition hydration to disconnected
+      useHydration.getState().setPhase('disconnected')
+    },
     onError: () => {},
-    onNotify: (m, p) => {
-      // Log every backend notification with window/workspace context for debugging
-      try {
-        const binding = useBackendBinding.getState()
-        console.log('[ws-render] recv', m, {
-          windowId: binding.windowId ?? null,
-          workspaceId: binding.workspaceId ?? null,
-        })
-      } catch {}
-
-      // Belt-and-suspenders: directly bridge critical session events to the per-window UI store.
-      // This guarantees the HUD/overlay updates even if a method-specific subscription
-      // (initSessionUiEvents) fails to attach for some reason.
-      try {
-        if (m === 'session.list.changed') {
-          const list = Array.isArray(p?.sessions) ? (p.sessions as any[]) : []
-          const currentId = (p?.currentId ?? null) as string | null
-          try { useSessionUi.getState().__setSessions(list as any, currentId) } catch {}
-        }
-      } catch {}
-
-      // Also handle canonical workspace attachment here to avoid any timing gaps in subscription setup.
-      // Treat both workspace.attached and workspace.ready as signals that this window is bound.
-      if (m === 'workspace.attached' || m === 'workspace.ready') {
-        try {
-          const workspaceId = (p?.workspaceId || p?.id || p?.root || null) as string | null
-          const root = (p?.root || (typeof workspaceId === 'string' ? workspaceId : null)) as string | null
-          useBackendBinding.setState({ windowId: boot.windowId, workspaceId, root, attached: !!workspaceId })
-        } catch {}
-      }
+    onNotify: () => {
+      // Generic notification hook - currently unused
+      // Individual subscriptions handle their own notifications
     }
   })
+
+  // Initialize all event subscriptions once at app startup
+  // BackendClient automatically re-attaches on reconnect
+
+  // Initialize hydration first - it's the foundation for everything else
+  initHydrationEvents()
+
+  initFlowRuntimeEvents()
+  initChatTimelineEvents()
+  initSessionUiEvents()
+  initFlowContextsEvents()
+  initWorkspaceUiEvents()
+  initKnowledgeBaseEvents()
+  initKanbanEvents()
+  initAppBootEvents()
+  initTerminalTabsEvents()
+  initFlowEditorEvents()
+
+  // Workspace binding
+  client.subscribe('workspace.attached', (p: any) => {
+    console.log('[bootstrap] workspace.attached received:', p)
+    const workspaceId = (p?.workspaceId || p?.id || p?.root || null) as string | null
+    const root = (p?.root || (typeof workspaceId === 'string' ? workspaceId : null)) as string | null
+    console.log('[bootstrap] Setting attached:', { windowId: boot.windowId, workspaceId, root, attached: !!workspaceId })
+
+    console.log('[bootstrap] Before setState, current state:', useBackendBinding.getState())
+    useBackendBinding.setState({ windowId: boot.windowId, workspaceId, root, attached: !!workspaceId })
+    console.log('[bootstrap] After setState, new state:', useBackendBinding.getState())
+
+    // Force loading overlay to recompute
+    setTimeout(() => {
+      console.log('[bootstrap] Forcing loadingOverlay recompute')
+      useLoadingOverlay.getState()._recompute()
+    }, 100)
+  })
+
   client.connect()
 
-  // Listen for canonical workspace attachment event (single source of truth)
-  try {
-    client.subscribe('workspace.attached', (p: any) => {
-      try {
-        const workspaceId = (p?.workspaceId || p?.id || p?.root || null) as string | null
-        const root = (p?.root || (typeof workspaceId === 'string' ? workspaceId : null)) as string | null
-        useBackendBinding.setState({ windowId: boot.windowId, workspaceId, root, attached: !!workspaceId })
-      } catch {}
-    })
-  } catch {}
+  // Hydrate initial workspace state (in case already attached before renderer started)
+  setTimeout(async () => {
+    try {
+      await (client as any).whenReady?.(5000)
+      const ws: any = await client!.rpc('workspace.get', {})
+      console.log('[bootstrap] workspace.get response:', ws)
+      if (ws?.ok && ws.root) {
+        console.log('[bootstrap] Hydrating workspace state:', { root: ws.root, attached: true })
+        useBackendBinding.setState({
+          windowId: boot.windowId,
+          workspaceId: ws.root,
+          root: ws.root,
+          attached: true
+        })
+      }
+    } catch (e) {
+      console.error('[bootstrap] Failed to hydrate workspace state:', e)
+    }
+  }, 0)
 
 
   // After ready, perform ping and init handshake

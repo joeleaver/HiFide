@@ -1,8 +1,10 @@
-import { Text, UnstyledButton } from '@mantine/core'
-import { IconChevronLeft, IconChevronRight } from '@tabler/icons-react'
-import { useEffect } from 'react'
+import { Text, UnstyledButton, Stack, Skeleton, Center, Button } from '@mantine/core'
+import { IconChevronLeft, IconChevronRight, IconRefresh, IconAlertTriangle } from '@tabler/icons-react'
+import { useEffect, useCallback } from 'react'
 import { getBackendClient } from '../lib/backend/bootstrap'
 import { useUiStore } from '../store/ui'
+import { useFlowEditorHydration } from '../store/screenHydration'
+import { useFlowEditor } from '../store/flowEditor'
 import AgentDebugPanel from './AgentDebugPanel'
 import FlowCanvasPanel from './FlowCanvasPanel'
 import NodePalettePanel from './NodePalettePanel'
@@ -13,7 +15,44 @@ import { ReactFlowProvider } from 'reactflow'
 import { useRerenderTrace } from '../utils/perf'
 const SHOW_FLOW_DEBUG_PANEL = false
 
+/**
+ * Skeleton for the Flow Editor while loading
+ */
+function FlowEditorSkeleton() {
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 16 }}>
+      {/* Toolbar skeleton */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <Skeleton width={120} height={32} radius="sm" />
+        <Skeleton width={100} height={32} radius="sm" />
+        <Skeleton width={80} height={32} radius="sm" />
+      </div>
+      {/* Canvas skeleton */}
+      <div style={{ flex: 1, position: 'relative' }}>
+        <Skeleton width="100%" height="100%" radius="sm" />
+        {/* Fake nodes */}
+        <div style={{ position: 'absolute', top: 40, left: 40 }}>
+          <Skeleton width={180} height={80} radius="md" />
+        </div>
+        <div style={{ position: 'absolute', top: 100, left: 280 }}>
+          <Skeleton width={180} height={80} radius="md" />
+        </div>
+        <div style={{ position: 'absolute', top: 200, left: 160 }}>
+          <Skeleton width={180} height={80} radius="md" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function FlowView() {
+  // Screen hydration state
+  const screenPhase = useFlowEditorHydration((s) => s.phase)
+  const screenError = useFlowEditorHydration((s) => s.error)
+  const startLoading = useFlowEditorHydration((s) => s.startLoading)
+  const setReady = useFlowEditorHydration((s) => s.setReady)
+  const setError = useFlowEditorHydration((s) => s.setError)
+
   // Renderer-only UI state
   const metaPanelOpen = useUiStore((s) => s.metaPanelOpen)
   const metaPanelWidth = useUiStore((s) => s.metaPanelWidth)
@@ -22,20 +61,39 @@ export default function FlowView() {
   const setIsDraggingMetaPanel = useUiStore((s) => s.setIsDraggingMetaPanel)
 
   // Perf: trace rerenders for FlowView hot path
-  useRerenderTrace('FlowView', { metaPanelOpen })
+  useRerenderTrace('FlowView', { metaPanelOpen, screenPhase })
 
-  // Hydrate UI store window state via WS on mount
+  // Load flow editor data
+  const loadFlowEditor = useCallback(async () => {
+    try {
+      const client = getBackendClient()
+      if (!client) throw new Error('No backend connection')
+
+      // Load templates and graph in parallel
+      await Promise.all([
+        useFlowEditor.getState().hydrateTemplates(),
+        useFlowEditor.getState().fetchGraph(),
+      ])
+
+      // Also get UI state
+      const res: any = await client.rpc('ui.getWindowState', {})
+      const ws = res?.windowState || {}
+      setMetaPanelWidth(typeof ws.metaPanelWidth === 'number' ? ws.metaPanelWidth : 300)
+      setMetaPanelOpen(Boolean(ws.metaPanelOpen))
+
+      setReady()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load flow editor')
+    }
+  }, [setMetaPanelWidth, setMetaPanelOpen, setReady, setError])
+
+  // Auto-load on mount if in idle state
   useEffect(() => {
-    (async () => {
-      try {
-        const res: any = await getBackendClient()?.rpc('ui.getWindowState', {})
-        const ws = res?.windowState || {}
-        setMetaPanelWidth(typeof ws.metaPanelWidth === 'number' ? ws.metaPanelWidth : 300)
-        setMetaPanelOpen(Boolean(ws.metaPanelOpen))
-      } catch {}
-    })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (screenPhase === 'idle') {
+      startLoading()
+      loadFlowEditor()
+    }
+  }, [screenPhase, startLoading, loadFlowEditor])
 
   // Meta panel resize handler
   const handleMetaPanelMouseDown = (e: React.MouseEvent) => {
@@ -58,6 +116,35 @@ export default function FlowView() {
 
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
+  }
+
+  // Render loading/error/content based on phase
+  if (screenPhase === 'idle' || screenPhase === 'loading') {
+    return <FlowEditorSkeleton />
+  }
+
+  if (screenPhase === 'error') {
+    return (
+      <Center h="100%">
+        <Stack align="center" gap="md">
+          <IconAlertTriangle size={48} color="var(--mantine-color-red-6)" />
+          <Text size="sm" c="dimmed" ta="center">
+            {screenError ?? 'Failed to load flow editor'}
+          </Text>
+          <Button
+            variant="light"
+            size="sm"
+            leftSection={<IconRefresh size={16} />}
+            onClick={() => {
+              startLoading()
+              loadFlowEditor()
+            }}
+          >
+            Retry
+          </Button>
+        </Stack>
+      </Center>
+    )
   }
 
   return (

@@ -14,20 +14,9 @@ import { UiPayloadCache } from '../../core/uiPayloadCache'
 
 import { useMainStore } from '../../store'
 import { sessionSaver } from '../../store/utils/session-persistence'
+import { getWorkspaceIdForSessionId } from '../../utils/workspace-session'
 
 // Active flow schedulers
-
-function getWorkspaceIdForSessionId(sessionId: string | null | undefined): string | null {
-  if (!sessionId) return null
-  try {
-    const st: any = useMainStore.getState()
-    const map = st.sessionsByWorkspace || {}
-    for (const [ws, list] of Object.entries(map as Record<string, any[]>)) {
-      if (Array.isArray(list) && (list as any[]).some((s: any) => s?.id === sessionId)) return ws as string
-    }
-  } catch {}
-  return null
-}
 
 const activeFlows = new Map<string, FlowScheduler>()
 
@@ -230,35 +219,36 @@ function setupPersistenceForFlow(requestId: string, args: FlowExecutionArgs): ()
     try {
       const ws = getWorkspaceIdForSessionId(sessionId) || ((useMainStore.getState() as any).workspaceRoot || null)
 
+      if (!ws) {
+        console.warn(`[flows-v2] flush: NO workspace found for session ${sessionId}, cannot broadcast delta`)
+      }
+
       if (didCreate) {
-        if (ws) broadcastWorkspaceNotification(ws, 'session.timeline.delta', {
-          sessionId,
-          op: 'upsertBox',
-          nodeId,
-          executionId,
-          append: { text: txt, reasoning, badges }
-        })
+        if (ws) {
+          console.log(`[flows-v2] Broadcasting upsertBox to workspace ${ws}:`, { sessionId, nodeId, executionId })
+          broadcastWorkspaceNotification(ws, 'session.timeline.delta', {
+            sessionId,
+            op: 'upsertBox',
+            nodeId,
+            executionId,
+            append: { text: txt, reasoning, badges }
+          })
+        }
       } else if (txt.trim() || reasoning || (badges && badges.length)) {
-        if (ws) broadcastWorkspaceNotification(ws, 'session.timeline.delta', {
-          sessionId,
-          op: 'appendToBox',
-          nodeId,
-          executionId,
-          append: { text: txt, reasoning, badges }
-        })
+        if (ws) {
+          console.log(`[flows-v2] Broadcasting appendToBox to workspace ${ws}:`, { sessionId, nodeId, executionId, textLen: txt.length, reasoningLen: reasoning.length, badgesLen: badges.length })
+          broadcastWorkspaceNotification(ws, 'session.timeline.delta', {
+            sessionId,
+            op: 'appendToBox',
+            nodeId,
+            executionId,
+            append: { text: txt, reasoning, badges }
+          })
+        }
       }
-    // Also broadcast a full snapshot to guarantee renderer hydration
-    try {
-      const st: any = useMainStore.getState()
-      const ws = st.workspaceRoot || null
-      if (ws) {
-        const list = (((st.sessionsByWorkspace || {})[ws]) || [])
-        const sess = list.find((s: any) => s.id === sessionId)
-        const itemsSnap = Array.isArray(sess?.items) ? sess.items : []
-        broadcastWorkspaceNotification(ws, 'session.timeline.snapshot', { sessionId, items: itemsSnap })
-      }
-    } catch {}
-    } catch {}
+    } catch (e) {
+      console.error(`[flows-v2] flush: broadcast error`, e)
+    }
 
     // Clear local buffers and timeouts
     textBuffers.delete(key)
@@ -290,6 +280,12 @@ function setupPersistenceForFlow(requestId: string, args: FlowExecutionArgs): ()
     const t = ev?.type
     const nid = ev?.nodeId as string | undefined
     const execId = (ev?.executionId as string | undefined) || undefined
+
+    // Defensive: warn if executionId is missing for events that should have it
+    if (!execId && nid && (t === 'chunk' || t === 'reasoning' || t === 'toolStart' || t === 'toolEnd' || t === 'toolError' || t === 'tokenUsage')) {
+      console.warn(`[flows-v2] Missing executionId for ${t} event on node ${nid}`)
+    }
+
     const key = nid ? `${nid}${execId ? `::${execId}` : ''}` : undefined
 
     if (t === 'chunk' && key && nid) {
@@ -568,17 +564,6 @@ function setupPersistenceForFlow(requestId: string, args: FlowExecutionArgs): ()
           callId: ev.callId,
           updates
         })
-        // Also broadcast a full snapshot to guarantee renderer hydration
-        try {
-          const st: any = useMainStore.getState()
-          const ws = st.workspaceRoot || null
-          if (ws) {
-            const list = (((st.sessionsByWorkspace || {})[ws]) || [])
-            const sess = list.find((s: any) => s.id === sessionId)
-            const itemsSnap = Array.isArray(sess?.items) ? sess.items : []
-            broadcastWorkspaceNotification(ws, 'session.timeline.snapshot', { sessionId, items: itemsSnap })
-          }
-        } catch {}
       } catch {}
       return
     }
@@ -672,17 +657,6 @@ function setupPersistenceForFlow(requestId: string, args: FlowExecutionArgs): ()
           executionId: execId,
           meta: { provider: ev.provider, model: ev.model, cost: ev.usage }
         })
-        // Also broadcast a full snapshot to guarantee renderer hydration
-        try {
-          const st: any = useMainStore.getState()
-          const ws = st.workspaceRoot || null
-          if (ws) {
-            const list = (((st.sessionsByWorkspace || {})[ws]) || [])
-            const sess = list.find((s: any) => s.id === sessionId)
-            const itemsSnap = Array.isArray(sess?.items) ? sess.items : []
-            broadcastWorkspaceNotification(ws, 'session.timeline.snapshot', { sessionId, items: itemsSnap })
-          }
-        } catch {}
       } catch {}
       return
     }
@@ -810,6 +784,19 @@ export async function resumeFlow(
     return { ok: false, error }
   }
 }
+
+/** Update provider/model for an active flow's main context, if present */
+export function updateActiveFlowProviderModelForSession(sessionId: string, provider?: string, model?: string): void {
+  try {
+    if (!sessionId) return
+    const scheduler = activeFlows.get(sessionId)
+    if (!scheduler) return
+    scheduler.updateProviderModel(provider, model)
+  } catch (e) {
+    try { console.warn('[flows-v2] updateActiveFlowProviderModelForSession failed', e) } catch {}
+  }
+}
+
 
 /**
  * Get an active flow scheduler (for backwards compatibility)

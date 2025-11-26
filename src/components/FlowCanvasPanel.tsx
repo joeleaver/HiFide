@@ -14,8 +14,8 @@ import ReactFlow, {
   type Edge,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
-import { getBackendClient } from '../lib/backend/bootstrap'
 import { useFlowEditorLocal } from '../store/flowEditorLocal'
+import { useFlowEditor } from '../store/flowEditor'
 import { useRerenderTrace } from '../utils/perf'
 import { splitFlowsByLibrary, getLibraryLabel } from '../utils/flowLibraries'
 import { useFlowRuntime } from '../store/flowRuntime'
@@ -108,9 +108,13 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   }, [])
   const status = useFlowRuntime((s: any) => s.status)
   const pausedNode = useFlowRuntime((s: any) => s.pausedNode)
-  const [availableTemplates, setAvailableTemplates] = useState<any[]>([])
-  const [templatesLoaded, setTemplatesLoaded] = useState<boolean>(false)
-  const [selectedTemplate, setSelectedTemplate] = useState<string>('')
+
+  // Get templates from store (not local state!)
+  const availableTemplates = useFlowEditor((s) => s.availableTemplates)
+  const templatesLoaded = useFlowEditor((s) => s.templatesLoaded)
+  const selectedTemplate = useFlowEditor((s) => s.selectedTemplate)
+  const graphVersion = useFlowEditor((s) => s.graphVersion)
+
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false)
 
   // Helper to check if a template is from system library
@@ -152,24 +156,16 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
       return
     }
 
-    const client = getBackendClient()
     try {
-      const res: any = await client?.rpc('flowEditor.loadTemplate', { templateId: value })
+      const res = await useFlowEditor.getState().loadTemplate(value)
       if (res?.ok) {
-        // Refresh meta + graph
-        const t: any = await client?.rpc('flowEditor.getTemplates', {})
-        if (t?.ok) {
-          setAvailableTemplates(t.templates || [])
-          setTemplatesLoaded(!!t.templatesLoaded)
-          setSelectedTemplate(t.selectedTemplate || value)
-        }
-        const g: any = await client?.rpc('flowEditor.getGraph', {})
-        if (g?.ok) {
-          const nodes = Array.isArray(g.nodes) ? g.nodes : []
-          const edges = Array.isArray(g.edges) ? g.edges : []
-          const styledNodes = nodes.map((n: any) => ({ ...n, data: { ...(n.data || {}), __runtime: runtimeNodeStateRef.current?.[n.id] || null } }))
-          hydrateFromMain({ nodes: styledNodes, edges })
-          const nSig = JSON.stringify({ n: nodes.map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null })), e: edges.map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined })) })
+        // Graph will be updated via graphVersion increment in store
+        // Just need to hydrate locally
+        const g = await useFlowEditor.getState().fetchGraph()
+        if (g?.ok && g.nodes && g.edges) {
+          const styledNodes = g.nodes.map((n: any) => ({ ...n, data: { ...(n.data || {}), __runtime: runtimeNodeStateRef.current?.[n.id] || null } }))
+          hydrateFromMain({ nodes: styledNodes, edges: g.edges })
+          const nSig = JSON.stringify({ n: g.nodes.map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null })), e: g.edges.map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined })) })
           ;(lastLoadedTemplateRef as any).currentSig = nSig
           lastSyncedSigRef.current = nSig
           setHasUnsavedChanges(false)
@@ -182,21 +178,11 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   const handleSaveAs = useCallback(async () => {
     if (!localProfileName.trim()) return
     const name = localProfileName.trim()
-    const client = getBackendClient()
     try {
-      // Sync local state to backend before saving
-      await client?.rpc('flowEditor.setGraph', { nodes: localNodes, edges: localEdges })
-      const res: any = await client?.rpc('flowEditor.saveAsProfile', { name, library: saveAsLibrary })
+      const res = await useFlowEditor.getState().saveAsProfile({ name, library: saveAsLibrary, nodes: localNodes, edges: localEdges })
       if (res?.ok) {
         setLocalProfileName('')
         setSaveAsModalOpen(false)
-        // Refresh templates/meta
-        const t: any = await client?.rpc('flowEditor.getTemplates', {})
-        if (t?.ok) {
-          setAvailableTemplates(t.templates || [])
-          setTemplatesLoaded(!!t.templatesLoaded)
-          setSelectedTemplate(t.selectedTemplate || name)
-        }
         // After save, update last loaded signature using current local graph
         try {
           const n = (localNodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
@@ -213,25 +199,16 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   // Actually load the template/profile (called from modal)
   const loadSelectedTemplate = useCallback(async () => {
     if (!pendingSelection) return
-    const client = getBackendClient()
     try {
-      const res: any = await client?.rpc('flowEditor.loadTemplate', { templateId: pendingSelection })
+      const res = await useFlowEditor.getState().loadTemplate(pendingSelection)
       if (res?.ok) {
         setLoadTemplateModalOpen(false)
         setPendingSelection(null)
-        const t: any = await client?.rpc('flowEditor.getTemplates', {})
-        if (t?.ok) {
-          setAvailableTemplates(t.templates || [])
-          setTemplatesLoaded(!!t.templatesLoaded)
-          setSelectedTemplate(t.selectedTemplate || pendingSelection)
-        }
-        const g: any = await client?.rpc('flowEditor.getGraph', {})
-        if (g?.ok) {
-          const nodes = Array.isArray(g.nodes) ? g.nodes : []
-          const edges = Array.isArray(g.edges) ? g.edges : []
-          const styledNodes = nodes.map((n: any) => ({ ...n, data: { ...(n.data || {}), __runtime: runtimeNodeStateRef.current?.[n.id] || null } }))
-          hydrateFromMain({ nodes: styledNodes, edges })
-          const nSig = JSON.stringify({ n: nodes.map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null })), e: edges.map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined })) })
+        const g = await useFlowEditor.getState().fetchGraph()
+        if (g?.ok && g.nodes && g.edges) {
+          const styledNodes = g.nodes.map((n: any) => ({ ...n, data: { ...(n.data || {}), __runtime: runtimeNodeStateRef.current?.[n.id] || null } }))
+          hydrateFromMain({ nodes: styledNodes, edges: g.edges })
+          const nSig = JSON.stringify({ n: g.nodes.map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null })), e: g.edges.map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined })) })
           ;(lastLoadedTemplateRef as any).currentSig = nSig
           lastSyncedSigRef.current = nSig
           setHasUnsavedChanges(false)
@@ -251,16 +228,8 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   // Keep a ref of last synced signature to avoid sending unchanged graphs to backend
   const lastSyncedSigRef = useRef<string | null>(null)
 
-  // Ensure we subscribe to backend events before taking the first snapshot
-  const [graphSubReady, setGraphSubReady] = useState(false)
-
+  // Hydrate graph from pre-fetched store state on mount
   useEffect(() => {
-    let cancelled = false
-    const client = getBackendClient()
-
-    // Only snapshot after subscription is in place to avoid missing in-flight changes
-    if (!graphSubReady) return
-
     const computeSig = (nodes: any[], edges: any[]) => {
       try {
         const n = (nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
@@ -269,75 +238,54 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
       } catch { return '' }
     }
 
+    // Graph should already be pre-fetched during loading overlay phase
+    const currentGraph = useFlowEditor.getState().currentGraph
+    if (currentGraph?.nodes && currentGraph?.edges) {
+      const nodes = currentGraph.nodes
+      const edges = currentGraph.edges
+      console.log('[FlowCanvasPanel] Hydrating from pre-fetched graph:', { nodeCount: nodes.length, edgeCount: edges.length })
+      const styledNodes = nodes.map((n: any) => ({
+        ...n,
+        data: { ...(n.data || {}), __runtime: runtimeNodeStateRef.current?.[n.id] || null }
+      }))
+      hydrateFromMain({ nodes: styledNodes, edges })
+      const sig = computeSig(nodes, edges)
+      ;(lastLoadedTemplateRef as any).currentSig = sig
+      lastLoadedTemplateRef.current = selectedTemplate
+      lastSyncedSigRef.current = sig
+      setHasUnsavedChanges(false)
+    }
+  }, [hydrateFromMain, selectedTemplate])
+
+  // Re-hydrate graph when graphVersion changes (triggered by store subscription)
+  useEffect(() => {
+    // Skip initial mount (handled by mount effect above)
+    if (graphVersion === 0) return
+
     ;(async () => {
       try {
-        await (client as any)?.whenReady?.(7000)
-        const t: any = await client?.rpc('flowEditor.getTemplates', {})
-        if (!cancelled && t?.ok) {
-          setAvailableTemplates(t.templates || [])
-          setTemplatesLoaded(!!t.templatesLoaded)
-          setSelectedTemplate(t.selectedTemplate || '')
-        }
-        const g: any = await client?.rpc('flowEditor.getGraph', {})
-        if (!cancelled && g?.ok) {
-          const nodes = Array.isArray(g.nodes) ? g.nodes : []
-          const edges = Array.isArray(g.edges) ? g.edges : []
+        // Fetch graph via store action (not direct RPC)
+        const g = await useFlowEditor.getState().fetchGraph()
+        if (g?.ok && g.nodes && g.edges) {
+          const nodes = g.nodes
+          const edges = g.edges
           const styledNodes = nodes.map((n: any) => ({
             ...n,
             data: { ...(n.data || {}), __runtime: runtimeNodeStateRef.current?.[n.id] || null }
           }))
           hydrateFromMain({ nodes: styledNodes, edges })
-          const sig = computeSig(nodes, edges)
+
+          const n = (nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
+          const e = (edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
+          const sig = JSON.stringify({ n, e })
           ;(lastLoadedTemplateRef as any).currentSig = sig
-          lastLoadedTemplateRef.current = t?.selectedTemplate || ''
+          lastLoadedTemplateRef.current = selectedTemplate
           lastSyncedSigRef.current = sig
           setHasUnsavedChanges(false)
         }
       } catch {}
     })()
-
-    return () => { cancelled = true }
-  }, [hydrateFromMain, graphSubReady])
-
-  // Subscribe to backend notifications when graph/template changes in main
-  useEffect(() => {
-    const client = getBackendClient()
-    if (!client) return
-
-    // Subscribe first, then allow snapshot
-    const unsub = (client as any).subscribe?.('flowEditor.graph.changed', async (_params: any) => {
-      try {
-        const t: any = await (client as any).rpc('flowEditor.getTemplates', {})
-        if (t?.ok) {
-          setAvailableTemplates(t.templates || [])
-          setTemplatesLoaded(!!t.templatesLoaded)
-          setSelectedTemplate(t.selectedTemplate || '')
-        }
-        const g: any = await (client as any).rpc('flowEditor.getGraph', {})
-        if (g?.ok) {
-          const nodes = Array.isArray(g.nodes) ? g.nodes : []
-          const edges = Array.isArray(g.edges) ? g.edges : []
-          const styledNodes = nodes.map((n: any) => ({
-            ...n,
-            data: { ...(n.data || {}), __runtime: runtimeNodeStateRef.current?.[n.id] || null }
-          }))
-          hydrateFromMain({ nodes: styledNodes, edges })
-          try {
-            const n = (nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
-            const e = (edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
-            const sig = JSON.stringify({ n, e })
-            ;(lastLoadedTemplateRef as any).currentSig = sig
-            lastSyncedSigRef.current = sig
-            setHasUnsavedChanges(false)
-          } catch {}
-        }
-      } catch {}
-    })
-
-    // Mark subscription ready for initial snapshot
-    setGraphSubReady(true)
-    return () => { try { unsub?.() } catch {} }
-  }, [hydrateFromMain])
+  }, [graphVersion, hydrateFromMain, selectedTemplate])
 
 
   // Debounced sync of local graph to main store only when dirty
@@ -357,9 +305,8 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
           lastSyncedSigRef.current = (lastLoadedTemplateRef as any).currentSig
         }
 
-        const client = getBackendClient()
         if (sig !== lastSyncedSigRef.current) {
-          void client?.rpc('flowEditor.setGraph', { nodes: localNodes, edges: localEdges })
+          void useFlowEditor.getState().setGraph({ nodes: localNodes, edges: localEdges })
           lastSyncedSigRef.current = sig
         }
         // Update local unsaved marker vs last loaded snapshot
@@ -367,8 +314,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
         setHasUnsavedChanges(!!loadedSig && sig !== loadedSig)
       } catch {
         // Fallback: if signature fails, still sync to backend
-        const client = getBackendClient()
-        void client?.rpc('flowEditor.setGraph', { nodes: localNodes, edges: localEdges })
+        void useFlowEditor.getState().setGraph({ nodes: localNodes, edges: localEdges })
       }
     }, 500)
     return () => clearTimeout(t)
@@ -815,25 +761,15 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
             onClick={async () => {
               if (!selectedTemplate || isSystemTemplate(selectedTemplate)) return
               if (confirm(`Delete profile "${selectedTemplate}"?`)) {
-                const client = getBackendClient()
                 try {
-                  const res: any = await client?.rpc('flowEditor.deleteProfile', { name: selectedTemplate })
+                  const res = await useFlowEditor.getState().deleteProfile(selectedTemplate)
                   if (res?.ok) {
-                    // Refresh templates/meta and current graph
-                    const t: any = await client?.rpc('flowEditor.getTemplates', {})
-                    if (t?.ok) {
-                      setAvailableTemplates(t.templates || [])
-                      setTemplatesLoaded(!!t.templatesLoaded)
-                      setSelectedTemplate(t.selectedTemplate || '')
-                    }
-                    const g: any = await client?.rpc('flowEditor.getGraph', {})
-                    if (g?.ok) {
-                      const nodes = Array.isArray(g.nodes) ? g.nodes : []
-                      const edges = Array.isArray(g.edges) ? g.edges : []
-                      hydrateFromMain({ nodes, edges })
+                    const g = await useFlowEditor.getState().fetchGraph()
+                    if (g?.ok && g.nodes && g.edges) {
+                      hydrateFromMain({ nodes: g.nodes, edges: g.edges })
                       try {
-                        const n = (nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
-                        const e = (edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
+                        const n = (g.nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
+                        const e = (g.edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
                         const sig = JSON.stringify({ n, e })
                         ;(lastLoadedTemplateRef as any).currentSig = sig
                         lastSyncedSigRef.current = sig
@@ -896,25 +832,15 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
                 setNewFlowError(`A flow named "${name}" already exists. Please choose another name.`)
                 return
               }
-              const client = getBackendClient()
               try {
-                const res: any = await client?.rpc('flowEditor.createNewFlowNamed', { name })
+                const res = await useFlowEditor.getState().createNewFlowNamed(name)
                 if (res?.ok) {
-                  // Refresh templates/meta and current graph
-                  const t: any = await client?.rpc('flowEditor.getTemplates', {})
-                  if (t?.ok) {
-                    setAvailableTemplates(t.templates || [])
-                    setTemplatesLoaded(!!t.templatesLoaded)
-                    setSelectedTemplate(t.selectedTemplate || name)
-                  }
-                  const g: any = await client?.rpc('flowEditor.getGraph', {})
-                  if (g?.ok) {
-                    const nodes = Array.isArray(g.nodes) ? g.nodes : []
-                    const edges = Array.isArray(g.edges) ? g.edges : []
-                    hydrateFromMain({ nodes, edges })
+                  const g = await useFlowEditor.getState().fetchGraph()
+                  if (g?.ok && g.nodes && g.edges) {
+                    hydrateFromMain({ nodes: g.nodes, edges: g.edges })
                     try {
-                      const n = (nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
-                      const e = (edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
+                      const n = (g.nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
+                      const e = (g.edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
                       const sig = JSON.stringify({ n, e })
                       ;(lastLoadedTemplateRef as any).currentSig = sig
                       lastSyncedSigRef.current = sig
@@ -954,20 +880,13 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
                 setNewFlowError(`A flow named "${name}" already exists. Please choose another name.`)
                 return
               }
-              const client = getBackendClient()
               try {
-                const res: any = await client?.rpc('flowEditor.createNewFlowNamed', { name })
+                const res = await useFlowEditor.getState().createNewFlowNamed(name)
                 if (res?.ok) {
-                  const t: any = await client?.rpc('flowEditor.getTemplates', {})
-                  if (t?.ok) {
-                    setAvailableTemplates(t.templates || [])
-                    setTemplatesLoaded(!!t.templatesLoaded)
-                    setSelectedTemplate(t.selectedTemplate || name)
-                  }
-                  const g: any = await client?.rpc('flowEditor.getGraph', {})
-                  if (g?.ok) {
-                    const nodes = Array.isArray(g.nodes) ? g.nodes : []
-                    const edges = Array.isArray(g.edges) ? g.edges : []
+                  const g = await useFlowEditor.getState().fetchGraph()
+                  if (g?.ok && g.nodes && g.edges) {
+                    const nodes = g.nodes
+                    const edges = g.edges
                     hydrateFromMain({ nodes, edges })
                     try {
                       const n = (nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))

@@ -76,7 +76,7 @@ function contentsToMessages(contents: Array<{ role: string; parts: Array<{ text?
 export const GeminiAiSdkProvider: ProviderAdapter = {
   id: 'gemini',
 
-  async agentStream({ apiKey, model, systemInstruction, contents, temperature, includeThoughts, thinkingBudget, tools, responseSchema: _responseSchema, emit: _emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, systemInstruction, contents, temperature, includeThoughts, thinkingBudget, tools, responseSchema: _responseSchema, emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const google = createGoogleGenerativeAI({ apiKey })
     const llm = google(model)
 
@@ -125,6 +125,13 @@ export const GeminiAiSdkProvider: ProviderAdapter = {
               case 'text-delta': {
                 const d = chunk.text || ''
                 if (d) onTextChunk?.(d)
+                break
+              }
+              case 'reasoning-delta': {
+                const d = chunk.text || ''
+                if (d) {
+                  try { emit?.({ type: 'reasoning', provider: 'gemini', model, reasoning: d }) } catch {}
+                }
                 break
               }
               case 'tool-input-start': {

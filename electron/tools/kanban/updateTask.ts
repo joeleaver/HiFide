@@ -18,7 +18,7 @@ export const kanbanUpdateTaskTool: AgentTool = {
     required: ['taskId'],
     additionalProperties: false,
   },
-  run: async (input: { taskId: string; title?: string; description?: string; status?: KanbanStatus; epicId?: string | null; assignees?: string[]; tags?: string[] }) => {
+  run: async (input: { taskId: string; title?: string; description?: string; status?: KanbanStatus; epicId?: string | null; assignees?: string[]; tags?: string[] }, meta?: any) => {
     const { useMainStore } = await import('../../store')
     const state = useMainStore.getState() as any
 
@@ -34,10 +34,7 @@ export const kanbanUpdateTaskTool: AgentTool = {
     if (input.assignees !== undefined) patch.assignees = input.assignees
     if (input.tags !== undefined) patch.tags = input.tags
 
-    const updated: KanbanTask | null = await state.kanbanUpdateTask(input.taskId, patch)
-    if (!updated) {
-      throw new Error(`Failed to update task ${input.taskId}`)
-    }
+    const updated: KanbanTask = await state.kanbanUpdateTask(input.taskId, patch, meta?.workspaceId)
 
     return {
       summary: `Updated task "${updated.title}" (${updated.status}).`,

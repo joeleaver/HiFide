@@ -208,18 +208,73 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
         }
       }
 
-      // 9. Indexing gate (workspace-scoped)
+      // 9. Non-blocking index check (workspace-scoped)
       if (hasWorkspace) {
         try {
           if (state.setStartupMessage) state.setStartupMessage('Checking code index…')
           if (state.refreshIndexStatus) await state.refreshIndexStatus()
-          if (state.maybeAutoRebuildAndWait) {
-            const t = Date.now()
-            await state.maybeAutoRebuildAndWait()
-            log(`indexing gate done in ${Date.now() - t}ms`)
+
+          // Check if index exists and is usable
+          const stateAny = state as any
+          const indexStatus = stateAny.idxStatus
+
+          if (!indexStatus?.ready || (indexStatus?.chunks || 0) === 0) {
+            // No index or unusable - start background rebuild immediately (high priority)
+            log('No usable index found, starting high-priority background rebuild')
+            if (stateAny.startBackgroundRebuild) {
+              // Don't await - let it run in background
+              stateAny.startBackgroundRebuild({ priority: 'high' }).catch((e: any) => {
+                console.error('[app] Background rebuild failed:', e)
+              })
+            }
+          } else {
+            // Index exists - check if rebuild needed (TTL, model change, etc.)
+            const shouldRebuild = await (async () => {
+              try {
+                const { getIndexer } = await import('../../core/state.js')
+                const indexer = await getIndexer()
+                const cfg = stateAny.idxAutoRefresh || {}
+                const now = Date.now()
+                const last = stateAny.idxLastRebuildAt || 0
+
+                // Check model change
+                if (cfg.modelChangeTrigger) {
+                  const ei = await indexer.getEngineInfo()
+                  if (indexStatus.modelId && indexStatus.dim &&
+                      (ei.id !== indexStatus.modelId || ei.dim !== indexStatus.dim)) {
+                    log(`Index model changed (${indexStatus.modelId}/${indexStatus.dim} -> ${ei.id}/${ei.dim})`)
+                    return true
+                  }
+                }
+
+                // Check TTL
+                const ttlMs = Math.max(1, cfg.ttlMinutes || 120) * 60_000
+                if (last > 0 && (now - last) > ttlMs) {
+                  log(`Index TTL expired (last rebuild: ${new Date(last).toISOString()})`)
+                  return true
+                }
+
+                return false
+              } catch (e) {
+                console.error('[app] Failed to check if rebuild needed:', e)
+                return false
+              }
+            })()
+
+            if (shouldRebuild) {
+              log('Index rebuild needed, starting low-priority background rebuild')
+              if (stateAny.startBackgroundRebuild) {
+                // Don't await - let it run in background
+                stateAny.startBackgroundRebuild({ priority: 'low' }).catch((e: any) => {
+                  console.error('[app] Background rebuild failed:', e)
+                })
+              }
+            } else {
+              log('Index is up-to-date, no rebuild needed')
+            }
           }
         } catch (e) {
-          console.error('[app] Indexing gate failed:', e)
+          console.error('[app] Index check failed:', e)
         }
       }
 

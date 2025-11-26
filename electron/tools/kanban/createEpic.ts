@@ -14,7 +14,7 @@ export const kanbanCreateEpicTool: AgentTool = {
     required: ['name'],
     additionalProperties: false,
   },
-  run: async (input: { name: string; color?: string; description?: string }) => {
+  run: async (input: { name: string; color?: string; description?: string }, meta?: any) => {
     const { useMainStore } = await import('../../store')
     const state = useMainStore.getState() as any
 
@@ -22,15 +22,12 @@ export const kanbanCreateEpicTool: AgentTool = {
       throw new Error('Kanban store is not initialized')
     }
 
-    const epic: KanbanEpic | null = await state.kanbanCreateEpic({
+    const epic: KanbanEpic = await state.kanbanCreateEpic({
+      workspaceId: meta?.workspaceId,
       name: input.name,
       color: input.color,
       description: input.description,
     })
-
-    if (!epic) {
-      throw new Error('Failed to create epic')
-    }
 
     return {
       summary: `Created epic "${epic.name}".`,

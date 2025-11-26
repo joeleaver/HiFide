@@ -189,13 +189,10 @@ if ((import.meta as any).hot) {
   })
 }
 
-let unsubscribe: (() => void) | null = null
 export function initFlowRuntimeEvents(): void {
-  // Re-subscribe idempotently (works across reconnects)
-  try { unsubscribe?.() } catch {}
   try {
     // 1) Subscribe FIRST to avoid missing in-flight events
-    unsubscribe = FlowService.onEvent((ev) => {
+    FlowService.onEvent((ev) => {
       try {
         useFlowRuntime.getState().handleEvent(ev)
       } catch (e) {

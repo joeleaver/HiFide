@@ -8,8 +8,8 @@ const __astSearchCache: Map<string, { ts: number; data: any }> = new Map()
 const AST_CACHE_TTL_MS = 20_000 // 20s
 const AST_CACHE_MAX = 64
 
-function astKey(args: { pattern: string; languages?: string[]; includeGlobs?: string[]; excludeGlobs?: string[]; maxMatches?: number; contextLines?: number; maxFileBytes?: number; concurrency?: number }) {
-  const root = path.resolve(useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd())
+function astKey(args: { pattern: string; languages?: string[]; includeGlobs?: string[]; excludeGlobs?: string[]; maxMatches?: number; contextLines?: number; maxFileBytes?: number; concurrency?: number }, workspaceId?: string) {
+  const root = path.resolve(workspaceId || useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd())
   const keyObj = {
     root,
     pattern: args.pattern,
@@ -57,9 +57,9 @@ export const searchAstTool: AgentTool = {
     required: ['pattern'],
     additionalProperties: false,
   },
-  run: async (args: { pattern: string; languages?: string[]; includeGlobs?: string[]; excludeGlobs?: string[]; maxMatches?: number; contextLines?: number; maxFileBytes?: number; concurrency?: number }) => {
+  run: async (args: { pattern: string; languages?: string[]; includeGlobs?: string[]; excludeGlobs?: string[]; maxMatches?: number; contextLines?: number; maxFileBytes?: number; concurrency?: number }, meta?: any) => {
     // Cache collapse for identical calls within short window
-    const key = astKey(args)
+    const key = astKey(args, meta?.workspaceId)
     const cached = astCacheGet(key)
     if (cached) {
       return { ok: true, ...cached, cached: true }

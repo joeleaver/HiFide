@@ -25,22 +25,19 @@ if ((import.meta as any).hot) {
   (import.meta as any).hot.dispose((data: any) => { data.flowContextsStore = __flowContextsStore })
 }
 
-let inited = false
 export function initFlowContextsEvents(): void {
-  if (inited) return
-  inited = true
-  const client = getBackendClient(); if (!client) return
+  const client = getBackendClient()
+  if (!client) return
 
-  try {
-    client.subscribe('flow.contexts.changed', (p: any) => {
-      try { useFlowContexts.getState().setContexts(p?.mainContext || null, p?.isolatedContexts || {}) } catch {}
-    })
-  } catch {}
+  // Context updates
+  client.subscribe('flow.contexts.changed', (p: any) => {
+    useFlowContexts.getState().setContexts(p?.mainContext || null, p?.isolatedContexts || {})
+  })
 
-  // Initial hydration (gate on workspace)
+  // Initial hydration
   ;(async () => {
-    try { await (client as any).whenReady?.(5000) } catch {}
     try {
+      await (client as any).whenReady?.(5000)
       const ws = await client.rpc('workspace.get', {})
       if (!ws?.ok || !ws.root) return
       const res = await client.rpc('flow.getContexts', {})
@@ -50,17 +47,16 @@ export function initFlowContextsEvents(): void {
     } catch {}
   })()
 
-  // Rehydrate on workspace change
-  try {
-    const rehydrate = async () => {
-      try { useFlowContexts.getState().setContexts(null, {}) } catch {}
-      try {
-        const res = await client.rpc('flow.getContexts', {})
-        if (res?.ok) useFlowContexts.getState().setContexts(res.mainContext || null, res.isolatedContexts || {})
-      } catch {}
-    }
-    client.subscribe('workspace.bound', rehydrate)
-    client.subscribe('workspace.ready', rehydrate)
-  } catch {}
+  // Workspace changes - clear and re-hydrate
+  // Only clear/rehydrate on workspace.bound (actual workspace change), not workspace.ready (just a ready signal)
+  client.subscribe('workspace.bound', async () => {
+    useFlowContexts.getState().setContexts(null, {})
+    try {
+      const res = await client.rpc('flow.getContexts', {})
+      if (res?.ok) {
+        useFlowContexts.getState().setContexts(res.mainContext || null, res.isolatedContexts || {})
+      }
+    } catch {}
+  })
 }
 

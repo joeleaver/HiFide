@@ -33,9 +33,13 @@ export class Indexer {
   private data: IndexData | null = null
   private root: string // workspace root
   private scanRoot: string // actual directory to scan (may be inside workspace)
-  private indexPath: string
-  private indexDir: string
+  private indexPath!: string // Initialized in constructor via loadActiveVersion
+  private indexDir!: string // Initialized in constructor via loadActiveVersion
   private readonly CHUNKS_PER_FILE = 200 // Safer split: 200 chunks per file to reduce JSON size
+
+  // Versioned index support
+  private indexVersionsDir: string // .hifide-private/{indexSubdir}/
+  private activeVersion: string | null = null // Currently active index version
 
   // progress & cancel
   private inProgress = false
@@ -68,12 +72,113 @@ export class Indexer {
     // Store index in workspace .hifide-private/{indexSubdir}/
     const privateDir = path.join(root, '.hifide-private')
     const sub = opts.indexSubdir || 'indexes'
-    this.indexDir = path.join(privateDir, sub)
+    this.indexVersionsDir = path.join(privateDir, sub)
     this.mode = (opts.mode ?? 'default')
 
-    this.indexPath = path.join(this.indexDir, 'meta.json')
-    fs.mkdirSync(this.indexDir, { recursive: true })
+    // Create versions directory
+    fs.mkdirSync(this.indexVersionsDir, { recursive: true })
+
+    // Migrate old flat structure to versioned if needed
+    this.migrateToVersioned()
+
+    // Load active version or use latest
+    this.loadActiveVersion()
+
     this.useWorkspaceGitignore = opts.useWorkspaceGitignore ?? (this.scanRoot === this.root)
+  }
+
+  /**
+   * Migrate old flat index structure to versioned
+   */
+  private migrateToVersioned(): void {
+    const oldMetaPath = path.join(this.indexVersionsDir, 'meta.json')
+    const activeMarkerPath = path.join(this.indexVersionsDir, 'active.json')
+
+    // If active marker exists, already migrated
+    if (fs.existsSync(activeMarkerPath)) {
+      return
+    }
+
+    // If old meta.json exists at root level, migrate it
+    if (fs.existsSync(oldMetaPath)) {
+      try {
+        const v0Dir = path.join(this.indexVersionsDir, 'v0')
+
+        // Move all chunk files and meta to v0 directory
+        fs.mkdirSync(v0Dir, { recursive: true })
+
+        const files = fs.readdirSync(this.indexVersionsDir)
+        for (const file of files) {
+          if (file === 'v0') continue // Skip the directory we just created
+          const srcPath = path.join(this.indexVersionsDir, file)
+          const stat = fs.statSync(srcPath)
+
+          // Only move files (meta.json, chunks-*.json), not directories
+          if (stat.isFile() && (file === 'meta.json' || file.startsWith('chunks-'))) {
+            const destPath = path.join(v0Dir, file)
+            fs.renameSync(srcPath, destPath)
+          }
+        }
+
+        // Create active marker pointing to v0
+        fs.writeFileSync(activeMarkerPath, JSON.stringify({ version: 'v0' }), 'utf-8')
+        console.log('[indexer] Migrated old index to versioned structure (v0)')
+      } catch (e) {
+        console.error('[indexer] Failed to migrate old index:', e)
+        // If migration fails, we'll just start fresh
+      }
+    }
+  }
+
+  /**
+   * Load active index version from marker file
+   */
+  private loadActiveVersion(): void {
+    const activeMarkerPath = path.join(this.indexVersionsDir, 'active.json')
+
+    if (fs.existsSync(activeMarkerPath)) {
+      try {
+        const markerData = JSON.parse(fs.readFileSync(activeMarkerPath, 'utf-8'))
+        this.activeVersion = markerData.version
+        if (this.activeVersion) {
+          this.indexDir = path.join(this.indexVersionsDir, this.activeVersion)
+          this.indexPath = path.join(this.indexDir, 'meta.json')
+        }
+        return
+      } catch (e) {
+        console.error('[indexer] Failed to read active marker:', e)
+      }
+    }
+
+    // Fallback: find most recent version
+    try {
+      const versions = fs.readdirSync(this.indexVersionsDir)
+        .filter(f => {
+          const fullPath = path.join(this.indexVersionsDir, f)
+          return f.startsWith('v') && fs.statSync(fullPath).isDirectory()
+        })
+        .sort()
+        .reverse()
+
+      if (versions.length > 0) {
+        this.activeVersion = versions[0]
+        this.indexDir = path.join(this.indexVersionsDir, this.activeVersion)
+        this.indexPath = path.join(this.indexDir, 'meta.json')
+
+        // Create active marker for future use
+        fs.writeFileSync(activeMarkerPath, JSON.stringify({ version: this.activeVersion }), 'utf-8')
+        return
+      }
+    } catch (e) {
+      console.error('[indexer] Failed to find existing versions:', e)
+    }
+
+    // No existing index - will be created on first rebuild
+    // Use v0 as default for new indexes
+    const defaultVersion = 'v0'
+    this.activeVersion = defaultVersion
+    this.indexDir = path.join(this.indexVersionsDir, defaultVersion)
+    this.indexPath = path.join(this.indexDir, 'meta.json')
   }
 
   // Clean up resources (watchers, timers) and release references
@@ -97,11 +202,14 @@ export class Indexer {
     this.scanRoot = opts.scanRoot || newRoot
 
     const privateDir = path.join(newRoot, '.hifide-private')
-    const sub = opts.indexSubdir || path.basename(this.indexDir) || 'indexes'
-    this.indexDir = path.join(privateDir, sub)
-    try { fs.mkdirSync(this.indexDir, { recursive: true }) } catch {}
+    const sub = opts.indexSubdir || path.basename(this.indexVersionsDir) || 'indexes'
+    this.indexVersionsDir = path.join(privateDir, sub)
+    try { fs.mkdirSync(this.indexVersionsDir, { recursive: true }) } catch {}
 
-    this.indexPath = path.join(this.indexDir, 'meta.json')
+    // Migrate and load active version for new root
+    this.migrateToVersioned()
+    this.loadActiveVersion()
+
     this.useWorkspaceGitignore = opts.useWorkspaceGitignore ?? (this.scanRoot === this.root)
     if (opts.mode) this.mode = opts.mode
 
@@ -651,6 +759,137 @@ export class Indexer {
     this.inProgress = false
     this.progress.phase = 'done'
     onProgress?.(this.status())
+  }
+
+  /**
+   * Rebuild index into a specific versioned directory (for background rebuilding)
+   * Does NOT modify the active index or this.data
+   */
+  async rebuildToDirectory(targetDir: string, onProgress?: (p: ReturnType<Indexer['status']>) => void): Promise<void> {
+    if (!this.engine) this.engine = await getLocalEngine()
+    this.loadGitIgnoreFilter()
+
+    // Save current state
+    const savedIndexDir = this.indexDir
+    const savedIndexPath = this.indexPath
+    const savedData = this.data
+
+    try {
+      // Temporarily point to target directory
+      this.indexDir = targetDir
+      this.indexPath = path.join(targetDir, 'meta.json')
+      fs.mkdirSync(targetDir, { recursive: true })
+
+      // Run rebuild (will write to targetDir)
+      await this.rebuild(onProgress)
+
+    } finally {
+      // Restore original state
+      this.indexDir = savedIndexDir
+      this.indexPath = savedIndexPath
+      this.data = savedData
+    }
+  }
+
+  /**
+   * Atomically swap to a new index version
+   */
+  async swapToNewIndex(newVersion: string): Promise<void> {
+    const newIndexDir = path.join(this.indexVersionsDir, newVersion)
+    const newMetaPath = path.join(newIndexDir, 'meta.json')
+    const activeMarkerPath = path.join(this.indexVersionsDir, 'active.json')
+
+    // Verify new index is valid
+    if (!fs.existsSync(newMetaPath)) {
+      throw new Error(`New index version ${newVersion} is invalid (no meta.json)`)
+    }
+
+    try {
+      // Verify we can read the metadata
+      const metaRaw = fs.readFileSync(newMetaPath, 'utf-8')
+      JSON.parse(metaRaw)
+    } catch (e) {
+      throw new Error(`New index version ${newVersion} has invalid metadata: ${e}`)
+    }
+
+    // Atomic swap via marker file
+    fs.writeFileSync(activeMarkerPath, JSON.stringify({ version: newVersion }), 'utf-8')
+
+    // Update instance to use new index
+    this.activeVersion = newVersion
+    this.indexDir = newIndexDir
+    this.indexPath = newMetaPath
+
+    // Reload data from new index
+    this.data = null
+    this.ensureLoadedFromDisk()
+
+    console.log(`[indexer] Swapped to new index version: ${newVersion}`)
+  }
+
+  /**
+   * Clean up old index versions, keeping only the most recent N
+   */
+  async cleanupOldVersions({ keep = 2 }: { keep?: number } = {}): Promise<void> {
+    try {
+      const versions = fs.readdirSync(this.indexVersionsDir)
+        .filter(f => {
+          const fullPath = path.join(this.indexVersionsDir, f)
+          try {
+            return f.startsWith('v') && fs.statSync(fullPath).isDirectory()
+          } catch {
+            return false
+          }
+        })
+        .sort()
+        .reverse()
+
+      // Keep active version + N most recent
+      const activeVer = this.activeVersion
+      const toKeep = new Set<string>()
+
+      if (activeVer) {
+        toKeep.add(activeVer)
+      }
+
+      // Add N most recent (excluding active if already added)
+      let kept = activeVer ? 1 : 0
+      for (const v of versions) {
+        if (kept >= keep) break
+        if (!toKeep.has(v)) {
+          toKeep.add(v)
+          kept++
+        }
+      }
+
+      // Delete versions not in keep set
+      const toDelete = versions.filter(v => !toKeep.has(v))
+      for (const v of toDelete) {
+        const vPath = path.join(this.indexVersionsDir, v)
+        try {
+          fs.rmSync(vPath, { recursive: true, force: true })
+          console.log(`[indexer] Cleaned up old index version: ${v}`)
+        } catch (e) {
+          console.error(`[indexer] Failed to delete old version ${v}:`, e)
+        }
+      }
+
+      if (toDelete.length > 0) {
+        console.log(`[indexer] Cleanup complete: kept ${toKeep.size} versions, deleted ${toDelete.length}`)
+      }
+    } catch (e) {
+      console.error('[indexer] Failed to cleanup old versions:', e)
+    }
+  }
+
+  /**
+   * Get current active version info
+   */
+  getVersionInfo(): { activeVersion: string | null; versionsDir: string } {
+    return {
+      activeVersion: this.activeVersion,
+      versionsDir: this.indexVersionsDir
+    }
   }
 
   ensureLoadedFromDisk() {
