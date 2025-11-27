@@ -25,8 +25,9 @@ export function resolveWorkspaceRoot(hint?: string): string {
 
   try {
     // Dynamic import to avoid circular dependencies
-    const { useMainStore } = require('../store')
-    const root = useMainStore.getState().workspaceRoot
+    const { ServiceRegistry } = require('../services/base/ServiceRegistry.js')
+    const workspaceService = ServiceRegistry.get<any>('workspace')
+    const root = workspaceService?.getWorkspaceRoot()
     if (root) {
       return path.resolve(root)
     }
@@ -49,8 +50,9 @@ export async function resolveWorkspaceRootAsync(hint?: string): Promise<string> 
   }
 
   try {
-    const { useMainStore } = await import('../store/index.js')
-    const root = useMainStore.getState().workspaceRoot
+    const { ServiceRegistry } = await import('../services/base/ServiceRegistry.js')
+    const workspaceService = ServiceRegistry.get<any>('workspace')
+    const root = workspaceService?.getWorkspaceRoot()
     if (root) {
       return path.resolve(root)
     }

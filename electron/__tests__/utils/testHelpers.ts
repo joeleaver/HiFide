@@ -2,11 +2,11 @@
  * Test helper utilities for creating test contexts, configs, and mocks
  */
 
-import type { ExecutionContext, MainFlowContext, NodeInputs } from '../../ipc/flows-v2/types'
-import type { FlowAPI, Badge, Tool, UsageReport } from '../../ipc/flows-v2/flow-api'
+import type { ExecutionContext, MainFlowContext, NodeInputs } from '../../ipc/flows-v2flow-engine/types'
+import type { FlowAPI, Badge, Tool, UsageReport } from '../../ipc/flows-v2flow-engine/flow-api'
 import type { ProviderAdapter, ChatMessage, AgentTool } from '../../providers/provider'
 import { withFixture, getTestMode } from './fixtures'
-import { createContextAPI } from '../../ipc/flows-v2/context-api'
+import { createContextAPI } from '../../ipc/flows-v2flow-engine/context-api'
 
 /**
  * Create a test execution context with sensible defaults

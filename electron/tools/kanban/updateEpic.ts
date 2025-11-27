@@ -16,11 +16,11 @@ export const kanbanUpdateEpicTool: AgentTool = {
     additionalProperties: false,
   },
   run: async (input: { epicId: string; name?: string; color?: string; description?: string | null }, meta?: any) => {
-    const { useMainStore } = await import('../../store')
-    const state = useMainStore.getState() as any
+    const { ServiceRegistry } = await import('../../services/base/ServiceRegistry.js')
+    const kanbanService = ServiceRegistry.get<any>('kanban')
 
-    if (typeof state.kanbanUpdateEpic !== 'function') {
-      throw new Error('Kanban store is not initialized')
+    if (!kanbanService) {
+      throw new Error('Kanban service is not initialized')
     }
 
     const patch: Partial<KanbanEpic> = {}
@@ -28,7 +28,7 @@ export const kanbanUpdateEpicTool: AgentTool = {
     if (input.color !== undefined) patch.color = input.color
     if (input.description !== undefined) patch.description = input.description ?? undefined
 
-    const epic: KanbanEpic = await state.kanbanUpdateEpic(input.epicId, patch, meta?.workspaceId)
+    const epic: KanbanEpic = await kanbanService.kanbanUpdateEpic(input.epicId, patch, meta?.workspaceId)
 
     return {
       summary: `Updated epic "${epic.name}".`,

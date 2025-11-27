@@ -1,5 +1,5 @@
 import { getBackendClient } from '../lib/backend/bootstrap'
-import type { FlowExecutionArgs } from '@/../../electron/ipc/flows-v2/types'
+import type { FlowExecutionArgs } from '@/../../electron/flow-engine/types'
 
 export type FlowEvent = {
   requestId: string

@@ -14,7 +14,7 @@ import { AnthropicAiSdkProvider as AnthropicProvider } from '../../providers-ai-
 import { OpenAiSdkProvider as OpenAIProvider } from '../../providers-ai-sdk/openai'
 import { GeminiAiSdkProvider as GeminiProvider } from '../../providers-ai-sdk/gemini'
 import { FireworksAiSdkProvider as FireworksProvider } from '../../providers-ai-sdk/fireworks'
-import type { ExecutionEvent } from '../../ipc/flows-v2/execution-events'
+import type { ExecutionEvent } from '../../ipc/flows-v2flow-engine/execution-events'
 import { getTestApiKey } from '../../__tests__/utils/testHelpers'
 import { withFixture, getTestMode, fixtureExists } from '../../__tests__/utils/fixtures'
 

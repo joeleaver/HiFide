@@ -11,7 +11,7 @@ The execution event system has comprehensive test coverage across three levels:
 
 ### 1. Unit Tests (`execution-events.test.ts`)
 
-**Location**: `electron/ipc/flows-v2/__tests__/execution-events.test.ts`
+**Location**: `electron/flow-engine/__tests__/execution-events.test.ts`
 
 **What it tests**:
 - `createEventEmitter()` - Event emitter creation and metadata injection
@@ -84,7 +84,7 @@ TEST_MODE=live pnpm test execution-events-integration.test.ts
 
 ### 3. Scheduler Event Routing Tests (`scheduler-events.test.ts`)
 
-**Location**: `electron/ipc/flows-v2/__tests__/scheduler-events.test.ts`
+**Location**: `electron/flow-engine/__tests__/scheduler-events.test.ts`
 
 **What it tests**:
 - Scheduler correctly routes events to store handlers

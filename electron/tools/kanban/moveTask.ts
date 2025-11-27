@@ -15,16 +15,16 @@ export const kanbanMoveTaskTool: AgentTool = {
     additionalProperties: false,
   },
   run: async (input: { taskId: string; status: KanbanStatus; index?: number }, meta?: any) => {
-    const { useMainStore } = await import('../../store')
-    const state = useMainStore.getState() as any
+    const { ServiceRegistry } = await import('../../services/base/ServiceRegistry.js')
+    const kanbanService = ServiceRegistry.get<any>('kanban')
 
-    if (typeof state.kanbanMoveTask !== 'function') {
-      throw new Error('Kanban store is not initialized')
+    if (!kanbanService) {
+      throw new Error('Kanban service is not initialized')
     }
 
     const idx = typeof input.index === 'number' && input.index >= 0 ? input.index : 0
 
-    const result = await state.kanbanMoveTask({
+    const result = await kanbanService.kanbanMoveTask({
       taskId: input.taskId,
       toStatus: input.status,
       toIndex: idx,

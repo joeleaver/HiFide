@@ -19,11 +19,11 @@ export const kanbanUpdateTaskTool: AgentTool = {
     additionalProperties: false,
   },
   run: async (input: { taskId: string; title?: string; description?: string; status?: KanbanStatus; epicId?: string | null; assignees?: string[]; tags?: string[] }, meta?: any) => {
-    const { useMainStore } = await import('../../store')
-    const state = useMainStore.getState() as any
+    const { ServiceRegistry } = await import('../../services/base/ServiceRegistry.js')
+    const kanbanService = ServiceRegistry.get<any>('kanban')
 
-    if (typeof state.kanbanUpdateTask !== 'function') {
-      throw new Error('Kanban store is not initialized')
+    if (!kanbanService) {
+      throw new Error('Kanban service is not initialized')
     }
 
     const patch: Partial<KanbanTask> & { status?: KanbanStatus } = {}
@@ -34,7 +34,7 @@ export const kanbanUpdateTaskTool: AgentTool = {
     if (input.assignees !== undefined) patch.assignees = input.assignees
     if (input.tags !== undefined) patch.tags = input.tags
 
-    const updated: KanbanTask = await state.kanbanUpdateTask(input.taskId, patch, meta?.workspaceId)
+    const updated: KanbanTask = await kanbanService.kanbanUpdateTask(input.taskId, patch, meta?.workspaceId)
 
     return {
       summary: `Updated task "${updated.title}" (${updated.status}).`,

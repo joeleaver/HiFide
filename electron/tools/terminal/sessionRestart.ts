@@ -1,7 +1,7 @@
 import type { AgentTool } from '../../providers/provider'
-import { useMainStore } from '../../store/index'
 import path from 'node:path'
 import * as agentPty from '../../services/agentPty'
+import { ServiceRegistry } from '../../services/base/ServiceRegistry.js'
 
 
 export const sessionRestartTool: AgentTool = {
@@ -9,15 +9,16 @@ export const sessionRestartTool: AgentTool = {
   description: 'Restart the presented terminal session (kills and recreates).',
   parameters: { type: 'object', properties: { shell: { type: 'string' }, cwd: { type: 'string' }, cols: { type: 'integer' }, rows: { type: 'integer' } }, additionalProperties: false },
   run: async (args: { shell?: string; cwd?: string; cols?: number; rows?: number }, meta?: { requestId?: string; workspaceId?: string }) => {
-    const stAny: any = useMainStore.getState()
-    const ws = meta?.workspaceId || stAny.workspaceRoot || null
-    const sessionId = (ws && typeof stAny.getCurrentIdFor === 'function') ? stAny.getCurrentIdFor({ workspaceId: ws }) : null
+    const workspaceService = ServiceRegistry.get<any>('workspace')
+    const sessionService = ServiceRegistry.get<any>('session')
+    const ws = meta?.workspaceId || workspaceService?.getWorkspaceRoot() || null
+    const sessionId = (ws && sessionService) ? sessionService.getCurrentIdFor({ workspaceId: ws }) : null
     if (!sessionId) {
       console.error('[terminal.session_restart] No active sessionId')
       return { ok: false, error: 'no-session' }
     }
 
-    const root = path.resolve(meta?.workspaceId || useMainStore.getState().workspaceRoot || process.cwd())
+    const root = path.resolve(meta?.workspaceId || workspaceService?.getWorkspaceRoot() || process.cwd())
     const desiredCwd = args.cwd ? (path.isAbsolute(args.cwd) ? args.cwd : path.join(root, args.cwd)) : undefined
 
     try {

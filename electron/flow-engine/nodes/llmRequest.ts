@@ -71,14 +71,38 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
   }
 
   if (!executionContext) {
-    // No usable context edge; create from node config
+    // No usable context edge; create from node config with sampling settings
     const provider = (config.provider as string) || 'openai'
     const model = (config.model as string) || 'gpt-4o'
-    executionContext = flow.context.create({ provider, model, systemInstructions: '' })
+    const temperature = (config as any)?.temperature as number | undefined
+    const reasoningEffort = (config as any)?.reasoningEffort as ('low'|'medium'|'high') | undefined
+    const includeThoughts = (config as any)?.includeThoughts as boolean | undefined
+    const thinkingBudget = (config as any)?.thinkingBudget as number | undefined
+    const modelOverrides = (config as any)?.modelOverrides as Array<{
+      model: string
+      temperature?: number
+      reasoningEffort?: 'low' | 'medium' | 'high'
+      includeThoughts?: boolean
+      thinkingBudget?: number
+    }> | undefined
+    executionContext = flow.context.create({
+      provider,
+      model,
+      systemInstructions: '',
+      ...(typeof temperature === 'number' ? { temperature } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(includeThoughts !== undefined ? { includeThoughts } : {}),
+      ...(typeof thinkingBudget === 'number' ? { thinkingBudget } : {}),
+      ...(modelOverrides?.length ? { modelOverrides } : {}),
+    })
     contextSource = 'config'
     flow.log.debug('No context provided/usable, created from config', {
       provider: executionContext.provider,
-      model: executionContext.model
+      model: executionContext.model,
+      temperature: (executionContext as any).temperature,
+      reasoningEffort: (executionContext as any).reasoningEffort,
+      includeThoughts: (executionContext as any).includeThoughts,
+      thinkingBudget: (executionContext as any).thinkingBudget,
     })
   }
 
@@ -140,12 +164,30 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
       model: appliedModel
     })
 
+    // Apply override sampling/reasoning settings
     const overrideTemperature = (config as any)?.overrideTemperature as number | undefined
     const overrideReasoningEffort = (config as any)?.overrideReasoningEffort as ('low'|'medium'|'high') | undefined
-    if (typeof overrideTemperature === 'number' || overrideReasoningEffort) {
+    const overrideIncludeThoughts = (config as any)?.overrideIncludeThoughts as boolean | undefined
+    const overrideThinkingBudget = (config as any)?.overrideThinkingBudget as number | undefined
+    const overrideModelOverrides = (config as any)?.overrideModelOverrides as Array<{
+      model: string
+      temperature?: number
+      reasoningEffort?: 'low' | 'medium' | 'high'
+      includeThoughts?: boolean
+      thinkingBudget?: number
+    }> | undefined
+    const hasOverrides = typeof overrideTemperature === 'number' ||
+      overrideReasoningEffort ||
+      overrideIncludeThoughts !== undefined ||
+      typeof overrideThinkingBudget === 'number' ||
+      overrideModelOverrides?.length
+    if (hasOverrides) {
       executionContext = flow.context.update(executionContext, {
         ...(typeof overrideTemperature === 'number' ? { temperature: overrideTemperature } : {}),
         ...(overrideReasoningEffort ? { reasoningEffort: overrideReasoningEffort } : {}),
+        ...(overrideIncludeThoughts !== undefined ? { includeThoughts: overrideIncludeThoughts } : {}),
+        ...(typeof overrideThinkingBudget === 'number' ? { thinkingBudget: overrideThinkingBudget } : {}),
+        ...(overrideModelOverrides?.length ? { modelOverrides: overrideModelOverrides } : {}),
       })
     }
 
@@ -156,6 +198,8 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
       appliedModel: executionContext.model,
       temperature: (executionContext as any).temperature,
       reasoningEffort: (executionContext as any).reasoningEffort,
+      includeThoughts: (executionContext as any).includeThoughts,
+      thinkingBudget: (executionContext as any).thinkingBudget,
     })
   } else {
     flow.log.debug('Using context provider/model', {

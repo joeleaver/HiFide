@@ -44,8 +44,9 @@ async function atomicWrite(filePath: string, content: string): Promise<void> {
  * Get workspace settings file path
  */
 async function getSettingsPath(): Promise<string> {
-  const { useMainStore } = await import('../store/index.js')
-  const baseDir = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
+  const { ServiceRegistry } = await import('../services/base/ServiceRegistry.js')
+  const workspaceService = ServiceRegistry.get<any>('workspace')
+  const baseDir = path.resolve(workspaceService?.getWorkspaceRoot() || process.cwd())
   const privateDir = path.join(baseDir, '.hifide-private')
   return path.join(privateDir, 'settings.json')
 }
@@ -96,8 +97,9 @@ export function registerWorkspaceHandlers(ipcMain: IpcMain): void {
       await fs.access(resolved)
 
       // Update store (single source of truth)
-      const { useMainStore } = await import('../store/index.js')
-      useMainStore.getState().setWorkspaceRoot(resolved)
+      const { ServiceRegistry } = await import('../services/base/ServiceRegistry.js')
+      const workspaceService = ServiceRegistry.get<any>('workspace')
+      workspaceService?.setWorkspaceRoot(resolved)
 
       // Reinitialize indexer with new root
       resetIndexer()
@@ -149,9 +151,10 @@ export function registerWorkspaceHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('workspace:bootstrap', async (_e, args: { baseDir?: string; preferAgent?: boolean; overwrite?: boolean }) => {
     try {
       const { resolveWorkspaceRootAsync } = await import('../utils/workspace.js')
-      const { useMainStore } = await import('../store/index.js')
+      const { ServiceRegistry } = await import('../services/base/ServiceRegistry.js')
+      const workspaceService = ServiceRegistry.get<any>('workspace')
       const baseDir = path.resolve(String(args?.baseDir || await resolveWorkspaceRootAsync()))
-      const res = await useMainStore.getState().ensureWorkspaceReady?.({
+      const res = await workspaceService?.ensureWorkspaceReady?.({
         baseDir,
         preferAgent: !!args?.preferAgent,
         overwrite: !!args?.overwrite,

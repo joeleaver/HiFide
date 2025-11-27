@@ -146,7 +146,7 @@ function logLLMRequestPayload(args: {
       streamType: args.streamType,
       payload
     })
-  } catch {}
+  } catch { }
 }
 
 /**
@@ -260,7 +260,7 @@ function wrapToolsWithPolicy(tools: AgentTool[], policy?: {
             return wsSearchSeen.get(key)
           }
           const out = await orig(args, meta)
-          try { wsSearchSeen.set(key, out) } catch {}
+          try { wsSearchSeen.set(key, out) } catch { }
           return out
         }
       }
@@ -320,7 +320,7 @@ function wrapToolsWithPolicy(tools: AgentTool[], policy?: {
               const key = JSON.stringify({ tool: t.name, path: rel, handle: !!args.handle, mode: args.mode || 'range', start: args.startLine, end: args.endLine, focus: args.focusLine, window: args.window, before: args.beforeLines, after: args.afterLines })
               readLinesCache.set(key, out)
             }
-          } catch {}
+          } catch { }
 
           return out
         }
@@ -365,7 +365,7 @@ function wrapToolsWithPolicy(tools: AgentTool[], policy?: {
               const key = JSON.stringify({ tool: t.name, path: rel })
               readFileCache.set(key, out)
             }
-          } catch {}
+          } catch { }
           return out
         }
       }
@@ -412,6 +412,9 @@ export interface LLMServiceRequest {
 export interface LLMServiceResponse {
   /** Assistant's response text */
   text: string
+
+  /** Optional reasoning/thinking from the model (Gemini 2.5, Fireworks reasoning models) */
+  reasoning?: string
 
   /** Updated context with new messages */
   updatedContext: MainFlowContext
@@ -521,7 +524,7 @@ class LLMService {
         hasTools: Array.isArray(tools) ? tools.length : (tools ? 'non-array' : 0),
         messageLength: typeof message === 'string' ? message.length : undefined
       })
-    } catch {}
+    } catch { }
 
     // 1. Get provider adapter
     const providerAdapter = providers[provider]
@@ -608,22 +611,22 @@ class LLMService {
     // Wrap emitter to suppress chunk events if skipHistory is true (with debug override)
     const emit = skipHistory
       ? (event: any) => {
-          // By default, suppress chunk events for stateless calls (like intentRouter)
-          // Set HF_SHOW_SKIP_HISTORY_CHUNKS=1 to forward chunks for debugging/visibility.
-          const showSkipChunks = process.env.HF_SHOW_SKIP_HISTORY_CHUNKS === '1'
-          if (event.type === 'chunk') {
-            if (showSkipChunks) {
-              if (process.env.HF_FLOW_DEBUG === '1') {
-                const brief = (event.chunk || '').slice(0, 40)
-                console.log('[llm-service] forwarding skipHistory chunk due to HF_SHOW_SKIP_HISTORY_CHUNKS', { nodeId: flowAPI.nodeId, brief })
-              }
-              flowAPI.emitExecutionEvent(event)
+        // By default, suppress chunk events for stateless calls (like intentRouter)
+        // Set HF_SHOW_SKIP_HISTORY_CHUNKS=1 to forward chunks for debugging/visibility.
+        const showSkipChunks = process.env.HF_SHOW_SKIP_HISTORY_CHUNKS === '1'
+        if (event.type === 'chunk') {
+          if (showSkipChunks) {
+            if (process.env.HF_FLOW_DEBUG === '1') {
+              const brief = (event.chunk || '').slice(0, 40)
+              console.log('[llm-service] forwarding skipHistory chunk due to HF_SHOW_SKIP_HISTORY_CHUNKS', { nodeId: flowAPI.nodeId, brief })
             }
-            // else: drop chunk
-            return
+            flowAPI.emitExecutionEvent(event)
           }
-          flowAPI.emitExecutionEvent(event)
+          // else: drop chunk
+          return
         }
+        flowAPI.emitExecutionEvent(event)
+      }
       : flowAPI.emitExecutionEvent
 
     const eventHandlers = createCallbackEventEmitters(emit, provider, model)
@@ -651,7 +654,7 @@ class LLMService {
         try {
           const useO200k = /(^o\d|o\d|gpt-4o|gpt-4\.1)/i.test(m)
           __openaiEncoder = get_encoding(useO200k ? 'o200k_base' : 'cl100k_base')
-        } catch {}
+        } catch { }
       }
       return __openaiEncoder
     }
@@ -688,14 +691,14 @@ class LLMService {
       try {
         __toolCallsOutCount++
         const key = toolKey(ev?.name)
-        __toolCallsByTool[key] = ( __toolCallsByTool[key] || 0 ) + 1
+        __toolCallsByTool[key] = (__toolCallsByTool[key] || 0) + 1
         if (ev && ev.arguments != null) {
           const s = typeof ev.arguments === 'string' ? ev.arguments : JSON.stringify(ev.arguments)
           const t = __tokenCounter.count(s)
           __toolArgsTokensOut += t
-          __toolArgsTokensByTool[key] = ( __toolArgsTokensByTool[key] || 0 ) + t
+          __toolArgsTokensByTool[key] = (__toolArgsTokensByTool[key] || 0) + t
         }
-      } catch {}
+      } catch { }
       eventHandlers.onToolStart(ev)
     }
     const onToolEndWrapped = (ev: { callId?: string; name: string; result?: any }) => {
@@ -705,7 +708,7 @@ class LLMService {
           const s = typeof (ev as any).result === 'string' ? (ev as any).result : JSON.stringify((ev as any).result)
           const t = __tokenCounter.count(s)
           __toolResultsTokensIn += t
-          __toolResultsTokensByTool[key] = ( __toolResultsTokensByTool[key] || 0 ) + t
+          __toolResultsTokensByTool[key] = (__toolResultsTokensByTool[key] || 0) + t
 
           // Resolve heavy UI payload via previewKey and register for UI rendering
           const callId = ev?.callId
@@ -714,29 +717,29 @@ class LLMService {
             // First try non-destructive read in case multiple consumers race
             const data = UiPayloadCache.peek(pk)
             if (typeof data !== 'undefined') {
-              try { flowAPI.store.getState().registerToolResult({ key: callId, data }) } catch {}
+              try { flowAPI.store.getState().registerToolResult({ key: callId, data }) } catch { }
             } else {
               // Schedule a microtask to try again after providers finish caching
               setTimeout(() => {
                 const later = UiPayloadCache.peek(pk)
                 if (typeof later !== 'undefined') {
-                  try { flowAPI.store.getState().registerToolResult({ key: callId, data: later }) } catch {}
+                  try { flowAPI.store.getState().registerToolResult({ key: callId, data: later }) } catch { }
                 }
               }, 0)
             }
           }
         }
-      } catch {}
+      } catch { }
       eventHandlers.onToolEnd(ev as any)
     }
 
     // Track latest usage (if provider reports it) and maintain a best-effort fallback
-    let lastReportedUsage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number } | null = null
+    let lastReportedUsage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number; reasoningTokens?: number } | null = null
     // Accumulate deltas across all steps so we can report accurate totals in usage_breakdown
-    let accumulatedUsage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number } = { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
+    let accumulatedUsage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number; reasoningTokens?: number } = { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0, reasoningTokens: 0 }
     let usageEmitted = false
     const emitUsage = eventHandlers.onTokenUsage
-    const onTokenUsageWrapped = (u: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number }) => {
+    const onTokenUsageWrapped = (u: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number; reasoningTokens?: number }) => {
       const prev = lastReportedUsage
       // Determine cumulative by totalTokens only; providers may report non-monotonic input/output per step
       const currTotal = (u?.totalTokens ?? ((u?.inputTokens || 0) + (u?.outputTokens || 0)))
@@ -753,7 +756,8 @@ class LLMService {
           inputTokens: dIn,
           outputTokens: dOut,
           totalTokens: Math.max(0, dIn + dOut),
-          cachedTokens: Math.max(0, (u.cachedTokens || 0) - (prev.cachedTokens || 0))
+          cachedTokens: Math.max(0, (u.cachedTokens || 0) - (prev.cachedTokens || 0)),
+          reasoningTokens: Math.max(0, (u.reasoningTokens || 0) - (prev.reasoningTokens || 0))
         }
       }
 
@@ -765,7 +769,7 @@ class LLMService {
             prev,
             delta
           })
-        } catch {}
+        } catch { }
       }
 
       // Accumulate deltas so we can compute accurate totals later
@@ -773,7 +777,8 @@ class LLMService {
         inputTokens: (accumulatedUsage.inputTokens || 0) + (delta.inputTokens || 0),
         outputTokens: (accumulatedUsage.outputTokens || 0) + (delta.outputTokens || 0),
         totalTokens: (accumulatedUsage.totalTokens || 0) + (delta.totalTokens || 0),
-        cachedTokens: (accumulatedUsage.cachedTokens || 0) + (delta.cachedTokens || 0)
+        cachedTokens: (accumulatedUsage.cachedTokens || 0) + (delta.cachedTokens || 0),
+        reasoningTokens: (accumulatedUsage.reasoningTokens || 0) + (delta.reasoningTokens || 0)
       }
 
       lastReportedUsage = u
@@ -783,7 +788,8 @@ class LLMService {
         (delta.inputTokens || 0) > 0 ||
         (delta.outputTokens || 0) > 0 ||
         (delta.totalTokens || 0) > 0 ||
-        (delta.cachedTokens || 0) > 0
+        (delta.cachedTokens || 0) > 0 ||
+        (delta.reasoningTokens || 0) > 0
       ) {
         usageEmitted = true
         emitUsage(delta)
@@ -795,8 +801,68 @@ class LLMService {
 
     // 6. Call provider with formatted messages
 
+    // --- Resolve effective sampling parameters with model-specific overrides ---
+    // Model overrides take precedence over defaults
+    const modelOverrides: Array<{
+      model: string
+      temperature?: number
+      reasoningEffort?: 'low' | 'medium' | 'high'
+      includeThoughts?: boolean
+      thinkingBudget?: number
+    }> = (updatedContext as any)?.modelOverrides || []
+
+    // Find override for current model (exact match)
+    const modelOverride = modelOverrides.find(o => o.model === model)
+
+    // Temperature: model override → mapped normalized value → raw context value
+    let effectiveTemperature: number | undefined
+    if (modelOverride?.temperature !== undefined) {
+      // Model-specific override (raw value)
+      effectiveTemperature = modelOverride.temperature
+    } else if (typeof (updatedContext as any)?.temperature === 'number') {
+      const normalizedTemp = (updatedContext as any).temperature
+      // Map normalized (0-1) to provider range:
+      // - OpenAI/Gemini/Fireworks/xAI: 0-2
+      // - Anthropic: 0-1 (already normalized)
+      if (provider === 'anthropic') {
+        effectiveTemperature = Math.min(normalizedTemp, 1) // Clamp to 0-1
+      } else {
+        effectiveTemperature = normalizedTemp * 2 // Scale to 0-2
+      }
+    }
+
+    // Reasoning effort: model override → default
+    const effectiveReasoningEffort = modelOverride?.reasoningEffort ?? (updatedContext as any)?.reasoningEffort
+
+    // Auto-enable thinking for models that support it:
+    // - Gemini 2.5+ (2.5, 3-pro, 3.0, 3.5, etc.): /(2\.5|[^0-9]3[.-])/i
+    // - Anthropic Claude 3.5+ Sonnet, 3.7+, 4+
+    const isGeminiWithThinking = provider === 'gemini' && /(2\.5|[^0-9]3[.-])/i.test(model)
+    const isAnthropicWithThinking = provider === 'anthropic' && (
+      /claude-4/i.test(model) || /claude-opus-4/i.test(model) || /claude-sonnet-4/i.test(model) || /claude-haiku-4/i.test(model) ||
+      /claude-3-7-sonnet/i.test(model) || /claude-3\.7/i.test(model) ||
+      /claude-3-5-sonnet/i.test(model) || /claude-3\.5-sonnet/i.test(model)
+    )
+    const modelSupportsThinking = isGeminiWithThinking || isAnthropicWithThinking
+
+    // Include thoughts: model override → default (with auto-enable for supported models)
+    const includeThoughtsOverride = modelOverride?.includeThoughts
+    const includeThoughtsDefault = updatedContext?.includeThoughts
+    const shouldIncludeThoughts = includeThoughtsOverride === true ||
+      (includeThoughtsOverride !== false && includeThoughtsDefault === true) ||
+      (includeThoughtsOverride === undefined && includeThoughtsDefault !== false && modelSupportsThinking)
+
+    // Thinking budget: model override → default
+    const thinkingBudgetOverride = modelOverride?.thinkingBudget
+    const thinkingBudgetDefault = (updatedContext as any)?.thinkingBudget
+    const effectiveThinkingBudget = typeof thinkingBudgetOverride === 'number'
+      ? thinkingBudgetOverride
+      : (typeof thinkingBudgetDefault === 'number'
+        ? thinkingBudgetDefault
+        : (shouldIncludeThoughts && modelSupportsThinking ? 2048 : undefined))
 
     let response = ''
+    let reasoning = '' // Accumulate reasoning/thinking from provider
 
     try {
       // PROACTIVE RATE LIMIT CHECK - Wait before making request if needed
@@ -825,7 +891,7 @@ class LLMService {
       await new Promise<void>(async (resolve, reject) => {
         let streamHandle: { cancel: () => void } | null = null
         const onAbort = () => {
-          try { streamHandle?.cancel() } catch {}
+          try { streamHandle?.cancel() } catch { }
           try {
             // Best-effort usage on cancel: prefer provider-reported usage; otherwise estimate
             if (!usageEmitted && lastReportedUsage) {
@@ -836,7 +902,7 @@ class LLMService {
               usageEmitted = true
               emitUsage({ inputTokens: approxInputTokens, outputTokens: approxOutput, totalTokens: approxInputTokens + approxOutput })
             }
-          } catch {}
+          } catch { }
           reject(new Error('Flow cancelled'))
         }
         try {
@@ -851,18 +917,26 @@ class LLMService {
           const baseStreamOpts = {
             apiKey,
             model,
-            emit, // allow providers to emit rich ExecutionEvents (e.g., reasoning)
-            // Sampling + reasoning controls (forwarded to providers when supported)
-            ...(typeof updatedContext?.temperature === 'number' ? { temperature: updatedContext.temperature } : {}),
-            ...(updatedContext?.reasoningEffort ? { reasoningEffort: updatedContext.reasoningEffort } : {}),
-            // Gemini thinking controls (2.5-series)
-            ...(updatedContext?.includeThoughts !== undefined ? { includeThoughts: updatedContext.includeThoughts } : {}),
-            ...(typeof (updatedContext as any)?.thinkingBudget === 'number' ? { thinkingBudget: (updatedContext as any).thinkingBudget } : {}),
+            // Wrap emit to capture reasoning for persistence
+            emit: (event: any) => {
+              // Capture reasoning events for later persistence
+              if (event.type === 'reasoning' && event.reasoning) {
+                reasoning += event.reasoning
+              }
+              // Forward to original emit
+              emit(event)
+            },
+            // Sampling + reasoning controls (using effective values with model overrides applied)
+            ...(typeof effectiveTemperature === 'number' ? { temperature: effectiveTemperature } : {}),
+            ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
+            // Thinking controls - auto-enabled for supported models
+            ...(shouldIncludeThoughts ? { includeThoughts: true } : {}),
+            ...(effectiveThinkingBudget !== undefined ? { thinkingBudget: effectiveThinkingBudget } : {}),
             // Callbacks that providers call - these are wrapped to emit ExecutionEvents
             onChunk: (text: string) => {
               if (!text) return
               if (process.env.HF_FLOW_DEBUG === '1') {
-                try { console.log(`[llm-service] onChunk node=${flowAPI.nodeId} provider=${provider}/${model} len=${text?.length}`) } catch {}
+                try { console.log(`[llm-service] onChunk node=${flowAPI.nodeId} provider=${provider}/${model} len=${text?.length}`) } catch { }
               }
 
               // Robust de-dup/overlap handling for providers that resend accumulated text
@@ -906,12 +980,12 @@ class LLMService {
             },
             onDone: () => {
 
-              try { flowAPI.signal?.removeEventListener('abort', onAbort as any) } catch {}
+              try { flowAPI.signal?.removeEventListener('abort', onAbort as any) } catch { }
               resolve()
             },
             onError: (error: string) => {
 
-              try { flowAPI.signal?.removeEventListener('abort', onAbort as any) } catch {}
+              try { flowAPI.signal?.removeEventListener('abort', onAbort as any) } catch { }
               reject(new Error(error))
             },
             onTokenUsage: onTokenUsageWrapped
@@ -944,7 +1018,7 @@ class LLMService {
               if (sysParts.length) systemText = sysParts.join('\n\n')
             }
 
-	          try { flowAPI.log.debug('llmService.chat building stream options', { provider, model }) } catch {}
+            try { flowAPI.log.debug('llmService.chat building stream options', { provider, model }) } catch { }
 
             streamOpts = {
               ...baseStreamOpts,
@@ -972,12 +1046,12 @@ class LLMService {
             async () => {
               const policyTools = (tools && tools.length)
                 ? wrapToolsWithPolicy(tools, {
-                    // Disable dedupe for fsReadLines/fsReadFile to ensure RAW text is returned (no cached JSON stubs)
-                    dedupeReadLines: false,
-                    // Remove re-read limits for fsReadLines so LLMs can read, edit, then re-read to verify
+                  // Disable dedupe for fsReadLines/fsReadFile to ensure RAW text is returned (no cached JSON stubs)
+                  dedupeReadLines: false,
+                  // Remove re-read limits for fsReadLines so LLMs can read, edit, then re-read to verify
 
-                    dedupeReadFile: false,
-                  })
+                  dedupeReadFile: false,
+                })
                 : []
               streamHandle = await providerAdapter.agentStream({
                 ...streamOpts,
@@ -989,7 +1063,7 @@ class LLMService {
                 onToolError: eventHandlers.onToolError
               })
 
-	            try { flowAPI.log.debug('llmService.chat agentStream started', { provider, model }) } catch {}
+              try { flowAPI.log.debug('llmService.chat agentStream started', { provider, model }) } catch { }
 
             },
             {
@@ -1020,7 +1094,7 @@ class LLMService {
             rateLimitTracker.updateFromError(provider as any, model, e, rateLimitInfo)
           }
 
-          try { flowAPI.signal?.removeEventListener('abort', onAbort as any) } catch {}
+          try { flowAPI.signal?.removeEventListener('abort', onAbort as any) } catch { }
           reject(e)
         }
       })
@@ -1076,18 +1150,18 @@ class LLMService {
       const hasAccum = (acc && ((acc.inputTokens || 0) > 0 || (acc.outputTokens || 0) > 0 || (acc.totalTokens || 0) > 0))
       const totals = hasAccum
         ? {
-            inputTokens: (acc.inputTokens ?? calcInput),
-            outputTokens: (acc.outputTokens ?? calcOutput),
-            totalTokens: (acc.totalTokens ?? ((acc.inputTokens ?? calcInput) + (acc.outputTokens ?? calcOutput))),
-            cachedInputTokens: Math.max(0, acc.cachedTokens || 0)
-          }
+          inputTokens: (acc.inputTokens ?? calcInput),
+          outputTokens: (acc.outputTokens ?? calcOutput),
+          totalTokens: (acc.totalTokens ?? ((acc.inputTokens ?? calcInput) + (acc.outputTokens ?? calcOutput))),
+          cachedInputTokens: Math.max(0, acc.cachedTokens || 0)
+        }
         : (reported
           ? {
-              inputTokens: (reported.inputTokens ?? calcInput),
-              outputTokens: (reported.outputTokens ?? calcOutput),
-              totalTokens: (reported.totalTokens ?? ((reported.inputTokens ?? calcInput) + (reported.outputTokens ?? calcOutput))),
-              cachedInputTokens: Math.max(0, reported.cachedTokens || reported.cachedInputTokens || 0)
-            }
+            inputTokens: (reported.inputTokens ?? calcInput),
+            outputTokens: (reported.outputTokens ?? calcOutput),
+            totalTokens: (reported.totalTokens ?? ((reported.inputTokens ?? calcInput) + (reported.outputTokens ?? calcOutput))),
+            cachedInputTokens: Math.max(0, reported.cachedTokens || reported.cachedInputTokens || 0)
+          }
           : { inputTokens: calcInput, outputTokens: calcOutput, totalTokens: calcInput + calcOutput, cachedInputTokens: 0 })
 
       // Cost estimate (provider-aware; cached tokens are separate from input tokens)
@@ -1105,7 +1179,7 @@ class LLMService {
             + (cachedTokens / 1_000_000) * cachedPer1M
             + (Number((totals as any).outputTokens || 0) / 1_000_000) * rate.outputCostPer1M
         }
-      } catch {}
+      } catch { }
 
       const thoughtsTokens = Math.max(0, Number(totals.outputTokens || 0) - (assistantTextTokens + toolCallsTokens))
       flowAPI.emitExecutionEvent({
@@ -1147,7 +1221,7 @@ class LLMService {
       })
 
       // Free encoder if allocated (OpenAI)
-      if (__openaiEncoder) { try { __openaiEncoder.free() } catch {} __openaiEncoder = null }
+      if (__openaiEncoder) { try { __openaiEncoder.free() } catch { } __openaiEncoder = null }
     } catch (e) {
       console.warn('[LLM] failed to emit usage_breakdown', e)
     }
@@ -1159,18 +1233,25 @@ class LLMService {
       finalContext = updatedContext
     } else {
       // Normal case: add assistant response to history
+      // Include reasoning if captured (from Gemini thinking or Fireworks <think> tags)
+      const assistantMessage: { role: 'assistant'; content: string; reasoning?: string } = {
+        role: 'assistant',
+        content: response
+      }
+      if (reasoning.trim()) {
+        assistantMessage.reasoning = reasoning
+      }
       finalContext = {
         ...updatedContext,
-        messageHistory: [...updatedContext.messageHistory, { role: 'assistant', content: response }]
+        messageHistory: [...updatedContext.messageHistory, assistantMessage]
       }
-
-
     }
 
 
 
     return {
       text: response,
+      reasoning: reasoning.trim() || undefined,
       updatedContext: finalContext
     }
   }

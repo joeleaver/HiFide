@@ -4,6 +4,7 @@ import { useFlowEditorLocal } from '../../store/flowEditorLocal'
 import { useMemo, useState, useEffect } from 'react'
 import InjectMessagesConfig from './InjectMessagesConfig'
 import { FlowService } from '../../services/flow'
+import { SamplingControls } from './SamplingControls'
 
 interface NodeConfigProps {
   nodeId: string
@@ -158,109 +159,8 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
             )}
           </label>
 
-          {/* Sampling & reasoning controls (visible only when global provider & model are selected) */}
-          {selectedProvider && selectedModel ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {!(selectedProvider === 'openai' && /(o3|codex)/i.test(String(selectedModel))) && (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
-                  <span style={{ fontSize: 10, color: '#888', width: 90 }}>Temperature:</span>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min={0}
-                    max={selectedProvider === 'anthropic' ? 1 : 2}
-                    value={(config.temperature ?? '') as any}
-                    onChange={(e) => {
-                      const v = e.target.value
-                      const num = parseFloat(v)
-                      onConfigChange({ temperature: Number.isFinite(num) ? num : undefined })
-                    }}
-                    placeholder={selectedProvider === 'anthropic' ? '0–1' : '0–2'}
-                    style={{
-                      flex: 1,
-                      padding: '2px 4px',
-                      background: '#252526',
-                      color: '#cccccc',
-                      border: '1px solid #3e3e42',
-                      borderRadius: 3,
-                      fontSize: 10,
-                    }}
-                  />
-                </label>
-              )}
-
-              {/* OpenAI reasoning effort (o3 family) */}
-              {selectedProvider === 'openai' && /(o3|gpt-5)/i.test(String(selectedModel)) && (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
-                  <span style={{ fontSize: 10, color: '#888', width: 90 }}>Reasoning effort:</span>
-                  <select
-                    value={config.reasoningEffort || ''}
-                    onChange={(e) => onConfigChange({ reasoningEffort: e.target.value || undefined })}
-                    style={{
-                      flex: 1,
-                      padding: '4px 6px',
-                      background: '#252526',
-                      color: '#cccccc',
-                      border: '1px solid #3e3e42',
-                      borderRadius: 3,
-                      fontSize: 10,
-                    }}
-                  >
-                    <option value="">Default</option>
-                    <option value="low">low</option>
-                    <option value="medium">medium</option>
-                    <option value="high">high</option>
-                  </select>
-                </label>
-              )}
-            </div>
-          ) : null}
-
-              {/* Gemini 2.5 thinking controls */}
-              {selectedProvider === 'gemini' && /2\.5/i.test(String(selectedModel)) && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
-                    <input
-                      type="checkbox"
-                      checked={!!config.includeThoughts}
-                      onChange={(e) => {
-                        const checked = e.currentTarget.checked
-                        // When enabling, default budget to 2048 if unset
-                        if (checked && (config.thinkingBudget === undefined || config.thinkingBudget === null)) {
-                          onConfigChange({ includeThoughts: true, thinkingBudget: 2048 })
-                        } else {
-                          onConfigChange({ includeThoughts: checked })
-                        }
-                      }}
-                    />
-                    <span>Include thoughts</span>
-                  </label>
-                  {!!config.includeThoughts && (
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
-                      <span style={{ fontSize: 10, color: '#888', width: 90 }}>Thinking budget:</span>
-                      <input
-                        type="number"
-                        min={-1}
-                        value={(config.thinkingBudget ?? 2048) as any}
-                        onChange={(e) => {
-                          const v = parseInt(e.target.value, 10)
-                          onConfigChange({ thinkingBudget: Number.isFinite(v) ? v : undefined })
-                        }}
-                        placeholder="2048"
-                        style={{
-                          flex: 1,
-                          padding: '2px 4px',
-                          background: '#252526',
-                          color: '#cccccc',
-                          border: '1px solid #3e3e42',
-                          borderRadius: 3,
-                          fontSize: 10,
-                        }}
-                      />
-                    </label>
-                  )}
-                </div>
-              )}
+          {/* Sampling & reasoning controls - provider-agnostic */}
+          <SamplingControls config={config} onConfigChange={onConfigChange} modelsByProvider={modelsByProvider} />
 
         </div>
       )}
@@ -468,108 +368,8 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
             )}
           </label>
 
-            {/* Sampling & reasoning controls (visible only when provider & model are selected) */}
-            {config.provider && config.model ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
-                {!(config.provider === 'openai' && /(o3|codex)/i.test(String(config.model))) && (
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
-                    <span style={{ fontSize: 10, color: '#888', width: 90 }}>Temperature:</span>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min={0}
-                      max={(config.provider === 'anthropic') ? 1 : 2}
-                      value={(config.temperature ?? '') as any}
-                      onChange={(e) => {
-                        const v = e.target.value
-                        const num = parseFloat(v)
-                        onConfigChange({ temperature: Number.isFinite(num) ? num : undefined })
-                      }}
-                      placeholder={(config.provider === 'anthropic') ? '0–1' : '0–2'}
-                      style={{
-                        flex: 1,
-                        padding: '2px 4px',
-                        background: '#252526',
-                        color: '#cccccc',
-                        border: '1px solid #3e3e42',
-                        borderRadius: 3,
-                        fontSize: 10,
-                      }}
-                    />
-                  </label>
-                )}
-
-                {/* OpenAI reasoning effort (o3 family) */}
-                {config.provider === 'openai' && /(o3|gpt-5)/i.test(String(config.model)) && (
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
-                    <span style={{ fontSize: 10, color: '#888', width: 90 }}>Reasoning effort:</span>
-                    <select
-                      value={config.reasoningEffort || ''}
-                      onChange={(e) => onConfigChange({ reasoningEffort: e.target.value || undefined })}
-                      style={{
-                        flex: 1,
-                        padding: '4px 6px',
-                        background: '#252526',
-                        color: '#cccccc',
-                        border: '1px solid #3e3e42',
-                        borderRadius: 3,
-                        fontSize: 10,
-                      }}
-                    >
-                      <option value="">Default</option>
-                      <option value="low">low</option>
-                      <option value="medium">medium</option>
-                      <option value="high">high</option>
-                    </select>
-                  </label>
-                )}
-              </div>
-            ) : null}
-
-            {/* Gemini 2.5 thinking controls */}
-            {config.provider === 'gemini' && /2\.5/i.test(String(config.model)) && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
-                  <input
-                    type="checkbox"
-                    checked={!!config.includeThoughts}
-                    onChange={(e) => {
-                      const checked = e.currentTarget.checked
-                      if (checked && (config.thinkingBudget === undefined || config.thinkingBudget === null)) {
-                        onConfigChange({ includeThoughts: true, thinkingBudget: 2048 })
-                      } else {
-                        onConfigChange({ includeThoughts: checked })
-                      }
-                    }}
-                  />
-                  <span>Include thoughts</span>
-                </label>
-                {!!config.includeThoughts && (
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
-                    <span style={{ fontSize: 10, color: '#888', width: 90 }}>Thinking budget:</span>
-                    <input
-                      type="number"
-                      min={-1}
-                      value={(config.thinkingBudget ?? 2048) as any}
-                      onChange={(e) => {
-                        const v = parseInt(e.target.value, 10)
-                        onConfigChange({ thinkingBudget: Number.isFinite(v) ? v : undefined })
-                      }}
-                      placeholder="2048"
-                      style={{
-                        flex: 1,
-                        padding: '2px 4px',
-                        background: '#252526',
-                        color: '#cccccc',
-                        border: '1px solid #3e3e42',
-                        borderRadius: 3,
-                        fontSize: 10,
-                      }}
-                    />
-                  </label>
-                )}
-              </div>
-            )}
+            {/* Sampling & reasoning controls - provider-agnostic */}
+            <SamplingControls config={config} onConfigChange={onConfigChange} modelsByProvider={modelsByProvider} />
 
 
         </div>
@@ -748,6 +548,8 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
                     </select>
                   </label>
                 </div>
+                {/* Sampling & reasoning controls - provider-agnostic */}
+                <SamplingControls config={config} onConfigChange={onConfigChange} modelsByProvider={modelsByProvider} />
               </div>
             )}
 
@@ -826,62 +628,10 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
                       </select>
                     </label>
 
-                    {/* Override sampling & reasoning controls */}
-                    {(config.overrideProvider && config.overrideModel) && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
-                        {!(config.overrideProvider === 'openai' && /(o3|codex)/i.test(String(config.overrideModel))) && (
-                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
-                            <span style={{ fontSize: 10, color: '#888', width: 90 }}>Temperature:</span>
-                            <input
-                              type="number"
-                              step="0.1"
-                              min={0}
-                              max={config.overrideProvider === 'anthropic' ? 1 : 2}
-                              value={(config.overrideTemperature ?? '') as any}
-                              onChange={(e) => {
-                                const v = e.target.value
-                                const num = parseFloat(v)
-                                onConfigChange({ overrideTemperature: Number.isFinite(num) ? num : undefined })
-                              }}
-                              placeholder={config.overrideProvider === 'anthropic' ? '0–1' : '0–2'}
-                              style={{
-                                flex: 1,
-                                padding: '2px 4px',
-                                background: '#252526',
-                                color: '#cccccc',
-                                border: '1px solid #3e3e42',
-                                borderRadius: 3,
-                                fontSize: 10,
-                              }}
-                            />
-                          </label>
-                        )}
-
-                        {config.overrideProvider === 'openai' && /(o3|gpt-5)/i.test(String(config.overrideModel)) && (
-                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
-                            <span style={{ fontSize: 10, color: '#888', width: 90 }}>Reasoning effort:</span>
-                            <select
-                              value={config.overrideReasoningEffort || ''}
-                              onChange={(e) => onConfigChange({ overrideReasoningEffort: e.target.value || undefined })}
-                              style={{
-                                flex: 1,
-                                padding: '4px 6px',
-                                background: '#252526',
-                                color: '#cccccc',
-                                border: '1px solid #3e3e42',
-                                borderRadius: 3,
-                                fontSize: 10,
-                              }}
-                            >
-                              <option value="">Default</option>
-                              <option value="low">low</option>
-                              <option value="medium">medium</option>
-                              <option value="high">high</option>
-                            </select>
-                          </label>
-                        )}
-                      </div>
-                    )}
+                    {/* Override sampling & reasoning controls - provider-agnostic */}
+                    <div style={{ gridColumn: '1 / -1', marginTop: 8 }}>
+                      <SamplingControls config={config} onConfigChange={onConfigChange} modelsByProvider={modelsByProvider} prefix="override" />
+                    </div>
 
                   </div>
                 )}

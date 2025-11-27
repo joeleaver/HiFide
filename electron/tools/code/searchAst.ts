@@ -1,7 +1,7 @@
 import type { AgentTool } from '../../providers/provider'
 import { astGrepSearch } from '../astGrep'
 import path from 'node:path'
-import { useMainStore } from '../../store/index'
+import { ServiceRegistry } from '../../services/base/ServiceRegistry.js'
 
 // In-memory TTL cache to collapse repeated identical AST searches
 const __astSearchCache: Map<string, { ts: number; data: any }> = new Map()
@@ -9,7 +9,8 @@ const AST_CACHE_TTL_MS = 20_000 // 20s
 const AST_CACHE_MAX = 64
 
 function astKey(args: { pattern: string; languages?: string[]; includeGlobs?: string[]; excludeGlobs?: string[]; maxMatches?: number; contextLines?: number; maxFileBytes?: number; concurrency?: number }, workspaceId?: string) {
-  const root = path.resolve(workspaceId || useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd())
+  const workspaceService = ServiceRegistry.get<any>('workspace')
+  const root = path.resolve(workspaceId || workspaceService?.getWorkspaceRoot() || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd())
   const keyObj = {
     root,
     pattern: args.pattern,

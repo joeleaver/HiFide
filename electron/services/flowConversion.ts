@@ -14,7 +14,7 @@
  */
 
 import type { Node as ReactFlowNode, Edge as ReactFlowEdge } from 'reactflow'
-import type { FlowNode, FlowDefinition, Edge } from '../ipc/flows-v2/types'
+import type { FlowNode, FlowDefinition, Edge } from '../flow-engine/types'
 
 /**
  * Convert a ReactFlow node (UI format) to a FlowNode (execution format)

@@ -12,8 +12,9 @@ import fs from 'node:fs/promises'
  * Get the sessions directory path (workspace-relative)
  */
 async function getSessionsDir(): Promise<string> {
-  const { useMainStore } = await import('../store/index.js')
-  const baseDir = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
+  const { ServiceRegistry } = await import('../services/base/ServiceRegistry.js')
+  const workspaceService = ServiceRegistry.get<any>('workspace')
+  const baseDir = path.resolve(workspaceService?.getWorkspaceRoot() || process.cwd())
   const privateDir = path.join(baseDir, '.hifide-private')
   const sessionsDir = path.join(privateDir, 'sessions')
 

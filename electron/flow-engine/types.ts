@@ -76,6 +76,13 @@ export interface MainFlowContext {
     content: string
 
     /**
+     * Optional reasoning/thinking content from the model
+     * Used by models that support extended thinking (e.g., Gemini 2.5, Fireworks reasoning models)
+     * This is the model's internal reasoning process, separate from the final response.
+     */
+    reasoning?: string
+
+    /**
      * Optional metadata for message management and context windowing
      */
     metadata?: {

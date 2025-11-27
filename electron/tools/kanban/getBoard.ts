@@ -2,24 +2,29 @@ import type { AgentTool } from '../../providers/provider'
 import type { KanbanBoard, KanbanStatus } from '../../store'
 
 async function ensureBoardLoadedFor(workspaceId?: string): Promise<KanbanBoard> {
+  const { ServiceRegistry } = await import('../../services/base/ServiceRegistry.js')
+  const kanbanService = ServiceRegistry.get<any>('kanban')
+
+  if (!kanbanService) {
+    throw new Error('Kanban service is not initialized')
+  }
+
   if (workspaceId) {
     // Read directly from disk for the specified workspace to avoid single-tenant store crosstalk
     const { readKanbanBoard } = await import('../../store/utils/kanban')
     return await readKanbanBoard(workspaceId)
   }
 
-  const { useMainStore } = await import('../../store')
-  const state = useMainStore.getState() as any
-
-  if (!state.kanbanBoard && typeof state.kanbanLoad === 'function') {
-    await state.kanbanLoad()
+  const board = kanbanService.getBoard()
+  if (!board) {
+    await kanbanService.kanbanLoad()
+    const refreshed = kanbanService.getBoard()
+    if (!refreshed) {
+      throw new Error('Kanban board is not available')
+    }
+    return refreshed
   }
-
-  const refreshed = useMainStore.getState() as any
-  if (!refreshed.kanbanBoard) {
-    throw new Error('Kanban board is not available')
-  }
-  return refreshed.kanbanBoard as KanbanBoard
+  return board
 }
 
 export const kanbanGetBoardTool: AgentTool = {

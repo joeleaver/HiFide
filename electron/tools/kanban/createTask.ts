@@ -18,14 +18,14 @@ export const kanbanCreateTaskTool: AgentTool = {
     additionalProperties: false,
   },
   run: async (input: { title: string; description?: string; status?: KanbanStatus; epicId?: string | null; assignees?: string[]; tags?: string[] }, meta?: any) => {
-    const { useMainStore } = await import('../../store')
-    const state = useMainStore.getState() as any
+    const { ServiceRegistry } = await import('../../services/base/ServiceRegistry.js')
+    const kanbanService = ServiceRegistry.get<any>('kanban')
 
-    if (typeof state.kanbanCreateTask !== 'function') {
-      throw new Error('Kanban store is not initialized')
+    if (!kanbanService) {
+      throw new Error('Kanban service is not initialized')
     }
 
-    const task: KanbanTask = await state.kanbanCreateTask({
+    const task: KanbanTask = await kanbanService.kanbanCreateTask({
       workspaceId: meta?.workspaceId,
       title: input.title,
       status: input.status ?? 'backlog',

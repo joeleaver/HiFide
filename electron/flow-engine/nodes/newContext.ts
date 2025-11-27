@@ -33,6 +33,13 @@ export const newContextNode: NodeFunction = async (flow, _context, dataIn, input
   const reasoningEffort = (config as any)?.reasoningEffort as ('low'|'medium'|'high') | undefined
   const includeThoughts = !!(config as any)?.includeThoughts
   const thinkingBudget = (config as any)?.thinkingBudget as number | undefined
+  const modelOverrides = (config as any)?.modelOverrides as Array<{
+    model: string
+    temperature?: number
+    reasoningEffort?: 'low' | 'medium' | 'high'
+    includeThoughts?: boolean
+    thinkingBudget?: number
+  }> | undefined
 
   // Prefer dynamic input if connected, otherwise fall back to config
   let systemInstructions = sysFromConfig
@@ -58,6 +65,7 @@ export const newContextNode: NodeFunction = async (flow, _context, dataIn, input
     ...(reasoningEffort ? { reasoningEffort } : {}),
     ...(includeThoughts === true ? { includeThoughts: true } : {}),
     ...(typeof thinkingBudget === 'number' ? { thinkingBudget } : {}),
+    ...(modelOverrides?.length ? { modelOverrides } : {}),
   })
 
   // Mark as isolated and set deterministic id for testability

@@ -390,8 +390,11 @@ async function countWorkspaceFiles(root: string): Promise<number> {
 
 async function autoRefreshPreflight(): Promise<{ triggered: boolean }> {
   try {
-    const { useMainStore } = await import('../../store/index')
-    const st: any = useMainStore.getState()
+    const { ServiceRegistry } = await import('../../services/base/ServiceRegistry.js')
+    const indexingService = ServiceRegistry.get<any>('indexing')
+    if (!indexingService) return { triggered: false }
+
+    const st = indexingService.getState()
     const cfg = st?.idxAutoRefresh
     if (!cfg || !cfg.enabled) return { triggered: false }
 
@@ -415,7 +418,8 @@ async function autoRefreshPreflight(): Promise<{ triggered: boolean }> {
 
     // Lockfile trigger
     if (!should && cfg.lockfileTrigger) {
-      const root = st?.workspaceRoot || process.cwd()
+      const workspaceService = ServiceRegistry.get<any>('workspace')
+      const root = workspaceService?.getWorkspaceRoot() || process.cwd()
       const globs = Array.isArray(cfg.lockfileGlobs) ? cfg.lockfileGlobs : []
       for (const f of globs) {
         const m = await safeStatMtimeMs(path.join(root, f))
@@ -435,7 +439,8 @@ async function autoRefreshPreflight(): Promise<{ triggered: boolean }> {
     // Workspace churn (approximate)
     let currCount: number | undefined
     if (!should && sinceAttempt > minIntervalMs && (cfg.changeAbsoluteThreshold || cfg.changePercentThreshold)) {
-      const root = st?.workspaceRoot || process.cwd()
+      const workspaceService = ServiceRegistry.get<any>('workspace')
+      const root = workspaceService?.getWorkspaceRoot() || process.cwd()
       currCount = await countWorkspaceFiles(root)
       const prev = st?.idxLastFileCount || currCount
       const abs = Math.abs((currCount || 0) - (prev || 0))
@@ -443,7 +448,7 @@ async function autoRefreshPreflight(): Promise<{ triggered: boolean }> {
       if ((cfg.changeAbsoluteThreshold && abs >= cfg.changeAbsoluteThreshold) || (cfg.changePercentThreshold && pct >= cfg.changePercentThreshold)) {
         should = true
       }
-      (useMainStore as any)?.setState?.({ idxLastScanAt: now, idxLastFileCount: currCount })
+      indexingService.setState({ idxLastScanAt: now, idxLastFileCount: currCount })
     }
 
     // Rate limit
@@ -454,11 +459,12 @@ async function autoRefreshPreflight(): Promise<{ triggered: boolean }> {
     }
 
     if (should && !s?.inProgress) {
-      (useMainStore as any)?.setState?.((prev: any) => ({
+      const prev = indexingService.getState()
+      indexingService.setState({
         idxLastRebuildAt: now,
         idxRebuildTimestamps: [ ...(prev?.idxRebuildTimestamps || []), now ].filter((t: number) => now - t < 60 * 60 * 1000),
         ...(typeof currCount === 'number' ? { idxLastFileCount: currCount } : {}),
-      }))
+      })
       indexer.rebuild(() => {}).catch(() => {})
       return { triggered: true }
     }

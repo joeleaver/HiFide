@@ -17,7 +17,7 @@
  */
 
 import type { StateCreator } from 'zustand'
-import type { Session, TokenUsage, TokenCost, AgentMetrics, ActivityEvent, SessionItem, SessionMessage, NodeExecutionBox, Badge } from '../types'
+import type { Session, TokenUsage, TokenCost, ActivityEvent, SessionItem, SessionMessage, NodeExecutionBox, Badge } from '../types'
 import { MAX_SESSIONS } from '../utils/constants'
 import { deriveTitle, initialSessionTitle } from '../utils/sessions'
 import { loadAllSessions, sessionSaver, deleteSessionFromDisk } from '../utils/session-persistence'
@@ -63,9 +63,6 @@ export interface SessionSlice {
 
   // Activity State
   activityByRequestId: Record<string, ActivityEvent[]>
-
-  // Agent Metrics State
-  agentMetrics: AgentMetrics | null
 
   // Session Actions
   loadSessions: () => Promise<void>
@@ -178,8 +175,6 @@ export const createSessionSlice: StateCreator<SessionSlice, [], [], SessionSlice
   lastRequestSavings: null,
 
   activityByRequestId: {},
-
-  agentMetrics: null,
 
 
 	  // Workspace-scoped helpers (Phase 3)

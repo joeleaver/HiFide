@@ -1,0 +1,117 @@
+.appContainer {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.titleBar {
+  height: 36px;
+  background-color: #2d2d30;
+  border-bottom: 1px solid #3e3e42;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+  -webkit-app-region: drag;
+}
+
+.noDrag {
+  -webkit-app-region: no-drag;
+}
+
+.logoContainer {
+  padding: 0 8px 0 6px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.logo {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.appTitle {
+  font-weight: 600;
+  font-size: 13px;
+  color: #cccccc;
+}
+
+.menuItem {
+  padding: 0 12px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  cursor: default;
+  font-size: 13px;
+  color: #cccccc;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.menuItem:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.windowControl {
+  color: #cccccc;
+  width: 46px;
+  height: 36px;
+  border-radius: 0;
+}
+
+.windowControl:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.closeButton {
+  color: #cccccc;
+  width: 46px;
+  height: 36px;
+  border-radius: 0;
+}
+
+.closeButton:hover {
+  background-color: #e81123;
+  color: #ffffff;
+}
+
+.mainContent {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  flex-direction: column;
+}
+
+.workspace {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.viewContainer {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settingsContainer {
+  padding: 16px;
+  background-color: #1e1e1e;
+  height: 100%;
+  overflow: auto;
+}
+
+.loadingOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 10000;
+}

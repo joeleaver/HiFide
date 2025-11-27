@@ -4,8 +4,9 @@ import { Indexer } from '../../indexing/indexer'
 
 let indexer: Indexer | null = null
 async function getIndexer(): Promise<Indexer> {
-  const { useMainStore } = await import('../../store/index.js')
-  if (!indexer) indexer = new Indexer(useMainStore.getState().workspaceRoot || process.cwd())
+  const { ServiceRegistry } = await import('../../services/base/ServiceRegistry.js')
+  const workspaceService = ServiceRegistry.get<any>('workspace')
+  if (!indexer) indexer = new Indexer(workspaceService?.getWorkspaceRoot() || process.cwd())
   return indexer
 }
 
@@ -16,8 +17,9 @@ async function pathExists(p: string) {
 export async function buildContextMessages(query: string, k: number = 6): Promise<Array<{ role: 'user'; content: string }>> {
   const out: Array<{ role: 'user'; content: string }> = []
   try {
-    const { useMainStore } = require('../../store/index.js')
-    const baseDir = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
+    const { ServiceRegistry } = require('../../services/base/ServiceRegistry.js')
+    const workspaceService = ServiceRegistry.get<any>('workspace')
+    const baseDir = path.resolve(workspaceService?.getWorkspaceRoot() || process.cwd())
     const contextMd = path.join(baseDir, '.hifide-public', 'context.md')
     if (await pathExists(contextMd)) {
       const projectContext = await fs.readFile(contextMd, 'utf-8')

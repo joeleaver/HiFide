@@ -1,6 +1,6 @@
 import type { AgentTool } from '../../providers/provider'
-import { useMainStore } from '../../store'
 import { deleteItem } from '../../store/utils/knowledgeBase'
+import { ServiceRegistry } from '../../services/base/ServiceRegistry.js'
 
 export const knowledgeBaseDeleteTool: AgentTool = {
   name: 'knowledgeBaseDelete',
@@ -24,11 +24,12 @@ export const knowledgeBaseDeleteTool: AgentTool = {
 
     // Immediate best-effort store update to broadcast events without waiting for fs watcher
     try {
-      (useMainStore as any).setState?.((s: any) => {
-        const map = { ...(s?.kbItems || {}) }
+      const kbService = ServiceRegistry.get<any>('knowledgeBase')
+      if (kbService) {
+        const map = { ...kbService.getItems() }
         delete map[id]
-        return { kbItems: map }
-      })
+        kbService.setState({ kbItems: map })
+      }
     } catch {}
 
     return { ok: true, data: { id } }

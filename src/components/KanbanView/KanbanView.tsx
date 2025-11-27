@@ -25,7 +25,7 @@ import {
   Draggable,
   type DropResult,
 } from '@hello-pangea/dnd'
-import { IconPlus, IconEdit, IconTrash, IconColumns3, IconFolderPlus, IconRefresh, IconAlertTriangle } from '@tabler/icons-react'
+import { IconPlus, IconEdit, IconTrash, IconColumns3, IconFolderPlus, IconRefresh, IconAlertTriangle, IconArchive } from '@tabler/icons-react'
 
 import { getBackendClient } from '../../lib/backend/bootstrap'
 import type { KanbanEpic, KanbanStatus, KanbanTask, KanbanBoard } from '../../../electron/store/types'
@@ -148,7 +148,12 @@ export default function KanbanView() {
     }
     const tasks = board?.tasks ?? []
 
-    for (const t of tasks) grouped[t.status].push(t)
+    // Filter out archived tasks
+    for (const t of tasks) {
+      if (!t.archived) {
+        grouped[t.status].push(t)
+      }
+    }
     grouped.backlog.sort((a, b) => a.order - b.order)
     grouped.todo.sort((a, b) => a.order - b.order)
     grouped.inProgress.sort((a, b) => a.order - b.order)
@@ -167,6 +172,7 @@ export default function KanbanView() {
   const [taskModal, setTaskModal] = useState<TaskModalState | null>(null)
   const [epicModal, setEpicModal] = useState<EpicModalState | null>(null)
   const [epicDrawerOpen, setEpicDrawerOpen] = useState(false)
+  const [archiveModalOpen, setArchiveModalOpen] = useState(false)
 
   // Board is pre-fetched during loading overlay phase, no need to load on mount
 
@@ -246,7 +252,7 @@ export default function KanbanView() {
       if (!res?.ok) throw new Error('Move rejected')
     } catch (err) {
       // Roll back on failure
-      try { setBoard(prev) } catch {}
+      try { setBoard(prev) } catch { }
       pendingMoveRef.current = null
       console.error('[kanban] move failed:', err)
       notifications.show({ color: 'red', title: 'Move failed', message: 'Unable to move task. Please try again.' })
@@ -355,6 +361,23 @@ export default function KanbanView() {
     }
   }
 
+  const handleArchiveTasks = async (olderThan: number) => {
+    try {
+      const res: any = await getBackendClient()?.rpc('kanban.archiveTasks', { olderThan })
+      if (!res?.ok) throw new Error(res?.error || 'Archive failed')
+      const count = res.archivedCount ?? 0
+      notifications.show({
+        color: 'green',
+        title: 'Tasks archived',
+        message: `Archived ${count} task${count !== 1 ? 's' : ''}.`
+      })
+      setArchiveModalOpen(false)
+    } catch (err) {
+      console.error('[kanban] archive failed:', err)
+      notifications.show({ color: 'red', title: 'Archive failed', message: String(err) })
+    }
+  }
+
   // Render based on screen phase
   if (screenPhase === 'idle' || screenPhase === 'loading') {
     return <KanbanSkeleton />
@@ -418,6 +441,15 @@ export default function KanbanView() {
           >
             Manage Epics
           </Button>
+          <Button
+            leftSection={<IconArchive size={16} />}
+            onClick={() => setArchiveModalOpen(true)}
+            size="xs"
+            variant="subtle"
+            disabled={tasksByStatus.done.length === 0}
+          >
+            Archive Done
+          </Button>
         </Group>
       </Group>
 
@@ -432,66 +464,69 @@ export default function KanbanView() {
           }}
         >
           {COLUMNS.map(({ status, label }) => (
-            <Droppable droppableId={status} key={status}>
-              {(provided, snapshot) => (
-                <Paper
-                  withBorder
-                  radius="md"
-                  p="sm"
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    minWidth: 0,
-                    backgroundColor: snapshot.isDraggingOver
-                      ? `${theme.colors.blue[7]}26`
-                      : 'rgba(255,255,255,0.03)',
-                  }}
-                >
-                  <Group justify="space-between" align="center">
-                    <Group gap="xs">
-                      <Title order={5} c="white">
-                        {label}
-                      </Title>
-                      <Badge variant="filled" color="gray" radius="sm">
-                        {tasksByStatus[status].length}
-                      </Badge>
-                    </Group>
-                    <ActionIcon variant="subtle" size="sm" onClick={() => openCreateTask(status)}>
-                      <IconPlus size={16} />
-                    </ActionIcon>
-                  </Group>
-
-                  <div
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                    style={{ flex: 1, marginTop: 12, overflowY: 'auto' }}
+            <div key={status} style={{ height: '100%', overflow: 'hidden' }}>
+              <Droppable droppableId={status}>
+                {(provided, snapshot) => (
+                  <Paper
+                    withBorder
+                    radius="md"
+                    p="sm"
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      height: '100%',
+                      minWidth: 0,
+                      backgroundColor: snapshot.isDraggingOver
+                        ? `${theme.colors.blue[7]}26`
+                        : 'rgba(255,255,255,0.03)',
+                    }}
                   >
-                    <Stack gap="sm">
-                      {tasksByStatus[status].map((task, index) => (
-                        <Draggable draggableId={task.id} index={index} key={task.id}>
-                          {(dragProvided, dragSnapshot) => (
-                            <KanbanTaskCard
-                              task={task}
-                              epic={task.epicId ? epicMap.get(task.epicId) ?? null : null}
-                              provided={dragProvided}
-                              dragging={dragSnapshot.isDragging}
-                              onEdit={() => openEditTask(task)}
-                              onDelete={() => handleDeleteTask(task)}
-                            />
-                          )}
-                        </Draggable>
-                      ))}
-                      {provided.placeholder}
-                      {tasksByStatus[status].length === 0 && (
-                        <Box c="dimmed" ta="center" py="lg" fz="sm">
-                          No tasks
-                        </Box>
-                      )}
-                    </Stack>
-                  </div>
-                </Paper>
-              )}
-            </Droppable>
+                    <Group justify="space-between" align="center">
+                      <Group gap="xs">
+                        <Title order={5} c="white">
+                          {label}
+                        </Title>
+                        <Badge variant="filled" color="gray" radius="sm">
+                          {tasksByStatus[status].length}
+                        </Badge>
+                      </Group>
+                      <ActionIcon variant="subtle" size="sm" onClick={() => openCreateTask(status)}>
+                        <IconPlus size={16} />
+                      </ActionIcon>
+                    </Group>
+
+                    <div
+                      ref={provided.innerRef}
+                      {...provided.droppableProps}
+                      style={{ flex: 1, marginTop: 12, minHeight: 0, overflowY: 'scroll' }}
+                    >
+                      <Stack gap="sm">
+                        {tasksByStatus[status].map((task, index) => (
+                          <Draggable draggableId={task.id} index={index} key={task.id}>
+                            {(dragProvided, dragSnapshot) => (
+                              <KanbanTaskCard
+                                task={task}
+                                epic={task.epicId ? epicMap.get(task.epicId) ?? null : null}
+                                provided={dragProvided}
+                                dragging={dragSnapshot.isDragging}
+                                onEdit={() => openEditTask(task)}
+                                onDelete={() => handleDeleteTask(task)}
+                              />
+                            )}
+                          </Draggable>
+                        ))}
+                        {provided.placeholder}
+                        {tasksByStatus[status].length === 0 && (
+                          <Box c="dimmed" ta="center" py="lg" fz="sm">
+                            No tasks
+                          </Box>
+                        )}
+                      </Stack>
+                    </div>
+                  </Paper>
+                )}
+              </Droppable>
+            </div>
           ))}
         </Box>
       </DragDropContext>
@@ -519,6 +554,12 @@ export default function KanbanView() {
         onCreate={openCreateEpic}
         onEdit={openEditEpic}
         onDelete={handleDeleteEpic}
+      />
+
+      <ArchiveDoneModal
+        open={archiveModalOpen}
+        onClose={() => setArchiveModalOpen(false)}
+        onArchive={handleArchiveTasks}
       />
     </Box>
   )
@@ -824,5 +865,97 @@ function EpicDrawer({ open, onClose, epics, onCreate, onEdit, onDelete }: EpicDr
         ))}
       </Stack>
     </Drawer>
+  )
+}
+
+type ArchiveDoneModalProps = {
+  open: boolean
+  onClose: () => void
+  onArchive: (olderThan: number) => Promise<void>
+}
+
+function ArchiveDoneModal({ open, onClose, onArchive }: ArchiveDoneModalProps) {
+  const [mode, setMode] = useState<'today' | 'week' | 'custom'>('week')
+  const [customDate, setCustomDate] = useState('')
+  const [archiving, setArchiving] = useState(false)
+
+  const handleArchive = async () => {
+    let cutoffDate: Date
+    const now = new Date()
+
+    switch (mode) {
+      case 'today':
+        // Set to start of today
+        cutoffDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        break
+      case 'week':
+        // 7 days ago
+        cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+        break
+      case 'custom':
+        if (!customDate) {
+          notifications.show({ color: 'red', title: 'Validation', message: 'Please select a date.' })
+          return
+        }
+        cutoffDate = new Date(customDate)
+        if (isNaN(cutoffDate.getTime())) {
+          notifications.show({ color: 'red', title: 'Validation', message: 'Invalid date selected.' })
+          return
+        }
+        break
+    }
+
+    setArchiving(true)
+    try {
+      await onArchive(cutoffDate.getTime())
+    } finally {
+      setArchiving(false)
+    }
+  }
+
+  return (
+    <Modal
+      opened={open}
+      onClose={onClose}
+      title="Archive Done Tasks"
+      centered
+      size="md"
+    >
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Select which completed tasks to archive. Archived tasks will be hidden from the Done column.
+        </Text>
+
+        <Select
+          label="Archive tasks completed before"
+          value={mode}
+          onChange={(value) => setMode(value as 'today' | 'week' | 'custom')}
+          data={[
+            { value: 'today', label: 'Today (older than today)' },
+            { value: 'week', label: 'This week (older than 7 days)' },
+            { value: 'custom', label: 'Custom date...' },
+          ]}
+        />
+
+        {mode === 'custom' && (
+          <TextInput
+            label="Archive tasks completed before this date"
+            type="date"
+            value={customDate}
+            onChange={(event) => setCustomDate(event.currentTarget.value)}
+            max={new Date().toISOString().split('T')[0]}
+          />
+        )}
+
+        <Group justify="flex-end" gap="sm">
+          <Button variant="default" onClick={onClose} disabled={archiving}>
+            Cancel
+          </Button>
+          <Button onClick={handleArchive} loading={archiving} color="blue">
+            Archive
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   )
 }

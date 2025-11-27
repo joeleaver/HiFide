@@ -277,8 +277,9 @@ export function createWindow(opts?: { offsetFromCurrent?: boolean; workspaceId?:
         await manager.bindWindowToWorkspace(win, workspaceId)
 
         // Update store
-        const { useMainStore } = await import('../store/index.js')
-        useMainStore.getState().setWorkspaceForWindow({ windowId: win.id, workspaceId })
+        const { ServiceRegistry } = await import('../services/base/ServiceRegistry.js')
+        const workspaceService = ServiceRegistry.get<any>('workspace')
+        workspaceService?.setWorkspaceForWindow({ windowId: win.id, workspaceId })
       } catch (error) {
         console.error('[window] Failed to bind workspace:', error)
       }

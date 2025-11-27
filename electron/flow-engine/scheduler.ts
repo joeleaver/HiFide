@@ -56,18 +56,6 @@ export class FlowScheduler {
   private sessionId: string | undefined
 
 
-  // Cached store reference (lazy-loaded to avoid circular dependency)
-  private storeCache: any = null
-
-  // Helper to get store (avoids circular dependency)
-  private async getStore() {
-    if (!this.storeCache) {
-      const mod = await import('../../store')
-      this.storeCache = mod.useMainStore.getState
-    }
-    return this.storeCache()
-  }
-
   // Execution context
   private requestId: string
 
@@ -167,7 +155,8 @@ export class FlowScheduler {
    */
   public async flushToSession(): Promise<void> {
     try {
-      const store = await this.getStore()
+      const { getSessionService, getSessionTimelineService } = await import('../services/index.js')
+      const sessionService = getSessionService()
 
       // Defensive: only flush if we're still the active session
       const ws = this.workspaceId
@@ -176,9 +165,7 @@ export class FlowScheduler {
         return
       }
 
-      const currentSessionId = typeof store.getCurrentIdFor === 'function'
-        ? store.getCurrentIdFor({ workspaceId: ws })
-        : null
+      const currentSessionId = sessionService.getCurrentIdFor({ workspaceId: ws })
 
       if (currentSessionId !== this.sessionId) {
         console.warn('[Scheduler.flushToSession] Session changed, skipping flush', {
@@ -189,15 +176,14 @@ export class FlowScheduler {
       }
 
       // Write final messageHistory back to session
-      if (typeof store.updateCurrentContext === 'function') {
-        console.log('[Scheduler.flushToSession] Flushing messageHistory to session', {
-          sessionId: this.sessionId,
-          messageCount: this.mainContext.messageHistory.length
-        })
-        store.updateCurrentContext({
-          messageHistory: this.mainContext.messageHistory
-        })
-      }
+      const timelineService = getSessionTimelineService()
+      console.log('[Scheduler.flushToSession] Flushing messageHistory to session', {
+        sessionId: this.sessionId,
+        messageCount: this.mainContext.messageHistory.length
+      })
+      timelineService.updateCurrentContext({
+        messageHistory: this.mainContext.messageHistory
+      })
     } catch (e) {
       console.error('[Scheduler.flushToSession] Error flushing to session:', e)
     }
@@ -497,7 +483,6 @@ export class FlowScheduler {
     const executionId = crypto.randomUUID()
     console.log(`[Scheduler] ${nodeId} - Starting execution ${executionId}, isPull: ${isPull}, callerId: ${callerId}, pushedInputs:`, Object.keys(pushedInputs))
 
-    const store = await this.getStore()
     try { emitFlowEvent(this.requestId, { type: 'nodeStart', nodeId, executionId, sessionId: this.sessionId }) } catch {}
     // Track running node for snapshot/status queries
     try { this.activeNodeIds.add(nodeId) } catch {}
@@ -554,11 +539,6 @@ export class FlowScheduler {
               messageHistoryLength: this.mainContext.messageHistory.length
             })
 
-            // Sync to store for UI display
-            console.log(`[Scheduler] ${nodeId} - About to call feUpdateMainFlowContext`)
-            store.feUpdateMainFlowContext(this.mainContext)
-            console.log(`[Scheduler] ${nodeId} - feUpdateMainFlowContext returned`)
-
             // Flush messageHistory to session after each node that updates context
             // This ensures conversation history is persisted incrementally during execution
             await this.flushToSession()
@@ -570,9 +550,6 @@ export class FlowScheduler {
               messageHistoryLength: resultContext.messageHistory.length,
               totalIsolatedContexts: this.isolatedContexts.size
             })
-
-            // Update UI tabs for isolated contexts; store handles not syncing to session
-            store.feUpdateMainFlowContext(resultContext)
           }
         } else {
           // Portal nodes are transparent; do not sync context to store to avoid noise
@@ -732,36 +709,28 @@ export class FlowScheduler {
         throw e
       }
       console.error(`[FlowScheduler] Error in ${nodeId}:`, error)
-      const store = await this.getStore()
       if (callerId) {
-        // Non-entry node failed: append an error badge but keep the flow running
+        // Non-entry node failed: emit error event (SessionTimelineService will create badge)
         try {
-          const nodeCfg = this.flowDef.nodes.find((n) => n.id === nodeId)
-          store.appendToNodeExecution?.({
+          emitFlowEvent(this.requestId, {
+            type: 'error',
             nodeId,
-            nodeLabel: (nodeCfg as any)?.data?.label || (nodeCfg as any)?.data?.nodeType || 'Node',
-            nodeKind: (nodeCfg as any)?.data?.nodeType || 'unknown',
-            content: {
-              type: 'badge',
-              badge: {
-                id: `error-${Date.now()}`,
-                type: 'error',
-                label: 'Node Error',
-                icon: '❌',
-                color: 'red',
-                variant: 'filled',
-                status: 'error',
-                error,
-                expandable: true,
-                defaultExpanded: false,
-                timestamp: Date.now()
-              }
-            }
+            error,
+            executionId,
+            sessionId: this.sessionId
           })
         } catch {}
       } else {
-        // Top-level error (entry execution): stop the flow and surface globally
-        try { store.feHandleError(this.requestId, error, nodeId) } catch {}
+        // Top-level error (entry execution): emit error event
+        try {
+          emitFlowEvent(this.requestId, {
+            type: 'error',
+            nodeId,
+            error,
+            executionId,
+            sessionId: this.sessionId
+          })
+        } catch {}
       }
       throw e
     }
@@ -792,18 +761,20 @@ export class FlowScheduler {
       context: createContextAPI(),
       conversation: {
         streamChunk: (chunk: string) => {
-          // TODO: Implement streaming to conversation UI
-          console.log(`[Stream] ${nodeId}:`, chunk)
+          // Streaming is handled by SessionTimelineService listening to flow events
+          // Nodes should emit 'chunk' events instead of calling this directly
+          emit({ type: 'chunk', data: chunk })
         },
         addBadge: (badge: Badge) => {
-          // TODO: Implement badge creation
+          // Badge creation is handled by SessionTimelineService listening to flow events
+          // This is a convenience method for nodes that want to add simple badges
           const badgeId = `badge-${Date.now()}`
-          console.log(`[Badge] ${nodeId}:`, badge)
+          emit({ type: 'badge', badge: { ...badge, id: badgeId } })
           return badgeId
         },
         updateBadge: (badgeId: string, updates: Partial<Badge>) => {
-          // TODO: Implement badge updates
-          console.log(`[Badge Update] ${badgeId}:`, updates)
+          // Badge updates are handled by SessionTimelineService listening to flow events
+          emit({ type: 'badgeUpdate', badgeId, updates })
         }
       },
       log: {
@@ -1142,17 +1113,19 @@ export class FlowScheduler {
   }
 
   /**
-   * Get current node configuration from main store
-   * This fetches the config fresh from the store on every call
+   * Get current node configuration from FlowGraphService
+   * This fetches the config fresh from the service on every call
    */
   private async getNodeConfig(nodeId: string): Promise<Record<string, any>> {
     try {
-      // Prefer live config from main store (renderer-edited)
-      const store = await this.getStore()
-      const nodeFromStore = store?.feNodes?.find((n: any) => n.id === nodeId)
-      const cfgFromStore = (nodeFromStore?.data as any)?.config
-      if (cfgFromStore && Object.keys(cfgFromStore).length > 0) {
-        return JSON.parse(JSON.stringify(cfgFromStore))
+      // Prefer live config from FlowGraphService (renderer-edited)
+      const { getFlowGraphService } = await import('../services/index.js')
+      const flowGraphService = getFlowGraphService()
+      const nodes = flowGraphService.getState().nodes
+      const nodeFromService = nodes?.find((n: any) => n.id === nodeId)
+      const cfgFromService = (nodeFromService?.data as any)?.config
+      if (cfgFromService && Object.keys(cfgFromService).length > 0) {
+        return JSON.parse(JSON.stringify(cfgFromService))
       }
 
       // Fallback to static FlowDefinition config (useful in unit tests or early boot)

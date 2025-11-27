@@ -29,7 +29,7 @@ const initArgs: any = {
 The scheduler stores this and provides it to nodes via FlowAPI:
 
 ```typescript
-// electron/ipc/flows-v2/scheduler.ts:729
+// electron/flow-engine/scheduler.ts:729
 return {
   nodeId,
   requestId: this.requestId,

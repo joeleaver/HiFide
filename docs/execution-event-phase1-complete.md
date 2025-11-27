@@ -153,16 +153,16 @@ This allows providers to continue using the old callback interface while we migr
 ## Files Changed
 
 ### Created
-- `electron/ipc/flows-v2/execution-events.ts` (175 lines)
+- `electron/flow-engine/execution-events.ts` (175 lines)
 - `docs/execution-event-refactor-proposal.md` (300 lines)
 - `docs/execution-event-phase1-complete.md` (this file)
 
 ### Modified
-- `electron/ipc/flows-v2/flow-api.ts` (+25 lines)
-- `electron/ipc/flows-v2/scheduler.ts` (+85 lines)
-- `electron/ipc/flows-v2/llm-service.ts` (-50 lines net)
-- `electron/ipc/flows-v2/nodes/llmRequest.ts` (-1 line)
-- `electron/ipc/flows-v2/nodes/intentRouter.ts` (-1 line)
+- `electron/flow-engine/flow-api.ts` (+25 lines)
+- `electron/flow-engine/scheduler.ts` (+85 lines)
+- `electron/flow-engine/llm-service.ts` (-50 lines net)
+- `electron/flow-engine/nodes/llmRequest.ts` (-1 line)
+- `electron/flow-engine/nodes/intentRouter.ts` (-1 line)
 
 **Total**: +233 lines added, -52 lines removed = **+181 lines net**
 

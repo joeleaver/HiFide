@@ -71,7 +71,7 @@ export default function SettingsPane() {
       setStartupMessage(snap.startupMessage || null)
       setFireworksAllowed(snap.fireworksAllowedModels || [])
       setLocalApiKeys(snap.settingsApiKeys || {})
-    }).catch(() => {})
+    }).catch(() => { })
 
     // Index snapshot
     client.rpc<any>('idx.status', {}).then((s) => {
@@ -80,15 +80,15 @@ export default function SettingsPane() {
       setIdxProg(s.progress || null)
       setIdxAutoRefresh(s.autoRefresh || null)
       setIdxLastRebuildAt(s.lastRebuildAt ?? null)
-    }).catch(() => {})
+    }).catch(() => { })
 
     // Subscribe to progress
-    client.rpc('idx.subscribe', {}).catch(() => {})
+    client.rpc('idx.subscribe', {}).catch(() => { })
     const unsub = client.subscribe('idx.progress', (p: any) => {
       setIdxStatus(p?.status || null)
       setIdxProg(p?.progress || null)
     })
-    return () => { try { unsub?.() } catch {} }
+    return () => { try { unsub?.() } catch { } }
   }, [])
 
 
@@ -119,7 +119,7 @@ export default function SettingsPane() {
 
   const doClearIndex = async () => {
     const client = getBackendClient(); if (!client) return
-    try { await client.rpc('idx.clear', {}) } catch {}
+    try { await client.rpc('idx.clear', {}) } catch { }
   }
 
   const doSearchIndex = async () => {
@@ -128,7 +128,7 @@ export default function SettingsPane() {
       setIdxQuery(localIdxQuery)
       const res: any = await client.rpc('idx.search', { query: localIdxQuery, limit: 20 })
       if (res?.ok) setIdxResults(res.results || [])
-    } catch {}
+    } catch { }
   }
 
   const save = async () => {
@@ -391,7 +391,7 @@ export default function SettingsPane() {
           <Title order={3}>Cost Estimation</Title>
           <Text size="sm" c="dimmed">Configure pricing per model for accurate cost tracking</Text>
         </div>
-        <PricingSettings />
+        <PricingSettings modelsByProvider={modelsByProvider} providerValid={providerValid} />
       </Stack>
 
       <Divider />
@@ -455,7 +455,7 @@ export default function SettingsPane() {
               return 0
             })()} />
             <Text size="xs" c="dimmed">
-              {idxProg.phase || 'idle'} • Files: {idxProg.processedFiles ?? 0}/{idxProg.totalFiles ?? 0} • Chunks: {idxProg.processedChunks ?? 0}/{idxProg.totalChunks ?? 0} • {Math.round((idxProg.elapsedMs || 0)/1000)}s
+              {idxProg.phase || 'idle'} • Files: {idxProg.processedFiles ?? 0}/{idxProg.totalFiles ?? 0} • Chunks: {idxProg.processedChunks ?? 0}/{idxProg.totalChunks ?? 0} • {Math.round((idxProg.elapsedMs || 0) / 1000)}s
 
             </Text>
           </Stack>

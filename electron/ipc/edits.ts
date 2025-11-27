@@ -8,20 +8,21 @@ import type { IpcMain } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import { getIndexer, providers, getProviderKey } from '../core/state'
-import { useMainStore } from '../store/index'
+import { ServiceRegistry } from '../services/base/ServiceRegistry.js'
 
 
 // Local edit operation types (discriminated union)
- type ReplaceOnceEdit = { type: 'replaceOnce'; path: string; oldText: string; newText: string }
- type InsertAfterLineEdit = { type: 'insertAfterLine'; path: string; line: number; text: string }
- type ReplaceRangeEdit = { type: 'replaceRange'; path: string; start: number; end: number; text: string }
- type TextEdit = ReplaceOnceEdit | InsertAfterLineEdit | ReplaceRangeEdit
+type ReplaceOnceEdit = { type: 'replaceOnce'; path: string; oldText: string; newText: string }
+type InsertAfterLineEdit = { type: 'insertAfterLine'; path: string; line: number; text: string }
+type ReplaceRangeEdit = { type: 'replaceRange'; path: string; start: number; end: number; text: string }
+type TextEdit = ReplaceOnceEdit | InsertAfterLineEdit | ReplaceRangeEdit
 
 /**
  * Resolve path within workspace (security check)
  */
 function resolveWithinWorkspace(p: string): string {
-  const root = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
+  const workspaceService = ServiceRegistry.get<any>('workspace')
+  const root = path.resolve(workspaceService?.getWorkspaceRoot() || process.cwd())
   const abs = path.isAbsolute(p) ? p : path.join(root, p)
   const norm = path.resolve(abs)
   const guard = root.endsWith(path.sep) ? root : root + path.sep
@@ -43,7 +44,7 @@ async function atomicWrite(filePath: string, content: string): Promise<void> {
   try {
     await fs.rename(tmp, filePath)
   } catch (e: any) {
-    try { await fs.unlink(filePath) } catch {}
+    try { await fs.unlink(filePath) } catch { }
     await fs.rename(tmp, filePath)
   }
 }
@@ -93,7 +94,8 @@ export async function applyFileEditsInternal(
     if (typeof s !== 'string') return s as any
     return s.length > MAX_PREVIEW ? s.slice(0, MAX_PREVIEW) : s
   }
-  const wsRoot: string = path.resolve(useMainStore.getState().workspaceRoot || process.cwd())
+  const workspaceService = ServiceRegistry.get<any>('workspace')
+  const wsRoot: string = path.resolve(workspaceService?.getWorkspaceRoot() || process.cwd())
 
   const results: Array<{ path: string; changed: boolean; message?: string }> = []
   let applied = 0
@@ -120,11 +122,11 @@ export async function applyFileEditsInternal(
 
       // Store the op; sanitize new text now, normalize to EOL during application
       if (ed.type === 'replaceOnce') {
-        bucket.ops.push({ type: 'replaceOnce', idx: i, oldText: (ed as any).oldText, newText: sanitizeAppliedText((ed as any).newText) })
+        bucket.ops.push({ type: 'replaceOnce', idx: i, oldText: ed.oldText, newText: sanitizeAppliedText(ed.newText) })
       } else if (ed.type === 'insertAfterLine') {
-        bucket.ops.push({ type: 'insertAfterLine', idx: i, line: (ed as any).line | 0, text: sanitizeAppliedText((ed as any).text) })
+        bucket.ops.push({ type: 'insertAfterLine', idx: i, line: ed.line | 0, text: sanitizeAppliedText(ed.text) })
       } else if (ed.type === 'replaceRange') {
-        bucket.ops.push({ type: 'replaceRange', idx: i, start: (ed as any).start | 0, end: (ed as any).end | 0, text: sanitizeAppliedText((ed as any).text) })
+        bucket.ops.push({ type: 'replaceRange', idx: i, start: ed.start | 0, end: ed.end | 0, text: sanitizeAppliedText(ed.text) })
       } else {
         results.push({ path: (ed as any).path, changed: false, message: 'unknown-edit-type' })
       }
@@ -150,7 +152,7 @@ export async function applyFileEditsInternal(
         if (s0 < prevEnd) {
           results.push({ path: rel, changed: false, message: 'non-sequential-or-overlapping-ranges' })
           // Fallback: sort by start ascending to salvage best-effort
-          rangeOps.sort((a: any, b: any) => (a.start|0) - (b.start|0))
+          rangeOps.sort((a: any, b: any) => (a.start | 0) - (b.start | 0))
           break
         }
         prevEnd = e0
@@ -248,18 +250,18 @@ export async function applyFileEditsInternal(
   }
 
 
-	const fileEditsPreview = Array.from(previews.entries()).map(([absPath, v]) => {
-	  const rel = path.relative(wsRoot, absPath)
-	  const truncated = (v.before && v.before.length > MAX_PREVIEW) || (v.after && v.after.length > MAX_PREVIEW)
-	  return {
-	    path: rel,
-	    before: clip(v.before),
-	    after: clip(v.after),
-	    sizeBefore: v.sizeBefore,
-	    sizeAfter: v.sizeAfter,
-	    truncated: !!truncated,
-	  }
-	})
+  const fileEditsPreview = Array.from(previews.entries()).map(([absPath, v]) => {
+    const rel = path.relative(wsRoot, absPath)
+    const truncated = (v.before && v.before.length > MAX_PREVIEW) || (v.after && v.after.length > MAX_PREVIEW)
+    return {
+      path: rel,
+      before: clip(v.before),
+      after: clip(v.after),
+      sizeBefore: v.sizeBefore,
+      sizeAfter: v.sizeAfter,
+      truncated: !!truncated,
+    }
+  })
 
   const verification = undefined
   return { ok: true, applied, results, dryRun: !!opts.dryRun, verification, fileEditsPreview }
@@ -425,7 +427,7 @@ function extractJsonObject(raw: string): any {
   // Try parse directly, else fallback to first {...} block
   try {
     return JSON.parse(candidate)
-  } catch {}
+  } catch { }
 
   const first = candidate.indexOf('{')
   const last = candidate.lastIndexOf('}')
@@ -433,7 +435,7 @@ function extractJsonObject(raw: string): any {
     const sub = candidate.slice(first, last + 1)
     try {
       return JSON.parse(sub)
-    } catch {}
+    } catch { }
   }
   throw new Error('Failed to parse JSON edits from model output')
 }
@@ -488,7 +490,7 @@ export function registerEditsHandlers(ipcMain: IpcMain): void {
         const ctx = res.chunks.map((c) => `• ${c.path}:${c.startLine}-${c.endLine}\n${(c.text || '').slice(0, 600)}`).join('\n\n')
         messages.push({ role: 'user', content: `Context from repository (top matches):\n\n${ctx}\n\nUse this context if helpful.` })
       }
-    } catch {}
+    } catch { }
 
     messages.push({ role: 'user', content: `Instruction:\n${args.instruction}\n\nReturn ONLY the JSON object, nothing else.` })
 

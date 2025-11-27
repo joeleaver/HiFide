@@ -1,0 +1,260 @@
+/**
+ * Service Registry and Initialization
+ * 
+ * Central place to initialize and register all services.
+ * Services replace Zustand slices with a simpler class-based architecture.
+ */
+
+import { ServiceRegistry } from './base/ServiceRegistry'
+import { DebugService } from './DebugService'
+import { ViewService } from './ViewService'
+import { UiService } from './UiService'
+import { ToolsService } from './ToolsService'
+import { WorkspaceService } from './WorkspaceService'
+import { ExplorerService } from './ExplorerService'
+import { ProviderService } from './ProviderService'
+import { SettingsService } from './SettingsService'
+import { PlanningService } from './PlanningService'
+import { KanbanService } from './KanbanService'
+import { KnowledgeBaseService } from './KnowledgeBaseService'
+import { AppService } from './AppService'
+import { IndexingService } from './IndexingService'
+import { TerminalService } from './TerminalService'
+import { SessionService } from './SessionService'
+import { FlowProfileService } from './FlowProfileService'
+import { FlowConfigService } from './FlowConfigService'
+import { FlowGraphService } from './FlowGraphService'
+import { FlowCacheService } from './FlowCacheService'
+import { SessionTimelineService } from './SessionTimelineService'
+
+// Singleton registry instance
+const registry = ServiceRegistry.getInstance()
+
+// Service instances (initialized lazily)
+let debugService: DebugService | null = null
+let viewService: ViewService | null = null
+let uiService: UiService | null = null
+let toolsService: ToolsService | null = null
+let workspaceService: WorkspaceService | null = null
+let explorerService: ExplorerService | null = null
+let providerService: ProviderService | null = null
+let settingsService: SettingsService | null = null
+let planningService: PlanningService | null = null
+let kanbanService: KanbanService | null = null
+let knowledgeBaseService: KnowledgeBaseService | null = null
+let appService: AppService | null = null
+let indexingService: IndexingService | null = null
+let terminalService: TerminalService | null = null
+let sessionService: SessionService | null = null
+let flowProfileService: FlowProfileService | null = null
+let flowConfigService: FlowConfigService | null = null
+let flowGraphService: FlowGraphService | null = null
+let flowCacheService: FlowCacheService | null = null
+let sessionTimelineService: SessionTimelineService | null = null
+
+/**
+ * Initialize all services
+ * Call this once during app startup
+ */
+export function initializeServices(): void {
+  console.log('[Services] Initializing services...')
+
+  // Phase 1: Simple services
+  debugService = new DebugService()
+  viewService = new ViewService()
+  uiService = new UiService()
+
+  // Phase 2: Medium complexity
+  toolsService = new ToolsService()
+  workspaceService = new WorkspaceService()
+  explorerService = new ExplorerService()
+  providerService = new ProviderService()
+  settingsService = new SettingsService()
+  planningService = new PlanningService()
+  kanbanService = new KanbanService()
+  knowledgeBaseService = new KnowledgeBaseService()
+
+  // Phase 3: Complex services
+  appService = new AppService()
+  indexingService = new IndexingService()
+  terminalService = new TerminalService()
+
+  // Phase 4: Session services (order matters - SessionService must be first)
+  sessionService = new SessionService()
+  sessionTimelineService = new SessionTimelineService()
+  flowCacheService = new FlowCacheService()
+
+  // Phase 5: Flow services
+  flowProfileService = new FlowProfileService()
+  flowConfigService = new FlowConfigService()
+  flowGraphService = new FlowGraphService()
+
+  // Register all services
+  registry.register('debug', debugService)
+  registry.register('view', viewService)
+  registry.register('ui', uiService)
+  registry.register('tools', toolsService)
+  registry.register('workspace', workspaceService)
+  registry.register('explorer', explorerService)
+  registry.register('provider', providerService)
+  registry.register('settings', settingsService)
+  registry.register('planning', planningService)
+  registry.register('kanban', kanbanService)
+  registry.register('knowledgeBase', knowledgeBaseService)
+  registry.register('app', appService)
+  registry.register('indexing', indexingService)
+  registry.register('terminal', terminalService)
+  registry.register('session', sessionService)
+  registry.register('sessionTimeline', sessionTimelineService)
+  registry.register('flowCache', flowCacheService)
+  registry.register('flowProfile', flowProfileService)
+  registry.register('flowConfig', flowConfigService)
+  registry.register('flowGraph', flowGraphService)
+
+  console.log('[Services] Initialized:', registry.getServiceNames().join(', '))
+}
+
+/**
+ * Get the service registry
+ */
+export function getServiceRegistry(): ServiceRegistry {
+  return registry
+}
+
+/**
+ * Get a specific service by name
+ */
+export function getService<T>(name: string): T {
+  return registry.get<T>(name)
+}
+
+/**
+ * Convenience getters for all services
+ */
+export function getDebugService(): DebugService {
+  if (!debugService) throw new Error('[Services] DebugService not initialized')
+  return debugService
+}
+
+export function getViewService(): ViewService {
+  if (!viewService) throw new Error('[Services] ViewService not initialized')
+  return viewService
+}
+
+export function getUiService(): UiService {
+  if (!uiService) throw new Error('[Services] UiService not initialized')
+  return uiService
+}
+
+export function getToolsService(): ToolsService {
+  if (!toolsService) throw new Error('[Services] ToolsService not initialized')
+  return toolsService
+}
+
+export function getWorkspaceService(): WorkspaceService {
+  if (!workspaceService) throw new Error('[Services] WorkspaceService not initialized')
+  return workspaceService
+}
+
+export function getExplorerService(): ExplorerService {
+  if (!explorerService) throw new Error('[Services] ExplorerService not initialized')
+  return explorerService
+}
+
+export function getProviderService(): ProviderService {
+  if (!providerService) throw new Error('[Services] ProviderService not initialized')
+  return providerService
+}
+
+export function getSettingsService(): SettingsService {
+  if (!settingsService) throw new Error('[Services] SettingsService not initialized')
+  return settingsService
+}
+
+export function getPlanningService(): PlanningService {
+  if (!planningService) throw new Error('[Services] PlanningService not initialized')
+  return planningService
+}
+
+export function getKanbanService(): KanbanService {
+  if (!kanbanService) throw new Error('[Services] KanbanService not initialized')
+  return kanbanService
+}
+
+export function getKnowledgeBaseService(): KnowledgeBaseService {
+  if (!knowledgeBaseService) throw new Error('[Services] KnowledgeBaseService not initialized')
+  return knowledgeBaseService
+}
+
+export function getAppService(): AppService {
+  if (!appService) throw new Error('[Services] AppService not initialized')
+  return appService
+}
+
+export function getIndexingService(): IndexingService {
+  if (!indexingService) throw new Error('[Services] IndexingService not initialized')
+  return indexingService
+}
+
+export function getTerminalService(): TerminalService {
+  if (!terminalService) throw new Error('[Services] TerminalService not initialized')
+  return terminalService
+}
+
+export function getSessionService(): SessionService {
+  if (!sessionService) throw new Error('[Services] SessionService not initialized')
+  return sessionService
+}
+
+export function getFlowProfileService(): FlowProfileService {
+  if (!flowProfileService) throw new Error('[Services] FlowProfileService not initialized')
+  return flowProfileService
+}
+
+export function getFlowConfigService(): FlowConfigService {
+  if (!flowConfigService) throw new Error('[Services] FlowConfigService not initialized')
+  return flowConfigService
+}
+
+export function getFlowGraphService(): FlowGraphService {
+  if (!flowGraphService) throw new Error('[Services] FlowGraphService not initialized')
+  return flowGraphService
+}
+
+export function getFlowCacheService(): FlowCacheService {
+  if (!flowCacheService) throw new Error('[Services] FlowCacheService not initialized')
+  return flowCacheService
+}
+
+export function getSessionTimelineService(): SessionTimelineService {
+  if (!sessionTimelineService) throw new Error('[Services] SessionTimelineService not initialized')
+  return sessionTimelineService
+}
+
+/**
+ * Export service classes for type imports
+ */
+export { DebugService } from './DebugService'
+export { ViewService } from './ViewService'
+export { UiService } from './UiService'
+export { ToolsService } from './ToolsService'
+export { WorkspaceService } from './WorkspaceService'
+export { ExplorerService } from './ExplorerService'
+export { ProviderService } from './ProviderService'
+export { SettingsService } from './SettingsService'
+export { PlanningService } from './PlanningService'
+export { KanbanService } from './KanbanService'
+export { KnowledgeBaseService } from './KnowledgeBaseService'
+export { AppService } from './AppService'
+export { IndexingService } from './IndexingService'
+export { TerminalService } from './TerminalService'
+export { SessionService } from './SessionService'
+export { FlowProfileService } from './FlowProfileService'
+export { FlowConfigService } from './FlowConfigService'
+export { FlowGraphService } from './FlowGraphService'
+export { FlowCacheService } from './FlowCacheService'
+export { SessionTimelineService } from './SessionTimelineService'
+
+// Export types
+export type { WindowState } from './UiService'
+

@@ -181,10 +181,10 @@ async function initialize(): Promise<void> {
     // Optionally surface a non-blocking warning in logs if ast-grep is missing
     if (!astGrepOk) {
       try {
-        const { useMainStore } = await import('./store')
-        const st: any = useMainStore.getState()
+        const { ServiceRegistry } = await import('./services/base/ServiceRegistry.js')
+        const appService = ServiceRegistry.get<any>('app')
         // Keep app usable; StatusBar can read this message if desired
-        st.setStartupMessage?.('Structural search disabled: @ast-grep/napi not available')
+        appService?.setStartupMessage?.('Structural search disabled: @ast-grep/napi not available')
       } catch {}
     }
   })

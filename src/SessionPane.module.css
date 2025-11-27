@@ -1,0 +1,89 @@
+.container {
+    height: 100%;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+}
+
+.scrollArea {
+    flex: 1;
+}
+
+.userMessageCard {
+    background-color: #1e3a5f;
+    margin-left: 40px;
+    border-color: #2b5a8e;
+}
+
+.reasoningBlock {
+    position: relative;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 8px 28px;
+    font-size: 0.95em;
+}
+
+.quoteIconLeft {
+    position: absolute;
+    left: 8px;
+    top: 4px;
+    font-size: 24px;
+    line-height: 1;
+}
+
+.quoteIconRight {
+    position: absolute;
+    right: 8px;
+    bottom: 4px;
+    font-size: 24px;
+    line-height: 1;
+}
+
+.reasoningText {
+    font-style: italic;
+    white-space: pre-wrap;
+}
+
+.errorText {
+    white-space: pre-wrap;
+    font-family: monospace;
+}
+
+.badgeLabel {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.addedLines {
+    margin-left: 6px;
+    padding: 0 6px;
+    height: 16px;
+    line-height: 16px;
+    border-radius: 9999px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: var(--mantine-color-green-8, #2f9e44);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    display: inline-flex;
+    align-items: center;
+}
+
+.removedLines {
+    margin-left: 4px;
+    padding: 0 6px;
+    height: 16px;
+    line-height: 16px;
+    border-radius: 9999px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: var(--mantine-color-red-8, #e03131);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    display: inline-flex;
+    align-items: center;
+}

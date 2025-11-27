@@ -127,6 +127,7 @@ function deserializeEdge(serialized: SerializedEdge): Edge {
 
 // Cache for system templates
 let systemTemplates: Record<string, FlowProfile> | null = null
+let systemTemplatesLoading: Promise<Record<string, FlowProfile>> | null = null
 
 const DEFAULT_PROFILE_NAME = 'default'
 
@@ -189,39 +190,54 @@ function getSystemTemplatesDir(): string {
  * Scans for all .json files and loads them as templates
  */
 export async function loadSystemTemplates(): Promise<Record<string, FlowProfile>> {
+  // Return cached templates if available
   if (systemTemplates) {
     return systemTemplates
   }
 
-  systemTemplates = {}
-
-  try {
-    const templatesDir = getSystemTemplatesDir()
-
-    const files = await fs.readdir(templatesDir)
-
-    for (const file of files) {
-      if (!file.endsWith('.json')) continue
-
-      try {
-        const filePath = path.join(templatesDir, file)
-        const content = await fs.readFile(filePath, 'utf-8')
-        const profile = JSON.parse(content) as FlowProfile
-
-        // Use the profile's name as the ID, or fall back to filename without extension
-        const id = profile.name || path.basename(file, '.json')
-        systemTemplates[id] = profile
-
-      } catch (error) {
-        console.error(`[flowProfiles] Failed to load template ${file}:`, error)
-      }
-    }
-
-  } catch (error) {
-    console.error('[flowProfiles] Failed to load system templates:', error)
+  // If already loading, wait for that promise
+  if (systemTemplatesLoading) {
+    return systemTemplatesLoading
   }
 
-  return systemTemplates
+  // Start loading
+  systemTemplatesLoading = (async () => {
+    const templates: Record<string, FlowProfile> = {}
+
+    try {
+      const templatesDir = getSystemTemplatesDir()
+      const files = await fs.readdir(templatesDir)
+
+      for (const file of files) {
+        if (!file.endsWith('.json')) continue
+
+        try {
+          const filePath = path.join(templatesDir, file)
+          const content = await fs.readFile(filePath, 'utf-8')
+          const profile = JSON.parse(content) as FlowProfile
+
+          // Use the profile's name as the ID, or fall back to filename without extension
+          const id = profile.name || path.basename(file, '.json')
+          templates[id] = profile
+
+        } catch (error) {
+          console.error(`[flowProfiles] Failed to load template ${file}:`, error)
+        }
+      }
+
+      // Only cache after all templates are loaded
+      systemTemplates = templates
+
+    } catch (error) {
+      console.error('[flowProfiles] Failed to load system templates:', error)
+    } finally {
+      systemTemplatesLoading = null
+    }
+
+    return systemTemplates || {}
+  })()
+
+  return systemTemplatesLoading
 }
 
 /**

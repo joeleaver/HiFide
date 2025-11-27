@@ -1,26 +1,37 @@
 import { searchWorkspaceTool } from '../searchWorkspace'
-// Ensure main store is mocked for auto-refresh preflight (match TS module path)
-jest.mock('../../../store/index', () => ({
-  useMainStore: {
-    getState: () => ({
-      workspaceRoot: process.cwd(),
-      idxAutoRefresh: {
-        enabled: true,
-        ttlMinutes: 120,
-        minIntervalMinutes: 10,
-        changeAbsoluteThreshold: 100,
-        changePercentThreshold: 0.02,
-        lockfileTrigger: true,
-        lockfileGlobs: ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock'],
-        modelChangeTrigger: true,
-        maxRebuildsPerHour: 3,
-      },
-      idxLastRebuildAt: undefined,
-      idxRebuildTimestamps: [],
-      idxLastScanAt: undefined,
-      idxLastFileCount: undefined,
-    }),
-    setState: jest.fn(),
+// Ensure services are mocked for auto-refresh preflight
+jest.mock('../../../services/base/ServiceRegistry', () => ({
+  ServiceRegistry: {
+    get: (name: string) => {
+      if (name === 'workspace') {
+        return {
+          getWorkspaceRoot: () => process.cwd(),
+        }
+      }
+      if (name === 'indexing') {
+        return {
+          getState: () => ({
+            idxAutoRefresh: {
+              enabled: true,
+              ttlMinutes: 120,
+              minIntervalMinutes: 10,
+              changeAbsoluteThreshold: 100,
+              changePercentThreshold: 0.02,
+              lockfileTrigger: true,
+              lockfileGlobs: ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock'],
+              modelChangeTrigger: true,
+              maxRebuildsPerHour: 3,
+            },
+            idxLastRebuildAt: undefined,
+            idxRebuildTimestamps: [],
+            idxLastScanAt: undefined,
+            idxLastFileCount: undefined,
+          }),
+          setState: jest.fn(),
+        }
+      }
+      return null
+    },
   },
 }))
 

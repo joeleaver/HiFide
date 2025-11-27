@@ -42,11 +42,11 @@ This document outlines the step-by-step plan to migrate from the current schedul
 ### Phase 1: Create FlowAPI and ContextAPI
 
 **Files to create:**
-- `electron/ipc/flows-v2/flow-api.ts` (FlowAPI interface and factory)
-- `electron/ipc/flows-v2/context-api.ts` (ContextAPI implementation)
+- `electron/flow-engine/flow-api.ts` (FlowAPI interface and factory)
+- `electron/flow-engine/context-api.ts` (ContextAPI implementation)
 
 **Files to modify:**
-- `electron/ipc/flows-v2/types.ts` (update NodeFunction signature)
+- `electron/flow-engine/types.ts` (update NodeFunction signature)
 
 **Changes:**
 
@@ -133,7 +133,7 @@ export type NodeFunction = (
 ### Phase 2: Update Scheduler
 
 **Files to modify:**
-- `electron/ipc/flows-v2/scheduler.ts`
+- `electron/flow-engine/scheduler.ts`
 
 **Changes:**
 
@@ -291,7 +291,7 @@ interface SessionSlice {
 
 ### Phase 4: Update All Nodes
 
-**Files to modify:** All node files in `electron/ipc/flows-v2/nodes/`
+**Files to modify:** All node files in `electron/flow-engine/nodes/`
 
 **Node list:**
 1. `cache.ts` ✅ (already partially updated)
@@ -404,7 +404,7 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
 ### Phase 6: Update Documentation
 
 **Files to modify:**
-- `electron/ipc/flows-v2/scheduler.ts` (header comment)
+- `electron/flow-engine/scheduler.ts` (header comment)
 - `README.md` (if it mentions flow execution)
 - Any other docs that reference the old architecture
 

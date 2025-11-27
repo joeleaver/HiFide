@@ -18,6 +18,7 @@
 import type { StateCreator } from 'zustand'
 import type { ModelOption, RouteRecord } from '../types'
 import { MAX_ROUTE_HISTORY } from '../utils/constants'
+import { DEFAULT_PRICING } from '../../data/defaultPricing'
 
 // ============================================================================
 // Types
@@ -193,10 +194,14 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
       }
 
       if (!key) {
+        // Fallback to defaults if no key available, so user can still edit pricing
+        const defaults = DEFAULT_PRICING[provider] || {}
+        const fallbackList = Object.keys(defaults).map(id => ({ value: id, label: id }))
+
         set((state) => ({
           modelsByProvider: {
             ...state.modelsByProvider,
-            [provider]: [],
+            [provider]: fallbackList,
           },
         }))
         return
@@ -268,7 +273,7 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
               const arr = Array.isArray(data.models) ? data.models : Array.isArray(data.data) ? data.data : []
               if (Array.isArray(arr)) all.push(...arr)
             }
-          } catch {}
+          } catch { }
         }
         // Normalize, filter and dedupe
         const seen = new Set<string>()
@@ -328,10 +333,15 @@ export const createProviderSlice: StateCreator<ProviderSlice, [], [], ProviderSl
       }
     } catch (e) {
       console.error('[provider] Failed to refresh models for', provider, ':', e)
+
+      // Fallback to defaults on error
+      const defaults = DEFAULT_PRICING[provider] || {}
+      const fallbackList = Object.keys(defaults).map(id => ({ value: id, label: id }))
+
       set((state) => ({
         modelsByProvider: {
           ...state.modelsByProvider,
-          [provider]: [],
+          [provider]: fallbackList,
         },
       }))
     }

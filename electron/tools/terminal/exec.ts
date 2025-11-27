@@ -1,8 +1,8 @@
 import type { AgentTool } from '../../providers/provider'
-import { useMainStore } from '../../store/index'
 import path from 'node:path'
 import { sanitizeTerminalOutput, redactOutput } from '../utils'
 import * as agentPty from '../../services/agentPty'
+import { ServiceRegistry } from '../../services/base/ServiceRegistry.js'
 
 export const terminalExecTool: AgentTool = {
   name: 'terminalExec',
@@ -24,9 +24,10 @@ export const terminalExecTool: AgentTool = {
     meta?: { requestId?: string; [key: string]: any }
   ) => {
     // Always use the current session ID for the agent PTY (one terminal per session)
-    const stAny: any = useMainStore.getState()
-    const ws = stAny.workspaceRoot || null
-    const sessionId = (ws && typeof stAny.getCurrentIdFor === 'function') ? stAny.getCurrentIdFor({ workspaceId: ws }) : null
+    const workspaceService = ServiceRegistry.get<any>('workspace')
+    const sessionService = ServiceRegistry.get<any>('session')
+    const ws = (meta as any)?.workspaceId || workspaceService?.getWorkspaceRoot() || null
+    const sessionId = (ws && sessionService) ? sessionService.getCurrentIdFor({ workspaceId: ws }) : null
     if (!sessionId) {
       console.error('[terminal.exec] No active sessionId')
       return { ok: false, error: 'no-session' }
@@ -35,7 +36,7 @@ export const terminalExecTool: AgentTool = {
     console.log('[terminal.exec] Called with:', { command: args.command, requestId: req, sessionId })
 
     // Get or create session with optional cwd
-    const root = path.resolve((meta as any)?.workspaceId || useMainStore.getState().workspaceRoot || process.cwd())
+    const root = path.resolve((meta as any)?.workspaceId || workspaceService?.getWorkspaceRoot() || process.cwd())
     const desiredCwd = args.cwd ? (path.isAbsolute(args.cwd) ? args.cwd : path.join(root, args.cwd)) : undefined
     console.log('[terminal.exec] Getting or creating PTY session:', { sessionId, desiredCwd })
 

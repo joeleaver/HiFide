@@ -1,7 +1,7 @@
 import type { AgentTool } from '../../providers/provider'
-import { useMainStore } from '../../store'
 import { listItems, type KbHit } from '../../store/utils/knowledgeBase'
 import { getKbIndexer } from '../../core/state'
+import { ServiceRegistry } from '../../services/base/ServiceRegistry.js'
 
 export const knowledgeBaseSearchTool: AgentTool = {
   name: 'knowledgeBaseSearch',
@@ -15,7 +15,8 @@ export const knowledgeBaseSearchTool: AgentTool = {
     },
   },
   run: async (input: any, meta?: any) => {
-    const baseDir = meta?.workspaceId || useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+    const workspaceService = ServiceRegistry.get<any>('workspace')
+    const baseDir = meta?.workspaceId || workspaceService?.getWorkspaceRoot() || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
     const query = typeof input?.query === 'string' ? input.query : ''
     const tags: string[] = Array.isArray(input?.tags) ? (input.tags as any[]).map((t) => String(t)) : []
     const limit = typeof input?.limit === 'number' ? input.limit : 50

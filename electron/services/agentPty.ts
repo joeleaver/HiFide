@@ -3,7 +3,6 @@ import { createRequire } from 'node:module'
 import { redactOutput } from '../utils/security'
 import { logEvent } from '../utils/logging'
 import { broadcastWorkspaceNotification } from '../backend/ws/broadcast'
-import { useMainStore } from '../store'
 
 const require = createRequire(import.meta.url)
 
@@ -76,8 +75,8 @@ export async function beginCommand(st: AgentTerminalState, cmd: string): Promise
 
 function getDefaultCwd(): string {
   try {
-    const st: any = useMainStore.getState()
-    return st.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+    const workspaceService = ServiceRegistry.get<any>('workspace')
+    return workspaceService?.getWorkspaceRoot() || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
   } catch {
     return process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
   }
@@ -86,8 +85,9 @@ function getDefaultCwd(): string {
 function workspaceForSession(sessionId: string | undefined): string | null {
   if (!sessionId) return null
   try {
-    const st: any = useMainStore.getState()
-    const map = st.sessionsByWorkspace || {}
+    const sessionService = ServiceRegistry.get<any>('session')
+    if (!sessionService) return null
+    const map = sessionService.getSessionsByWorkspace() || {}
     for (const [ws, list] of Object.entries(map as Record<string, any[]>)) {
       if (Array.isArray(list) && (list as any[]).some((s: any) => s?.id === sessionId)) return ws as string
     }
@@ -134,7 +134,9 @@ export async function createAgentPtySession(opts: { shell?: string; cwd?: string
       }
       pushDataToState(state, redacted)
       try {
-        const wsId = workspaceForSession(sessionId) || ((useMainStore.getState() as any).workspaceRoot || null)
+        const { ServiceRegistry } = await import('./base/ServiceRegistry.js')
+        const workspaceService = ServiceRegistry.get<any>('workspace')
+        const wsId = workspaceForSession(sessionId) || workspaceService?.getWorkspaceRoot() || null
         if (wsId) broadcastWorkspaceNotification(wsId, 'terminal.data', { sessionId, data: redacted })
       } catch {}
     } catch {}
@@ -143,7 +145,8 @@ export async function createAgentPtySession(opts: { shell?: string; cwd?: string
   p.onExit(async ({ exitCode }: { exitCode: number }) => {
     await logEvent(sessionId, 'agent_pty_exit', { exitCode })
     try {
-      const wsId = workspaceForSession(sessionId) || ((useMainStore.getState() as any).workspaceRoot || null)
+      const workspaceService = ServiceRegistry.get<any>('workspace')
+      const wsId = workspaceForSession(sessionId) || (workspaceService?.getWorkspaceRoot() || null)
       if (wsId) broadcastWorkspaceNotification(wsId, 'terminal.exit', { sessionId, exitCode })
     } catch {}
     agentPtySessions.delete(sessionId)

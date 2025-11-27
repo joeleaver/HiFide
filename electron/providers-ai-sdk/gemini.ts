@@ -18,7 +18,7 @@ function sanitizeName(name: string): string {
   return safe
 }
 
-function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: string; [k: string]: any }) {
+function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: string;[k: string]: any }) {
   const map: Record<string, any> = {}
   const nameMap = new Map<string, string>() // safe -> original
 
@@ -53,7 +53,7 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
             }
             return (res as any)?.minimal ?? raw
           }
-        } catch {}
+        } catch { }
         return raw
       }
     })
@@ -95,7 +95,8 @@ export const GeminiAiSdkProvider: ProviderAdapter = {
       if (DEBUG) {
         console.log('[ai-sdk:gemini] streamText start', { model, msgs: msgs.length, tools: Object.keys(aiTools).length })
       }
-      const supportsThinking = (id: string) => /2\.5/i.test(String(id))
+      // Matches: gemini-2.5-*, gemini-3-*, gemini-3.0-*, etc.
+      const supportsThinking = (id: string) => /(2\.5|[^0-9]3[.-])/i.test(String(id))
       const shouldThink = includeThoughts === true && supportsThinking(model)
       const providerOptions = shouldThink ? (() => {
         const raw = typeof thinkingBudget === 'number' ? thinkingBudget : 2048
@@ -130,7 +131,7 @@ export const GeminiAiSdkProvider: ProviderAdapter = {
               case 'reasoning-delta': {
                 const d = chunk.text || ''
                 if (d) {
-                  try { emit?.({ type: 'reasoning', provider: 'gemini', model, reasoning: d }) } catch {}
+                  try { emit?.({ type: 'reasoning', provider: 'gemini', model, reasoning: d }) } catch { }
                 }
                 break
               }
@@ -175,7 +176,7 @@ export const GeminiAiSdkProvider: ProviderAdapter = {
                       if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
                         output = JSON.parse(trimmed)
                       }
-                    } catch {}
+                    } catch { }
                   }
                 }
                 if (output && typeof output === 'object') {
@@ -216,46 +217,61 @@ export const GeminiAiSdkProvider: ProviderAdapter = {
             }
             if (step?.usage && onTokenUsage) {
               const u: any = step.usage
-              const out = Number(u.outputTokens ?? u.candidatesTokens ?? u.completionTokens ?? 0)
+              // Gemini 2.0 Flash Thinking: reasoning tokens are part of output tokens in some views,
+              // but we want to separate them.
+              // AI SDK often puts reasoning in `reasoningTokens` if available.
               const rt = Number(u.reasoningTokens ?? 0)
+              const outTotal = Number(u.outputTokens ?? u.candidatesTokens ?? u.completionTokens ?? 0)
+
+              // If total output includes reasoning, we might want to separate them for display?
+              // Standard practice: outputTokens usually includes reasoning. 
+              // But for UI clarity, let's try to keep them distinct if possible, or just report them.
+              // Let's trust the provider's `outputTokens` as the "generated content + reasoning" usually,
+              // unless we want to subtract. 
+              // However, AI SDK v5 usually reports `outputTokens` and `reasoningTokens` separately in the object if they are distinct.
+              // If `totalTokens` = input + output, and reasoning is a subset of output, we shouldn't double count.
+
               const inp = Number(u.inputTokens ?? u.promptTokens ?? 0)
+              const cached = Number(u.cachedInputTokens ?? u.cachedTokens ?? u.cacheTokens ?? u.cachedContentTokenCount ?? 0)
+
               const usage = {
                 inputTokens: inp,
-                outputTokens: out + rt,
-                totalTokens: Number(u.totalTokens ?? (inp + out + rt)),
-                cachedTokens: Number(u.cachedInputTokens ?? u.cachedTokens ?? u.cacheTokens ?? 0)
+                outputTokens: outTotal, // Keep as total output for now
+                totalTokens: Number(u.totalTokens ?? (inp + outTotal)),
+                cachedTokens: cached,
+                reasoningTokens: rt
               }
               onTokenUsage(usage)
             }
-          } catch {}
+          } catch { }
         },
         onFinish() {
           try {
             if (DEBUG) console.log('[ai-sdk:gemini] onFinish')
             onStreamDone?.()
-          } catch {}
+          } catch { }
         },
         onError(ev: any) {
           const err = ev?.error ?? ev
           try {
             if (DEBUG) console.error('[ai-sdk:gemini] onError', err)
             onStreamError?.(String(err?.message || err))
-          } catch {}
+          } catch { }
         }
       } as any)
       // Ensure the stream is consumed so callbacks fire reliably
       result.consumeStream().catch((err: any) => {
         if (DEBUG) console.error('[ai-sdk:gemini] consumeStream error', err)
-        try { onStreamError?.(String(err?.message || err)) } catch {}
+        try { onStreamError?.(String(err?.message || err)) } catch { }
       })
     } catch (err: any) {
       if (DEBUG) console.error('[ai-sdk:gemini] adapter exception', err)
-      try { onStreamError?.(String(err?.message || err)) } catch {}
+      try { onStreamError?.(String(err?.message || err)) } catch { }
     }
 
     return {
       cancel: () => {
-        try { ac.abort() } catch {}
+        try { ac.abort() } catch { }
       }
     }
   }

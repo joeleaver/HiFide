@@ -22,11 +22,11 @@ function blocksToSystemText(system: any): string | undefined {
         .filter(Boolean) as string[]
       if (texts.length) return texts.join('\n\n')
     }
-  } catch {}
+  } catch { }
   return undefined
 }
 
-function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: string; [k: string]: any }) {
+function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: string;[k: string]: any }) {
   const map: Record<string, any> = {}
   const nameMap = new Map<string, string>() // safe -> original
   for (const t of tools || []) {
@@ -53,7 +53,7 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
             }
             return (res as any)?.minimal ?? raw
           }
-        } catch {}
+        } catch { }
         return raw
       }
     })
@@ -61,10 +61,21 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
   return { tools: map, nameMap }
 }
 
+// Models that support extended thinking (Claude 3.5+ Sonnet, Claude 3.7+, Claude 4+)
+const supportsThinking = (id: string) => {
+  // Claude 4.x models
+  if (/claude-4/i.test(id) || /claude-opus-4/i.test(id) || /claude-sonnet-4/i.test(id) || /claude-haiku-4/i.test(id)) return true
+  // Claude 3.7 Sonnet
+  if (/claude-3-7-sonnet/i.test(id) || /claude-3\.7/i.test(id)) return true
+  // Claude 3.5 Sonnet (not Haiku - 3.5 Haiku doesn't support thinking)
+  if (/claude-3-5-sonnet/i.test(id) || /claude-3\.5-sonnet/i.test(id)) return true
+  return false
+}
+
 export const AnthropicAiSdkProvider: ProviderAdapter = {
   id: 'anthropic',
 
-  async agentStream({ apiKey, model, system, messages, temperature, tools, responseSchema: _responseSchema, emit: _emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, system, messages, temperature, includeThoughts, thinkingBudget, tools, responseSchema: _responseSchema, emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const anthropic = createAnthropic({ apiKey })
     const llm = anthropic(model)
 
@@ -82,8 +93,16 @@ export const AnthropicAiSdkProvider: ProviderAdapter = {
 
     try {
       if (DEBUG) {
-        console.log('[ai-sdk:anthropic] streamText start', { model, msgs: msgs.length, tools: Object.keys(aiTools).length })
+        console.log('[ai-sdk:anthropic] streamText start', { model, msgs: msgs.length, tools: Object.keys(aiTools).length, includeThoughts, thinkingBudget })
       }
+      // Extended thinking support for Claude 3.5+ Sonnet, 3.7+, and 4+
+      const shouldThink = includeThoughts === true && supportsThinking(model)
+      const providerOptions = shouldThink ? (() => {
+        const raw = typeof thinkingBudget === 'number' ? thinkingBudget : 2048
+        const thinking: any = { type: 'enabled' }
+        if (raw !== -1) thinking.budgetTokens = raw
+        return { anthropic: { thinking, sendReasoning: true } }
+      })() : undefined
       const result = streamText({
         model: llm,
         system: systemText,
@@ -95,6 +114,7 @@ export const AnthropicAiSdkProvider: ProviderAdapter = {
         abortSignal: ac.signal,
         stopWhen: stepCountIs(AGENT_MAX_STEPS),
         includeRawChunks: DEBUG,
+        providerOptions: providerOptions as any,
         // Stream mapping (AI SDK v5 onChunk passes { chunk })
         onChunk({ chunk }: any) {
           try {
@@ -106,6 +126,13 @@ export const AnthropicAiSdkProvider: ProviderAdapter = {
               case 'text-delta': {
                 const d = chunk.text || ''
                 if (d) onTextChunk?.(d)
+                break
+              }
+              case 'reasoning-delta': {
+                const d = chunk.text || ''
+                if (d) {
+                  try { emit?.({ type: 'reasoning', provider: 'anthropic', model, reasoning: d }) } catch { }
+                }
                 break
               }
               case 'tool-input-start': {
@@ -152,7 +179,7 @@ export const AnthropicAiSdkProvider: ProviderAdapter = {
                       if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
                         output = JSON.parse(trimmed)
                       }
-                    } catch {}
+                    } catch { }
                   }
                 }
                 // Unwrap AI SDK structured result shapes
@@ -195,43 +222,48 @@ export const AnthropicAiSdkProvider: ProviderAdapter = {
             }
             if (step?.usage && onTokenUsage) {
               const u: any = step.usage
+              // Check for reasoning tokens in usage (Claude 3.7)
+              // Note: AI SDK might put it in `reasoningTokens` or nested in `outputTokenDetails`
+              const rt = Number(u.reasoningTokens ?? (u.outputTokenDetails?.reasoningTokens) ?? 0)
+
               const usage = {
                 inputTokens: Number(u.inputTokens ?? u.promptTokens ?? 0),
                 outputTokens: Number(u.outputTokens ?? u.completionTokens ?? 0),
                 totalTokens: Number(u.totalTokens ?? (Number(u.inputTokens ?? 0) + Number(u.outputTokens ?? 0))),
-                cachedTokens: Number(u.cachedInputTokens ?? u.cachedTokens ?? 0)
+                cachedTokens: Number(u.cachedInputTokens ?? u.cachedTokens ?? u.cacheReadInputTokens ?? u.cacheCreationInputTokens ?? 0),
+                reasoningTokens: rt
               }
               onTokenUsage(usage)
             }
-          } catch {}
+          } catch { }
         },
         onFinish() {
           try {
             if (DEBUG) console.log('[ai-sdk:anthropic] onFinish')
             onStreamDone?.()
-          } catch {}
+          } catch { }
         },
         onError(ev: any) {
           const err = ev?.error ?? ev
           try {
             if (DEBUG) console.error('[ai-sdk:anthropic] onError', err)
             onStreamError?.(String(err?.message || err))
-          } catch {}
+          } catch { }
         }
       } as any)
       // Ensure the stream is consumed so callbacks fire reliably
       result.consumeStream().catch((err: any) => {
         if (DEBUG) console.error('[ai-sdk:anthropic] consumeStream error', err)
-        try { onStreamError?.(String(err?.message || err)) } catch {}
+        try { onStreamError?.(String(err?.message || err)) } catch { }
       })
     } catch (err: any) {
       if (DEBUG) console.error('[ai-sdk:anthropic] adapter exception', err)
-      try { onStreamError?.(String(err?.message || err)) } catch {}
+      try { onStreamError?.(String(err?.message || err)) } catch { }
     }
 
     return {
       cancel: () => {
-        try { ac.abort() } catch {}
+        try { ac.abort() } catch { }
       }
     }
   }

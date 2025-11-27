@@ -1,4 +1,4 @@
-import type { EmitExecutionEvent } from '../ipc/flows-v2/execution-events'
+import type { EmitExecutionEvent } from '../flow-engine/execution-events'
 
 export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string }
 
@@ -41,7 +41,7 @@ export interface ProviderAdapter {
     // Sampling and reasoning controls
     temperature?: number
     reasoningEffort?: 'low' | 'medium' | 'high'
-    // Gemini thinking controls (2.5-series models)
+    // Thinking controls (Gemini 2.5+ and Anthropic Claude 3.5+ Sonnet, 3.7+, 4+)
     includeThoughts?: boolean
     thinkingBudget?: number
 

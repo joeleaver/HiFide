@@ -60,6 +60,7 @@ export interface KanbanSlice {
     workspaceId?: string
   ) => Promise<KanbanEpic>
   kanbanDeleteEpic: (epicId: string, workspaceId?: string) => Promise<{ ok: boolean }>
+  kanbanArchiveTasks: (params: { olderThan: number; workspaceId?: string }) => Promise<{ ok: boolean; archivedCount?: number; error?: string }>
 }
 
 type KanbanStore = KanbanSlice & { workspaceRoot?: string | null }
@@ -102,7 +103,7 @@ async function persistBoard(params: {
         error: null,
         lastLoadedAt,
       })
-    } catch {}
+    } catch { }
   } catch (error) {
     console.error('[kanban] Failed to persist board:', error)
     // Do not revert board here since we didn't optimistically set it
@@ -117,7 +118,7 @@ async function persistBoard(params: {
         error: String(error),
         lastLoadedAt,
       })
-    } catch {}
+    } catch { }
     throw error
   }
 }
@@ -147,7 +148,7 @@ export const createKanbanSlice: StateCreator<KanbanSlice, [], [], KanbanSlice> =
         const board = await readKanbanBoard(workspaceRoot)
         const ts = Date.now()
         setPartial({ kanbanBoard: board, kanbanLoading: false, kanbanLastLoadedAt: ts })
-        try { broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', { board, loading: false, saving: false, error: null, lastLoadedAt: ts }) } catch {}
+        try { broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', { board, loading: false, saving: false, error: null, lastLoadedAt: ts }) } catch { }
         return { ok: true, board }
       } catch (error) {
         console.error('[kanban] Load failed:', error)
@@ -155,7 +156,7 @@ export const createKanbanSlice: StateCreator<KanbanSlice, [], [], KanbanSlice> =
         try {
           const workspaceRoot = resolveWorkspaceRoot(get as () => KanbanStore)
           broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', { board: null, loading: false, saving: false, error: String(error) })
-        } catch {}
+        } catch { }
         return { ok: false }
       }
     },
@@ -166,7 +167,7 @@ export const createKanbanSlice: StateCreator<KanbanSlice, [], [], KanbanSlice> =
         const board = await readKanbanBoard(workspaceRoot)
         const ts = Date.now()
         setPartial({ kanbanBoard: board, kanbanError: null, kanbanLastLoadedAt: ts })
-        try { broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', { board, loading: false, saving: false, error: null, lastLoadedAt: ts }) } catch {}
+        try { broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', { board, loading: false, saving: false, error: null, lastLoadedAt: ts }) } catch { }
         return { ok: true, board }
       } catch (error) {
         console.error('[kanban] Refresh failed:', error)
@@ -174,7 +175,7 @@ export const createKanbanSlice: StateCreator<KanbanSlice, [], [], KanbanSlice> =
         try {
           const workspaceRoot = resolveWorkspaceRoot(get as () => KanbanStore)
           broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', { board: (get() as any).kanbanBoard || null, loading: false, saving: false, error: String(error), lastLoadedAt: (get() as any).kanbanLastLoadedAt || null })
-        } catch {}
+        } catch { }
         return { ok: false }
       }
     },
@@ -397,6 +398,43 @@ export const createKanbanSlice: StateCreator<KanbanSlice, [], [], KanbanSlice> =
         await persistBoard({ board: updatedBoard, previous, get: get as () => KanbanStore, setPartial, workspaceId })
         return { ok: true, deleted: { epicId } }
       } catch (error) {
+        return { ok: false, error: String(error) }
+      }
+    },
+
+    async kanbanArchiveTasks({ olderThan, workspaceId }) {
+      const board = get().kanbanBoard
+      if (!board) return { ok: false, error: 'Board not loaded' }
+
+      const timestamp = Date.now()
+
+      // Find done tasks that were updated before the cutoff and aren't already archived
+      const tasksToArchive = board.tasks.filter(
+        (task) =>
+          task.status === 'done' &&
+          task.updatedAt < olderThan &&
+          !task.archived
+      )
+
+      if (tasksToArchive.length === 0) {
+        return { ok: true, archivedCount: 0 }
+      }
+
+      const previous = board
+      const updatedBoard: KanbanBoard = {
+        ...board,
+        tasks: board.tasks.map((task) =>
+          tasksToArchive.some((t) => t.id === task.id)
+            ? { ...task, archived: true, archivedAt: timestamp }
+            : task
+        ),
+      }
+
+      try {
+        await persistBoard({ board: updatedBoard, previous, get: get as () => KanbanStore, setPartial, workspaceId, immediate: true })
+        return { ok: true, archivedCount: tasksToArchive.length }
+      } catch (error) {
+        console.error('[kanban] archiveTasks failed:', error)
         return { ok: false, error: String(error) }
       }
     },

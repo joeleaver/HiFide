@@ -179,7 +179,9 @@ function createFlowRuntimeStore() {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const hotData: any = (import.meta as any).hot?.data || {}
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const __flowRuntimeStore: any = hotData.flowRuntimeStore || createFlowRuntimeStore()
+import { type StoreApi, type UseBoundStore } from 'zustand'
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const __flowRuntimeStore = (hotData.flowRuntimeStore || createFlowRuntimeStore()) as UseBoundStore<StoreApi<FlowRuntimeState>>
 
 export const useFlowRuntime = __flowRuntimeStore
 
@@ -200,30 +202,30 @@ export function initFlowRuntimeEvents(): void {
       }
     })
 
-    // 2) Then snapshot current runtime and seed state (race-proof)
-    ;(async () => {
-      try {
-        const active = await FlowService.getActive()
-        if (!Array.isArray(active) || active.length === 0) {
-          return
-        }
-        const rid = active[0]
-        const snap: any = await FlowService.getStatus(rid)
-        if (snap && !Array.isArray(snap)) {
-          const rt = useFlowRuntime.getState()
-          try { rt.setRequestId(rid) } catch {}
-          if (snap.status === 'waitingForInput') { try { rt.setStatus('waitingForInput') } catch {} }
-          if (Array.isArray(snap.activeNodeIds)) {
-            for (const nid of snap.activeNodeIds) {
-              try { rt.handleEvent({ type: 'nodeStart', nodeId: nid, requestId: rid } as any) } catch {}
+      // 2) Then snapshot current runtime and seed state (race-proof)
+      ; (async () => {
+        try {
+          const active = await FlowService.getActive()
+          if (!Array.isArray(active) || active.length === 0) {
+            return
+          }
+          const rid = active[0]
+          const snap: any = await FlowService.getStatus(rid)
+          if (snap && !Array.isArray(snap)) {
+            const rt = useFlowRuntime.getState()
+            try { rt.setRequestId(rid) } catch { }
+            if (snap.status === 'waitingForInput') { try { rt.setStatus('waitingForInput') } catch { } }
+            if (Array.isArray(snap.activeNodeIds)) {
+              for (const nid of snap.activeNodeIds) {
+                try { rt.handleEvent({ type: 'nodeStart', nodeId: nid, requestId: rid } as any) } catch { }
+              }
+            }
+            if (snap.pausedNodeId) {
+              try { rt.handleEvent({ type: 'waitingForInput', nodeId: snap.pausedNodeId, requestId: rid } as any) } catch { }
             }
           }
-          if (snap.pausedNodeId) {
-            try { rt.handleEvent({ type: 'waitingForInput', nodeId: snap.pausedNodeId, requestId: rid } as any) } catch {}
-          }
-        }
-      } catch {}
-    })()
+        } catch { }
+      })()
   } catch (e) {
     // Ignore subscribe failures; retry logic elsewhere will recover
   }
@@ -234,30 +236,30 @@ export async function refreshFlowRuntimeStatus(): Promise<void> {
     const active = await FlowService.getActive()
     if (!Array.isArray(active) || active.length === 0) {
       // No active flows – ensure clean stopped state
-      try { useFlowRuntime.getState().reset() } catch {}
+      try { useFlowRuntime.getState().reset() } catch { }
       return
     }
     const rid = active[0]
     const snap: any = await FlowService.getStatus(rid)
     if (snap && !Array.isArray(snap)) {
       const rt = useFlowRuntime.getState()
-      try { rt.setRequestId(rid) } catch {}
+      try { rt.setRequestId(rid) } catch { }
       if (snap.status === 'waitingForInput') {
-        try { rt.setStatus('waitingForInput') } catch {}
+        try { rt.setStatus('waitingForInput') } catch { }
         if (snap.pausedNodeId) {
-          try { rt.handleEvent({ type: 'waitingForInput', nodeId: snap.pausedNodeId, requestId: rid } as any) } catch {}
+          try { rt.handleEvent({ type: 'waitingForInput', nodeId: snap.pausedNodeId, requestId: rid } as any) } catch { }
         }
       } else if (snap.status === 'running') {
-        try { rt.setStatus('running') } catch {}
+        try { rt.setStatus('running') } catch { }
         if (Array.isArray(snap.activeNodeIds)) {
           for (const nid of snap.activeNodeIds) {
 
 
-            try { rt.handleEvent({ type: 'nodeStart', nodeId: nid, requestId: rid } as any) } catch {}
+            try { rt.handleEvent({ type: 'nodeStart', nodeId: nid, requestId: rid } as any) } catch { }
           }
         }
       } else {
-        try { rt.setStatus('stopped') } catch {}
+        try { rt.setStatus('stopped') } catch { }
       }
     }
   } catch (e) {
@@ -275,12 +277,12 @@ export function refreshFlowRuntimeStatusSoon(delayMs = 250): void {
 export async function refreshFlowRuntimeStatusWithRetry(_delays: number[] = [150, 300, 600]): Promise<void> {
   const rt = useFlowRuntime.getState()
   try {
-    try { rt.setIsHydrating(true) } catch {}
+    try { rt.setIsHydrating(true) } catch { }
     // Single-shot status refresh to avoid spamming flow.getActive with repeated retries.
     await refreshFlowRuntimeStatus()
   } catch (e) {
     // Ignore refresh failures; caller will see latest runtime status on next event.
   } finally {
-    try { rt.setIsHydrating(false) } catch {}
+    try { rt.setIsHydrating(false) } catch { }
   }
 }

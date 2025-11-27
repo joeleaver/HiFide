@@ -8,12 +8,26 @@ import path from 'node:path'
 import { BrowserWindow } from 'electron'
 
 import { redactOutput } from '../../utils/security'
-import { registerConnection, unregisterConnection, setConnectionWorkspace, setConnectionWindowId, getConnectionWorkspaceId, broadcastWorkspaceNotification, activeConnections, setConnectionSelectedSessionId, transitionConnectionPhase, type RpcConnection } from './broadcast'
+import {
+  activeConnections,
+  registerConnection,
+  unregisterConnection,
+  setConnectionWorkspace,
+  setConnectionWindowId,
+  setConnectionSelectedSessionId,
+  getConnectionWorkspaceId,
+  getConnectionSelectedSessionId,
+  transitionConnectionPhase,
+  getConnectionPhase,
+  incrementSnapshotVersion,
+  getSnapshotVersion,
+  broadcastWsNotification,
+} from './broadcast.js'
 import { sendWorkspaceSnapshot } from './snapshot'
 import * as agentPty from '../../services/agentPty'
-import { flowEvents } from '../../ipc/flows-v2/events'
+import { flowEvents } from '../../flow-engine/events'
+import { ServiceRegistry } from '../../services/base/ServiceRegistry'
 
-import { useMainStore } from '../../store/index'
 import { sessionSaver } from '../../store/utils/session-persistence'
 import { UiPayloadCache } from '../../core/uiPayloadCache'
 import { getWorkspaceIdForSessionId } from '../../utils/workspace-session'
@@ -24,6 +38,10 @@ import { listItems, createItem, updateItem, deleteItem } from '../../store/utils
 import { listWorkspaceFiles } from '../../store/utils/workspace-helpers'
 import { getKbIndexer, getIndexer } from '../../core/state'
 
+// Service handlers
+import { sessionHandlers, kanbanHandlers, providerHandlers, settingsHandlers, flowHandlers } from './service-handlers.js'
+import { getWorkspaceService, getAppService, getIndexingService, getToolsService } from '../../services/index.js'
+
 
 
 const require = createRequire(import.meta.url)
@@ -32,12 +50,13 @@ function broadcastFlowEvent(ev: any): void {
   try {
     const sid = (ev && typeof ev === 'object') ? (ev.sessionId || null) : null
     const wsFromSid = getWorkspaceIdForSessionId(sid)
-    const fallback = (useMainStore.getState() as any).workspaceRoot || null
+    const workspaceService = ServiceRegistry.get<any>('workspace')
+    const fallback = workspaceService?.getWorkspaceRoot() || null
     const target = wsFromSid || fallback
     if (target) {
       broadcastWorkspaceNotification(target, 'flow.event', ev)
     }
-  } catch {}
+  } catch { }
 }
 
 export interface WsBootstrap {
@@ -46,68 +65,26 @@ export interface WsBootstrap {
 }
 
 // Global flow.event forwarder: ensure renderers receive flow events regardless of when executeFlow was called
-// We attach once and forward all request-scoped events emitted by the scheduler
+// We attach ONCE to the 'broadcast' channel and forward all events to the renderer
+// This replaces the per-requestId listener pattern which was causing duplicate events
 try {
-  const forwardedRequestIds = new Set<string>()
-  // Legacy per-request wiring (kept for compatibility if other subsystems add listeners)
-  flowEvents.on('newListener', (eventName: string) => {
-    // Ignore internal EventEmitter events
-    if (eventName === 'newListener' || eventName === 'removeListener') return
-    if (typeof eventName !== 'string') return
-    if (forwardedRequestIds.has(eventName)) return
-
-    const listener = (event: any) => {
+  // Single global listener on the 'broadcast' channel - attached once at startup
+  flowEvents.on('broadcast', (event: any) => {
+    try {
+      const sanitized = JSON.parse(JSON.stringify(event))
+      broadcastFlowEvent(sanitized)
+    } catch (error) {
       try {
-        const sanitized = JSON.parse(JSON.stringify(event))
-        const payload = { requestId: eventName, ...sanitized }
-        broadcastFlowEvent(payload)
-      } catch (error) {
-        try {
-          broadcastFlowEvent({
-            requestId: eventName,
-            type: 'error',
-            error: 'Failed to serialize flow event'
-          })
-        } catch {}
-      }
+        const reqId = (event && typeof event === 'object' ? (event.requestId || 'unknown') : 'unknown')
+        broadcastFlowEvent({
+          requestId: reqId,
+          type: 'error',
+          error: 'Failed to serialize flow event'
+        })
+      } catch { }
     }
-
-    forwardedRequestIds.add(eventName)
-    flowEvents.on(eventName, listener)
-
-    // When all listeners for a requestId are removed (e.g., after cancel/done),
-
-  // New: listen to broadcast channel from flowEvents so we always forward events
-  try {
-    flowEvents.on('broadcast', (event: any) => {
-      try {
-        const sanitized = JSON.parse(JSON.stringify(event))
-        broadcastFlowEvent(sanitized)
-      } catch (error) {
-        try {
-          const reqId = (event && typeof event === 'object' ? (event.requestId || 'unknown') : 'unknown')
-          broadcastFlowEvent({
-            requestId: reqId,
-            type: 'error',
-            error: 'Failed to serialize flow event'
-          })
-        } catch {}
-      }
-    })
-  } catch {}
-    // allow forwarder re-attachment on the next start with the same requestId
-    flowEvents.on('removeListener', (removedEvent: string) => {
-      if (removedEvent === 'newListener' || removedEvent === 'removeListener') return
-      if (typeof removedEvent !== 'string') return
-      try {
-        if (flowEvents.listenerCount(removedEvent) === 0) {
-          forwardedRequestIds.delete(removedEvent)
-        }
-      } catch {}
-    })
-
   })
-} catch {}
+} catch { }
 
 // Minimal PTY interface
 type IPty = {
@@ -139,7 +116,7 @@ function createTerminalService(addMethod: (method: string, handler: (params: any
     const rows = opts.rows || 24
     const env = { ...process.env, ...(opts.env || {}) }
     const boundCwd = getConnectionWorkspaceId(connection)
-const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+    const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
 
     const ptyModule = loadPtyModule()
     if (!ptyModule) throw new Error('pty-unavailable')
@@ -152,10 +129,10 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       try {
         const { redacted } = redactOutput(data)
         connection.sendNotification('terminal.data', { sessionId, data: redacted })
-      } catch {}
+      } catch { }
     })
     p.onExit(({ exitCode }: { exitCode: number }) => {
-      try { connection.sendNotification('terminal.exit', { sessionId, exitCode }) } catch {}
+      try { connection.sendNotification('terminal.exit', { sessionId, exitCode }) } catch { }
       ptySessions.delete(sessionId)
     })
 
@@ -170,14 +147,14 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 
   addMethod('terminal.resize', async ({ sessionId, cols, rows }: { sessionId: string; cols: number; rows: number }) => {
     const s = ptySessions.get(sessionId)
-    if (s) try { s.p.resize(cols, rows) } catch {}
+    if (s) try { s.p.resize(cols, rows) } catch { }
     return { ok: !!s }
   })
 
   addMethod('terminal.dispose', async ({ sessionId }: { sessionId: string }) => {
     const s = ptySessions.get(sessionId)
     if (s) {
-      try { s.p.kill() } catch {}
+      try { s.p.kill() } catch { }
       ptySessions.delete(sessionId)
     }
     return { ok: true }
@@ -199,7 +176,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
       try {
         const tail = rec.state.ring.slice(-n)
         connection.sendNotification('terminal.data', { sessionId: sid, data: tail })
-      } catch {}
+      } catch { }
     }
     return { ok: true, sessionId: sid }
   })
@@ -234,244 +211,230 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   // Terminal UI state: list of tabs and active terminals
   addMethod('terminal.getTabs', async () => {
     try {
-      const st: any = useMainStore.getState()
-      const agentTabs = Array.isArray(st.agentTerminalTabs) ? st.agentTerminalTabs : []
-      const explorerTabs = Array.isArray(st.explorerTerminalTabs) ? st.explorerTerminalTabs : []
+      const { getTerminalService } = await import('../../services/index.js')
+      const terminalService = getTerminalService()
+
       return {
         ok: true,
-        agentTabs,
-        agentActive: st.agentActiveTerminal || null,
-        explorerTabs,
-        explorerActive: st.explorerActiveTerminal || null,
+        agentTabs: terminalService?.getAgentTerminalTabs() || [],
+        agentActive: terminalService?.getAgentActiveTerminal() || null,
+        explorerTabs: terminalService?.getExplorerTerminalTabs() || [],
+        explorerActive: terminalService?.getExplorerActiveTerminal() || null,
       }
     } catch (e) {
       return { ok: false, error: String(e) }
     }
   })
 
-	  // Terminal tab management RPCs
-	  addMethod('terminal.addTab', async ({ context }: { context: 'agent' | 'explorer' }) => {
-	    try {
-	      const st: any = useMainStore.getState()
-	      const id = typeof st.addTerminalTab === 'function' ? st.addTerminalTab(context) : null
-	      return { ok: true, tabId: id }
-	    } catch (e) {
-	      return { ok: false, error: String(e) }
-	    }
-	  })
+  // Terminal tab management RPCs
+  addMethod('terminal.addTab', async ({ context }: { context: 'agent' | 'explorer' }) => {
+    try {
+      const { getTerminalService } = await import('../../services/index.js')
+      const terminalService = getTerminalService()
+      const id = terminalService?.addTerminalTab(context) || null
+      return { ok: true, tabId: id }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-	  addMethod('terminal.removeTab', async ({ context, tabId }: { context: 'agent' | 'explorer'; tabId: string }) => {
-	    try {
-	      const st: any = useMainStore.getState()
-	      if (typeof st.removeTerminalTab === 'function') st.removeTerminalTab({ context, tabId })
-	      return { ok: true }
-	    } catch (e) {
-	      return { ok: false, error: String(e) }
-	    }
-	  })
+  addMethod('terminal.removeTab', async ({ context, tabId }: { context: 'agent' | 'explorer'; tabId: string }) => {
+    try {
+      const { getTerminalService } = await import('../../services/index.js')
+      const terminalService = getTerminalService()
+      terminalService?.removeTerminalTab({ context, tabId })
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-	  addMethod('terminal.setActive', async ({ context, tabId }: { context: 'agent' | 'explorer'; tabId: string }) => {
-	    try {
-	      const st: any = useMainStore.getState()
-	      if (typeof st.setActiveTerminal === 'function') st.setActiveTerminal({ context, tabId })
-	      return { ok: true }
-	    } catch (e) {
-	      return { ok: false, error: String(e) }
-	    }
-	  })
+  addMethod('terminal.setActive', async ({ context, tabId }: { context: 'agent' | 'explorer'; tabId: string }) => {
+    try {
+      const { getTerminalService } = await import('../../services/index.js')
+      const terminalService = getTerminalService()
+      terminalService?.setActiveTerminal({ context, tabId })
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-	  addMethod('terminal.restartAgent', async ({ tabId }: { tabId: string }) => {
-	    try {
-	      const st: any = useMainStore.getState()
-	      if (typeof st.restartAgentTerminal === 'function') await st.restartAgentTerminal({ tabId })
-	      return { ok: true }
-	    } catch (e) {
-	      return { ok: false, error: String(e) }
-	    }
-	  })
+  addMethod('terminal.restartAgent', async ({ tabId }: { tabId: string }) => {
+    try {
+      const { getTerminalService } = await import('../../services/index.js')
+      const terminalService = getTerminalService()
+      await terminalService?.restartAgentTerminal({ tabId })
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
 
 
-	  // Kanban RPCs
-	  addMethod('kanban.getBoard', async () => {
-	    try {
-	      const st: any = useMainStore.getState()
-	      return {
-	        ok: true,
-	        board: st.kanbanBoard || null,
-	        loading: !!st.kanbanLoading,
-	        saving: !!st.kanbanSaving,
-	        error: st.kanbanError || null,
-	        lastLoadedAt: st.kanbanLastLoadedAt || null,
-	      }
-	    } catch (e) {
-	      return { ok: false, error: String(e) }
-	    }
-	  })
+  // Kanban RPCs
+  addMethod('kanban.getBoard', async () => {
+    try {
+      return await kanbanHandlers.getBoard()
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-	  addMethod('kanban.load', async () => {
-	    try {
-	      const st: any = useMainStore.getState()
-	      const res = await st.kanbanLoad?.()
-	      return res || { ok: true }
-	    } catch (e) {
-	      return { ok: false, error: String(e) }
-	    }
-	  })
+  addMethod('kanban.load', async () => {
+    try {
+      return await kanbanHandlers.load()
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-	  addMethod('kanban.refresh', async () => {
-	    try {
-	      const st: any = useMainStore.getState()
-	      const res = await st.kanbanRefreshFromDisk?.()
-	      return res || { ok: true }
-	    } catch (e) {
-	      return { ok: false, error: String(e) }
-	    }
-	  })
+  addMethod('kanban.refresh', async () => {
+    try {
+      return await kanbanHandlers.refresh()
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-	  addMethod('kanban.save', async () => {
-	    try {
-	      const st: any = useMainStore.getState()
-	      const res = await st.kanbanSave?.()
-	      return res || { ok: true }
-	    } catch (e) {
-	      return { ok: false, error: String(e) }
-	    }
-	  })
+  addMethod('kanban.save', async () => {
+    try {
+      return await kanbanHandlers.save()
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-	  addMethod('kanban.createTask', async ({ input }: { input: { title: string; status?: string; epicId?: string | null; description?: string; assignees?: string[]; tags?: string[] } }) => {
-	    try {
-	      const st: any = useMainStore.getState()
-	      const task = await st.kanbanCreateTask?.(input)
-	      return { ok: !!task, task: task || null }
-	    } catch (e) {
-	      return { ok: false, error: String(e) }
-	    }
-	  })
+  addMethod('kanban.createTask', async ({ input }: { input: { title: string; status?: string; epicId?: string | null; description?: string; assignees?: string[]; tags?: string[] } }) => {
+    try {
+      return await kanbanHandlers.createTask(input)
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-	  addMethod('kanban.updateTask', async ({ taskId, patch }: { taskId: string; patch: any }) => {
-	    try {
-	      const st: any = useMainStore.getState()
-	      const task = await st.kanbanUpdateTask?.(taskId, patch)
-	      return { ok: !!task, task: task || null }
-	    } catch (e) {
-	      return { ok: false, error: String(e) }
-	    }
-	  })
+  addMethod('kanban.updateTask', async ({ taskId, patch }: { taskId: string; patch: any }) => {
+    try {
+      return await kanbanHandlers.updateTask(taskId, patch)
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-	  addMethod('kanban.deleteTask', async ({ taskId }: { taskId: string }) => {
-	    try {
-	      const st: any = useMainStore.getState()
-	      const res = await st.kanbanDeleteTask?.(taskId)
-	      return res || { ok: true }
-	    } catch (e) {
-	      return { ok: false, error: String(e) }
-	    }
-	  })
+  addMethod('kanban.deleteTask', async ({ taskId }: { taskId: string }) => {
+    try {
+      return await kanbanHandlers.deleteTask(taskId)
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-	  addMethod('kanban.moveTask', async ({ taskId, toStatus, toIndex }: { taskId: string; toStatus: string; toIndex: number }) => {
-	    try {
-	      const st: any = useMainStore.getState()
-	      const res = await st.kanbanMoveTask?.({ taskId, toStatus, toIndex })
-	      return res || { ok: true }
-	    } catch (e) {
-	      return { ok: false, error: String(e) }
-	    }
-	  })
+  addMethod('kanban.moveTask', async ({ taskId, toStatus, toIndex }: { taskId: string; toStatus: string; toIndex: number }) => {
+    try {
+      return await kanbanHandlers.moveTask(taskId, toStatus, toIndex)
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-	  addMethod('kanban.createEpic', async ({ input }: { input: { name: string; color?: string; description?: string } }) => {
-	    try {
-	      const st: any = useMainStore.getState()
-	      const epic = await st.kanbanCreateEpic?.(input)
-	      return { ok: !!epic, epic: epic || null }
-	    } catch (e) {
-	      return { ok: false, error: String(e) }
-	    }
-	  })
+  addMethod('kanban.createEpic', async ({ input }: { input: { name: string; color?: string; description?: string } }) => {
+    try {
+      return await kanbanHandlers.createEpic(input)
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-	  addMethod('kanban.updateEpic', async ({ epicId, patch }: { epicId: string; patch: any }) => {
-	    try {
-	      const st: any = useMainStore.getState()
-	      const epic = await st.kanbanUpdateEpic?.(epicId, patch)
-	      return { ok: !!epic, epic: epic || null }
-	    } catch (e) {
-	      return { ok: false, error: String(e) }
-	    }
-	  })
+  addMethod('kanban.updateEpic', async ({ epicId, patch }: { epicId: string; patch: any }) => {
+    try {
+      return await kanbanHandlers.updateEpic(epicId, patch)
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-	  addMethod('kanban.deleteEpic', async ({ epicId }: { epicId: string }) => {
-	    try {
-	      const st: any = useMainStore.getState()
-	      const res = await st.kanbanDeleteEpic?.(epicId)
-	      return res || { ok: true }
-	    } catch (e) {
-	      return { ok: false, error: String(e) }
-	    }
-	  })
+  addMethod('kanban.deleteEpic', async ({ epicId }: { epicId: string }) => {
+    try {
+      return await kanbanHandlers.deleteEpic(epicId)
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
+
+  addMethod('kanban.archiveTasks', async ({ olderThan }: { olderThan: number }) => {
+    try {
+      return await kanbanHandlers.archiveTasks(olderThan)
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
   // Flow execution service (JSON-RPC)
   addMethod('flow.start', async (_args: any = {}) => {
     try {
-      const st: any = useMainStore.getState()
-      // Prefer using the main store action which resets UI state and builds args
-      if (typeof st.flowInit === 'function') {
-        const res = await st.flowInit()
-        // If flowInit explicitly reports a failure, propagate it to the renderer
-        if (res && res.ok === false) {
-          return { ok: false, error: res.error || 'Flow could not be started', code: (res as any).code }
-        }
-        // Return the requestId if the store populated it
-        try {
-          const ns: any = useMainStore.getState()
-          const rid = ns?.feRequestId
-          if (rid) return { ok: true, requestId: rid }
-        } catch {}
-        return { ok: true }
-      }
-
-      // Fallback: build minimal args from store and execute directly (workspace-scoped)
+      // Build args from services and execute directly (workspace-scoped)
       const bound = getConnectionWorkspaceId(connection)
       if (!bound) return { ok: false, error: 'no-workspace' }
-      const currentId = typeof st.getCurrentIdFor === 'function' ? st.getCurrentIdFor({ workspaceId: bound }) : null
+
+      // Get current session
+      const sessionService = ServiceRegistry.get<any>('session')
+      const currentId = sessionService?.getCurrentIdFor({ workspaceId: bound }) || null
       if (!currentId) return { ok: false, error: 'no-current-session' }
+
       const requestId = currentId || `flow-init-${Date.now()}`
-      const nodes = st.feNodes || []
-      const edges = st.feEdges || []
+
+      // Get flow graph
+      const flowGraphService = ServiceRegistry.get<any>('flowGraph')
+      const graph = flowGraphService?.getGraph() || { nodes: [], edges: [] }
+      const nodes = graph.nodes || []
+      const edges = graph.edges || []
       if (!nodes.length) return { ok: false, error: 'no-flow-loaded' }
 
       const { reactFlowToFlowDefinition } = await import('../../services/flowConversion.js')
       const flowDef = reactFlowToFlowDefinition(nodes, edges, 'editor-current')
 
-      const list = typeof st.getSessionsFor === 'function' ? st.getSessionsFor({ workspaceId: bound }) : []
+      // Get session context
+      const list = sessionService?.getSessionsFor({ workspaceId: bound }) || []
       const session = Array.isArray(list) ? list.find((s: any) => s.id === currentId) : null
       const initialContext = session?.currentContext
+      if (!initialContext) return { ok: false, error: 'no-session-context' }
 
-      const pricingConfig = st.pricingConfig
+      // Get pricing config
+      const settingsService = ServiceRegistry.get<any>('settings')
+      const pricingConfig = settingsService?.getPricingConfig() || {}
       const modelPricing = (pricingConfig?.[initialContext?.provider || ''] || {})[initialContext?.model || ''] || null
 
+      // Get flow config (redactor, budget, error detection)
+      const flowConfigService = ServiceRegistry.get<any>('flowConfig')
+      const config = flowConfigService?.getConfig() || {}
+
       const rules: string[] = []
-      if (st.feRuleEmails) rules.push('emails')
-      if (st.feRuleApiKeys) rules.push('apiKeys')
-      if (st.feRuleAwsKeys) rules.push('awsKeys')
-      if (st.feRuleNumbers16) rules.push('numbers16')
-      const maxUSD = (() => { const v = parseFloat(st.feBudgetUSD); return isNaN(v) ? undefined : v })()
+      if (config.feRuleEmails) rules.push('emails')
+      if (config.feRuleApiKeys) rules.push('apiKeys')
+      if (config.feRuleAwsKeys) rules.push('awsKeys')
+      if (config.feRuleNumbers16) rules.push('numbers16')
+      const maxUSD = (() => { const v = parseFloat(config.feBudgetUSD || ''); return isNaN(v) ? undefined : v })()
 
       const initArgs: any = {
         sessionId: currentId,
-
         requestId,
         flowDef,
         initialContext,
         workspaceId: bound || undefined,
         policy: {
-          redactor: { enabled: st.feRedactorEnabled, rules },
-          budgetGuard: { maxUSD, blockOnExceed: st.feBudgetBlock },
-          errorDetection: { enabled: st.feErrorDetectEnabled, blockOnFlag: st.feErrorDetectBlock, patterns: (st.feErrorDetectPatterns || '').split(/[\n,]/g).map((s: string) => s.trim()).filter(Boolean) },
+          redactor: { enabled: config.feRedactorEnabled, rules },
+          budgetGuard: { maxUSD, blockOnExceed: config.feBudgetBlock },
+          errorDetection: {
+            enabled: config.feErrorDetectEnabled,
+            blockOnFlag: config.feErrorDetectBlock,
+            patterns: (config.feErrorDetectPatterns || '').split(/[\n,]/g).map((s: string) => s.trim()).filter(Boolean)
+          },
           pricing: modelPricing ? { inputCostPer1M: modelPricing.inputCostPer1M, outputCostPer1M: modelPricing.outputCostPer1M } : undefined,
         },
       }
 
-      const { executeFlow } = await import('../../ipc/flows-v2/index.js')
+      const { executeFlow } = await import('../../flow-engine/index.js')
       void executeFlow(undefined, initArgs).catch((_err) => {
         // Flow start failures are surfaced to the renderer via existing error handling
       })
@@ -493,7 +456,7 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
           const { listActiveFlows } = await import('../../ipc/flows-v2/index.js')
           const act = listActiveFlows()
           if (!act.includes(id)) id = undefined
-        } catch {}
+        } catch { }
       }
 
       // If not provided, choose the best target on the scheduler side:
@@ -510,43 +473,52 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
             const act = listActiveFlows()
             if (Array.isArray(act) && act.length === 1) id = act[0]
           }
-        } catch {}
+        } catch { }
 
-      // Persist user message into the current session before resuming (workspace-scoped)
-      try {
-        const st: any = useMainStore.getState()
-        const bound = getConnectionWorkspaceId(connection)
-        if (!bound) throw new Error('no-workspace')
-        const sid = typeof st.getCurrentIdFor === 'function' ? st.getCurrentIdFor({ workspaceId: bound }) : null
-        if (sid && typeof userInput === 'string' && userInput.trim()) {
-          const msg = { type: 'message', id: `msg-${Date.now()}`, role: 'user', content: userInput, timestamp: Date.now() }
-          const list = typeof st.getSessionsFor === 'function' ? (st.getSessionsFor({ workspaceId: bound }) || []) : []
-          const idx = list.findIndex((sess: any) => sess.id === sid)
-          if (idx !== -1 && typeof st.setSessionsFor === 'function') {
-            const sess = list[idx]
-            const hasMessages = Array.isArray(sess.items) && sess.items.some((i: any) => i.type === 'message')
-            let nextTitle = sess.title
-            if (!hasMessages) {
-              const isInitial = String(nextTitle || '') === initialSessionTitleUtil(sess.createdAt)
-              if (isInitial) {
-                try { nextTitle = deriveSessionTitle(userInput, sess.createdAt) } catch {}
+        // Persist user message into the current session before resuming (workspace-scoped)
+        try {
+          const bound = getConnectionWorkspaceId(connection)
+          if (!bound) throw new Error('no-workspace')
+
+          const { getSessionService, getSessionTimelineService } = await import('../../services/index.js')
+          const sessionService = getSessionService()
+          const timelineService = getSessionTimelineService()
+
+          const sid = sessionService?.getCurrentIdFor({ workspaceId: bound })
+          if (sid && typeof userInput === 'string' && userInput.trim()) {
+            const msg = {
+              type: 'message' as const,
+              id: `msg-${Date.now()}`,
+              role: 'user' as const,
+              content: userInput,
+              timestamp: Date.now()
+            }
+
+            // Add message to timeline
+            timelineService?.addSessionItem({ workspaceId: bound, sessionId: sid, item: msg })
+
+            // Update session title if this is the first message
+            const sessions = sessionService?.getSessionsFor({ workspaceId: bound }) || []
+            const sess = sessions.find((s: any) => s.id === sid)
+            if (sess) {
+              const hasMessages = Array.isArray(sess.items) && sess.items.some((i: any) => i.type === 'message')
+              if (!hasMessages) {
+                const isInitial = String(sess.title || '') === initialSessionTitleUtil(sess.createdAt)
+                if (isInitial) {
+                  try {
+                    const nextTitle = deriveSessionTitle(userInput, sess.createdAt)
+                    sessionService?.renameSession({ workspaceId: bound, sessionId: sid, title: nextTitle })
+                  } catch { }
+                }
               }
             }
-            const items = [...(sess.items || []), msg]
-            const updated = { ...sess, title: nextTitle, items, updatedAt: Date.now(), lastActivityAt: Date.now() }
-            const nextList = list.slice(); nextList[idx] = updated
-            st.setSessionsFor({ workspaceId: bound, sessions: nextList })
-            try {
-              const fresh = (useMainStore.getState() as any).getSessionsFor?.({ workspaceId: bound }) || []
-              const saved = fresh.find((ss: any) => ss.id === sid)
-              if (saved) sessionSaver.save(saved)
-            } catch {}
+
+            // Broadcast notification
             try {
               broadcastWorkspaceNotification(bound, 'session.timeline.delta', { sessionId: sid, op: 'message', item: msg })
-            } catch {}
+            } catch { }
           }
-        }
-      } catch {}
+        } catch { }
 
       }
 
@@ -563,19 +535,13 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
     try {
       let id = requestId
 
-      // If no explicit id, prefer the store's last flow requestId
-      try {
-        const st: any = useMainStore.getState()
-        if (!id && st?.feRequestId) id = st.feRequestId
-      } catch {}
-
-      // As a final fallback, if exactly one active flow exists, cancel it
+      // If no explicit id, check if exactly one active flow exists and cancel it
       if (!id) {
         try {
           const { listActiveFlows } = await import('../../ipc/flows-v2/index.js')
           const active = listActiveFlows()
           if (Array.isArray(active) && active.length === 1) id = active[0]
-        } catch {}
+        } catch { }
       }
 
       if (!id) return { ok: false, error: 'no-request' }
@@ -619,13 +585,13 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 
   addMethod('flows.getTools', async () => {
     try {
+      const toolsService = ServiceRegistry.get<any>('tools')
       const allTools: any[] = (globalThis as any).__agentTools || []
-      const getCategory = useMainStore.getState().getToolCategory as any
 
       return allTools.map((tool: any) => ({
         name: tool.name,
         description: tool.description || '',
-        category: typeof getCategory === 'function' ? getCategory(tool.name) : 'other'
+        category: toolsService ? toolsService.getToolCategory(tool.name) : 'other'
       }))
     } catch (error: any) {
       return []
@@ -634,340 +600,294 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   // Session snapshot for initial hydration of timeline
   addMethod('session.getCurrent', async () => {
     try {
-      const st: any = useMainStore.getState()
       const bound = getConnectionWorkspaceId(connection)
       if (!bound) return null
-      const sid = typeof st.getCurrentIdFor === 'function' ? st.getCurrentIdFor({ workspaceId: bound }) : null
-      if (!sid) return null
-      const sessions = typeof st.getSessionsFor === 'function' ? (st.getSessionsFor({ workspaceId: bound }) || []) : []
-      const sess = sessions.find((s: any) => s.id === sid)
-      if (!sess) return null
-      return {
-        id: sess.id,
-        title: sess.title,
-        items: Array.isArray(sess.items) ? sess.items : [],
-        updatedAt: sess.updatedAt,
-        lastActivityAt: sess.lastActivityAt
-      }
+      return await sessionHandlers.getCurrent(bound)
     } catch (e: any) {
       return null
     }
   })
 
-      // Strict session snapshot for initial hydration of timeline (workspace-scoped only)
-      addMethod('session.getCurrentStrict', async () => {
-        try {
-          const st: any = useMainStore.getState()
-          const bound = getConnectionWorkspaceId(connection)
-          if (!bound) return null
-          const list = typeof st.getSessionsFor === 'function' ? st.getSessionsFor({ workspaceId: bound }) : []
-          const currentId = typeof st.getCurrentIdFor === 'function' ? st.getCurrentIdFor({ workspaceId: bound }) : null
-          if (!currentId) return null
-          const sess = (list || []).find((s: any) => s.id === currentId)
-          if (!sess) return null
-          return {
-            id: sess.id,
-            title: sess.title,
-            items: Array.isArray(sess.items) ? sess.items : [],
-            updatedAt: sess.updatedAt,
-            lastActivityAt: sess.lastActivityAt
-          }
-        } catch (e: any) {
-          return null
-        }
-      })
+  // Strict session snapshot for initial hydration of timeline (workspace-scoped only)
+  addMethod('session.getCurrentStrict', async () => {
+    try {
+      const bound = getConnectionWorkspaceId(connection)
+      if (!bound) return null
+      return await sessionHandlers.getCurrent(bound)
+    } catch (e: any) {
+      return null
+    }
+  })
 
 
-      // Sessions: list/select/new (lightweight, no timeline)
-      addMethod('session.list', async () => {
-        try {
-          const st: any = useMainStore.getState()
-          const bound = getConnectionWorkspaceId(connection)
-          if (!bound) return { ok: false, error: 'no-workspace' }
-          const list = typeof st.getSessionsFor === 'function' ? st.getSessionsFor({ workspaceId: bound }) : []
-          const sessions = (list || []).map((s: any) => ({ id: s.id, title: s.title }))
-          const currentId = typeof st.getCurrentIdFor === 'function' ? st.getCurrentIdFor({ workspaceId: bound }) : null
-          return { ok: true, sessions, currentId }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
+  // Sessions: list/select/new (lightweight, no timeline)
+  addMethod('session.list', async () => {
+    try {
+      const bound = getConnectionWorkspaceId(connection)
+      if (!bound) return { ok: false, error: 'no-workspace' }
+      return await sessionHandlers.list(bound)
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
 
-      addMethod('session.select', async ({ id }: { id: string }) => {
-        try {
-          const st: any = useMainStore.getState()
-          const bound = getConnectionWorkspaceId(connection)
-          if (!bound) return { ok: false, error: 'no-workspace' }
+  addMethod('session.select', async ({ id }: { id: string }) => {
+    try {
+      const bound = getConnectionWorkspaceId(connection)
+      if (!bound) return { ok: false, error: 'no-workspace' }
 
-          // Reset scheduler for this workspace before switching sessions
-          try {
-            if (st.workspaceRoot === bound) {
-              const isRunning = st.feStatus === 'running' || st.feStatus === 'waitingForInput'
-              if (isRunning && typeof st.feStop === 'function') {
-                await st.feStop()
-              }
-            }
-          } catch {}
-
-          // Workspace-scoped only - await to ensure save completes
-          await st.selectFor({ workspaceId: bound, id })
-
-          const next: any = useMainStore.getState()
-          const cur = (typeof next.getCurrentIdFor === 'function') ? next.getCurrentIdFor({ workspaceId: bound }) : null
-
-          // Single source of truth: record selection for this connection and notify
-          try { setConnectionSelectedSessionId(connection, cur || id) } catch {}
-          try { connection.sendNotification('session.selected', { id: cur || id }) } catch {}
-
-          // Also push the current list for this workspace so renderer doesn't maintain a separate SoT
-          try {
-            const list = (typeof next.getSessionsFor === 'function') ? next.getSessionsFor({ workspaceId: bound }) : []
-            const sessions = (list || []).map((s: any) => ({ id: s.id, title: s.title }))
-            connection.sendNotification('session.list.changed', { sessions, currentId: cur || id })
-          } catch {}
-
-          // Send full timeline snapshot and contexts for the newly selected session
-          try {
-            const list = (typeof next.getSessionsFor === 'function') ? next.getSessionsFor({ workspaceId: bound }) : []
-            const sess = Array.isArray(list) ? list.find((s: any) => s.id === (cur || id)) : null
-            const items = Array.isArray(sess?.items) ? sess.items : []
-            connection.sendNotification('session.timeline.snapshot', { sessionId: (cur || id), items })
-            const payload = {
-              mainContext: sess?.currentContext || null,
-              isolatedContexts: {}
-            }
-            connection.sendNotification('flow.contexts.changed', payload)
-          } catch {}
-
-          return { ok: true, currentId: cur || id }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      addMethod('session.new', async ({ title }: { title?: string } = {}) => {
-        try {
-          const st: any = useMainStore.getState()
-          const bound = getConnectionWorkspaceId(connection)
-          if (!bound) return { ok: false, error: 'no-workspace' }
-
-          // Reset scheduler before creating/selecting a new session
-          try {
-            if (st.workspaceRoot === bound) {
-              const isRunning = st.feStatus === 'running' || st.feStatus === 'waitingForInput'
-              if (isRunning && typeof st.feStop === 'function') {
-                await st.feStop()
-              }
-            }
-          } catch {}
-
-          // Save current session before creating new one
-          try {
-            if (st.workspaceRoot === bound && typeof st.saveCurrentSession === 'function') {
-              await st.saveCurrentSession(true)
-            }
-          } catch {}
-
-          // Workspace-scoped only
-          const id = st.newSessionFor({ workspaceId: bound, title })
-          const next: any = useMainStore.getState()
-          const list = (typeof next.getSessionsFor === 'function') ? next.getSessionsFor({ workspaceId: bound }) : []
-          const sessions = (list || []).map((s: any) => ({ id: s.id, title: s.title }))
-          const curId = (typeof next.getCurrentIdFor === 'function') ? next.getCurrentIdFor({ workspaceId: bound }) : id
-          // Record selection for this connection and push SoT notifications
-          try { setConnectionSelectedSessionId(connection, curId) } catch {}
-          try { connection.sendNotification('session.selected', { id: curId }) } catch {}
-          try { connection.sendNotification('session.list.changed', { sessions, currentId: curId }) } catch {}
-          try {
-            const sess = Array.isArray(list) ? list.find((s: any) => s.id === curId) : null
-            const items = Array.isArray(sess?.items) ? sess.items : []
-            connection.sendNotification('session.timeline.snapshot', { sessionId: curId, items })
-            connection.sendNotification('flow.contexts.changed', { mainContext: sess?.currentContext || null, isolatedContexts: {} })
-          } catch {}
-          return { ok: true, id, currentId: curId, sessions }
-
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      // Session: get current meta (id, title, lastUsedFlow)
-      addMethod('session.getCurrentMeta', async () => {
-        try {
-          const st: any = useMainStore.getState()
-          const bound = getConnectionWorkspaceId(connection)
-          if (!bound) return { ok: false, error: 'no-workspace' }
-          const currentId = typeof st.getCurrentIdFor === 'function' ? st.getCurrentIdFor({ workspaceId: bound }) : null
-          if (!currentId) return { ok: false, error: 'no-current-session' }
-          const list = typeof st.getSessionsFor === 'function' ? st.getSessionsFor({ workspaceId: bound }) : []
-          const sess = Array.isArray(list) ? list.find((s: any) => s.id === currentId) : null
-          if (!sess) return { ok: false, error: 'no-session' }
-          return { ok: true, id: sess.id, title: sess.title, lastUsedFlow: sess.lastUsedFlow || '', providerId: (sess.currentContext?.provider || ''), modelId: (sess.currentContext?.model || '') }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      // Session: set executed flow (stop current run then switch)
-      addMethod('session.setExecutedFlow', async ({ sessionId, flowId }: { sessionId: string; flowId: string }) => {
-        try {
-          const st: any = useMainStore.getState()
-          const bound = getConnectionWorkspaceId(connection)
-
-          if (st.workspaceRoot === bound) {
-            // Stop if running
-            const isRunning = st.feStatus === 'running' || st.feStatus === 'waitingForInput'
-            if (isRunning && typeof st.feStop === 'function') {
-              await st.feStop()
-            }
-
-            // Update session's lastUsedFlow (workspace-scoped)
-            if (typeof st.getSessionsFor === 'function' && typeof st.setSessionsFor === 'function') {
-              const list = st.getSessionsFor({ workspaceId: bound }) || []
-              const nextList = list.map((s: any) => (s.id === sessionId ? { ...s, lastUsedFlow: flowId, updatedAt: Date.now() } : s))
-              st.setSessionsFor({ workspaceId: bound, sessions: nextList })
+      // Reset scheduler for this workspace before switching sessions
+      try {
+        const workspaceService = getWorkspaceService()
+        const currentWorkspace = workspaceService?.getWorkspaceRoot()
+        if (currentWorkspace === bound) {
+          // Stop any running flow via flow-engine
+          const { getAllFlowSnapshots, cancelFlow } = await import('../../flow-engine/index.js')
+          const allFlows = getAllFlowSnapshots()
+          for (const flow of allFlows) {
+            if (flow.status === 'running' || flow.status === 'waitingForInput') {
+              await cancelFlow(flow.requestId)
             }
           }
-
-          return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
         }
-      })
+      } catch { }
 
-      // Session: set provider/model (session-scoped); update context immediately without stopping
-      addMethod('session.setProviderModel', async ({ sessionId, providerId, modelId }: { sessionId: string; providerId: string; modelId: string }) => {
-        try {
-          const st: any = useMainStore.getState()
-          const bound = getConnectionWorkspaceId(connection)
+      // Select session via service
+      await sessionHandlers.select(bound, id)
 
-          // Only mutate when this connection is bound to the current workspaceRoot
-          if (!bound || st.workspaceRoot !== bound) {
-            return { ok: false, error: 'workspace-mismatch' }
-          }
+      // Get updated session info
+      const sessionService = getSessionService()
+      const currentId = sessionService.getCurrentIdFor({ workspaceId: bound })
 
-          let updatedSess: any | null = null
+      // Single source of truth: record selection for this connection and notify
+      try { setConnectionSelectedSessionId(connection, currentId || id) } catch { }
+      try { connection.sendNotification('session.selected', { id: currentId || id }) } catch { }
 
-          if (typeof st.setSessionProviderModel === 'function') {
-            await st.setSessionProviderModel({ sessionId, provider: providerId, model: modelId })
-            // Re-read from store to build an accurate payload for this bound workspace/session
-            const fresh: any = useMainStore.getState()
-            const list = typeof fresh.getSessionsFor === 'function' ? (fresh.getSessionsFor({ workspaceId: bound }) || []) : []
-            updatedSess = Array.isArray(list) ? list.find((s: any) => s.id === sessionId) : null
-          } else if (typeof st.getSessionsFor === 'function' && typeof st.setSessionsFor === 'function') {
-            // Fallback for older stores: inline update by workspace
-            const list = st.getSessionsFor({ workspaceId: bound }) || []
-            const nextList = list.map((s: any) => (s.id === sessionId
-              ? { ...s, currentContext: { ...(s.currentContext || {}), provider: providerId, model: modelId }, updatedAt: Date.now() }
-              : s))
-            st.setSessionsFor({ workspaceId: bound, sessions: nextList })
-            updatedSess = nextList.find((s: any) => s.id === sessionId) || null
-          }
+      // Push the current list for this workspace
+      try {
+        const list = sessionService.getSessionsFor({ workspaceId: bound })
+        const sessions = list.map((s: any) => ({ id: s.id, title: s.title }))
+        connection.sendNotification('session.list.changed', { sessions, currentId: currentId || id })
+      } catch { }
 
-          // Proactively notify this connection so Context Inspector updates immediately,
-          // even if this workspace is not the currently active workspaceRoot for subscriptions.
-          try {
-            if (updatedSess) {
-              const payload = {
-                mainContext: updatedSess.currentContext || null,
-                isolatedContexts: {},
-              }
-              connection.sendNotification('flow.contexts.changed', payload)
-            }
-          } catch {}
-
-
-          try {
-            // Also update any active main flow scheduler whose requestId === sessionId
-            const { updateActiveFlowProviderModelForSession } = await import('../../ipc/flows-v2/index.js')
-            updateActiveFlowProviderModelForSession(sessionId, providerId, modelId)
-          } catch (e) {
-            try { console.warn('[ws] Failed to update active flow provider/model', e) } catch {}
-          }
-
-          return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
+      // Send full timeline snapshot and contexts for the newly selected session
+      try {
+        const list = sessionService.getSessionsFor({ workspaceId: bound })
+        const sess = list.find((s: any) => s.id === (currentId || id))
+        const items = Array.isArray(sess?.items) ? sess.items : []
+        connection.sendNotification('session.timeline.snapshot', { sessionId: (currentId || id), items })
+        const payload = {
+          mainContext: sess?.currentContext || null,
+          isolatedContexts: {}
         }
-      })
+        connection.sendNotification('flow.contexts.changed', payload)
+      } catch { }
 
+      return { ok: true, currentId: currentId || id }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
 
+  addMethod('session.new', async ({ title }: { title?: string } = {}) => {
+    try {
+      const bound = getConnectionWorkspaceId(connection)
+      if (!bound) return { ok: false, error: 'no-workspace' }
 
-      // Session: start a brand-new context (clear timeline + reset messageHistory)
-      addMethod('session.newContext', async () => {
-        try {
-          const st: any = useMainStore.getState()
-          const bound = getConnectionWorkspaceId(connection)
-
-          if (st.workspaceRoot === bound) {
-            if (typeof st.startNewContext === 'function') {
-              await st.startNewContext()
-            } else {
-              const running = st.feStatus === 'running' || st.feStatus === 'waitingForInput'
-              if (running && typeof st.feStop === 'function') {
-                await st.feStop()
-              }
-              ;(useMainStore as any).setState?.((s: any) => {
-                const ws = s.workspaceRoot || null
-                if (!ws) return {}
-                const prevList: any[] = (s.sessionsByWorkspace?.[ws] || [])
-                const cur: string | null = (s.currentIdByWorkspace?.[ws] ?? null)
-
-                const sessions = prevList.map((sess: any) => {
-                  if (sess.id !== cur) return sess
-                  const now = Date.now()
-                  return {
-                    ...sess,
-                    items: [],
-                    currentContext: { ...(sess.currentContext || {}), messageHistory: [] },
-                    lastActivityAt: now,
-                    updatedAt: now,
-                  }
-                })
-
-                const patch: any = { openExecutionBoxes: {}, feMainFlowContext: null, feIsolatedContexts: {} }
-                patch.sessionsByWorkspace = { ...(s.sessionsByWorkspace || {}), [ws]: sessions }
-                patch.currentIdByWorkspace = { ...(s.currentIdByWorkspace || {}), [ws]: cur }
-                return patch
-              })
-            }
-          } else if (bound && typeof st.getSessionsFor === 'function' && typeof st.setSessionsFor === 'function' && typeof st.getCurrentIdFor === 'function') {
-            const sid = st.getCurrentIdFor({ workspaceId: bound })
-            if (sid) {
-              const list = st.getSessionsFor({ workspaceId: bound }) || []
-              const now = Date.now()
-              const nextList = list.map((sess: any) => {
-                if (sess.id !== sid) return sess
-                return {
-                  ...sess,
-                  items: [],
-                  currentContext: { ...(sess.currentContext || {}), messageHistory: [] },
-                  lastActivityAt: now,
-                  updatedAt: now,
-                }
-              })
-              // Update per-workspace sessions for this bound (non-active) workspace
-              st.setSessionsFor({ workspaceId: bound, sessions: nextList })
-
-              // Actively notify this connection since store subscriptions only broadcast for the active workspace
-              try {
-                const updatedSess = nextList.find((s: any) => s.id === sid)
-                const items = Array.isArray(updatedSess?.items) ? updatedSess.items : []
-                connection.sendNotification('session.timeline.snapshot', { sessionId: sid, items })
-                const payload = {
-                  mainContext: updatedSess?.currentContext || null,
-                  isolatedContexts: {}
-                }
-                connection.sendNotification('flow.contexts.changed', payload)
-              } catch {}
+      // Reset scheduler before creating/selecting a new session
+      try {
+        const workspaceService = getWorkspaceService()
+        const currentWorkspace = workspaceService?.getWorkspaceRoot()
+        if (currentWorkspace === bound) {
+          // Stop any running flow via flow-engine
+          const { getAllFlowSnapshots, cancelFlow } = await import('../../flow-engine/index.js')
+          const allFlows = getAllFlowSnapshots()
+          for (const flow of allFlows) {
+            if (flow.status === 'running' || flow.status === 'waitingForInput') {
+              await cancelFlow(flow.requestId)
             }
           }
-
-          return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
         }
+      } catch { }
+
+      // Subscribe to model changes and broadcast to all clients
+      const providerServiceGlobal = ServiceRegistry.get<any>('provider')
+      providerServiceGlobal?.on('provider:models:changed', (data: any) => {
+        broadcastWsNotification('settings.models.changed', { models: data.modelsByProvider || {} })
+        broadcastWsNotification('settings.providerValid.changed', { providerValid: data.providerValid || {} })
       })
+
+      // Save current session before creating new one
+      try {
+        const sessionService = getSessionService()
+        const workspaceService = getWorkspaceService()
+        const currentWorkspace = workspaceService?.getWorkspaceRoot()
+        if (currentWorkspace === bound) {
+          await sessionService.saveCurrentSession(true)
+        }
+      } catch { }
+
+      // Create new session via service
+      const result = await sessionHandlers.newSession(bound, title)
+      if (!result.ok) return result
+
+      // Get updated session info
+      const sessionService = getSessionService()
+      const list = sessionService.getSessionsFor({ workspaceId: bound })
+      const sessions = list.map((s: any) => ({ id: s.id, title: s.title }))
+      const curId = sessionService.getCurrentIdFor({ workspaceId: bound }) || result.id
+
+      // Record selection for this connection and push SoT notifications
+      try { setConnectionSelectedSessionId(connection, curId) } catch { }
+      try { connection.sendNotification('session.selected', { id: curId }) } catch { }
+      try { connection.sendNotification('session.list.changed', { sessions, currentId: curId }) } catch { }
+      try {
+        const sess = list.find((s: any) => s.id === curId)
+        const items = Array.isArray(sess?.items) ? sess.items : []
+        connection.sendNotification('session.timeline.snapshot', { sessionId: curId, items })
+        connection.sendNotification('flow.contexts.changed', { mainContext: sess?.currentContext || null, isolatedContexts: {} })
+      } catch { }
+
+      return { ok: true, id: result.id, currentId: curId, sessions }
+
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  // Session: get current meta (id, title, lastUsedFlow)
+  addMethod('session.getCurrentMeta', async () => {
+    try {
+      const bound = getConnectionWorkspaceId(connection)
+      if (!bound) return { ok: false, error: 'no-workspace' }
+      return await sessionHandlers.getCurrentMeta(bound)
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  // Session: set executed flow (stop current run then switch)
+  addMethod('session.setExecutedFlow', async ({ sessionId, flowId }: { sessionId: string; flowId: string }) => {
+    try {
+      const bound = getConnectionWorkspaceId(connection)
+      const workspaceService = getWorkspaceService()
+      const currentWorkspace = workspaceService?.getWorkspaceRoot()
+
+      if (currentWorkspace === bound) {
+        // Stop any running flow via flow-engine
+        const { getAllFlowSnapshots, cancelFlow } = await import('../../flow-engine/index.js')
+        const allFlows = getAllFlowSnapshots()
+        for (const flow of allFlows) {
+          if (flow.status === 'running' || flow.status === 'waitingForInput') {
+            await cancelFlow(flow.requestId)
+          }
+        }
+      }
+
+      // Update session's lastUsedFlow via service
+      return await sessionHandlers.setExecutedFlow(sessionId, flowId)
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  // Session: set provider/model (session-scoped); update context immediately without stopping
+  addMethod('session.setProviderModel', async ({ sessionId, providerId, modelId }: { sessionId: string; providerId: string; modelId: string }) => {
+    try {
+      const bound = getConnectionWorkspaceId(connection)
+      const workspaceService = getWorkspaceService()
+      const currentWorkspace = workspaceService?.getWorkspaceRoot()
+
+      // Only mutate when this connection is bound to the current workspaceRoot
+      if (!bound || currentWorkspace !== bound) {
+        return { ok: false, error: 'workspace-mismatch' }
+      }
+
+      // Update via service
+      const result = await sessionHandlers.setProviderModel(sessionId, providerId, modelId)
+      if (!result.ok) return result
+
+      // Get updated session
+      const sessionService = getSessionService()
+      const list = sessionService.getSessionsFor({ workspaceId: bound })
+      const updatedSess = list.find((s: any) => s.id === sessionId)
+
+      // Proactively notify this connection so Context Inspector updates immediately
+      try {
+        if (updatedSess) {
+          const payload = {
+            mainContext: updatedSess.currentContext || null,
+            isolatedContexts: {},
+          }
+          connection.sendNotification('flow.contexts.changed', payload)
+        }
+      } catch { }
+
+      try {
+        // Also update any active main flow scheduler whose requestId === sessionId
+        const { updateActiveFlowProviderModelForSession } = await import('../../ipc/flows-v2/index.js')
+        updateActiveFlowProviderModelForSession(sessionId, providerId, modelId)
+      } catch (e) {
+        try { console.warn('[ws] Failed to update active flow provider/model', e) } catch { }
+      }
+
+      return { ok: true }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+
+
+  // Session: start a brand-new context (clear timeline + reset messageHistory)
+  addMethod('session.newContext', async () => {
+    try {
+      const bound = getConnectionWorkspaceId(connection)
+      if (!bound) return { ok: false, error: 'no-workspace' }
+
+      const workspaceService = getWorkspaceService()
+      const currentWorkspace = workspaceService?.getWorkspaceRoot()
+
+      // Stop flow if running
+      if (currentWorkspace === bound) {
+        // Stop any running flow via flow-engine
+        const { getAllFlowSnapshots, cancelFlow } = await import('../../flow-engine/index.js')
+        const allFlows = getAllFlowSnapshots()
+        for (const flow of allFlows) {
+          if (flow.status === 'running' || flow.status === 'waitingForInput') {
+            await cancelFlow(flow.requestId)
+          }
+        }
+      }
+
+      // Start new context via service
+      const result = await sessionHandlers.startNewContext()
+      if (!result.ok) return result
+
+      // Get updated session
+      const sessionService = getSessionService()
+      const sid = sessionService.getCurrentIdFor({ workspaceId: bound })
+      if (!sid) return { ok: true }
+
+      const list = sessionService.getSessionsFor({ workspaceId: bound })
+      const updatedSess = list.find((s: any) => s.id === sid)
+
+      // Notify this connection
+      try {
+        const items = Array.isArray(updatedSess?.items) ? updatedSess.items : []
+        connection.sendNotification('session.timeline.snapshot', { sessionId: sid, items })
+        const payload = {
+          mainContext: updatedSess?.currentContext || null,
+          isolatedContexts: {}
+        }
+        connection.sendNotification('flow.contexts.changed', payload)
+      } catch { }
+
+      return { ok: true }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
 
 
 
@@ -995,8 +915,8 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   // Knowledge Base: get item body
   addMethod('kb.getItemBody', async ({ id }: { id: string }) => {
     try {
-      const st: any = useMainStore.getState()
-      const baseDir = st?.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+      const workspaceService = ServiceRegistry.get<any>('workspace')
+      const baseDir = workspaceService?.getWorkspaceRoot() || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
       const found = await readById(baseDir, id)
       if (!found) return { ok: false, error: 'not-found' }
       const norm = normalizeMarkdown(found.body ?? '')
@@ -1010,13 +930,11 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   // Knowledge Base: index reload
   addMethod('kb.reloadIndex', async () => {
     try {
-      const st: any = useMainStore.getState()
-      const baseDir = st?.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
-      const items = await listItems(baseDir)
-      const map: Record<string, any> = {}
-      for (const it of items) map[it.id] = it
-      try { (useMainStore as any).setState?.({ kbItems: map }) } catch {}
-      return { ok: true, items: map }
+      const kbService = ServiceRegistry.get<any>('knowledgeBase')
+      if (!kbService) return { ok: false, error: 'knowledge base service not available' }
+      await kbService.kbReloadIndex()
+      const items = kbService.getItems()
+      return { ok: true, items }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
     }
@@ -1025,60 +943,11 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   // Knowledge Base: search
   addMethod('kb.search', async ({ query, tags, limit }: { query?: string; tags?: string[]; limit?: number }) => {
     try {
-      const st: any = useMainStore.getState()
-      const baseDir = st?.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
-      const qLower = String(query || '').toLowerCase().trim()
-      const idx = await getKbIndexer()
-      const st1 = idx.status()
-      if (!st1.ready || (st1.chunks ?? 0) === 0) {
-        try { await idx.rebuild(() => {}) } catch {}
-      }
-      const items = await listItems(baseDir)
-      const byRel: Record<string, any> = {}
-      for (const it of items) byRel[String(it.relPath).replace(/^\\?/, '')] = it
-      const k = Math.max(100, (typeof limit === 'number' ? limit : 50) * 3)
-      let sem = await idx.search(qLower || '', k)
-      if ((sem.chunks?.length || 0) === 0) {
-        try { await idx.rebuild(() => {}) } catch {}
-        sem = await idx.search(qLower || '', k)
-      }
-      const tagSet = new Set((tags || []).map((t: string) => String(t).toLowerCase()))
-      const hasAll = (entryTags: string[]) => {
-        if (!tagSet.size) return true
-        const lc = new Set((entryTags || []).map((t) => t.toLowerCase()))
-        for (const t of tagSet) if (!lc.has(t)) return false
-        return true
-      }
-      const stripPreamble = (s: string) => {
-        const ii = s.indexOf('\n\n'); return ii >= 0 ? s.slice(ii + 2) : s
-      }
-      const seen = new Set<string>()
-      const candidates: any[] = []
-      sem.chunks.forEach((c: any, i: number) => {
-        const p = String(c.path).replace(/^\\?/, '')
-        if (seen.has(p)) return
-        seen.add(p)
-        const meta = byRel[p]
-        if (!meta) return
-        if (!hasAll(meta.tags)) return
-        const baseScore = 1 - i / Math.max(1, sem.chunks.length)
-        const body = stripPreamble(String(c.text || ''))
-        const titleMatch = qLower && meta.title.toLowerCase().includes(qLower)
-        const literalMatch = qLower && body.toLowerCase().includes(qLower)
-        const tagBoost = Array.from(tagSet).filter((t) => (meta.tags || []).map((x: string) => x.toLowerCase()).includes(t)).length * 0.05
-        const score = baseScore + (titleMatch ? 0.3 : 0) + (literalMatch ? 0.15 : 0) + tagBoost
-        const excerpt = body.slice(0, 320)
-        candidates.push({ ...meta, excerpt, score })
-      })
-      candidates.sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-      let finalResults = candidates
-      if (finalResults.length === 0) {
-        try {
-          const raw: any = await import('../../store/utils/knowledgeBase')
-          finalResults = await raw.search(baseDir, { query: qLower, tags, limit: typeof limit === 'number' ? limit : 50 })
-        } catch {}
-      }
-      return { ok: true, results: finalResults.slice(0, typeof limit === 'number' ? limit : 50) }
+      const kbService = ServiceRegistry.get<any>('knowledgeBase')
+      if (!kbService) return { ok: false, error: 'knowledge base service not available' }
+      await kbService.kbSearch({ query, tags, limit })
+      const results = kbService.getSearchResults()
+      return { ok: true, results }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
     }
@@ -1087,11 +956,16 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   // Knowledge Base: create, update, delete
   addMethod('kb.createItem', async ({ title, description, tags, files }: { title: string; description: string; tags?: string[]; files?: string[] }) => {
     try {
-      const st: any = useMainStore.getState()
-      const baseDir = st?.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
-      const item = await createItem(baseDir, { title, description: normalizeMarkdown(description), tags, files })
-      try { (useMainStore as any).setState?.((s: any) => ({ kbItems: { ...(s?.kbItems || {}), [item.id]: item } })) } catch {}
-      return { ok: true, id: item.id, item }
+      const kbService = ServiceRegistry.get<any>('knowledgeBase')
+      if (!kbService) return { ok: false, error: 'knowledge base service not available' }
+      await kbService.kbCreateItem({ title, description, tags, files })
+      const result = kbService.getOpResult()
+      if (result && result.ok) {
+        const items = kbService.getItems()
+        const item = result.id ? items[result.id] : null
+        return { ok: true, id: result.id, item }
+      }
+      return { ok: false, error: result?.error || 'create failed' }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
     }
@@ -1099,12 +973,16 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 
   addMethod('kb.updateItem', async ({ id, patch }: { id: string; patch: Partial<{ title: string; description: string; tags: string[]; files: string[] }> }) => {
     try {
-      const st: any = useMainStore.getState()
-      const baseDir = st?.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
-      const item = await updateItem(baseDir, { id, patch: { ...patch, description: patch.description !== undefined ? normalizeMarkdown(patch.description as any) : undefined } as any })
-      if (!item) return { ok: false, error: 'not-found' }
-      try { (useMainStore as any).setState?.((s: any) => ({ kbItems: { ...(s?.kbItems || {}), [item.id]: item } })) } catch {}
-      return { ok: true, id: item.id, item }
+      const kbService = ServiceRegistry.get<any>('knowledgeBase')
+      if (!kbService) return { ok: false, error: 'knowledge base service not available' }
+      await kbService.kbUpdateItem({ id, patch })
+      const result = kbService.getOpResult()
+      if (result && result.ok) {
+        const items = kbService.getItems()
+        const item = result.id ? items[result.id] : null
+        return { ok: true, id: result.id, item }
+      }
+      return { ok: false, error: result?.error || 'update failed' }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
     }
@@ -1112,21 +990,14 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
 
   addMethod('kb.deleteItem', async ({ id }: { id: string }) => {
     try {
-      const st: any = useMainStore.getState()
-      const baseDir = st?.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
-      const ok = await deleteItem(baseDir, id)
-      if (ok) {
-        try {
-          (useMainStore as any).setState?.((s: any) => {
-            const map = { ...(s?.kbItems || {}) }
-            delete map[id]
-            return { kbItems: map }
-          })
-        } catch {}
+      const kbService = ServiceRegistry.get<any>('knowledgeBase')
+      if (!kbService) return { ok: false, error: 'knowledge base service not available' }
+      await kbService.kbDeleteItem({ id })
+      const result = kbService.getOpResult()
+      if (result && result.ok) {
         return { ok: true }
-      } else {
-        return { ok: false, error: 'not-found' }
       }
+      return { ok: false, error: result?.error || 'delete failed' }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
     }
@@ -1135,10 +1006,10 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   // Knowledge Base: refresh workspace file index
   addMethod('kb.refreshWorkspaceFileIndex', async ({ includeExts, max }: { includeExts?: string[]; max?: number } = {}) => {
     try {
-      const st: any = useMainStore.getState()
-      const baseDir = st?.workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
-      const files = await listWorkspaceFiles(baseDir, { includeExts, max })
-      try { (useMainStore as any).setState?.({ kbWorkspaceFiles: files }) } catch {}
+      const kbService = ServiceRegistry.get<any>('knowledgeBase')
+      if (!kbService) return { ok: false, error: 'knowledge base service not available' }
+      await kbService.kbRefreshWorkspaceFileIndex({ includeExts, max })
+      const files = kbService.getWorkspaceFiles()
       return { ok: true, files }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
@@ -1146,631 +1017,583 @@ const cwd = opts.cwd || boundCwd || process.env.HIFIDE_WORKSPACE_ROOT || process
   })
 
 
-      // Flow Editor: templates and graph management
-      addMethod('flowEditor.getTemplates', async () => {
+  // Flow Editor: templates and graph management
+  addMethod('flowEditor.getTemplates', async () => {
+    try {
+      const flowProfileService = ServiceRegistry.get<any>('flowProfile')
+      if (!flowProfileService) return { ok: false, error: 'flow profile service not available' }
+
+      // Ensure templates are loaded
+      const templates = flowProfileService.getTemplates()
+      if (templates.length === 0) {
         try {
-          // Ensure templates are loaded before responding (handles early renderer hydrate)
-          let st: any = useMainStore.getState()
-          if (!st.feTemplatesLoaded && typeof st.feLoadTemplates === 'function') {
-            try {
-              await st.feLoadTemplates()
-            } catch (e) {
-              // Ignore template load failures; UI can recover on demand
-            }
-            st = useMainStore.getState()
-          }
-          return {
-            ok: true,
-            templates: st.feAvailableTemplates || [],
-            templatesLoaded: !!st.feTemplatesLoaded,
-            selectedTemplate: st.feSelectedTemplate || '',
-            currentProfile: st.feCurrentProfile || '',
-            hasUnsavedChanges: !!st.feHasUnsavedChanges,
-          }
+          await flowProfileService.initialize()
         } catch (e) {
-          return { ok: false, error: String(e) }
+          // Ignore template load failures; UI can recover on demand
         }
+      }
+
+      return {
+        ok: true,
+        templates: flowProfileService.getTemplates(),
+        templatesLoaded: true,
+        selectedTemplate: flowProfileService.getSelectedTemplateId() || '',
+        currentProfile: '', // UI-specific state, not tracked in service
+        hasUnsavedChanges: false, // UI-specific state, not tracked in service
+      }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
+
+  addMethod('flowEditor.getGraph', async () => {
+    try {
+      const flowGraphService = ServiceRegistry.get<any>('flowGraph')
+      if (!flowGraphService) return { ok: false, error: 'flow graph service not available' }
+
+      const graph = flowGraphService.getGraph()
+      return {
+        ok: true,
+        nodes: graph.nodes,
+        edges: graph.edges,
+      }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
+
+  // Flow contexts snapshot (main + isolated)
+  // Canonical source is the current session's persisted context; ephemeral FE contexts are shown only while running
+  addMethod('flow.getContexts', async () => {
+    try {
+      const sessionService = ServiceRegistry.get<any>('session')
+      if (!sessionService) return { ok: false, error: 'session service not available' }
+
+      const bound = getConnectionWorkspaceId(connection)
+      if (!bound) return { ok: false, error: 'no workspace bound' }
+
+      const currentId = sessionService.getCurrentIdFor({ workspaceId: bound })
+      const list = sessionService.getSessionsFor({ workspaceId: bound })
+      const sess = Array.isArray(list) ? list.find((s: any) => s.id === currentId) : null
+
+      // For now, only return the session's persisted context
+      // Ephemeral flow execution contexts (feMainFlowContext, feIsolatedContexts) were UI-specific
+      // and should be tracked in the renderer or in a dedicated execution context service
+      const mainContext = sess?.currentContext || null
+
+      return {
+        ok: true,
+        mainContext,
+        isolatedContexts: {} // Ephemeral contexts not tracked in services yet
+      }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  // Flow cache operations
+  addMethod('flow.getNodeCache', async ({ nodeId }: { nodeId: string }) => {
+    try {
+      return await flowHandlers.getNodeCache(nodeId)
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('flow.clearNodeCache', async ({ nodeId }: { nodeId: string }) => {
+    try {
+      return await flowHandlers.clearNodeCache(nodeId)
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+
+
+  addMethod('flowEditor.setGraph', async ({ nodes, edges }: { nodes: any[]; edges: any[] }) => {
+    try {
+      const { getFlowGraphService } = await import('../../services/index.js')
+      const flowGraphService = getFlowGraphService()
+
+      const curGraph = flowGraphService?.getGraph() || { nodes: [], edges: [] }
+      const incomingEmpty = Array.isArray(nodes) && nodes.length === 0 && Array.isArray(edges) && edges.length === 0
+      if (incomingEmpty && (curGraph.nodes.length > 0 || curGraph.edges.length > 0)) {
+        // Ignore empty graph updates to prevent race overwriting during hydration
+        return { ok: false, ignored: true, reason: 'empty-graph-ignored' }
+      }
+
+      flowGraphService?.setGraph({ nodes, edges })
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
+
+  addMethod('flowEditor.loadTemplate', async ({ templateId }: { templateId: string }) => {
+    try {
+      const { getFlowProfileService } = await import('../../services/index.js')
+      const profileService = getFlowProfileService()
+
+      const profile = await profileService?.loadTemplate({ templateId })
+      if (!profile) {
+        return { ok: false, error: 'Template not found' }
+      }
+
+      return {
+        ok: true,
+        selectedTemplate: templateId,
+        nodes: profile.nodes,
+        edges: profile.edges
+      }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
+
+  addMethod('flowEditor.saveAsProfile', async ({ name, library, nodes, edges }: { name: string; library?: string; nodes: any[]; edges: any[] }) => {
+    try {
+      const { getFlowProfileService } = await import('../../services/index.js')
+      const profileService = getFlowProfileService()
+
+      await profileService?.saveProfile({
+        name,
+        library: (library as any) || 'user',
+        nodes,
+        edges
       })
 
-      addMethod('flowEditor.getGraph', async () => {
-        try {
-          const st: any = useMainStore.getState()
-          return {
-            ok: true,
-            nodes: Array.isArray(st.feNodes) ? st.feNodes : [],
-            edges: Array.isArray(st.feEdges) ? st.feEdges : [],
-          }
-        } catch (e) {
-          return { ok: false, error: String(e) }
+      return { ok: true, selectedTemplate: name }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
+
+  addMethod('flowEditor.deleteProfile', async ({ name }: { name: string }) => {
+    try {
+      const { getFlowProfileService } = await import('../../services/index.js')
+      const profileService = getFlowProfileService()
+
+      await profileService?.deleteProfile({ name })
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
+
+  addMethod('flowEditor.createNewFlowNamed', async ({ name }: { name: string }) => {
+    try {
+      // For now, creating a new flow is handled by the renderer
+      // The renderer will call saveAsProfile when ready
+      return { ok: true, selectedTemplate: name }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
+
+  addMethod('flowEditor.exportFlow', async ({ nodes, edges }: { nodes: any[]; edges: any[] }) => {
+    try {
+      const { getFlowProfileService } = await import('../../services/index.js')
+      const profileService = getFlowProfileService()
+
+      await profileService?.exportFlow({ nodes, edges })
+      const result = profileService?.getExportResult()
+      return { ok: true, result: result || null }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
+
+  addMethod('flowEditor.importFlow', async () => {
+    try {
+      const { getFlowProfileService } = await import('../../services/index.js')
+      const profileService = getFlowProfileService()
+
+      const profile = await profileService?.importFlow()
+      const result = profileService?.getImportResult()
+      return {
+        ok: true,
+        result: result || null,
+        profile: profile || null
+      }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
+
+  // UI: update window state (persisted in main store)
+  // UI: get full window state snapshot
+  addMethod('window.setContentSize', async ({ width, height }: { width: number; height: number }) => {
+    try {
+      const { BrowserWindow } = await import('electron')
+      const { getWindow } = await import('../../core/window.js')
+      const win = BrowserWindow.getFocusedWindow() || getWindow()
+      if (!win) return { ok: false, error: 'no-window' }
+      try { if (win.isMaximized && win.isMaximized()) { win.unmaximize?.() } } catch { }
+      const w = Math.max(300, Math.floor(Number(width) || 0))
+      const h = Math.max(300, Math.floor(Number(height) || 0))
+      try { (win as any).setContentSize?.(w, h, true) } catch { }
+      return { ok: true, width: w, height: h }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  // Window control handlers via WebSocket JSON-RPC
+  addMethod('window.minimize', async () => {
+    try {
+      const { BrowserWindow } = await import('electron')
+      const { getWindow } = await import('../../core/window.js')
+      const win = BrowserWindow.getFocusedWindow() || getWindow()
+      try { win?.minimize?.() } catch { }
+      return { ok: true }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('window.toggleMaximize', async () => {
+    try {
+      const { BrowserWindow } = await import('electron')
+      const { getWindow } = await import('../../core/window.js')
+      const win = BrowserWindow.getFocusedWindow() || getWindow()
+      if (!win) return { ok: false, error: 'no-window' }
+      try {
+        if (win.isMaximized?.()) {
+          try { win.unmaximize?.() } catch { }
+        } else {
+          try { win.maximize?.() } catch { }
         }
-      })
+        return { ok: true, isMaximized: !!win.isMaximized?.() }
+      } catch (e) {
+        return { ok: false, error: String(e) }
+      }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
 
-      // Flow contexts snapshot (main + isolated)
-      // Canonical source is the current session's persisted context; ephemeral FE contexts are shown only while running
-      addMethod('flow.getContexts', async () => {
-        try {
-          const st: any = useMainStore.getState()
-          const bound = getConnectionWorkspaceId(connection)
-          const currentId = bound && typeof st.getCurrentIdFor === 'function' ? st.getCurrentIdFor({ workspaceId: bound }) : null
-          const list = bound && typeof st.getSessionsFor === 'function' ? st.getSessionsFor({ workspaceId: bound }) : []
-          const sess = Array.isArray(list) ? list.find((s: any) => s.id === currentId) : null
-          const running = st.feStatus === 'running' || st.feStatus === 'waitingForInput'
-          const mainContext = (sess && sess.currentContext)
-            ? sess.currentContext
-            : (running ? (st.feMainFlowContext || null) : null)
-          const isolatedContexts = running ? (st.feIsolatedContexts || {}) : {}
-          return {
-            ok: true,
-            mainContext: mainContext || null,
-            isolatedContexts
-          }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
+  // Alias: window.maximize -> same behavior as toggleMaximize for convenience
+  addMethod('window.maximize', async () => {
+    try {
+      const { BrowserWindow } = await import('electron')
+      const { getWindow } = await import('../../core/window.js')
+      const win = BrowserWindow.getFocusedWindow() || getWindow()
+      if (!win) return { ok: false, error: 'no-window' }
+      try {
+        if (win.isMaximized?.()) {
+          try { win.unmaximize?.() } catch { }
+        } else {
+          try { win.maximize?.() } catch { }
         }
-      })
-
-      // Flow cache operations
-      addMethod('flow.getNodeCache', async ({ nodeId }: { nodeId: string }) => {
-        try {
-          const st: any = useMainStore.getState()
-          const fn = typeof st.getNodeCache === 'function' ? st.getNodeCache : undefined
-          const cache = fn ? fn(nodeId) : undefined
-          return { ok: true, cache }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      addMethod('flow.clearNodeCache', async ({ nodeId }: { nodeId: string }) => {
-        try {
-          const st: any = useMainStore.getState()
-          if (typeof st.clearNodeCache === 'function') await st.clearNodeCache(nodeId)
-          return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
+        return { ok: true, isMaximized: !!win.isMaximized?.() }
+      } catch (e) {
+        return { ok: false, error: String(e) }
+      }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
 
 
+  addMethod('window.close', async () => {
+    try {
+      const { BrowserWindow } = await import('electron')
+      const { getWindow } = await import('../../core/window.js')
+      const win = BrowserWindow.getFocusedWindow() || getWindow()
+      try { win?.close?.() } catch { }
+      return { ok: true }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
 
-      addMethod('flowEditor.setGraph', async ({ nodes, edges }: { nodes: any[]; edges: any[] }) => {
-        try {
-          const st: any = useMainStore.getState()
-          const curNodes = Array.isArray(st.feNodes) ? st.feNodes : []
-          const curEdges = Array.isArray(st.feEdges) ? st.feEdges : []
-          const incomingEmpty = Array.isArray(nodes) && nodes.length === 0 && Array.isArray(edges) && edges.length === 0
-          if (incomingEmpty && (curNodes.length > 0 || curEdges.length > 0)) {
-            // Ignore empty graph updates to prevent race overwriting during hydration
-            return { ok: false, ignored: true, reason: 'empty-graph-ignored' }
-          }
-          if (typeof st.feSetNodes === 'function') st.feSetNodes({ nodes })
-          if (typeof st.feSetEdges === 'function') st.feSetEdges({ edges })
-          return { ok: true }
-        } catch (e) {
-          return { ok: false, error: String(e) }
-        }
-      })
+  addMethod('ui.getWindowState', async () => {
+    try {
+      const { getUiService } = await import('../../services/index.js')
+      const uiService = getUiService()
+      return { ok: true, windowState: uiService.getWindowState() }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-      addMethod('flowEditor.loadTemplate', async ({ templateId }: { templateId: string }) => {
-        try {
-          const st: any = useMainStore.getState()
-          if (typeof st.feLoadTemplate === 'function') {
-            await st.feLoadTemplate({ templateId })
-          }
-          const ns: any = useMainStore.getState()
-          return { ok: true, selectedTemplate: ns.feSelectedTemplate || templateId }
-        } catch (e) {
-          return { ok: false, error: String(e) }
-        }
-      })
+  // App boot status snapshot
+  addMethod('app.getBootStatus', async () => {
+    try {
+      const appService = getAppService()
+      const state = appService.getState()
+      return { ok: true, appBootstrapping: !!state.appBootstrapping, startupMessage: state.startupMessage || null }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-      addMethod('flowEditor.saveAsProfile', async ({ name, library }: { name: string; library?: string }) => {
-        try {
-          const st: any = useMainStore.getState()
-          if (typeof st.feSaveAsProfile === 'function') {
-            await st.feSaveAsProfile({ name, library })
-          }
-          const ns: any = useMainStore.getState()
-          return { ok: true, selectedTemplate: ns.feSelectedTemplate || name }
-        } catch (e) {
-          return { ok: false, error: String(e) }
-        }
-      })
 
-      addMethod('flowEditor.deleteProfile', async ({ name }: { name: string }) => {
-        try {
-          const st: any = useMainStore.getState()
-          if (typeof st.feDeleteProfile === 'function') {
-            await st.feDeleteProfile({ name })
-          }
-          return { ok: true }
-        } catch (e) {
-          return { ok: false, error: String(e) }
-        }
-      })
+  addMethod('ui.updateWindowState', async ({ updates }: { updates: Record<string, any> }) => {
+    try {
+      const { getUiService } = await import('../../services/index.js')
+      const uiService = getUiService()
+      uiService.updateWindowState(updates)
+      uiService.persistWindowState(updates)
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-      addMethod('flowEditor.createNewFlowNamed', async ({ name }: { name: string }) => {
-        try {
-          const st: any = useMainStore.getState()
-          if (typeof st.feCreateNewFlowNamed === 'function') {
-            await st.feCreateNewFlowNamed({ name })
-          }
-          const ns: any = useMainStore.getState()
-          return { ok: true, selectedTemplate: ns.feSelectedTemplate || name }
-        } catch (e) {
-          return { ok: false, error: String(e) }
-        }
+  // UI: toggle a boolean window state key (no renderer read of current value)
+  addMethod('ui.toggleWindowState', async ({ key }: { key: string }) => {
+    try {
+      const { getUiService } = await import('../../services/index.js')
+      const uiService = getUiService()
+      const current = uiService.getWindowState()[key as keyof typeof uiService.getWindowState]
+      const next = !current
+      uiService.updateWindowState({ [key]: next })
+      uiService.persistWindowState({ [key]: next })
+      return { ok: true, value: next }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
-      addMethod('flowEditor.exportFlow', async () => {
-        try {
-          const st: any = useMainStore.getState()
-          if (typeof st.feExportFlow === 'function') {
-            await st.feExportFlow()
-          }
-          const ns: any = useMainStore.getState()
-          return { ok: true, result: ns.feExportResult || null }
-        } catch (e) {
-          return { ok: false, error: String(e) }
-        }
-      })
+  // Settings: snapshot of settings, provider, and indexing (lightweight)
+  addMethod('settings.get', async () => {
+    try {
+      return await settingsHandlers.get()
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
 
-      addMethod('flowEditor.importFlow', async () => {
-        try {
-          const st: any = useMainStore.getState()
-          if (typeof st.feImportFlow === 'function') {
-            await st.feImportFlow()
-          }
-          const ns: any = useMainStore.getState()
-          return { ok: true, result: ns.feImportResult || null }
-        } catch (e) {
-          return { ok: false, error: String(e) }
-        }
-      })
+  // Settings: set (partial) API keys in store
+  addMethod('settings.setApiKeys', async ({ apiKeys }: { apiKeys: Partial<any> }) => {
+    try {
+      return await settingsHandlers.setApiKeys(apiKeys)
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
 
-      })
+  // Settings: save keys (persist via store middleware)
+  addMethod('settings.saveKeys', async () => {
+    try {
+      return await settingsHandlers.saveKeys()
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
 
-      // UI: update window state (persisted in main store)
-      // UI: get full window state snapshot
-      addMethod('window.setContentSize', async ({ width, height }: { width: number; height: number }) => {
-        try {
-          const { BrowserWindow } = await import('electron')
-          const { getWindow } = await import('../../core/window.js')
-          const win = BrowserWindow.getFocusedWindow() || getWindow()
-          if (!win) return { ok: false, error: 'no-window' }
-          try { if (win.isMaximized && win.isMaximized()) { win.unmaximize?.() } } catch {}
-          const w = Math.max(300, Math.floor(Number(width) || 0))
-          const h = Math.max(300, Math.floor(Number(height) || 0))
-          try { (win as any).setContentSize?.(w, h, true) } catch {}
-          return { ok: true, width: w, height: h }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
+  // Settings: validate keys (updates providerValid and may refresh models)
+  addMethod('settings.validateKeys', async () => {
+    try {
+      return await settingsHandlers.validateKeys()
+    } catch (e: any) {
+      return { ok: false, failures: [e?.message || String(e)] }
+    }
+  })
 
-      // Window control handlers via WebSocket JSON-RPC
-      addMethod('window.minimize', async () => {
-        try {
-          const { BrowserWindow } = await import('electron')
-          const { getWindow } = await import('../../core/window.js')
-          const win = BrowserWindow.getFocusedWindow() || getWindow()
-          try { win?.minimize?.() } catch {}
-          return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
+  addMethod('settings.clearResults', async () => {
+    try {
+      return await settingsHandlers.clearResults()
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
 
-      addMethod('window.toggleMaximize', async () => {
-        try {
-          const { BrowserWindow } = await import('electron')
-          const { getWindow } = await import('../../core/window.js')
-          const win = BrowserWindow.getFocusedWindow() || getWindow()
-          if (!win) return { ok: false, error: 'no-window' }
+  // Settings: pricing operations
+  addMethod('settings.resetPricingToDefaults', async () => {
+    try {
+      return await settingsHandlers.resetPricingToDefaults()
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('settings.resetProviderPricing', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {
+    try {
+      return await settingsHandlers.resetProviderPricing(provider)
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('settings.setPricingForModel', async ({ provider, model, pricing }: { provider: string; model: string; pricing: any }) => {
+    try {
+      return await settingsHandlers.setPricingForModel(provider, model, pricing)
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+
+  // Provider/model management
+  addMethod('provider.refreshModels', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {
+    try {
+      return await providerHandlers.refreshModels(provider)
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('provider.setDefaultModel', async ({ provider, model }: { provider: string; model: string }) => {
+    try {
+      return await providerHandlers.setDefaultModel(provider, model)
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('provider.setAutoRetry', async ({ value }: { value: boolean }) => {
+    try {
+      return await providerHandlers.setAutoRetry(value)
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  // Fireworks allowlist helpers
+  addMethod('provider.fireworks.add', async ({ model }: { model: string }) => {
+    try {
+      return await providerHandlers.addFireworksModel(model)
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('provider.fireworks.remove', async ({ model }: { model: string }) => {
+    try {
+      return await providerHandlers.removeFireworksModel(model)
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+
+  // Provider selection RPCs for StatusBar
+  addMethod('provider.setSelectedProvider', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {
+    try {
+      return await providerHandlers.setSelectedProvider(provider)
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('provider.setSelectedModel', async ({ model }: { model: string }) => {
+    try {
+      return await providerHandlers.setSelectedModel(model)
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('provider.fireworks.loadDefaults', async () => {
+    try {
+      return await providerHandlers.loadFireworksDefaults()
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  // Indexing APIs
+  addMethod('idx.status', async () => {
+    try {
+      const indexingService = getIndexingService()
+      const state = indexingService.getState()
+      return {
+        ok: true,
+        status: state.idxStatus || null,
+        progress: state.idxProg || null,
+        autoRefresh: state.idxAutoRefresh || null,
+        lastRebuildAt: state.idxLastRebuildAt || 0,
+      }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  // Subscribe to progress updates for this connection
+  let idxSubscribed = false
+  addMethod('idx.subscribe', async () => {
+    if (idxSubscribed) return { ok: true }
+    idxSubscribed = true
+
+
+    try {
+      const indexer = await getIndexer()
+      try {
+        indexer.startWatch((p) => {
           try {
-            if (win.isMaximized?.()) {
-              try { win.unmaximize?.() } catch {}
-            } else {
-              try { win.maximize?.() } catch {}
+            const nextStatus = {
+              ready: p.ready,
+              chunks: p.chunks,
+              modelId: p.modelId,
+              dim: p.dim,
+              indexPath: p.indexPath,
             }
-            return { ok: true, isMaximized: !!win.isMaximized?.() }
-          } catch (e) {
-            return { ok: false, error: String(e) }
-          }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      // Alias: window.maximize -> same behavior as toggleMaximize for convenience
-      addMethod('window.maximize', async () => {
-        try {
-          const { BrowserWindow } = await import('electron')
-          const { getWindow } = await import('../../core/window.js')
-          const win = BrowserWindow.getFocusedWindow() || getWindow()
-          if (!win) return { ok: false, error: 'no-window' }
-          try {
-            if (win.isMaximized?.()) {
-              try { win.unmaximize?.() } catch {}
-            } else {
-              try { win.maximize?.() } catch {}
+            const nextProg = {
+              inProgress: p.inProgress,
+              phase: p.phase,
+              processedFiles: p.processedFiles,
+              totalFiles: p.totalFiles,
+              processedChunks: p.processedChunks,
+              totalChunks: p.totalChunks,
+              elapsedMs: p.elapsedMs,
             }
-            return { ok: true, isMaximized: !!win.isMaximized?.() }
-          } catch (e) {
-            return { ok: false, error: String(e) }
-          }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
+            connection.sendNotification('idx.progress', { status: nextStatus, progress: nextProg })
+          } catch { }
+        })
+      } catch { }
+    } catch { }
+    return { ok: true }
+  })
 
+  addMethod('idx.rebuild', async () => {
+    try {
+      const indexingService = getIndexingService()
+      return await indexingService.rebuildIndex()
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
 
-      addMethod('window.close', async () => {
-        try {
-          const { BrowserWindow } = await import('electron')
-          const { getWindow } = await import('../../core/window.js')
-          const win = BrowserWindow.getFocusedWindow() || getWindow()
-          try { win?.close?.() } catch {}
-          return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
+  addMethod('idx.clear', async () => {
+    try {
+      const indexingService = getIndexingService()
+      return await indexingService.clearIndex()
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
 
-      addMethod('ui.getWindowState', async () => {
-        try {
-          const st: any = useMainStore.getState()
-          const ws = st && typeof st.windowState === 'object' ? st.windowState : {}
-          return { ok: true, windowState: ws }
-        } catch (e) {
-          return { ok: false, error: String(e) }
-        }
-      })
+  addMethod('idx.cancel', async () => {
+    try {
+      const indexingService = getIndexingService()
+      await indexingService.cancelIndexing()
+      return { ok: true }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
 
-	      // App boot status snapshot
-	      addMethod('app.getBootStatus', async () => {
-	        try {
-	          const st: any = useMainStore.getState()
-	          return { ok: true, appBootstrapping: !!st.appBootstrapping, startupMessage: st.startupMessage || null }
-	        } catch (e) {
-	          return { ok: false, error: String(e) }
-	        }
-	      })
+  addMethod('idx.setAutoRefresh', async ({ config }: { config: Partial<any> }) => {
+    try {
+      const indexingService = getIndexingService()
+      indexingService.setIndexAutoRefresh({ config })
+      return { ok: true }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
 
-
-      addMethod('ui.updateWindowState', async ({ updates }: { updates: Record<string, any> }) => {
-        try {
-          const st: any = useMainStore.getState()
-          if (typeof st.updateWindowState === 'function') st.updateWindowState(updates)
-          if (typeof st.persistWindowState === 'function') st.persistWindowState({ updates })
-          return { ok: true }
-        } catch (e) {
-          return { ok: false, error: String(e) }
-        }
-      })
-
-      // UI: toggle a boolean window state key (no renderer read of current value)
-      addMethod('ui.toggleWindowState', async ({ key }: { key: string }) => {
-        try {
-          const st: any = useMainStore.getState()
-          const current = (st.windowState && typeof st.windowState === 'object') ? st.windowState[key] : undefined
-          const next = !current
-          if (typeof st.updateWindowState === 'function') st.updateWindowState({ [key]: next })
-          if (typeof st.persistWindowState === 'function') st.persistWindowState({ updates: { [key]: next } })
-          return { ok: true, value: next }
-        } catch (e) {
-          return { ok: false, error: String(e) }
-        }
-      })
-
-      // Settings: snapshot of settings, provider, and indexing (lightweight)
-      addMethod('settings.get', async () => {
-        try {
-          const st: any = useMainStore.getState()
-          return {
-            ok: true,
-            settingsApiKeys: st.settingsApiKeys || {},
-            settingsSaving: !!st.settingsSaving,
-            settingsSaved: !!st.settingsSaved,
-            providerValid: st.providerValid || {},
-            modelsByProvider: st.modelsByProvider || {},
-            defaultModels: st.defaultModels || {},
-            autoRetry: !!st.autoRetry,
-            fireworksAllowedModels: st.fireworksAllowedModels || [],
-            startupMessage: st.startupMessage || null,
-            pricingConfig: st.pricingConfig,
-            defaultPricingConfig: st.defaultPricingConfig,
-            // Added for StatusBar hydration
-            selectedProvider: st.selectedProvider || null,
-            selectedModel: st.selectedModel || null,
-          }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      // Settings: set (partial) API keys in store
-      addMethod('settings.setApiKeys', async ({ apiKeys }: { apiKeys: Partial<any> }) => {
-        try {
-          useMainStore.setState((s: any) => ({ settingsApiKeys: { ...(s.settingsApiKeys || {}), ...(apiKeys || {}) }, settingsSaved: false }))
-          return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      // Settings: save keys (persist via store middleware)
-      addMethod('settings.saveKeys', async () => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.saveSettingsApiKeys === 'function') {
-            await anyState.saveSettingsApiKeys()
-          }
-          return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      // Settings: validate keys (updates providerValid and may refresh models)
-      addMethod('settings.validateKeys', async () => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.validateApiKeys === 'function') {
-            const res = await anyState.validateApiKeys()
-            return res || { ok: true, failures: [] }
-          }
-          return { ok: true, failures: [] }
-        } catch (e: any) {
-          return { ok: false, failures: [e?.message || String(e)] }
-        }
-      })
-
-      addMethod('settings.clearResults', async () => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.clearSettingsResults === 'function') anyState.clearSettingsResults()
-          return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      // Settings: pricing operations
-      addMethod('settings.resetPricingToDefaults', async () => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.resetPricingToDefaults === 'function') anyState.resetPricingToDefaults()
-          const st: any = useMainStore.getState()
-          return { ok: true, pricingConfig: st.pricingConfig, defaultPricingConfig: st.defaultPricingConfig }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      addMethod('settings.resetProviderPricing', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.resetProviderPricing === 'function') anyState.resetProviderPricing(provider)
-          const st: any = useMainStore.getState()
-          return { ok: true, pricingConfig: st.pricingConfig }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      addMethod('settings.setPricingForModel', async ({ provider, model, pricing }: { provider: string; model: string; pricing: any }) => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.setPricingForModel === 'function') anyState.setPricingForModel({ provider, model, pricing })
-          const st: any = useMainStore.getState()
-          return { ok: true, pricingConfig: st.pricingConfig }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-
-      // Provider/model management
-      addMethod('provider.refreshModels', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.refreshModels === 'function') {
-            await anyState.refreshModels(provider)
-          }
-          const st = useMainStore.getState() as any
-          return { ok: true, models: (st.modelsByProvider || {})[provider] || [] }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      addMethod('provider.setDefaultModel', async ({ provider, model }: { provider: string; model: string }) => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.setDefaultModel === 'function') anyState.setDefaultModel({ provider, model })
-          return { ok: true }
-        } catch (e: any) {
-
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      addMethod('provider.setAutoRetry', async ({ value }: { value: boolean }) => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.setAutoRetry === 'function') anyState.setAutoRetry(value)
-          return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      // Fireworks allowlist helpers
-      addMethod('provider.fireworks.add', async ({ model }: { model: string }) => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.addFireworksModel === 'function') anyState.addFireworksModel({ model })
-          return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      addMethod('provider.fireworks.remove', async ({ model }: { model: string }) => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.removeFireworksModel === 'function') anyState.removeFireworksModel({ model })
-          return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-
-      // Provider selection RPCs for StatusBar
-      addMethod('provider.setSelectedProvider', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.setSelectedProvider === 'function') anyState.setSelectedProvider(provider)
-          const st: any = useMainStore.getState()
-          return { ok: true, selectedProvider: st.selectedProvider, selectedModel: st.selectedModel }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      addMethod('provider.setSelectedModel', async ({ model }: { model: string }) => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.setSelectedModel === 'function') anyState.setSelectedModel(model)
-          const st: any = useMainStore.getState()
-          return { ok: true, selectedModel: st.selectedModel }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      addMethod('provider.fireworks.loadDefaults', async () => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.loadFireworksRecommendedDefaults === 'function') anyState.loadFireworksRecommendedDefaults()
-          return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      // Indexing APIs
-      addMethod('idx.status', async () => {
-        try {
-          const st: any = useMainStore.getState()
-          return {
-            ok: true,
-            status: st.idxStatus || null,
-            progress: st.idxProg || null,
-            autoRefresh: st.idxAutoRefresh || null,
-            lastRebuildAt: st.idxLastRebuildAt || 0,
-          }
-        } catch (e: any) {
-
-
-
-
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      // Subscribe to progress updates for this connection
-      let idxSubscribed = false
-      addMethod('idx.subscribe', async () => {
-        if (idxSubscribed) return { ok: true }
-        idxSubscribed = true
-
-
-        try {
-          const indexer = await getIndexer()
-          try {
-            indexer.startWatch((p) => {
-              try {
-                const nextStatus = {
-                  ready: p.ready,
-                  chunks: p.chunks,
-                  modelId: p.modelId,
-                  dim: p.dim,
-                  indexPath: p.indexPath,
-                }
-                const nextProg = {
-                  inProgress: p.inProgress,
-                  phase: p.phase,
-                  processedFiles: p.processedFiles,
-                  totalFiles: p.totalFiles,
-                  processedChunks: p.processedChunks,
-                  totalChunks: p.totalChunks,
-                  elapsedMs: p.elapsedMs,
-                }
-                connection.sendNotification('idx.progress', { status: nextStatus, progress: nextProg })
-              } catch {}
-            })
-          } catch {}
-        } catch {}
-        return { ok: true }
-      })
-
-      addMethod('idx.rebuild', async () => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.rebuildIndex === 'function') {
-            return await anyState.rebuildIndex()
-          }
-          // Fallback direct call if action unavailable
-          const indexer = await getIndexer()
-          await indexer.rebuild(() => {})
-          const s = indexer.status()
-          return { ok: true, status: { ready: s.ready, chunks: s.chunks, modelId: s.modelId, dim: s.dim, indexPath: s.indexPath } }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      addMethod('idx.clear', async () => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.clearIndex === 'function') return await anyState.clearIndex()
-          const indexer = await getIndexer(); indexer.clear(); return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      addMethod('idx.cancel', async () => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.cancelIndexing === 'function') { await anyState.cancelIndexing(); return { ok: true } }
-          const indexer = await getIndexer(); indexer.cancel(); return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      addMethod('idx.setAutoRefresh', async ({ config }: { config: Partial<any> }) => {
-        try {
-          const anyState: any = useMainStore.getState()
-          if (typeof anyState.setIndexAutoRefresh === 'function') anyState.setIndexAutoRefresh({ config })
-          return { ok: true }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
-
-      addMethod('idx.search', async ({ query, limit }: { query: string; limit?: number }) => {
-        try {
-          const indexer = await getIndexer()
-          const res = await indexer.search(String(query || '').trim(), typeof limit === 'number' ? limit : 20)
-          return { ok: true, results: res?.chunks || [] }
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) }
-        }
-      })
+  addMethod('idx.search', async ({ query, limit }: { query: string; limit?: number }) => {
+    try {
+      const indexer = await getIndexer()
+      const res = await indexer.search(String(query || '').trim(), typeof limit === 'number' ? limit : 20)
+      return { ok: true, results: res?.chunks || [] }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
 
 
 
@@ -1798,26 +1621,26 @@ export function startWsBackend(): Promise<WsBootstrap> {
   wss = new WebSocketServer({ server: httpServer, host: '127.0.0.1' })
 
 
-  // Global: when main store determines workspaceRoot (e.g., after rehydrate/startup),
+  // Global: when workspace root is determined (e.g., after rehydrate/startup),
   // attach any unbound connections to that workspace and emit workspace.attached.
   try {
-    ;(useMainStore as any).subscribe?.(
-      (s: any) => s.workspaceRoot,
-      (next: any, prev: any) => {
-        try {
-          if (!next || next === prev) return
-          if (prev) return // only bind on initial boot (null/undefined -> value)
-          const ws = String(next)
-          for (const [conn, meta] of Array.from(activeConnections.entries())) {
-            if (!meta.workspaceId) {
-              try { setConnectionWorkspace(conn, ws) } catch {}
-              try { conn.sendNotification('workspace.attached', { windowId: meta.windowId || null, workspaceId: ws, root: ws }) } catch {}
-            }
+    const workspaceServiceGlobal = ServiceRegistry.get<any>('workspace')
+    let previousRoot: string | null = null
+    workspaceServiceGlobal?.on('workspace:changed', (root: string | null) => {
+      try {
+        if (!root || root === previousRoot) return
+        if (previousRoot) return // only bind on initial boot (null/undefined -> value)
+        previousRoot = root
+        const ws = String(root)
+        for (const [conn, meta] of Array.from(activeConnections.entries())) {
+          if (!meta.workspaceId) {
+            try { setConnectionWorkspace(conn, ws) } catch { }
+            try { conn.sendNotification('workspace.attached', { windowId: meta.windowId || null, workspaceId: ws, root: ws }) } catch { }
           }
-        } catch {}
-      }
-    )
-  } catch {}
+        }
+      } catch { }
+    })
+  } catch { }
 
   // Bind handlers (auth + services)
   wss.on('connection', (ws: WebSocket, req) => {
@@ -1857,7 +1680,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
                 workspaceId: meta.workspaceId || null,
               })
             }
-          } catch {}
+          } catch { }
           // Send as notification (no response expected)
           rpcServer.notify(method, params)
         }
@@ -1893,35 +1716,35 @@ export function startWsBackend(): Promise<WsBootstrap> {
                 params: params ?? null,
               })
             }
-          } catch {}
+          } catch { }
           return handler(params)
         })
       }
 
       // Add this connection to the broadcast registry early to avoid missing initial broadcasts
-      try { registerConnection(connection) } catch {}
+      try { registerConnection(connection) } catch { }
 
       // If a workspaceRoot is already known (e.g., restored on startup), bind immediately ONLY for the first window
       // Rationale: new windows should open to Welcome (unbound) until the user selects a folder
       try {
-        const st: any = useMainStore.getState()
-        const wsRoot = st.workspaceRoot || null
+        const workspaceService = ServiceRegistry.get<any>('workspace')
+        const wsRoot = workspaceService?.getWorkspaceRoot() || null
         if (wsRoot) {
           let anyBound = false
           try {
             for (const [, meta] of activeConnections.entries()) {
               if (meta?.workspaceId) { anyBound = true; break }
             }
-          } catch {}
+          } catch { }
           if (!anyBound) {
-            try { setConnectionWorkspace(connection, String(wsRoot)) } catch {}
+            try { setConnectionWorkspace(connection, String(wsRoot)) } catch { }
             try {
               const meta = activeConnections.get(connection) || {}
               connection.sendNotification('workspace.attached', { windowId: meta.windowId || null, workspaceId: String(wsRoot), root: String(wsRoot) })
-            } catch {}
+            } catch { }
           }
         }
-      } catch {}
+      } catch { }
 
       // Health check
 
@@ -1939,11 +1762,14 @@ export function startWsBackend(): Promise<WsBootstrap> {
 
       addMethod('view.get', async () => {
         try {
-          const st: any = useMainStore.getState()
+          const { getViewService } = await import('../../services/index.js')
+          const viewService = getViewService()
+
           // If this connection is not bound to a workspace, default to 'welcome'
           const bound = getConnectionWorkspaceId(connection)
           if (!bound) return { ok: true, currentView: 'welcome' }
-          return { ok: true, currentView: st.currentView || 'flow' }
+
+          return { ok: true, currentView: viewService.getCurrentView() }
         } catch (e: any) {
           return { ok: false, error: e?.message || String(e) }
         }
@@ -1951,10 +1777,10 @@ export function startWsBackend(): Promise<WsBootstrap> {
 
       addMethod('view.set', async ({ view }: { view: 'welcome' | 'flow' | 'explorer' | 'sourceControl' | 'knowledgeBase' | 'kanban' | 'settings' }) => {
         try {
-          const st: any = useMainStore.getState()
-          if (typeof st.setCurrentView === 'function') st.setCurrentView({ view })
-          const next: any = useMainStore.getState()
-          return { ok: true, currentView: next.currentView || view }
+          const { getViewService } = await import('../../services/index.js')
+          const viewService = getViewService()
+          viewService.setView(view)
+          return { ok: true, currentView: viewService.getCurrentView() }
         } catch (e: any) {
           return { ok: false, error: e?.message || String(e) }
         }
@@ -1962,13 +1788,16 @@ export function startWsBackend(): Promise<WsBootstrap> {
       // Explorer snapshot and mutations
       addMethod('explorer.getState', async () => {
         try {
-          const st: any = useMainStore.getState()
+          const { getExplorerService, getWorkspaceService } = await import('../../services/index.js')
+          const explorerService = getExplorerService()
+          const workspaceService = getWorkspaceService()
+
           return {
             ok: true,
-            workspaceRoot: st.workspaceRoot || null,
-            openFolders: Array.isArray(st.explorerOpenFolders) ? st.explorerOpenFolders : [],
-            childrenByDir: st.explorerChildrenByDir || {},
-            openedFile: st.openedFile || null,
+            workspaceRoot: workspaceService?.getWorkspaceRoot() || null,
+            openFolders: explorerService?.getOpenFolders() || [],
+            childrenByDir: explorerService?.getChildrenByDir() || {},
+            openedFile: explorerService?.getOpenedFile() || null,
           }
         } catch (e: any) {
           return { ok: false, error: e?.message || String(e) }
@@ -1977,13 +1806,14 @@ export function startWsBackend(): Promise<WsBootstrap> {
 
       addMethod('explorer.toggleFolder', async ({ path }: { path: string }) => {
         try {
-          const st: any = useMainStore.getState()
-          if (typeof st.toggleExplorerFolder === 'function') await st.toggleExplorerFolder(path)
-          const ns: any = useMainStore.getState()
+          const { getExplorerService } = await import('../../services/index.js')
+          const explorerService = getExplorerService()
+          await explorerService?.toggleFolder(path)
+
           return {
             ok: true,
-            openFolders: Array.isArray(ns.explorerOpenFolders) ? ns.explorerOpenFolders : [],
-            childrenByDir: ns.explorerChildrenByDir || {},
+            openFolders: explorerService?.getOpenFolders() || [],
+            childrenByDir: explorerService?.getChildrenByDir() || {},
           }
         } catch (e: any) {
           return { ok: false, error: e?.message || String(e) }
@@ -1992,10 +1822,11 @@ export function startWsBackend(): Promise<WsBootstrap> {
 
       addMethod('editor.openFile', async ({ path }: { path: string }) => {
         try {
-          const st: any = useMainStore.getState()
-          if (typeof st.openFile === 'function') await st.openFile(path)
-          const ns: any = useMainStore.getState()
-          return { ok: true, openedFile: ns.openedFile || null }
+          const { getExplorerService } = await import('../../services/index.js')
+          const explorerService = getExplorerService()
+          await explorerService?.openFile(path)
+
+          return { ok: true, openedFile: explorerService?.getOpenedFile() || null }
         } catch (e: any) {
           return { ok: false, error: e?.message || String(e) }
         }
@@ -2005,106 +1836,72 @@ export function startWsBackend(): Promise<WsBootstrap> {
 
       addMethod('session.getMetrics', async () => {
         try {
-          const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
-          const curRoot = (useMainStore.getState() as any).workspaceRoot || null
+          const workspaceService = getWorkspaceService()
+          const curRoot = workspaceService?.getWorkspaceRoot()
           if (bound && curRoot && bound !== curRoot) {
             return { ok: true, metrics: null }
           }
-          return { ok: true, metrics: st.agentMetrics || null }
+          // agentMetrics is dead code - never populated, always returns null
+          // The actual agent tools use their own session state management
+          // TODO: If agent metrics are needed in the future, implement via AgentMetricsService
+          return { ok: true, metrics: null }
         } catch (e: any) {
-
-
-	      // Strict usage/costs snapshot for TokensCostsPanel hydration (workspace-scoped only)
-	      addMethod('session.getUsageStrict', async () => {
-	        try {
-	          const st: any = useMainStore.getState()
-	          const bound = getConnectionWorkspaceId(connection)
-	          if (!bound) return { ok: false, error: 'no-workspace' }
-	          const sid = typeof st.getCurrentIdFor === 'function' ? st.getCurrentIdFor({ workspaceId: bound }) : null
-	          if (!sid) return { ok: true, usage: null }
-	          const list = typeof st.getSessionsFor === 'function' ? st.getSessionsFor({ workspaceId: bound }) : []
-	          const sess = (list || []).find((s: any) => s.id === sid)
-	          if (!sess) return { ok: true, usage: null }
-	          const tokenUsage = sess.tokenUsage || { total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }, byProvider: {}, byProviderAndModel: {} }
-	          const costs = sess.costs || { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }
-	          const requestsLog = Array.isArray(sess.requestsLog) ? sess.requestsLog : []
-	          return { ok: true, tokenUsage, costs, requestsLog }
-	        } catch (e: any) {
-	          return { ok: false, error: e?.message || String(e) }
-	        }
-	      })
-
           return { ok: false, error: e?.message || String(e) }
         }
       })
-
 
       // Strict usage/costs snapshot for TokensCostsPanel hydration (workspace-scoped only)
       addMethod('session.getUsageStrict', async () => {
         try {
-          const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
           if (!bound) return { ok: false, error: 'no-workspace' }
-          const sid = typeof st.getCurrentIdFor === 'function' ? st.getCurrentIdFor({ workspaceId: bound }) : null
-          if (!sid) return { ok: true, usage: null }
-          const list = typeof st.getSessionsFor === 'function' ? st.getSessionsFor({ workspaceId: bound }) : []
-          const sess = (list || []).find((s: any) => s.id === sid)
-          if (!sess) return { ok: true, usage: null }
-          const tokenUsage = sess.tokenUsage || { total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }, byProvider: {}, byProviderAndModel: {} }
-          const costs = sess.costs || { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }
-          const requestsLog = Array.isArray(sess.requestsLog) ? sess.requestsLog : []
-          return { ok: true, tokenUsage, costs, requestsLog }
+          return await sessionHandlers.getUsage(bound)
         } catch (e: any) {
           return { ok: false, error: e?.message || String(e) }
         }
       })
 
-	      // Current session usage/costs snapshot for TokensCostsPanel hydration
-	      addMethod('session.getUsage', async () => {
-	        try {
-	          const st: any = useMainStore.getState()
-	          const bound = getConnectionWorkspaceId(connection)
-	          if (!bound) return { ok: true, usage: null }
-	          const sid = typeof st.getCurrentIdFor === 'function' ? st.getCurrentIdFor({ workspaceId: bound }) : null
-	          if (!sid) return { ok: true, usage: null }
-	          const list = typeof st.getSessionsFor === 'function' ? (st.getSessionsFor({ workspaceId: bound }) || []) : []
-	          const sess = list.find((s: any) => s.id === sid)
-	          if (!sess) return { ok: true, usage: null }
-	          const tokenUsage = sess.tokenUsage || { total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }, byProvider: {}, byProviderAndModel: {} }
-	          const costs = sess.costs || { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }
-	          const requestsLog = Array.isArray(sess.requestsLog) ? sess.requestsLog : []
-	          return { ok: true, tokenUsage, costs, requestsLog }
-	        } catch (e: any) {
-	          return { ok: false, error: e?.message || String(e) }
-	        }
-	      })
+      // Current session usage/costs snapshot for TokensCostsPanel hydration
+      addMethod('session.getUsage', async () => {
+        try {
+          const bound = getConnectionWorkspaceId(connection)
+          if (!bound) return { ok: true, usage: null }
+          return await sessionHandlers.getUsage(bound)
+        } catch (e: any) {
+          return { ok: false, error: e?.message || String(e) }
+        }
+      })
 
 
       // Capability/boot handshake and optional workspace root
       addMethod('handshake.init', async (args: { windowId?: string; capabilities?: any; workspaceRoot?: string } = {}) => {
         try {
           if (args.windowId) {
-            try { setConnectionWindowId(connection, String(args.windowId)) } catch {}
+            try { setConnectionWindowId(connection, String(args.windowId)) } catch { }
           }
+
+          const workspaceService = ServiceRegistry.get<any>('workspace')
+
           if (args.workspaceRoot) {
             // Normalize and open requested workspace; allow joining or opening alongside others
             const requestedRaw = String(args.workspaceRoot)
             const requested = path.resolve(requestedRaw)
-            try { await useMainStore.getState().openFolder(requested) } catch (e) {}
-            try { setConnectionWorkspace(connection, requested) } catch {}
+            if (workspaceService) {
+              try { await workspaceService.openFolder(requested) } catch (e) { }
+            }
+            try { setConnectionWorkspace(connection, requested) } catch { }
           } else {
             // No explicit root passed. If no other bound connections exist, bind this one to current store root (first window).
             try {
               const othersBound = Array.from(activeConnections.entries()).some(([conn, meta]) => conn !== connection && !!meta.workspaceId)
-              if (!othersBound) {
-                const st: any = useMainStore.getState()
-                const curRoot = st.workspaceRoot || null
-                if (curRoot) try { setConnectionWorkspace(connection, String(curRoot)) } catch {}
+              if (!othersBound && workspaceService) {
+                const curRoot = workspaceService.getWorkspaceRoot()
+                if (curRoot) try { setConnectionWorkspace(connection, String(curRoot)) } catch { }
               }
-            } catch {}
+            } catch { }
           }
-        } catch {}
+        } catch { }
 
         // New: after binding, emit canonical workspace.attached for this connection
         try {
@@ -2113,34 +1910,34 @@ export function startWsBackend(): Promise<WsBootstrap> {
           if (ws) {
             connection.sendNotification('workspace.attached', { windowId: meta.windowId || null, workspaceId: ws, root: ws })
           }
-        } catch {}
+        } catch { }
 
 
         // After binding (if any), proactively announce the selected session and hydrate timeline for this connection
         try {
-          const st: any = useMainStore.getState()
+          const sessionService = ServiceRegistry.get<any>('session')
           const bound = getConnectionWorkspaceId(connection)
-          if (bound) {
-            const sessionsList = (typeof st.getSessionsFor === 'function') ? st.getSessionsFor({ workspaceId: bound }) : []
-            const currentId = (typeof st.getCurrentIdFor === 'function') ? st.getCurrentIdFor({ workspaceId: bound }) : null
+          if (bound && sessionService) {
+            const sessionsList = sessionService.getSessionsFor({ workspaceId: bound })
+            const currentId = sessionService.getCurrentIdFor({ workspaceId: bound })
             if (currentId) {
-              try { setConnectionSelectedSessionId(connection, currentId) } catch {}
-              try { connection.sendNotification('session.selected', { id: currentId }) } catch {}
+              try { setConnectionSelectedSessionId(connection, currentId) } catch { }
+              try { connection.sendNotification('session.selected', { id: currentId }) } catch { }
               try {
                 const sess = Array.isArray(sessionsList) ? sessionsList.find((s: any) => s.id === currentId) : null
                 const items = Array.isArray(sess?.items) ? sess.items : []
                 connection.sendNotification('session.timeline.snapshot', { sessionId: currentId, items })
                 connection.sendNotification('flow.contexts.changed', { mainContext: sess?.currentContext || null, isolatedContexts: {} })
-              } catch {}
+              } catch { }
             }
             try {
               const sessions = (sessionsList || []).map((s: any) => ({ id: s.id, title: s.title }))
               connection.sendNotification('session.list.changed', { sessions, currentId: currentId || null })
-            } catch {}
+            } catch { }
             // Tell the renderer that this workspace is fully ready for this connection as well
-            try { connection.sendNotification('workspace.ready', { root: bound }) } catch {}
+            try { connection.sendNotification('workspace.ready', { root: bound }) } catch { }
           }
-        } catch {}
+        } catch { }
 
         return {
           ok: true,
@@ -2154,11 +1951,12 @@ export function startWsBackend(): Promise<WsBootstrap> {
       // Strict atomic initial hydration snapshot (workspace-scoped only)
       addMethod('workspace.hydrateStrict', async () => {
         try {
-          const st: any = useMainStore.getState()
           const bound = getConnectionWorkspaceId(connection)
           if (!bound) return { ok: false, error: 'no-workspace' }
-          const sessionsList = (typeof st.getSessionsFor === 'function') ? st.getSessionsFor({ workspaceId: bound }) : []
-          const currentId = (typeof st.getCurrentIdFor === 'function') ? st.getCurrentIdFor({ workspaceId: bound }) : null
+
+          const sessionService = ServiceRegistry.get<any>('session')
+          const sessionsList = sessionService?.getSessionsFor({ workspaceId: bound }) || []
+          const currentId = sessionService?.getCurrentIdFor({ workspaceId: bound }) || null
           const sessions = (sessionsList || []).map((s: any) => ({ id: s.id, title: s.title }))
           const sess = Array.isArray(sessionsList) ? sessionsList.find((s: any) => s.id === currentId) : null
           const items = Array.isArray(sess?.items) ? sess.items : []
@@ -2194,7 +1992,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
                 break
               }
             }
-          } catch {}
+          } catch { }
 
           if (alreadyOpen) {
             try {
@@ -2203,7 +2001,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
               try {
                 const selfMeta = activeConnections.get(connection)
                 if (selfMeta?.windowId) selfWinId = parseInt(String(selfMeta.windowId), 10) || null
-              } catch {}
+              } catch { }
               try {
                 for (const [conn, meta] of activeConnections.entries()) {
                   if (
@@ -2217,29 +2015,29 @@ export function startWsBackend(): Promise<WsBootstrap> {
                     }
                   }
                 }
-              } catch {}
+              } catch { }
 
               if (existingWinId) {
                 try {
                   const bw = BrowserWindow.fromId(existingWinId)
-                  try { bw?.show() } catch {}
-                  try { if (bw?.isMinimized()) bw.restore() } catch {}
-                  try { bw?.focus() } catch {}
-                } catch {}
+                  try { bw?.show() } catch { }
+                  try { if (bw?.isMinimized()) bw.restore() } catch { }
+                  try { bw?.focus() } catch { }
+                } catch { }
               }
               if (selfWinId) {
                 const selfBw = BrowserWindow.fromId(selfWinId)
-                setTimeout(() => { try { selfBw?.close() } catch {} }, 50)
+                setTimeout(() => { try { selfBw?.close() } catch { } }, 50)
               }
-            } catch {}
+            } catch { }
             return { ok: true, focused: true }
           }
 
 
 
           // Bind this connection immediately and notify so UI can show loading state
-          try { setConnectionWorkspace(connection, requested) } catch {}
-          try { connection.sendNotification('workspace.bound', { root: requested }) } catch {}
+          try { setConnectionWorkspace(connection, requested) } catch { }
+          try { connection.sendNotification('workspace.bound', { root: requested }) } catch { }
           // New: emit canonical workspace.attached with windowId + workspaceId
           try {
             const meta = activeConnections.get(connection) || {}
@@ -2247,21 +2045,24 @@ export function startWsBackend(): Promise<WsBootstrap> {
 
             // Immediately push a sessions list snapshot (best effort) so renderer can flip hasHydratedList early
             try {
-              const st2: any = useMainStore.getState()
-              const list = typeof st2.getSessionsFor === 'function' ? (st2.getSessionsFor({ workspaceId: requested }) || []) : []
-              const sessions = list.map((s: any) => ({ id: s.id, title: s.title }))
-              const curId = typeof st2.getCurrentIdFor === 'function' ? st2.getCurrentIdFor({ workspaceId: requested }) : null
-              connection.sendNotification('session.list.changed', { sessions, currentId: curId || null })
-            } catch (e) {}
-          } catch {}
+              const sessionService = ServiceRegistry.get<any>('session')
+              if (sessionService) {
+                const list = sessionService.getSessionsFor({ workspaceId: requested }) || []
+                const sessions = list.map((s: any) => ({ id: s.id, title: s.title }))
+                const curId = sessionService.getCurrentIdFor({ workspaceId: requested })
+                connection.sendNotification('session.list.changed', { sessions, currentId: curId || null })
+              }
+            } catch (e) { }
+          } catch { }
 
           // Kick off heavy initialization in the background and report result to this connection only
-          ;(async () => {
+          ; (async () => {
             try {
               // Transition to loading phase
               transitionConnectionPhase(connection, 'loading')
 
-              const res = await useMainStore.getState().openFolder(requested)
+              const workspaceService = ServiceRegistry.get<any>('workspace')
+              const res = workspaceService ? await workspaceService.openFolder(requested) : { ok: false, error: 'workspace service not available' }
               if (res && res.ok) {
                 // Send complete workspace snapshot (replaces piecemeal notifications)
                 const snapshotSent = sendWorkspaceSnapshot(connection, requested)
@@ -2269,16 +2070,16 @@ export function startWsBackend(): Promise<WsBootstrap> {
                 if (snapshotSent) {
                   // Transition to ready phase
                   transitionConnectionPhase(connection, 'ready')
-                  try { connection.sendNotification('workspace.ready', { root: requested }) } catch {}
+                  try { connection.sendNotification('workspace.ready', { root: requested }) } catch { }
 
                   // Also update the selected session ID in connection metadata
                   try {
-                    const st2: any = useMainStore.getState()
-                    const curId = typeof st2.getCurrentIdFor === 'function' ? st2.getCurrentIdFor({ workspaceId: requested }) : null
+                    const sessionService = ServiceRegistry.get<any>('session')
+                    const curId = sessionService ? sessionService.getCurrentIdFor({ workspaceId: requested }) : null
                     if (curId) {
-                      try { setConnectionSelectedSessionId(connection, curId) } catch {}
+                      try { setConnectionSelectedSessionId(connection, curId) } catch { }
                     }
-                  } catch {}
+                  } catch { }
                 } else {
                   transitionConnectionPhase(connection, 'error')
                 }
@@ -2286,10 +2087,10 @@ export function startWsBackend(): Promise<WsBootstrap> {
 
 
               } else {
-                try { connection.sendNotification('workspace.error', { root: requested, error: (res && (res as any).error) || 'Failed to open workspace' }) } catch {}
+                try { connection.sendNotification('workspace.error', { root: requested, error: (res && (res as any).error) || 'Failed to open workspace' }) } catch { }
               }
             } catch (err: any) {
-              try { connection.sendNotification('workspace.error', { root: requested, error: err?.message || String(err) }) } catch {}
+              try { connection.sendNotification('workspace.error', { root: requested, error: err?.message || String(err) }) } catch { }
             }
           })()
 
@@ -2300,57 +2101,56 @@ export function startWsBackend(): Promise<WsBootstrap> {
         }
       })
 
-	      // Atomic initial hydration snapshot pulled by renderer after workspace.ready
-	      addMethod('workspace.hydrate', async () => {
-	        try {
-	          const st: any = useMainStore.getState()
-	          const bound = getConnectionWorkspaceId(connection)
-	          if (!bound) return { ok: false, error: 'no-workspace' }
+      // Atomic initial hydration snapshot pulled by renderer after workspace.ready
+      addMethod('workspace.hydrate', async () => {
+        try {
+          const sessionService = ServiceRegistry.get<any>('session')
+          const bound = getConnectionWorkspaceId(connection)
+          if (!bound) return { ok: false, error: 'no-workspace' }
+          if (!sessionService) return { ok: false, error: 'session service not available' }
 
-	          // Workspace-scoped only
-	          const sessionsList = (typeof st.getSessionsFor === 'function') ? st.getSessionsFor({ workspaceId: bound }) : []
-	          const currentId = (typeof st.getCurrentIdFor === 'function') ? st.getCurrentIdFor({ workspaceId: bound }) : null
+          // Workspace-scoped only
+          const sessionsList = sessionService.getSessionsFor({ workspaceId: bound })
+          const currentId = sessionService.getCurrentIdFor({ workspaceId: bound })
 
-	          const sessions = (sessionsList || []).map((s: any) => ({ id: s.id, title: s.title }))
-	          const sess = Array.isArray(sessionsList) ? sessionsList.find((s: any) => s.id === currentId) : null
-	          const items = Array.isArray(sess?.items) ? sess.items : []
+          const sessions = (sessionsList || []).map((s: any) => ({ id: s.id, title: s.title }))
+          const sess = Array.isArray(sessionsList) ? sessionsList.find((s: any) => s.id === currentId) : null
+          const items = Array.isArray(sess?.items) ? sess.items : []
 
-	          return {
-	            ok: true,
-	            workspace: { root: bound },
-	            sessions: { list: sessions, currentId },
-	            timeline: { sessionId: currentId, items },
-	            contexts: { mainContext: sess?.currentContext || null, isolatedContexts: {} },
-	          }
-	        } catch (e: any) {
-	          return { ok: false, error: e?.message || String(e) }
-	        }
-	      })
+          return {
+            ok: true,
+            workspace: { root: bound },
+            sessions: { list: sessions, currentId },
+            timeline: { sessionId: currentId, items },
+            contexts: { mainContext: sess?.currentContext || null, isolatedContexts: {} },
+          }
+        } catch (e: any) {
+          return { ok: false, error: e?.message || String(e) }
+        }
+      })
 
 
       // Strict hydration: only returns ok:true when sessions are present and a currentId exists
       addMethod('workspace.hydrateStrict', async () => {
         try {
-          const st: any = useMainStore.getState()
+          const sessionService = ServiceRegistry.get<any>('session')
           const bound = getConnectionWorkspaceId(connection)
           if (!bound) return { ok: false, error: 'no-workspace' }
+          if (!sessionService) return { ok: false, error: 'session service not available' }
 
-          let sessionsList = (typeof st.getSessionsFor === 'function') ? st.getSessionsFor({ workspaceId: bound }) : []
-          let currentId = (typeof st.getCurrentIdFor === 'function') ? st.getCurrentIdFor({ workspaceId: bound }) : null
+          let sessionsList = sessionService.getSessionsFor({ workspaceId: bound })
+          let currentId = sessionService.getCurrentIdFor({ workspaceId: bound })
 
           // Self-heal: if not ready, attempt to load from disk and/or create an initial session
           if (!(Array.isArray(sessionsList) && sessionsList.length > 0 && currentId)) {
-            if (typeof st.loadSessionsFor === 'function') {
-              try { await st.loadSessionsFor({ workspaceId: bound }) } catch {}
-              sessionsList = (typeof st.getSessionsFor === 'function') ? st.getSessionsFor({ workspaceId: bound }) : []
-              currentId = (typeof st.getCurrentIdFor === 'function') ? st.getCurrentIdFor({ workspaceId: bound }) : null
-            }
+            try { await sessionService.loadSessionsFor({ workspaceId: bound }) } catch { }
+            sessionsList = sessionService.getSessionsFor({ workspaceId: bound })
+            currentId = sessionService.getCurrentIdFor({ workspaceId: bound })
+
             if (!(Array.isArray(sessionsList) && sessionsList.length > 0 && currentId)) {
-              if (typeof st.ensureSessionPresentFor === 'function') {
-                try { st.ensureSessionPresentFor({ workspaceId: bound }) } catch {}
-                sessionsList = (typeof st.getSessionsFor === 'function') ? st.getSessionsFor({ workspaceId: bound }) : []
-                currentId = (typeof st.getCurrentIdFor === 'function') ? st.getCurrentIdFor({ workspaceId: bound }) : null
-              }
+              try { sessionService.ensureSessionPresentFor({ workspaceId: bound }) } catch { }
+              sessionsList = sessionService.getSessionsFor({ workspaceId: bound })
+              currentId = sessionService.getCurrentIdFor({ workspaceId: bound })
             }
           }
 
@@ -2374,27 +2174,28 @@ export function startWsBackend(): Promise<WsBootstrap> {
       })
 
 
-	      // Recent folders management
-	      addMethod('workspace.clearRecentFolders', async () => {
-	        try {
-	          const st: any = useMainStore.getState()
-	          if (typeof st.clearRecentFolders === 'function') st.clearRecentFolders()
-	          return { ok: true }
-	        } catch (e: any) {
-	          return { ok: false, error: e?.message || String(e) }
-	        }
-	      })
+      // Recent folders management
+      addMethod('workspace.clearRecentFolders', async () => {
+        try {
+          const workspaceService = ServiceRegistry.get<any>('workspace')
+          if (!workspaceService) return { ok: false, error: 'workspace service not available' }
+          workspaceService.clearRecentFolders()
+          return { ok: true }
+        } catch (e: any) {
+          return { ok: false, error: e?.message || String(e) }
+        }
+      })
 
-	      addMethod('workspace.listRecentFolders', async () => {
-	        try {
-	          const st: any = useMainStore.getState()
-	          const items = Array.isArray(st.recentFolders) ? st.recentFolders : []
-	          return { ok: true, recentFolders: items, folders: items }
-
-	        } catch (e: any) {
-	          return { ok: false, error: e?.message || String(e) }
-	        }
-	      })
+      addMethod('workspace.listRecentFolders', async () => {
+        try {
+          const workspaceService = ServiceRegistry.get<any>('workspace')
+          if (!workspaceService) return { ok: false, error: 'workspace service not available' }
+          const items = workspaceService.getRecentFolders()
+          return { ok: true, recentFolders: items, folders: items }
+        } catch (e: any) {
+          return { ok: false, error: e?.message || String(e) }
+        }
+      })
 
 
       addMethod('handshake.ping', async () => ({ pong: true }))
@@ -2403,213 +2204,126 @@ export function startWsBackend(): Promise<WsBootstrap> {
       createTerminalService(addMethod, connection)
 
       // Subscribe to terminal tabs changes for this connection only
-      const unsubTabs = (useMainStore as any).subscribe?.(
-        (s: any) => ({
-          agentTerminalTabs: s.agentTerminalTabs,
-          agentActiveTerminal: s.agentActiveTerminal,
-          explorerTerminalTabs: s.explorerTerminalTabs,
-          explorerActiveTerminal: s.explorerActiveTerminal,
-        }),
-        (next: any, prev: any) => {
-          try {
-            if (!next) return
-            // Only send terminal updates when this connection is bound to the active workspace
-            try {
-              const bound = getConnectionWorkspaceId(connection)
-              const curRoot = (useMainStore.getState() as any).workspaceRoot || null
-              if (!bound) return
-              if (bound && curRoot && bound !== curRoot) return
-            } catch {}
+      const terminalService = ServiceRegistry.get<any>('terminal')
+      const unsubTabs = terminalService?.on('terminal:tabs:changed', (data: any) => {
+        try {
+          // Only send terminal updates when this connection is bound to the active workspace
+          const bound = getConnectionWorkspaceId(connection)
+          const workspaceService = ServiceRegistry.get<any>('workspace')
+          const curRoot = workspaceService?.getWorkspaceRoot() || null
+          if (!bound) return
+          if (bound && curRoot && bound !== curRoot) return
 
-            const changed =
-              next.agentTerminalTabs !== prev.agentTerminalTabs ||
-              next.agentActiveTerminal !== prev.agentActiveTerminal ||
-              next.explorerTerminalTabs !== prev.explorerTerminalTabs ||
-              next.explorerActiveTerminal !== prev.explorerActiveTerminal
-            if (changed) {
-              connection.sendNotification('terminal.tabs.changed', {
-                agentTabs: Array.isArray(next.agentTerminalTabs) ? next.agentTerminalTabs : [],
-                agentActive: next.agentActiveTerminal || null,
-                explorerTabs: Array.isArray(next.explorerTerminalTabs) ? next.explorerTerminalTabs : [],
-                explorerActive: next.explorerActiveTerminal || null,
-              })
-            }
-          } catch {}
-        }
-      )
+          connection.sendNotification('terminal.tabs.changed', {
+            agentTabs: Array.isArray(data.agentTabs) ? data.agentTabs : [],
+            agentActive: data.agentActive || null,
+            explorerTabs: Array.isArray(data.explorerTabs) ? data.explorerTabs : [],
+            explorerActive: data.explorerActive || null,
+          })
+        } catch { }
+      })
 
 
-	      // Per-connection: notify on Kanban board changes
-	      const unsubKanban = (useMainStore as any).subscribe?.(
-	        (s: any) => ({
-	          board: s.kanbanBoard,
-	          loading: s.kanbanLoading,
-	          saving: s.kanbanSaving,
-	          error: s.kanbanError,
-	          lastLoadedAt: s.kanbanLastLoadedAt,
-	        }),
-	        (next: any, prev: any) => {
-	          try {
-	            if (!next) return
-            try {
-              const bound = getConnectionWorkspaceId(connection)
-              const curRoot = (useMainStore.getState() as any).workspaceRoot || null
-              if (bound && curRoot && bound !== curRoot) return
-            } catch {}
+      // Per-connection: notify on Kanban board changes
+      const kanbanService = ServiceRegistry.get<any>('kanban')
+      const unsubKanban = kanbanService?.on('kanban:board:changed', (data: any) => {
+        try {
+          const bound = getConnectionWorkspaceId(connection)
+          const workspaceService = ServiceRegistry.get<any>('workspace')
+          const curRoot = workspaceService?.getWorkspaceRoot() || null
+          if (bound && curRoot && bound !== curRoot) return
 
-	            const changed =
-	              next.board !== prev.board ||
-	              next.loading !== prev.loading ||
-	              next.saving !== prev.saving ||
-	              next.error !== prev.error ||
-	              next.lastLoadedAt !== prev.lastLoadedAt
-	            if (changed) {
-	              connection.sendNotification('kanban.board.changed', {
-	                board: next.board || null,
-	                loading: !!next.loading,
-	                saving: !!next.saving,
-
-	                error: next.error || null,
-	                lastLoadedAt: next.lastLoadedAt || null,
-	              })
-	            }
-	          } catch {}
-	        }
-	      )
+          connection.sendNotification('kanban.board.changed', {
+            board: data.board || null,
+            loading: !!data.loading,
+            saving: !!data.saving,
+            error: data.error || null,
+            lastLoadedAt: data.lastLoadedAt || null,
+          })
+        } catch { }
+      })
 
 
       // Per-connection: notify on Knowledge Base item map changes
-      const unsubKb = (useMainStore as any).subscribe?.(
-        (s: any) => ({ items: s.kbItems, error: s.kbLastError }),
-        (next: any, prev: any) => {
-          try {
-            if (!next) return
-            try {
-              const bound = getConnectionWorkspaceId(connection)
-              const curRoot = (useMainStore.getState() as any).workspaceRoot || null
-              if (bound && curRoot && bound !== curRoot) return
-            } catch {}
+      const kbService = ServiceRegistry.get<any>('knowledgeBase')
+      const unsubKb = kbService?.on('kb:items:changed', (data: any) => {
+        try {
+          const bound = getConnectionWorkspaceId(connection)
+          const workspaceService = ServiceRegistry.get<any>('workspace')
+          const curRoot = workspaceService?.getWorkspaceRoot() || null
+          if (bound && curRoot && bound !== curRoot) return
 
-            const changed = next.items !== prev.items || next.error !== prev.error
-            if (changed) {
-              connection.sendNotification('kb.items.changed', {
-                items: next.items || {},
-                error: next.error || null,
-              })
-            }
-          } catch {}
-        }
-      )
-
-            try {
-              const bound = getConnectionWorkspaceId(connection)
-              const curRoot = (useMainStore.getState() as any).workspaceRoot || null
-              if (bound && curRoot && bound !== curRoot) return
-            } catch {}
+          connection.sendNotification('kb.items.changed', {
+            items: data.items || {},
+            error: data.error || null,
+          })
+        } catch { }
+      })
 
       // Per-connection: notify on Knowledge Base workspace files list changes
-      const unsubKbFiles = (useMainStore as any).subscribe?.(
-        (s: any) => ({ files: Array.isArray(s.kbWorkspaceFiles) ? s.kbWorkspaceFiles : [] }),
-        (next: any, prev: any) => {
-          try {
-            if (!next) return
-            try {
-              const bound = getConnectionWorkspaceId(connection)
-              const curRoot = (useMainStore.getState() as any).workspaceRoot || null
-              if (bound && curRoot && bound !== curRoot) return
-            } catch {}
+      const unsubKbFiles = kbService?.on('kb:workspaceFiles:changed', (data: any) => {
+        try {
+          const bound = getConnectionWorkspaceId(connection)
+          const workspaceService = ServiceRegistry.get<any>('workspace')
+          const curRoot = workspaceService?.getWorkspaceRoot() || null
+          if (bound && curRoot && bound !== curRoot) return
 
-            const changed = next.files !== prev.files
-            if (changed) {
-              connection.sendNotification('kb.files.changed', {
-                files: Array.isArray(next.files) ? next.files : [],
-              })
-            }
-          } catch {}
-        }
-      )
+          connection.sendNotification('kb.files.changed', {
+            files: Array.isArray(data.files) ? data.files : [],
+          })
+        } catch { }
+      })
 
-	      // Per-connection: notify on boot status changes
-	      const unsubBoot = (useMainStore as any).subscribe?.(
-	        (s: any) => ({ appBootstrapping: s.appBootstrapping, startupMessage: s.startupMessage }),
-	        (next: any, prev: any) => {
-	          try {
-	            if (!next) return
-	            const changed = next.appBootstrapping !== prev.appBootstrapping || next.startupMessage !== prev.startupMessage
-	            if (changed) {
-	              connection.sendNotification('app.boot.changed', {
-	                appBootstrapping: !!next.appBootstrapping,
-	                startupMessage: next.startupMessage || null,
-	              })
-	            }
-	          } catch {}
-	        }
-	      )
-	      // Immediately push current boot status so the renderer doesn't rely solely on snapshot timing
-	      try {
-	        const st: any = useMainStore.getState()
-	        connection.sendNotification('app.boot.changed', {
-	          appBootstrapping: !!st.appBootstrapping,
-	          startupMessage: st.startupMessage || null,
-	        })
-	      } catch {}
+      // Per-connection: notify on boot status changes
+      const appService = ServiceRegistry.get<any>('app')
+      const unsubBoot = appService?.on('app:boot:changed', (data: any) => {
+        try {
+          connection.sendNotification('app.boot.changed', {
+            appBootstrapping: !!data.appBootstrapping,
+            startupMessage: data.startupMessage || null,
+          })
+        } catch { }
+      })
+      // Immediately push current boot status so the renderer doesn't rely solely on snapshot timing
+      try {
+        connection.sendNotification('app.boot.changed', {
+          appBootstrapping: !!appService?.isBootstrapping(),
+          startupMessage: appService?.getStartupMessage() || null,
+        })
+      } catch { }
 
       // Per-connection: notify on Flow Editor graph/template changes
-      const unsubFlowGraph = (useMainStore as any).subscribe?.(
-        (s: any) => ({
-          selectedTemplate: s.feSelectedTemplate,
-          nodes: s.feNodes,
-          edges: s.feEdges,
-        }),
-        (next: any, prev: any) => {
-          try {
-            if (!next) return
-            const changed =
-              next.selectedTemplate !== prev.selectedTemplate ||
-              next.nodes !== prev.nodes ||
-              next.edges !== prev.edges
-            if (changed) {
-              try {
-                const bound = getConnectionWorkspaceId(connection)
-                const curRoot = (useMainStore.getState() as any).workspaceRoot || null
-                if (bound && curRoot && bound !== curRoot) return
-              } catch {}
-              connection.sendNotification('flowEditor.graph.changed', {
-                selectedTemplate: next.selectedTemplate || '',
-                nodesCount: Array.isArray(next.nodes) ? next.nodes.length : 0,
-                edgesCount: Array.isArray(next.edges) ? next.edges.length : 0,
-              })
-            }
+      const flowGraphService = ServiceRegistry.get<any>('flowGraph')
+      const unsubFlowGraph = flowGraphService?.on('flowGraph:changed', (data: any) => {
+        try {
+          const bound = getConnectionWorkspaceId(connection)
+          const workspaceService = ServiceRegistry.get<any>('workspace')
+          const curRoot = workspaceService?.getWorkspaceRoot() || null
+          if (bound && curRoot && bound !== curRoot) return
 
-          } catch {}
-        }
-      )
+          connection.sendNotification('flowEditor.graph.changed', {
+            selectedTemplate: '', // selectedTemplate is UI-specific, not tracked in FlowGraphService
+            nodesCount: Array.isArray(data.nodes) ? data.nodes.length : 0,
+            edgesCount: Array.isArray(data.edges) ? data.edges.length : 0,
+          })
+        } catch { }
+      })
 
       // Per-connection: notify when provider/models change so selectors can refresh
-      const unsubSettingsModels = (useMainStore as any).subscribe?.(
-        (s: any) => ({
-          providerValid: s.providerValid,
-          modelsByProvider: s.modelsByProvider,
-        }),
-        (next: any, prev: any) => {
-          try {
-            if (!next) return
-            const changed =
-              next.providerValid !== prev.providerValid ||
-              next.modelsByProvider !== prev.modelsByProvider
-            if (!changed) return
-            try {
-              const bound = getConnectionWorkspaceId(connection)
-              const curRoot = (useMainStore.getState() as any).workspaceRoot || null
-              if (bound && curRoot && bound !== curRoot) return
-            } catch {}
-            connection.sendNotification('settings.models.changed', {
-              providerValid: next.providerValid || {},
-              modelsByProvider: next.modelsByProvider || {},
-            })
-          } catch {}
-        }
-      )
+      const providerService = ServiceRegistry.get<any>('provider')
+      const unsubSettingsModels = providerService?.on('provider:models:changed', (data: any) => {
+        try {
+          const bound = getConnectionWorkspaceId(connection)
+          const workspaceService = ServiceRegistry.get<any>('workspace')
+          const curRoot = workspaceService?.getWorkspaceRoot() || null
+          if (bound && curRoot && bound !== curRoot) return
+
+          connection.sendNotification('settings.models.changed', {
+            providerValid: data.providerValid || {},
+            modelsByProvider: data.modelsByProvider || {},
+          })
+        } catch { }
+      })
 
 
 
@@ -2617,190 +2331,108 @@ export function startWsBackend(): Promise<WsBootstrap> {
 
       // Track connection for global broadcasts
 
-	      // Per-connection: notify on current session usage/costs changes
-	      const unsubSessionUsage = (useMainStore as any).subscribe?.(
-	        (s: any) => {
-	          const ws = getConnectionWorkspaceId(connection) || null
-	          const sid = ws && s.currentIdByWorkspace ? (s.currentIdByWorkspace[ws] ?? null) : null
-	          const list = ws && s.sessionsByWorkspace ? (s.sessionsByWorkspace[ws] || []) : []
-	          const sess = Array.isArray(list) ? list.find((it: any) => it.id === sid) : null
-	          return {
-	            currentId: sid,
-	            totalTokens: sess?.tokenUsage?.total?.totalTokens || 0,
-	            totalInput: sess?.tokenUsage?.total?.inputTokens || 0,
-	            totalOutput: sess?.tokenUsage?.total?.outputTokens || 0,
-	            totalCached: sess?.tokenUsage?.total?.cachedTokens || 0,
-	            totalCost: sess?.costs?.totalCost || 0,
-	            requestsLen: Array.isArray(sess?.requestsLog) ? sess!.requestsLog.length : 0,
-	          }
-	        },
-	        (next: any, prev: any) => {
-	          try {
-	            if (!next) return
-	            const changed =
-	              next.currentId !== prev.currentId ||
-	              next.totalTokens !== prev.totalTokens ||
-	              next.totalInput !== prev.totalInput ||
-	              next.totalOutput !== prev.totalOutput ||
-	              next.totalCached !== prev.totalCached ||
-	              next.totalCost !== prev.totalCost ||
-	              next.requestsLen !== prev.requestsLen
-	            if (!changed) return
-            try {
-              const bound = getConnectionWorkspaceId(connection)
-              const curRoot = (useMainStore.getState() as any).workspaceRoot || null
-              if (bound && curRoot && bound !== curRoot) return
-            } catch {}
+      // Per-connection: notify on current session usage/costs changes
+      const sessionService = ServiceRegistry.get<any>('session')
+      const unsubSessionUsage = sessionService?.on('sessions:updated', (data: any) => {
+        try {
+          const bound = getConnectionWorkspaceId(connection)
+          const workspaceService = ServiceRegistry.get<any>('workspace')
+          const curRoot = workspaceService?.getWorkspaceRoot() || null
+          if (bound && curRoot && bound !== curRoot) return
+          if (data.workspaceId !== curRoot) return
 
-	            const st: any = useMainStore.getState()
-	            const ws = st.workspaceRoot || null
-	            const sid = (ws && typeof st.getCurrentIdFor === 'function') ? st.getCurrentIdFor({ workspaceId: ws }) : null
-	            if (!sid) return
-	            const list = (ws && typeof st.getSessionsFor === 'function') ? (st.getSessionsFor({ workspaceId: ws }) || []) : []
-	            const sess = Array.isArray(list) ? list.find((it: any) => it.id === sid) : null
-	            if (!sess) return
-	            const tokenUsage = sess.tokenUsage || { total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }, byProvider: {}, byProviderAndModel: {} }
-	            const costs = sess.costs || { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }
+          const sid = sessionService?.getCurrentIdFor({ workspaceId: data.workspaceId })
+          if (!sid) return
 
-	            const requestsLog = Array.isArray(sess.requestsLog) ? sess.requestsLog : []
-	            connection.sendNotification('session.usage.changed', { tokenUsage, costs, requestsLog })
-	          } catch {}
-	        }
-	      )
+          const sess = Array.isArray(data.sessions) ? data.sessions.find((it: any) => it.id === sid) : null
+          if (!sess) return
 
-      // Per-connection: notify with full timeline snapshot when current session items array changes
-      const unsubTimelineSnapshot = (useMainStore as any).subscribe?.(
-        (s: any) => {
-          const ws = getConnectionWorkspaceId(connection) || null
-          const sid = ws && s.currentIdByWorkspace ? (s.currentIdByWorkspace[ws] ?? null) : null
-          const list = ws && s.sessionsByWorkspace ? (s.sessionsByWorkspace[ws] || []) : []
-          const sess = Array.isArray(list) ? list.find((it: any) => it.id === sid) : null
-          return { sid, itemsRef: sess ? sess.items : null }
-        },
-        (next: any, prev: any) => {
-          try {
-            if (!next) return
-            const sidChanged = next.sid !== prev.sid
-            const itemsChanged = next.itemsRef !== prev.itemsRef
-            if (!(sidChanged || itemsChanged)) return
+          const tokenUsage = sess.tokenUsage || { total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }, byProvider: {}, byProviderAndModel: {} }
+          const costs = sess.costs || { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }
+          const requestsLog = Array.isArray(sess.requestsLog) ? sess.requestsLog : []
 
-            const st: any = useMainStore.getState()
-            const sid = (() => { const ws = (useMainStore.getState() as any).workspaceRoot || null; return (ws && typeof st.getCurrentIdFor === 'function') ? st.getCurrentIdFor({ workspaceId: ws }) : null })()
-            try {
-              const bound = getConnectionWorkspaceId(connection)
-              const curRoot = (useMainStore.getState() as any).workspaceRoot || null
-              if (bound && curRoot && bound !== curRoot) return
-            } catch {}
+          connection.sendNotification('session.usage.changed', { tokenUsage, costs, requestsLog })
+        } catch { }
+      })
 
-            // Announce selection changes as a first-class event for SoT simplicity
-            if (sidChanged) {
-              try { connection.sendNotification('session.selected', { id: sid || null }) } catch {}
-            }
+      // Per-connection: notify with full timeline snapshot when current session changes
+      const unsubTimelineSnapshot = sessionService?.on('session:selected', (data: any) => {
+        try {
+          const bound = getConnectionWorkspaceId(connection)
+          const workspaceService = ServiceRegistry.get<any>('workspace')
+          const curRoot = workspaceService?.getWorkspaceRoot() || null
+          if (bound && curRoot && bound !== curRoot) return
+          if (data.workspaceId !== curRoot) return
 
-            const ws = (useMainStore.getState() as any).workspaceRoot || null
-            const list = (ws && typeof st.getSessionsFor === 'function') ? st.getSessionsFor({ workspaceId: ws }) : []
-            const sess = Array.isArray(list) ? list.find((it: any) => it.id === sid) : null
-            const items = Array.isArray(sess?.items) ? sess.items : []
-            connection.sendNotification('session.timeline.snapshot', { sessionId: sid, items })
-          } catch {}
-        }
-      )
+          // Announce selection changes as a first-class event for SoT simplicity
+          try { connection.sendNotification('session.selected', { id: data.sessionId || null }) } catch { }
+
+          const sessions = sessionService?.getSessionsFor({ workspaceId: data.workspaceId }) || []
+          const sess = Array.isArray(sessions) ? sessions.find((it: any) => it.id === data.sessionId) : null
+          const items = Array.isArray(sess?.items) ? sess.items : []
+          connection.sendNotification('session.timeline.snapshot', { sessionId: data.sessionId, items })
+        } catch { }
+      })
 
       // Per-connection: notify when sessions list changes (active workspace only)
-      const unsubSessionList = (useMainStore as any).subscribe?.(
-        (s: any) => {
-          const ws = getConnectionWorkspaceId(connection) || null
-          const list = ws && s.sessionsByWorkspace ? (s.sessionsByWorkspace[ws] || []) : []
-          const cur = ws && s.currentIdByWorkspace ? (s.currentIdByWorkspace[ws] ?? null) : null
-          return { ref: list, currentId: cur }
-        },
-        (next: any, prev: any) => {
-          try {
-            if (!next) return
-            const changed = next.ref !== prev.ref || next.currentId !== prev.currentId
-            if (!changed) return
-            try {
-              const bound = getConnectionWorkspaceId(connection)
-              const curRoot = (useMainStore.getState() as any).workspaceRoot || null
-              if (bound && curRoot && bound !== curRoot) return
-            } catch {}
-            const st: any = useMainStore.getState()
-            const ws = st.workspaceRoot || null
-            const list = (ws && typeof st.getSessionsFor === 'function') ? (st.getSessionsFor({ workspaceId: ws }) || []) : []
-            const sessions = list.map((s: any) => ({ id: s.id, title: s.title }))
-            const currentId = (ws && typeof st.getCurrentIdFor === 'function') ? st.getCurrentIdFor({ workspaceId: ws }) : null
-            connection.sendNotification('session.list.changed', { sessions, currentId })
-          } catch {}
-        }
-      )
+      const unsubSessionList = sessionService?.on('sessions:updated', (data: any) => {
+        try {
+          const bound = getConnectionWorkspaceId(connection)
+          const workspaceService = ServiceRegistry.get<any>('workspace')
+          const curRoot = workspaceService?.getWorkspaceRoot() || null
+          if (bound && curRoot && bound !== curRoot) return
+          if (data.workspaceId !== curRoot) return
+
+          const sessions = Array.isArray(data.sessions) ? data.sessions.map((s: any) => ({ id: s.id, title: s.title })) : []
+          const currentId = sessionService?.getCurrentIdFor({ workspaceId: data.workspaceId })
+          connection.sendNotification('session.list.changed', { sessions, currentId })
+        } catch { }
+      })
 
 
 
-      // Per-connection: notify on flow contexts changes (main + isolated)
-      const unsubFlowContexts = (useMainStore as any).subscribe?.(
-        (s: any) => {
-          const ws = getConnectionWorkspaceId(connection) || null
-          const sid = ws && s.currentIdByWorkspace ? (s.currentIdByWorkspace[ws] ?? null) : null
-          const list = ws && s.sessionsByWorkspace ? (s.sessionsByWorkspace[ws] || []) : []
-          const sess = Array.isArray(list) ? list.find((it: any) => it.id === sid) : null
-          const running = s.feStatus === 'running' || s.feStatus === 'waitingForInput'
-          return {
-            sid,
-            // Track refs to detect changes efficiently without deep compares
-            mainRef: (sess && sess.currentContext) ? sess.currentContext : (running ? (s.feMainFlowContext || null) : null),
-            isoRef: running ? (s.feIsolatedContexts || {}) : {},
+      // Per-connection: notify on flow contexts changes (session's currentContext)
+      const unsubFlowContexts = sessionService?.on('sessions:updated', (data: any) => {
+        try {
+          const bound = getConnectionWorkspaceId(connection)
+          const workspaceService = ServiceRegistry.get<any>('workspace')
+          const curRoot = workspaceService?.getWorkspaceRoot() || null
+          if (bound && curRoot && bound !== curRoot) return
+          if (data.workspaceId !== curRoot) return
+
+          const sid = sessionService?.getCurrentIdFor({ workspaceId: data.workspaceId })
+          if (!sid) return
+
+          const sess = Array.isArray(data.sessions) ? data.sessions.find((it: any) => it.id === sid) : null
+          const payload = {
+            mainContext: sess?.currentContext || null,
+            isolatedContexts: {} // Isolated contexts are flow-editor specific, removed
           }
-        },
-        (next: any, prev: any) => {
-          try {
-            if (!next) return
-            const sidChanged = next.sid !== prev.sid
-            const mainChanged = next.mainRef !== prev.mainRef
-            const isoChanged = next.isoRef !== prev.isoRef
-            if (!(sidChanged || mainChanged || isoChanged)) return
-
-            const st: any = useMainStore.getState()
-            const ws = st.workspaceRoot || null
-            const sid = (ws && typeof st.getCurrentIdFor === 'function') ? st.getCurrentIdFor({ workspaceId: ws }) : null
-            const list = (ws && typeof st.getSessionsFor === 'function') ? (st.getSessionsFor({ workspaceId: ws }) || []) : []
-            const sess = Array.isArray(list) ? list.find((it: any) => it.id === sid) : null
-            const running = st.feStatus === 'running' || st.feStatus === 'waitingForInput'
-            try {
-              const bound = getConnectionWorkspaceId(connection)
-              const curRoot = (useMainStore.getState() as any).workspaceRoot || null
-              if (bound && curRoot && bound !== curRoot) return
-            } catch {}
-
-            const payload = {
-              mainContext: (sess && sess.currentContext) ? sess.currentContext : (running ? (st.feMainFlowContext || null) : null),
-              isolatedContexts: running ? (st.feIsolatedContexts || {}) : {}
-            }
-            connection.sendNotification('flow.contexts.changed', payload)
-          } catch {}
-        }
-      )
+          connection.sendNotification('flow.contexts.changed', payload)
+        } catch { }
+      })
 
       registerConnection(connection)
       ws.on('close', () => {
         unregisterConnection(connection)
-        try { unsubTabs?.() } catch {}
-        try { unsubKanban?.() } catch {}
-        try { unsubKb?.() } catch {}
-        try { unsubKbFiles?.() } catch {}
+        try { unsubTabs?.() } catch { }
+        try { unsubKanban?.() } catch { }
+        try { unsubKb?.() } catch { }
+        try { unsubKbFiles?.() } catch { }
 
-        try { unsubBoot?.() } catch {}
-        try { unsubFlowGraph?.() } catch {}
-        try { unsubSettingsModels?.() } catch {}
-        try { unsubSessionUsage?.() } catch {}
-        try { unsubTimelineSnapshot?.() } catch {}
-        try { unsubSessionList?.() } catch {}
-        try { unsubFlowContexts?.() } catch {}
+        try { unsubBoot?.() } catch { }
+        try { unsubFlowGraph?.() } catch { }
+        try { unsubSettingsModels?.() } catch { }
+        try { unsubSessionUsage?.() } catch { }
+        try { unsubTimelineSnapshot?.() } catch { }
+        try { unsubSessionList?.() } catch { }
+        try { unsubFlowContexts?.() } catch { }
       })
 
       // No need to call listen() with json-rpc-2.0 - messages are handled via ws.on('message')
     } catch (err) {
       console.error('[ws-main] Connection setup error:', err)
-      try { ws.close(1011, 'Internal error') } catch {}
+      try { ws.close(1011, 'Internal error') } catch { }
     }
   })
 
@@ -2816,7 +2448,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
       const url = `ws://127.0.0.1:${port}`
       bootstrap = { url, token }
       resolveBootstrap?.(bootstrap)
-    } catch {}
+    } catch { }
   })
 
   return bootstrapReady!
@@ -2829,9 +2461,9 @@ export function getWsBackendBootstrap(): WsBootstrap | null {
 }
 
 export function stopWsBackend(): void {
-  try { wss?.clients.forEach((c) => c.close()) } catch {}
-  try { wss?.close() } catch {}
-  try { httpServer?.close() } catch {}
+  try { wss?.clients.forEach((c) => c.close()) } catch { }
+  try { wss?.close() } catch { }
+  try { httpServer?.close() } catch { }
   wss = null
   httpServer = null
   bootstrap = null

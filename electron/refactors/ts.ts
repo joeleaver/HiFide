@@ -1,10 +1,11 @@
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { Project, SyntaxKind } from 'ts-morph'
-import { useMainStore } from '../store/index.js'
+import { ServiceRegistry } from '../services/base/ServiceRegistry.js'
 
 function getTsconfigPath(tsconfigPath?: string) {
-  const root = useMainStore.getState().workspaceRoot || process.cwd()
+  const workspaceService = ServiceRegistry.get<any>('workspace')
+  const root = workspaceService?.getWorkspaceRoot() || process.cwd()
   return tsconfigPath || path.join(root, 'tsconfig.json')
 }
 

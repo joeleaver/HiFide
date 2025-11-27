@@ -126,7 +126,13 @@ function createChatTimelineStore() {
     },
 
     appendRawItem: (item) => {
-      const items = [...get().items, item] as TimelineItem[]
+      // Deduplicate: skip if item with same ID already exists
+      const existing = get().items
+      if (existing.some(i => i.id === item.id)) {
+        console.warn('[chatTimeline] appendRawItem: duplicate ID, skipping:', item.id)
+        return
+      }
+      const items = [...existing, item] as TimelineItem[]
       set({ items, sig: computeSig(items) })
     },
 
@@ -158,10 +164,16 @@ function createChatTimelineStore() {
         const node = useFlowEditorLocal.getState().nodes.find((n: any) => n.id === nodeId)
         const label = node?.data?.label || node?.data?.labelBase || 'Node'
         const kind = node?.data?.nodeType || 'unknown'
-        ;(get() as any).openNodeExecution(nodeId, label, kind, executionId)
+          ; (get() as any).openNodeExecution(nodeId, label, kind, executionId)
         items = [...get().items] as TimelineItem[]
         box = items.slice().reverse().find((it) => it.type === 'node-execution' && it.nodeId === nodeId && (!executionId || (it as any).executionId === executionId)) as any
         if (!box) return
+      }
+      // Deduplicate: check if the last content item is the same text
+      const lastContent = box.content[box.content.length - 1]
+      if (lastContent?.type === 'text' && lastContent.text === txt) {
+        console.warn('[chatTimeline] appendText: duplicate text, skipping:', txt.slice(0, 50))
+        return
       }
       box.content.push({ type: 'text', text: txt } as any)
       set({ items, sig: computeSig(items) })
@@ -178,10 +190,16 @@ function createChatTimelineStore() {
         const node = useFlowEditorLocal.getState().nodes.find((n: any) => n.id === nodeId)
         const label = node?.data?.label || node?.data?.labelBase || 'Node'
         const kind = node?.data?.nodeType || 'unknown'
-        ;(get() as any).openNodeExecution(nodeId, label, kind, executionId)
+          ; (get() as any).openNodeExecution(nodeId, label, kind, executionId)
         items = [...get().items] as TimelineItem[]
         box = items.slice().reverse().find((it) => it.type === 'node-execution' && it.nodeId === nodeId && (!executionId || (it as any).executionId === executionId)) as any
         if (!box) return
+      }
+      // Deduplicate: check if the last content item is the same reasoning
+      const lastContent = box.content[box.content.length - 1]
+      if (lastContent?.type === 'reasoning' && lastContent.text === txt) {
+        console.warn('[chatTimeline] appendReasoning: duplicate reasoning, skipping:', txt.slice(0, 50))
+        return
       }
       box.content.push({ type: 'reasoning', text: txt } as any)
       set({ items, sig: computeSig(items) })
@@ -194,7 +212,7 @@ function createChatTimelineStore() {
         const node = useFlowEditorLocal.getState().nodes.find((n: any) => n.id === nodeId)
         const label = node?.data?.label || node?.data?.labelBase || 'Node'
         const kind = node?.data?.nodeType || 'unknown'
-        ;(get() as any).openNodeExecution(nodeId, label, kind, executionId)
+          ; (get() as any).openNodeExecution(nodeId, label, kind, executionId)
         items = [...get().items] as TimelineItem[]
         box = items.slice().reverse().find((it) => it.type === 'node-execution' && it.nodeId === nodeId && (!executionId || (it as any).executionId === executionId)) as any
         if (!box) return
@@ -242,7 +260,9 @@ function createChatTimelineStore() {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const hotData: any = (import.meta as any).hot?.data || {}
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const __chatTimelineStore: any = hotData.chatTimelineStore || createChatTimelineStore()
+import { type StoreApi, type UseBoundStore } from 'zustand'
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const __chatTimelineStore = (hotData.chatTimelineStore || createChatTimelineStore()) as UseBoundStore<StoreApi<ChatTimelineState>>
 
 export const useChatTimeline = __chatTimelineStore
 
@@ -285,7 +305,7 @@ export function initChatTimelineEvents(): void {
           const kind = node?.data?.nodeType || 'unknown'
           useChatTimeline.getState().openNodeExecution(msg.nodeId, label, kind, msg.executionId)
         }
-      } catch {}
+      } catch { }
 
       const append = msg.append || {}
       if (append.reasoning) useChatTimeline.getState().appendReasoning(msg.nodeId, append.reasoning, msg.executionId)
@@ -339,7 +359,7 @@ export function initChatTimelineEvents(): void {
 export async function switchTimelineToCurrentSession(): Promise<void> {
   const client: any = getBackendClient()
   if (!client) return
-  try { await (client as any).whenReady?.(5000) } catch {}
+  try { await (client as any).whenReady?.(5000) } catch { }
   try {
     const snap = await client.rpc('session.getCurrentStrict', {})
     if (snap && Array.isArray(snap.items)) {
@@ -347,5 +367,5 @@ export async function switchTimelineToCurrentSession(): Promise<void> {
     } else {
       useChatTimeline.getState().hydrateFromSession([])
     }
-  } catch {}
+  } catch { }
 }

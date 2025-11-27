@@ -6,7 +6,7 @@ import CollapsiblePanel from './CollapsiblePanel'
 import { useSessionUi } from '../store/sessionUi'
 
 // Minimal local types to avoid zubridge imports
-type TokenUsage = { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number }
+type TokenUsage = { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number; reasoningTokens?: number }
 
 export default function TokensCostsPanel() {
   // Use UI store for local state
@@ -28,14 +28,14 @@ export default function TokensCostsPanel() {
   useEffect(() => {
     const client = getBackendClient()
     if (!client) return
-    ;(async () => {
-      try {
-        const ws = await client.rpc('ui.getWindowState', {})
-        const windowState = ws?.windowState || {}
-        if (typeof windowState.tokensCostsCollapsed === 'boolean') setCollapsed(windowState.tokensCostsCollapsed)
-        if (typeof windowState.tokensCostsHeight === 'number') setHeight(windowState.tokensCostsHeight)
-      } catch {}
-    })()
+      ; (async () => {
+        try {
+          const ws = await client.rpc('ui.getWindowState', {})
+          const windowState = ws?.windowState || {}
+          if (typeof windowState.tokensCostsCollapsed === 'boolean') setCollapsed(windowState.tokensCostsCollapsed)
+          if (typeof windowState.tokensCostsHeight === 'number') setHeight(windowState.tokensCostsHeight)
+        } catch { }
+      })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -54,13 +54,13 @@ export default function TokensCostsPanel() {
         const newCollapsed = !collapsed
         setCollapsed(newCollapsed)
         const client = getBackendClient()
-        try { void client?.rpc('ui.updateWindowState', { updates: { tokensCostsCollapsed: newCollapsed } }) } catch {}
+        try { void client?.rpc('ui.updateWindowState', { updates: { tokensCostsCollapsed: newCollapsed } }) } catch { }
       }}
       height={height}
       onHeightChange={(newHeight) => {
         setHeight(newHeight)
         const client = getBackendClient()
-        try { void client?.rpc('ui.updateWindowState', { updates: { tokensCostsHeight: newHeight } }) } catch {}
+        try { void client?.rpc('ui.updateWindowState', { updates: { tokensCostsHeight: newHeight } }) } catch { }
       }}
       minHeight={150}
       maxHeight={400}
@@ -85,6 +85,9 @@ export default function TokensCostsPanel() {
                   ) : null}
                   <span style={{ color: '#666' }}> + </span>
                   <span style={{ color: '#81c784' }}>{total.outputTokens.toLocaleString()}</span>
+                  {total.reasoningTokens && total.reasoningTokens > 0 ? (
+                    <span style={{ color: '#a5d6a7', fontSize: '0.9em' }}> ({total.reasoningTokens.toLocaleString()} thinking)</span>
+                  ) : null}
                   <span style={{ color: '#666' }}> out</span>
                   <span style={{ color: '#666' }}> = </span>
                   <span style={{ color: '#fff' }}>{(total.inputTokens + total.outputTokens).toLocaleString()}</span>
@@ -142,8 +145,8 @@ export default function TokensCostsPanel() {
                                 {perModelUsage
                                   ? perModelUsage.totalTokens.toLocaleString()
                                   : providerUsage
-                                  ? providerUsage.totalTokens.toLocaleString()
-                                  : '—'}
+                                    ? providerUsage.totalTokens.toLocaleString()
+                                    : '—'}
                               </Text>
                             </Group>
                             <Group gap="xs" ml="md">
@@ -227,7 +230,14 @@ export default function TokensCostsPanel() {
                                   <span style={{ color: '#4ade80' }}>${Number(inputCost).toFixed(4)}</span>
                                 )}
                               </td>
-                              <td style={{ padding: '4px 8px', textAlign: 'right', color: '#81c784' }}>{Number(output).toLocaleString()}</td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right', color: '#81c784' }}>
+                                {Number(output).toLocaleString()}
+                                {Number(r?.usage?.reasoningTokens || 0) > 0 && (
+                                  <div style={{ fontSize: '0.85em', color: '#a5d6a7' }}>
+                                    {Number(r?.usage?.reasoningTokens).toLocaleString()} thinking
+                                  </div>
+                                )}
+                              </td>
                               <td style={{ padding: '4px 8px', textAlign: 'right', color: '#4ade80' }}>${Number(outputCost).toFixed(4)}</td>
                             </tr>
                           )

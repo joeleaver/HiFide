@@ -67,11 +67,12 @@ const legacySecureStore = new Store({
  */
 export async function getProviderKey(provider: string): Promise<string | null> {
   // NOTE: Use explicit index.js path for compatibility with bundled Electron builds
-  const { useMainStore } = await import('../store/index.js')
-  const state = useMainStore.getState()
+  const { ServiceRegistry } = await import('../services/base/ServiceRegistry.js')
+  const providerService = ServiceRegistry.get<any>('provider')
+  if (!providerService) return null
 
-  // 1) Try Zustand store first (primary storage)
-  const keys = state.settingsApiKeys
+  // 1) Try service first (primary storage)
+  const keys = providerService.getApiKeys()
   if (keys) {
     if (provider === 'openai' && keys.openai?.trim()) return keys.openai
     if (provider === 'anthropic' && keys.anthropic?.trim()) return keys.anthropic
@@ -293,9 +294,10 @@ export async function getKbIndexer(workspaceRoot?: string): Promise<Indexer> {
  * Reset the indexer for a workspace (used when workspace root changes)
  */
 export async function resetIndexer(workspaceRoot?: string): Promise<void> {
-  const { useMainStore } = await import('../store/index.js')
+  const { ServiceRegistry } = await import('../services/base/ServiceRegistry.js')
+  const workspaceService = ServiceRegistry.get<any>('workspace')
   const root = path.resolve(
-    workspaceRoot || useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+    workspaceRoot || workspaceService?.getWorkspaceRoot() || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
   )
   const idx = indexers.get(root)
   if (idx) {
@@ -308,9 +310,10 @@ export async function resetIndexer(workspaceRoot?: string): Promise<void> {
  * Reset the KB indexer for a workspace
  */
 export async function resetKbIndexer(workspaceRoot?: string): Promise<void> {
-  const { useMainStore } = await import('../store/index.js')
+  const { ServiceRegistry } = await import('../services/base/ServiceRegistry.js')
+  const workspaceService = ServiceRegistry.get<any>('workspace')
   const root = path.resolve(
-    workspaceRoot || useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+    workspaceRoot || workspaceService?.getWorkspaceRoot() || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
   )
   const idx = kbIndexers.get(root)
   if (idx) {

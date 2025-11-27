@@ -28,7 +28,7 @@
   "exclude": [
     "src/store/__tests__",
     "src/store/slices/__tests__",
-    "electron/ipc/flows-v2/__tests__",
+    "electron/flow-engine/__tests__",
     "**/__tests__",
     "**/*.test.ts",
     "**/*.spec.ts"

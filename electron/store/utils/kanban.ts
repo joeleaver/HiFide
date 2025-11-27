@@ -31,6 +31,8 @@ const KanbanTaskSchema = z.object({
   tags: z.array(z.string()).optional(),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
+  archived: z.boolean().optional(),
+  archivedAt: z.number().int().nonnegative().optional(),
 })
 
 const KanbanBoardSchema = z.object({
@@ -70,6 +72,8 @@ function normalizeTask(task: KanbanTask): KanbanTask {
     epicId: task.epicId ?? null,
     assignees: task.assignees ?? [],
     tags: task.tags ?? [],
+    archived: task.archived ?? false,
+    archivedAt: task.archivedAt,
   }
 }
 

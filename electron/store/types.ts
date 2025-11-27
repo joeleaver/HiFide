@@ -38,6 +38,8 @@ export interface KanbanTask {
   tags?: string[]
   createdAt: number
   updatedAt: number
+  archived?: boolean
+  archivedAt?: number
 }
 
 export interface KanbanBoard {
@@ -146,6 +148,7 @@ export type TokenUsage = {
   outputTokens: number
   totalTokens: number
   cachedTokens?: number  // Tokens served from cache (Gemini context caching)
+  reasoningTokens?: number // Tokens used for reasoning/thinking (Gemini 2.0, Claude 3.7)
 }
 
 export type TokenCost = {

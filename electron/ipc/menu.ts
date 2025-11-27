@@ -7,7 +7,7 @@ import { BrowserWindow, Menu, shell, app } from 'electron'
 import { getWindow, windowStateStore } from '../core/state'
 import { createWindow } from '../core/window'
 import type { ViewType } from '../store/types'
-import { useMainStore } from '../store'
+import { ServiceRegistry } from '../services/base/ServiceRegistry.js'
 
 let currentViewForMenu: ViewType = 'flow'
 
@@ -40,16 +40,16 @@ export function buildMenu(): void {
 
   let recentFolders: Array<{ path: string; lastOpened: number }> = []
   try {
-    // Source of truth: Zustand main store
-    const st = useMainStore.getState() as any
-    recentFolders = Array.isArray(st.recentFolders) ? st.recentFolders.slice(0, 10) : []
+    // Source of truth: WorkspaceService
+    const workspaceService = ServiceRegistry.get<any>('workspace')
+    recentFolders = workspaceService?.getRecentFolders?.() || []
 
     // One-time migration from legacy windowStateStore if store is empty
     if (recentFolders.length === 0) {
       const legacy = windowStateStore.get('recentFolders') as any
       if (Array.isArray(legacy) && legacy.length > 0) {
         recentFolders = legacy.slice(0, 10)
-        try { useMainStore.setState({ recentFolders: legacy } as any, false) } catch {}
+        try { workspaceService?.setRecentFolders?.(legacy) } catch {}
       }
     }
   } catch {}

@@ -80,7 +80,7 @@ The fix ensures:
 - `electron/store/utils/session-persistence.ts::loadAllSessions()` - Loads sessions from disk
 - `electron/store/slices/session.slice.ts::startNewContext()` - Clears messageHistory (already correct)
 - `electron/store/slices/flowEditor.slice.ts::flowInit()` - Passes session context to scheduler
-- `electron/ipc/flows-v2/scheduler.ts` - Initializes main context from session context
+- `electron/flow-engine/scheduler.ts` - Initializes main context from session context
 
 ## Testing
 

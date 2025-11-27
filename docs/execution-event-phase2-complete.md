@@ -32,7 +32,7 @@ Phase 2 is COMPLETE! All three providers (Anthropic, OpenAI, Gemini) now use the
 
 ### Modified (5 files)
 - `electron/providers/provider.ts` (+3 lines) - Added emit parameter to interface
-- `electron/ipc/flows-v2/llm-service.ts` (+2 lines) - Pass emit to providers
+- `electron/flow-engine/llm-service.ts` (+2 lines) - Pass emit to providers
 - `electron/providers/anthropic.ts` (+90 lines) - Full emit integration
 - `electron/providers/openai.ts` (+95 lines) - Full emit integration
 - `electron/providers/gemini.ts` (+140 lines) - Full emit integration
@@ -40,9 +40,9 @@ Phase 2 is COMPLETE! All three providers (Anthropic, OpenAI, Gemini) now use the
 **Total**: +330 lines added
 
 ### Created (4 test files + 1 doc)
-- `electron/ipc/flows-v2/__tests__/execution-events.test.ts` (300 lines) - Unit tests
+- `electron/flow-engine/__tests__/execution-events.test.ts` (300 lines) - Unit tests
 - `electron/providers/__tests__/execution-events-integration.test.ts` (300 lines) - Integration tests
-- `electron/ipc/flows-v2/__tests__/scheduler-events.test.ts` (300 lines) - Scheduler tests
+- `electron/flow-engine/__tests__/scheduler-events.test.ts` (300 lines) - Scheduler tests
 - `docs/execution-event-testing.md` (250 lines) - Testing guide
 - `docs/execution-event-phase2-complete.md` (this file)
 
@@ -194,9 +194,9 @@ if (emit) {
 ### Test Coverage
 
 **Created Test Files** (3 files, ~700 lines):
-- `electron/ipc/flows-v2/__tests__/execution-events.test.ts` - Unit tests for event system
+- `electron/flow-engine/__tests__/execution-events.test.ts` - Unit tests for event system
 - `electron/providers/__tests__/execution-events-integration.test.ts` - Provider integration tests
-- `electron/ipc/flows-v2/__tests__/scheduler-events.test.ts` - Scheduler event routing tests
+- `electron/flow-engine/__tests__/scheduler-events.test.ts` - Scheduler event routing tests
 - `docs/execution-event-testing.md` - Comprehensive testing guide
 
 **Test Categories**:

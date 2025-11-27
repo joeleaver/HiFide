@@ -5,22 +5,18 @@ import { getBackendClient } from '../lib/backend/bootstrap'
 type ModelPricing = { inputCostPer1M: number; outputCostPer1M: number; cachedInputCostPer1M?: number }
 
 
-export default function PricingSettings() {
-  const [modelsByProvider, setModelsByProvider] = useState<Record<string, Array<{ value: string; label: string }>>>({})
+export default function PricingSettings({ modelsByProvider, providerValid }: { modelsByProvider: Record<string, any>, providerValid: Record<string, boolean> }) {
   const [pricingConfig, setPricingConfig] = useState<any>({ customRates: false, openai: {}, anthropic: {}, gemini: {}, fireworks: {}, xai: {} })
   const [defaultPricingConfig, setDefaultPricingConfig] = useState<any>({ customRates: false, openai: {}, anthropic: {}, gemini: {}, fireworks: {}, xai: {} })
-  const [providerValid, setProviderValid] = useState<Record<string, boolean>>({})
   const [expanded, setExpanded] = useState<string | null>(null)
 
   useEffect(() => {
     const client = getBackendClient(); if (!client) return
     client.rpc<any>('settings.get', {}).then((snap) => {
       if (!snap?.ok) return
-      setModelsByProvider(snap.modelsByProvider || {})
-      setProviderValid(snap.providerValid || {})
       setPricingConfig(snap.pricingConfig || {})
       setDefaultPricingConfig(snap.defaultPricingConfig || {})
-    }).catch(() => {})
+    }).catch(() => { })
   }, [])
 
   const resetAll = async () => {
@@ -31,7 +27,7 @@ export default function PricingSettings() {
         setPricingConfig(res.pricingConfig || {})
         setDefaultPricingConfig(res.defaultPricingConfig || {})
       }
-    } catch {}
+    } catch { }
   }
 
   const resetProvider = async (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai') => {
@@ -41,7 +37,7 @@ export default function PricingSettings() {
       if (res?.ok) {
         setPricingConfig(res.pricingConfig || {})
       }
-    } catch {}
+    } catch { }
   }
 
   const setPrice = async (provider: string, model: string, pricing: ModelPricing) => {
@@ -51,7 +47,7 @@ export default function PricingSettings() {
       if (res?.ok) {
         setPricingConfig(res.pricingConfig || {})
       }
-    } catch {}
+    } catch { }
   }
 
   return (
@@ -314,8 +310,8 @@ function PricingTable({ models, pricing, defaultPricing, onUpdate }: PricingTabl
           // A model is at default if it has default pricing and matches it, or if it has no default pricing and is at 0/0
           const isDefault = modelDefaultPricing
             ? (modelPricing.inputCostPer1M === modelDefaultPricing.inputCostPer1M &&
-               modelPricing.outputCostPer1M === modelDefaultPricing.outputCostPer1M &&
-               modelPricing.cachedInputCostPer1M === modelDefaultPricing.cachedInputCostPer1M)
+              modelPricing.outputCostPer1M === modelDefaultPricing.outputCostPer1M &&
+              modelPricing.cachedInputCostPer1M === modelDefaultPricing.cachedInputCostPer1M)
             : (modelPricing.inputCostPer1M === 0 && modelPricing.outputCostPer1M === 0)
 
           // Check if this model supports caching (has cachedInputCostPer1M in defaults)

@@ -28,7 +28,6 @@ import { createKanbanSlice, type KanbanSlice } from './slices/kanban.slice'
 // NOTE: Terminal slice is renderer-only (uses xterm which is browser-specific)
 import type { TerminalSlice } from './slices/terminal.slice'
 import { createSessionSlice, type SessionSlice } from './slices/session.slice'
-import { createFlowEditorSlice, type FlowEditorSlice } from './slices/flowEditor.slice'
 import { createKnowledgeBaseSlice, type KnowledgeBaseSlice } from './slices/knowledgeBase.slice'
 import { electronStorage } from './storage'
 
@@ -51,7 +50,6 @@ export type AppStore = ViewSlice &
   KanbanSlice &
   TerminalSlice &
   SessionSlice &
-  FlowEditorSlice &
   KnowledgeBaseSlice
 
 /**
@@ -211,7 +209,6 @@ export const useMainStore = create<AppStore>()(
         disposePty: async () => ({ ok: false }),
         subscribePtyData: () => () => {},
         ...createSessionSlice(set, get, store),
-        ...createFlowEditorSlice(set, get, store),
         ...createKnowledgeBaseSlice(set, get, store),
       }
     },
@@ -327,14 +324,15 @@ export const initializeMainStore = async () => {
   const store = useMainStore.getState()
 
   try {
+    // Initialize new service architecture (Phase 1: debug, view, ui)
+    const { initializeServices } = await import('../services/index.js')
+    initializeServices()
+
     // NOTE: registerGlobalFlowEventHandler is renderer-only (uses window)
     // It will be called by the renderer when it initializes
 
     // Initialize app (loads workspace, API keys, sessions, etc.)
     await store.initializeApp()
-
-    // Initialize Flow Editor slice (loads templates, persistence)
-    await store.initFlowEditor()
 
     // Start index watchers (workspace + KB) - best effort (only when a workspace is set)
     if (useMainStore.getState().workspaceRoot) {
@@ -370,7 +368,6 @@ export type {
   SettingsSlice,
   TerminalSlice,
   SessionSlice,
-  FlowEditorSlice,
 }
 
 // Re-export types from types.ts for convenience

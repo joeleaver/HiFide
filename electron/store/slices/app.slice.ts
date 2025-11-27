@@ -99,7 +99,7 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
           }
         } else {
           log('No workspace configured; entering Welcome mode')
-          try { state.setCurrentView?.({ view: 'welcome' }) } catch {}
+          try { state.setCurrentView?.({ view: 'welcome' }) } catch { }
         }
       } catch (e) {
         console.error('[app] Failed to initialize workspace:', e)
@@ -165,9 +165,12 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
         state.setProvidersValid(validMap)
       }
 
-      // 5. Models are now loaded centrally by settings.validateApiKeys via refreshAllModels.
-      //    We intentionally avoid a second refresh pass here; renderer listens to
-      //    settings.models.changed for the canonical snapshot.
+      // 5. Refresh models (now that we have valid keys)
+      //    We must do this explicitly because modelsByProvider is not persisted.
+      if (state.refreshAllModels) {
+        // Don't await this; let it run in background so app boot isn't blocked
+        state.refreshAllModels().catch((e: any) => console.error('[app] Failed to refresh models:', e))
+      }
 
       // 7. Load sessions (only when a workspace is set)
       if (hasWorkspace) {
@@ -241,7 +244,7 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
                 if (cfg.modelChangeTrigger) {
                   const ei = await indexer.getEngineInfo()
                   if (indexStatus.modelId && indexStatus.dim &&
-                      (ei.id !== indexStatus.modelId || ei.dim !== indexStatus.dim)) {
+                    (ei.id !== indexStatus.modelId || ei.dim !== indexStatus.dim)) {
                     log(`Index model changed (${indexStatus.modelId}/${indexStatus.dim} -> ${ei.id}/${ei.dim})`)
                     return true
                   }
@@ -283,7 +286,7 @@ export const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set, ge
         try {
           const hasValidProvider = validMap.openai || validMap.anthropic || validMap.gemini || validMap.fireworks || validMap.xai
           if (hasValidProvider) set({ startupMessage: null })
-        } catch {}
+        } catch { }
       }
 
       // 6. Navigate if no providers (workspace mode only; in Welcome we stay on welcome)

@@ -49,10 +49,13 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
   return { tools: map, nameMap }
 }
 
+// Models that support reasoningEffort (o1, o3 families)
+const supportsReasoningEffort = (id: string) => /^o[13](-|$)/i.test(id)
+
 export const OpenAiSdkProvider: ProviderAdapter = {
   id: 'openai',
 
-  async agentStream({ apiKey, model, system, messages, temperature, tools, responseSchema: _responseSchema, emit: _emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, system, messages, temperature, reasoningEffort, tools, responseSchema: _responseSchema, emit: _emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
     const oai = createOpenAI({ apiKey })
     const llm = oai(model)
 
@@ -70,8 +73,12 @@ export const OpenAiSdkProvider: ProviderAdapter = {
 
     try {
       if (DEBUG) {
-        console.log('[ai-sdk:openai] streamText start', { model, msgs: msgs.length, tools: Object.keys(aiTools).length })
+        console.log('[ai-sdk:openai] streamText start', { model, msgs: msgs.length, tools: Object.keys(aiTools).length, reasoningEffort })
       }
+      // OpenAI provider options for o1/o3 reasoning models
+      const providerOptions = supportsReasoningEffort(model) && reasoningEffort
+        ? { openai: { reasoningEffort } }
+        : undefined
       const result = streamText({
         model: llm,
         system: systemText,
@@ -83,6 +90,7 @@ export const OpenAiSdkProvider: ProviderAdapter = {
         abortSignal: ac.signal,
         stopWhen: stepCountIs(AGENT_MAX_STEPS),
         includeRawChunks: DEBUG,
+        providerOptions: providerOptions as any,
         // Stream mapping (AI SDK v5 onChunk passes { chunk })
         onChunk({ chunk }: any) {
           try {

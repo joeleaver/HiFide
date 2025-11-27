@@ -1,6 +1,6 @@
 import type { AgentTool } from '../../providers/provider'
-import { useMainStore } from '../../store'
 import { createItem, normalizeMarkdown } from '../../store/utils/knowledgeBase'
+import { ServiceRegistry } from '../../services/base/ServiceRegistry.js'
 
 export const knowledgeBaseStoreTool: AgentTool = {
   name: 'knowledgeBaseStore',
@@ -17,7 +17,8 @@ export const knowledgeBaseStoreTool: AgentTool = {
     required: [],
   },
   run: async (input: any, meta?: any) => {
-    const baseDir = meta?.workspaceId || useMainStore.getState().workspaceRoot || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+    const workspaceService = ServiceRegistry.get<any>('workspace')
+    const baseDir = meta?.workspaceId || workspaceService?.getWorkspaceRoot() || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
     const id = typeof input?.id === 'string' && input.id.trim() ? input.id.trim() : undefined
     const title = typeof input?.title === 'string' ? input.title : undefined
     const description = typeof input?.description === 'string' ? input.description : undefined
@@ -30,7 +31,12 @@ export const knowledgeBaseStoreTool: AgentTool = {
         return { ok: false, error: 'Missing required fields for create: title, description' }
       }
       const item = await createItem(baseDir, { title, description: normalizeMarkdown(description), tags, files })
-      try { (useMainStore as any).setState?.((s: any) => ({ kbItems: { ...(s?.kbItems || {}), [item.id]: item } })) } catch {}
+      try {
+        const kbService = ServiceRegistry.get<any>('knowledgeBase')
+        if (kbService) {
+          kbService.setState({ kbItems: { ...kbService.getItems(), [item.id]: item } })
+        }
+      } catch {}
       return { ok: true, data: { id: item.id, path: item.relPath, title: item.title, tags: item.tags, files: item.files } }
     } else {
       // Update
@@ -43,7 +49,12 @@ export const knowledgeBaseStoreTool: AgentTool = {
         return res.updateItem(baseDir, { id, patch: { title, description: descPatch, tags, files } })
       })()
       if (!updated) return { ok: false, error: 'Not found' }
-      try { (useMainStore as any).setState?.((s: any) => ({ kbItems: { ...(s?.kbItems || {}), [updated.id]: updated } })) } catch {}
+      try {
+        const kbService = ServiceRegistry.get<any>('knowledgeBase')
+        if (kbService) {
+          kbService.setState({ kbItems: { ...kbService.getItems(), [updated.id]: updated } })
+        }
+      } catch {}
       return { ok: true, data: { id: updated.id, path: updated.relPath, title: updated.title, tags: updated.tags, files: updated.files } }
     }
   }

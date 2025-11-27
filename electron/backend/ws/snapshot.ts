@@ -6,7 +6,7 @@
  */
 
 import type { WorkspaceSnapshot } from '../../../shared/hydration.js'
-import { useMainStore } from '../../store/index.js'
+import { ServiceRegistry } from '../../services/base/ServiceRegistry.js'
 
 /**
  * Build a complete workspace snapshot for a given workspace.
@@ -14,10 +14,11 @@ import { useMainStore } from '../../store/index.js'
  */
 export function buildWorkspaceSnapshot(workspaceId: string): WorkspaceSnapshot | null {
   try {
-    const state = useMainStore.getState() as any
-    
+    const sessionService = ServiceRegistry.get<any>('session')
+    if (!sessionService) return null
+
     // Get sessions for this workspace
-    const sessionsByWorkspace = state.sessionsByWorkspace || {}
+    const sessionsByWorkspace = sessionService.getSessionsByWorkspace() || {}
     const sessions = sessionsByWorkspace[workspaceId] || []
     const currentIdByWorkspace = state.currentIdByWorkspace || {}
     const currentSessionId = currentIdByWorkspace[workspaceId] || null
