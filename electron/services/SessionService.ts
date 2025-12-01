@@ -280,7 +280,50 @@ export class SessionService extends Service<SessionState> {
   }
 
   /**
-   * Update session context message history
+   * Update session context (messageHistory, provider, model, systemInstructions)
+   * This is the primary sync point between the scheduler's mainContext and the session's currentContext
+   */
+  updateContextFor(params: {
+    workspaceId: string
+    sessionId: string
+    messageHistory: Array<{
+      role: 'system' | 'user' | 'assistant'
+      content: string
+      metadata?: {
+        id: string
+        pinned?: boolean
+        priority?: number
+      }
+    }>
+    provider?: string
+    model?: string
+    systemInstructions?: string
+  }): void {
+    const { workspaceId, sessionId, messageHistory, provider, model, systemInstructions } = params
+
+    const sessions = this.getSessionsFor({ workspaceId })
+    const updated = sessions.map((s) =>
+      s.id === sessionId
+        ? {
+            ...s,
+            currentContext: {
+              ...s.currentContext,
+              messageHistory,
+              ...(provider !== undefined ? { provider } : {}),
+              ...(model !== undefined ? { model } : {}),
+              ...(systemInstructions !== undefined ? { systemInstructions } : {}),
+            },
+            updatedAt: Date.now(),
+          }
+        : s
+    )
+
+    this.setSessionsFor({ workspaceId, sessions: updated })
+    this.saveSessionFor({ workspaceId, sessionId }, false) // Debounced
+  }
+
+  /**
+   * @deprecated Use updateContextFor instead
    */
   updateMessageHistoryFor(params: {
     workspaceId: string
@@ -295,24 +338,7 @@ export class SessionService extends Service<SessionState> {
       }
     }>
   }): void {
-    const { workspaceId, sessionId, messageHistory } = params
-
-    const sessions = this.getSessionsFor({ workspaceId })
-    const updated = sessions.map((s) =>
-      s.id === sessionId
-        ? {
-            ...s,
-            currentContext: {
-              ...s.currentContext,
-              messageHistory,
-            },
-            updatedAt: Date.now(),
-          }
-        : s
-    )
-
-    this.setSessionsFor({ workspaceId, sessions: updated })
-    this.saveSessionFor({ workspaceId, sessionId }, false) // Debounced
+    this.updateContextFor(params)
   }
 
   /**

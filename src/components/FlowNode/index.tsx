@@ -43,8 +43,11 @@ export default function FlowNode(props: NodeProps<any>) {
   }
 
   const handleConfigChange = (patch: any) => {
+    console.log('[FlowNode] handleConfigChange called:', { id, patch, hasHandler: !!onConfigChange })
     if (onConfigChange) {
       onConfigChange(id, patch)
+    } else {
+      console.warn('[FlowNode] onConfigChange handler is undefined!')
     }
   }
 

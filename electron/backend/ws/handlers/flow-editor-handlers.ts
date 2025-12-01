@@ -60,6 +60,19 @@ export function createFlowEditorHandlers(
 
       const flowGraphService = getFlowGraphService()
       const graph = flowGraphService.getGraph({ workspaceId })
+
+      // Log what we're about to send
+      if (graph.nodes.length > 0) {
+        const sample = graph.nodes[0]
+        console.log('[flowEditor.getGraph] About to send sample node:', {
+          id: sample.id,
+          type: sample.type,
+          dataKeys: sample.data ? Object.keys(sample.data) : [],
+          dataNodeType: (sample.data as any)?.nodeType,
+          dataConfig: (sample.data as any)?.config
+        })
+      }
+
       return { ok: true, nodes: graph.nodes, edges: graph.edges }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
@@ -128,15 +141,69 @@ export function createFlowEditorHandlers(
 
   addMethod('flowEditor.setGraph', async ({ nodes, edges }: { nodes: any[]; edges: any[] }) => {
     try {
+      console.log('[flowEditor.setGraph] Called with nodeCount:', nodes?.length, 'edgeCount:', edges?.length)
+
+      // Log sample node to see what format we're receiving
+      if (nodes && nodes.length > 0) {
+        const sampleNode = nodes[0]
+        console.log('[flowEditor.setGraph] Sample node from renderer:', {
+          id: sampleNode.id,
+          type: sampleNode.type,
+          topLevelNodeType: sampleNode.nodeType,  // Should be undefined (wrong format)
+          dataNodeType: sampleNode.data?.nodeType,  // Should have value (correct format)
+          hasData: !!sampleNode.data,
+          dataKeys: sampleNode.data ? Object.keys(sampleNode.data).slice(0, 10) : []
+        })
+
+        const nodesWithConfig = nodes.filter(n => n.data?.config && Object.keys(n.data.config).length > 0)
+        console.log('[flowEditor.setGraph] Nodes with config:', nodesWithConfig.map(n => ({
+          id: n.id,
+          nodeType: n.data?.nodeType,
+          config: n.data?.config
+        })))
+      }
+
       const workspaceId = await getConnectionWorkspaceId(connection)
+      console.log('[flowEditor.setGraph] workspaceId:', workspaceId)
       if (!workspaceId) {
+        console.warn('[flowEditor.setGraph] No workspace bound, cannot save graph')
         return { ok: false, error: 'No workspace bound' }
       }
 
       const flowGraphService = getFlowGraphService()
       flowGraphService.setGraph({ workspaceId, nodes, edges })
+
+      // Auto-save user and workspace flows to disk (system flows are read-only)
+      const selectedTemplateId = flowGraphService.getSelectedTemplateId({ workspaceId })
+
+      if (selectedTemplateId) {
+        const flowProfileService = getFlowProfileService()
+        const templates = flowProfileService.getTemplates(workspaceId)
+        const template = templates.find((t: any) => t.id === selectedTemplateId)
+
+        if (template && (template.library === 'workspace' || template.library === 'user')) {
+          console.log('[flowEditor.setGraph] Auto-saving flow:', { templateId: selectedTemplateId, library: template.library })
+          try {
+            await flowProfileService.saveProfile({
+              workspaceId,
+              name: selectedTemplateId,
+              library: template.library,
+              nodes,
+              edges
+            })
+            console.log('[flowEditor.setGraph] Flow auto-saved successfully')
+          } catch (e: any) {
+            console.error('[flowEditor.setGraph] Failed to auto-save flow:', e)
+          }
+        } else if (template && template.library === 'system') {
+          console.log('[flowEditor.setGraph] Skipping auto-save for system flow (read-only):', selectedTemplateId)
+        }
+      }
+
+      console.log('[flowEditor.setGraph] Graph saved successfully')
       return { ok: true }
     } catch (e: any) {
+      console.error('[flowEditor.setGraph] Error:', e)
       return { ok: false, error: e?.message || String(e) }
     }
   })
@@ -149,29 +216,10 @@ export function createFlowEditorHandlers(
       const profile = await flowProfileService.loadTemplate({ templateId })
       if (!profile) return { ok: false, error: 'template-not-found' }
 
-      // Deserialize nodes and edges from storage format to ReactFlow format
-      const nodes = profile.nodes.map((n: any) => ({
-        id: n.id,
-        type: 'hifiNode',
-        position: n.position,
-        data: {
-          nodeType: n.nodeType,
-          label: n.label || n.id,
-          labelBase: n.label || n.id,
-          config: n.config || {},
-          expanded: n.expanded || false,
-          bp: false,
-          onToggleBp: () => {},
-        },
-      }))
-
-      const edges = profile.edges.map((e: any) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sourceHandle: e.sourceHandle,
-        targetHandle: e.targetHandle,
-      }))
+      // profile.nodes and profile.edges are already in ReactFlow format
+      // (deserialized by loadFlowTemplate in flowProfiles.ts)
+      // DO NOT re-deserialize - that loses data.nodeType and data.config!
+      const { nodes, edges } = profile
 
       const workspaceId = await getConnectionWorkspaceId(connection)
       if (!workspaceId) {

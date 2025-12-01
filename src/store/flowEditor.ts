@@ -6,8 +6,6 @@ interface FlowEditorStore {
   templatesLoaded: boolean
   selectedTemplate: string
   graphVersion: number // Increment to trigger re-hydration in components
-  currentGraph: { nodes: any[]; edges: any[] } | null
-  isHydratingGraph: boolean // Track graph hydration for loading overlay
 
   setTemplates: (templates: any[], loaded: boolean, selected: string) => void
   incrementGraphVersion: () => void
@@ -28,8 +26,6 @@ export const useFlowEditor = create<FlowEditorStore>((set, get) => ({
   templatesLoaded: false,
   selectedTemplate: '',
   graphVersion: 0,
-  currentGraph: null,
-  isHydratingGraph: false,
 
   setTemplates: (templates, loaded, selected) => set({
     availableTemplates: templates,
@@ -70,13 +66,11 @@ export const useFlowEditor = create<FlowEditorStore>((set, get) => ({
     }
 
     try {
-      set({ isHydratingGraph: true })
       console.log('[flowEditor] Fetching graph from main store')
       const g: any = await withTimeout(client.rpc('flowEditor.getGraph', {}), RPC_TIMEOUT)
 
       if (g === null) {
         console.warn('[flowEditor] Graph fetch timed out')
-        set({ isHydratingGraph: false })
         return { ok: false }
       }
 
@@ -85,14 +79,21 @@ export const useFlowEditor = create<FlowEditorStore>((set, get) => ({
       if (g?.ok) {
         const nodes = Array.isArray(g.nodes) ? g.nodes : []
         const edges = Array.isArray(g.edges) ? g.edges : []
-        set({ currentGraph: { nodes, edges }, isHydratingGraph: false })
+
+        // Log nodes with config
+        const nodesWithConfig = nodes.filter((n: any) => n.data?.config && Object.keys(n.data.config).length > 0)
+        console.log('[flowEditor] Received nodes with config:', nodesWithConfig.map((n: any) => ({
+          id: n.id,
+          nodeType: n.data?.nodeType,
+          config: n.data?.config
+        })))
+
+        // Don't cache - just return
         return { ok: true, nodes, edges }
       }
-      set({ isHydratingGraph: false })
       return { ok: false }
     } catch (e) {
       console.error('[flowEditor] Error fetching graph:', e)
-      set({ isHydratingGraph: false })
       return { ok: false }
     }
   },

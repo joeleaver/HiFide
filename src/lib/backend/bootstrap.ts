@@ -10,6 +10,7 @@ import { initKanbanEvents } from '../../store/kanban'
 import { initAppBootEvents } from '../../store/appBoot'
 import { initTerminalTabsEvents } from '../../store/terminalTabs'
 import { initFlowEditorEvents } from '../../store/flowEditor'
+import { initFlowEditorLocalEvents } from '../../store/flowEditorLocal'
 import { initHydrationEvents, useHydration } from '../../store/hydration'
 import { initUiEvents, reloadUiStateForWorkspace } from '../../store/ui'
 import { useBackendBinding } from '../../store/binding'
@@ -69,6 +70,9 @@ export function bootstrapBackendFromPreload(): void {
   initTerminalTabsEvents()
   initFlowEditorEvents()
   initUiEvents()
+
+  // Initialize flow editor local events (async - waits for client ready)
+  void initFlowEditorLocalEvents()
 
   // Workspace binding
   client.subscribe('workspace.attached', (p: any) => {

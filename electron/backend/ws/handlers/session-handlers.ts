@@ -268,20 +268,100 @@ export function createSessionHandlers(
   })
 
   // Set executed flow for session
+  // NOTE: This does NOT update FlowGraphService - that's for the editor only.
+  // If editor is editing the same flow, flow.start will use the editor's graph.
+  // If editor is editing a different flow, we load fresh from disk.
   addMethod('session.setExecutedFlow', async ({ sessionId, flowId }: { sessionId: string; flowId: string }) => {
     try {
       const workspaceId = await getConnectionWorkspaceId(connection)
       if (!workspaceId) return { ok: false, error: 'No workspace bound' }
 
       const sessionService = getSessionService()
+
+      // Cancel any running flow for this session
+      const { getActiveFlows, cancelFlow, executeFlow } = await import('../../../flow-engine/index.js')
+      const activeFlows = getActiveFlows()
+      for (const [requestId, scheduler] of activeFlows.entries()) {
+        if ((scheduler as any).sessionId === sessionId) {
+          console.log('[session.setExecutedFlow] Cancelling running flow for session:', sessionId, 'requestId:', requestId)
+          await cancelFlow(requestId)
+        }
+      }
+
+      // Update the session's executed flow FIRST
       await sessionService.setSessionExecutedFlowFor({ workspaceId, sessionId, flowId })
-      return { ok: true }
+
+      // Check if editor is editing the same flow - if so, use editor's graph (picks up live edits)
+      const { getFlowProfileService, getFlowGraphService } = await import('../../../services/index.js')
+      const flowProfileService = getFlowProfileService()
+      const flowGraphService = getFlowGraphService()
+
+      const editorTemplateId = flowGraphService.getSelectedTemplateId({ workspaceId })
+      let nodes: any[]
+      let edges: any[]
+
+      if (editorTemplateId === flowId) {
+        // Same flow - use editor's current graph (includes unsaved edits)
+        console.log('[session.setExecutedFlow] Using editor graph (same flow):', flowId)
+        const graph = flowGraphService.getGraph({ workspaceId })
+        nodes = graph.nodes
+        edges = graph.edges
+      } else {
+        // Different flow - load fresh from disk
+        console.log('[session.setExecutedFlow] Loading from disk (different flow):', flowId, 'editor has:', editorTemplateId)
+        const profile = await flowProfileService.loadTemplate({ templateId: flowId })
+        if (!profile) {
+          console.warn('[session.setExecutedFlow] Failed to load flow template:', flowId)
+          return { ok: false, error: 'Failed to load flow template' }
+        }
+        nodes = profile.nodes
+        edges = profile.edges
+      }
+
+      console.log('[session.setExecutedFlow] Flow template ready:', flowId, 'nodes:', nodes.length)
+
+      // Get session and start the new flow
+      const sessions = sessionService.getSessionsFor({ workspaceId })
+      const session = sessions.find((s) => s.id === sessionId)
+      if (!session?.currentContext) {
+        return { ok: true } // Flow loaded but no context to start with
+      }
+
+      // Convert edges and execute flow
+      const { reactFlowEdgesToFlowEdges } = await import('../../../services/flowConversion.js')
+      const flowEdges = reactFlowEdgesToFlowEdges(edges)
+
+      const crypto = await import('crypto')
+      const requestId = crypto.randomUUID()
+
+      // Get WebContents for this connection
+      const { BrowserWindow } = await import('electron')
+      const meta = activeConnections.get(connection)
+      const wc = meta?.windowId ? BrowserWindow.fromId(meta.windowId)?.webContents : undefined
+
+      // Execute the new flow
+      executeFlow(wc, {
+        requestId,
+        flowDef: { nodes, edges: flowEdges },
+        sessionId,
+        workspaceId,
+        initialContext: {
+          provider: session.currentContext.provider,
+          model: session.currentContext.model,
+          systemInstructions: session.currentContext.systemInstructions,
+          messageHistory: session.currentContext.messageHistory || [],
+        },
+      })
+
+      console.log('[session.setExecutedFlow] Started new flow:', flowId, 'requestId:', requestId)
+      return { ok: true, requestId }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
     }
   })
 
   // Set provider/model for session
+  // Also updates any active flow scheduler for this session so the next LLM request uses the new model
   addMethod('session.setProviderModel', async ({ sessionId, providerId, modelId }: { sessionId: string; providerId: string; modelId: string }) => {
     try {
       const workspaceId = await getConnectionWorkspaceId(connection)
@@ -289,6 +369,11 @@ export function createSessionHandlers(
 
       const sessionService = getSessionService()
       await sessionService.setSessionProviderModelFor({ workspaceId, sessionId, provider: providerId, model: modelId })
+
+      // Update any active flow scheduler for this session so next LLM request uses new provider/model
+      const { updateActiveFlowProviderModelForSession } = await import('../../../flow-engine/index.js')
+      updateActiveFlowProviderModelForSession(sessionId, providerId, modelId)
+
       return { ok: true }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }

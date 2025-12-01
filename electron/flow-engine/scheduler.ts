@@ -178,17 +178,23 @@ export class FlowScheduler {
         return
       }
 
-      // Write final messageHistory back to session
-      console.log('[Scheduler.flushToSession] Flushing messageHistory to session', {
+      // Write mainContext back to session - this ensures session.currentContext matches scheduler's mainContext
+      // This is the single sync point that keeps UI (context inspector) aligned with what LLM receives
+      console.log('[Scheduler.flushToSession] Flushing context to session', {
         sessionId: this.sessionId,
-        messageCount: this.mainContext.messageHistory.length
+        messageCount: this.mainContext.messageHistory.length,
+        provider: this.mainContext.provider,
+        model: this.mainContext.model
       })
 
       if (this.workspaceId && this.sessionId) {
-        sessionService.updateMessageHistoryFor({
+        sessionService.updateContextFor({
           workspaceId: this.workspaceId,
           sessionId: this.sessionId,
-          messageHistory: this.mainContext.messageHistory
+          messageHistory: this.mainContext.messageHistory,
+          provider: this.mainContext.provider,
+          model: this.mainContext.model,
+          systemInstructions: this.mainContext.systemInstructions
         })
       } else {
         console.warn('[Scheduler.flushToSession] Missing workspaceId or sessionId, cannot flush')
@@ -638,6 +644,23 @@ export class FlowScheduler {
           try {
             console.log(`[Scheduler] ${nodeId} - collect for ${successorId}:`, considered)
           } catch {}
+
+          // If pushing a main context, ensure it has the current provider/model from mainContext
+          // This allows mid-flow model changes to take effect immediately
+          if (pushedData.context && (pushedData.context.contextType === 'main' || !pushedData.context.contextType)) {
+            if (this.mainContext.provider !== pushedData.context.provider ||
+                this.mainContext.model !== pushedData.context.model) {
+              console.log(`[Scheduler] ${nodeId} - Updating pushed context provider/model from mainContext:`, {
+                old: { provider: pushedData.context.provider, model: pushedData.context.model },
+                new: { provider: this.mainContext.provider, model: this.mainContext.model }
+              })
+              pushedData.context = {
+                ...pushedData.context,
+                provider: this.mainContext.provider,
+                model: this.mainContext.model
+              }
+            }
+          }
 
           // Only push to successor if we have data to push
           // This prevents calling successors with empty inputs (which would be treated as a pull)

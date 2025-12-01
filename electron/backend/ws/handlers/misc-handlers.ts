@@ -126,15 +126,26 @@ export function createMiscHandlers(
   // Flow tools
   addMethod('flows.getTools', async () => {
     try {
-      // Tools are now registered globally, not in FlowConfigService
-      // Return empty array for now - this RPC may need to be removed or reimplemented
-      return { ok: true, tools: [] }
+      const { agentTools } = await import('../../../tools/index.js')
+      const { getToolsService } = await import('../../../services/index.js')
+      const toolsService = getToolsService()
+
+      const tools = agentTools.map((t: any) => ({
+        name: t.name,
+        description: t.description || '',
+        category: toolsService.getToolCategory(t.name),
+      }))
+
+      return { ok: true, tools }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
     }
   })
 
   // Flow execution handlers
+  // NOTE: Uses session.executedFlow to determine which flow to run.
+  // If editor is editing the same flow, uses editor's graph (picks up live edits).
+  // If editor is editing a different flow, loads fresh from disk.
   addMethod('flow.start', async () => {
     try {
       const workspaceId = await getConnectionWorkspaceId(connection)
@@ -142,9 +153,10 @@ export function createMiscHandlers(
         return { ok: false, error: 'No workspace bound', code: 'no-workspace' }
       }
 
-      const { getSessionService, getFlowGraphService } = await import('../../../services/index.js')
+      const { getSessionService, getFlowGraphService, getFlowProfileService } = await import('../../../services/index.js')
       const sessionService = getSessionService()
       const flowGraphService = getFlowGraphService()
+      const flowProfileService = getFlowProfileService()
 
       // Get current session
       const currentSessionId = sessionService.getCurrentIdFor({ workspaceId })
@@ -163,18 +175,47 @@ export function createMiscHandlers(
         return { ok: false, error: 'Session has no context', code: 'no-session-context' }
       }
 
-      // Get flow definition from FlowGraphService (already loaded during workspace load)
-      const graph = flowGraphService.getGraph({ workspaceId })
-      console.log('[flow.start] Graph for workspace:', workspaceId, 'nodeCount:', graph.nodes?.length, 'edgeCount:', graph.edges?.length)
+      // Determine which flow to run from session's executedFlow
+      const executedFlowId = session.executedFlow
+      const editorTemplateId = flowGraphService.getSelectedTemplateId({ workspaceId })
 
-      if (!graph.nodes || graph.nodes.length === 0) {
+      let nodes: any[]
+      let edges: any[]
+
+      if (editorTemplateId && editorTemplateId === executedFlowId) {
+        // Same flow - use editor's current graph (includes unsaved edits)
+        console.log('[flow.start] Using editor graph (same flow):', executedFlowId)
+        const graph = flowGraphService.getGraph({ workspaceId })
+        nodes = graph.nodes
+        edges = graph.edges
+      } else if (executedFlowId) {
+        // Different flow - load fresh from disk
+        console.log('[flow.start] Loading from disk (different flow):', executedFlowId, 'editor has:', editorTemplateId)
+        const profile = await flowProfileService.loadTemplate({ templateId: executedFlowId })
+        if (!profile) {
+          console.error('[flow.start] Failed to load flow template:', executedFlowId)
+          return { ok: false, error: 'Failed to load flow template', code: 'template-not-found' }
+        }
+        nodes = profile.nodes
+        edges = profile.edges
+      } else {
+        // No executed flow set - fall back to editor's graph (legacy behavior)
+        console.log('[flow.start] No executedFlow, using editor graph')
+        const graph = flowGraphService.getGraph({ workspaceId })
+        nodes = graph.nodes
+        edges = graph.edges
+      }
+
+      if (!nodes || nodes.length === 0) {
         console.error('[flow.start] No flow loaded for workspace:', workspaceId)
         return { ok: false, error: 'No flow loaded', code: 'no-flow' }
       }
 
+      console.log('[flow.start] Flow ready:', executedFlowId || '(editor)', 'nodeCount:', nodes.length, 'edgeCount:', edges.length)
+
       // Convert ReactFlow edges to flow-engine edges
       const { reactFlowEdgesToFlowEdges } = await import('../../../services/flowConversion.js')
-      const flowEdges = reactFlowEdgesToFlowEdges(graph.edges)
+      const flowEdges = reactFlowEdgesToFlowEdges(edges)
 
       // Generate request ID
       const crypto = await import('crypto')
@@ -189,7 +230,7 @@ export function createMiscHandlers(
       const { executeFlow } = await import('../../../flow-engine/index.js')
       const result = await executeFlow(wc, {
         requestId,
-        flowDef: { nodes: graph.nodes, edges: flowEdges },
+        flowDef: { nodes, edges: flowEdges },
         sessionId: currentSessionId,
         workspaceId,
         initialContext: {

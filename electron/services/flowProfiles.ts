@@ -108,7 +108,8 @@ function deserializeNode(serialized: SerializedNode): Node {
       config: serialized.config || {},
       expanded: serialized.expanded || false,
       bp: false,
-      onToggleBp: () => {}, // Will be set by store
+      // Don't add functions here - they break JSON-RPC serialization
+      // Functions should only be added in the renderer when displaying nodes
     },
   }
 }

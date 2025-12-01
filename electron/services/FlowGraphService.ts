@@ -85,6 +85,27 @@ export class FlowGraphService extends Service<FlowGraphState> {
     console.log('[FlowGraphService.getGraph] Getting graph for workspace:', params.workspaceId, 'Available workspaces:', Object.keys(this.state.graphsByWorkspace))
     const graph = this.getWorkspaceGraph(params.workspaceId)
     console.log('[FlowGraphService.getGraph] Returning graph with nodeCount:', graph.nodes.length, 'edgeCount:', graph.edges.length)
+
+    // Log sample node to see what's stored
+    if (graph.nodes.length > 0) {
+      const sampleNode = graph.nodes[0]
+      console.log('[FlowGraphService.getGraph] Sample node:', {
+        id: sampleNode.id,
+        type: sampleNode.type,
+        nodeType: (sampleNode as any).nodeType,
+        dataNodeType: sampleNode.data?.nodeType,
+        dataKeys: sampleNode.data ? Object.keys(sampleNode.data) : []
+      })
+    }
+
+    // Log nodes with config
+    const nodesWithConfig = graph.nodes.filter((n: any) => n.data?.config && Object.keys(n.data.config).length > 0)
+    console.log('[FlowGraphService.getGraph] Nodes with config:', nodesWithConfig.map((n: any) => ({
+      id: n.id,
+      nodeType: n.data?.nodeType,
+      config: n.data?.config
+    })))
+
     return {
       nodes: graph.nodes,
       edges: graph.edges,
@@ -119,6 +140,18 @@ export class FlowGraphService extends Service<FlowGraphState> {
       edgeCount: edges.length,
       templateId: templateId || '(unchanged)',
     })
+
+    // Log sample node to see what's being stored
+    if (nodes && nodes.length > 0) {
+      const sampleNode = nodes[0]
+      console.log('[FlowGraph] Sample node being stored:', {
+        id: sampleNode.id,
+        type: sampleNode.type,
+        nodeType: (sampleNode.data as any)?.nodeType,
+        hasData: !!sampleNode.data,
+        dataKeys: sampleNode.data ? Object.keys(sampleNode.data) : []
+      })
+    }
 
     const graphsByWorkspace = { ...this.state.graphsByWorkspace }
     const currentGraph = this.getWorkspaceGraph(workspaceId)

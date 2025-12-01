@@ -161,9 +161,15 @@ export async function resumeFlow(
 export function updateActiveFlowProviderModelForSession(sessionId: string, provider?: string, model?: string): void {
   try {
     if (!sessionId) return
-    const scheduler = activeFlows.get(sessionId)
-    if (!scheduler) return
-    scheduler.updateProviderModel(provider, model)
+    // activeFlows is keyed by requestId, not sessionId, so we need to find the scheduler by session
+    for (const scheduler of activeFlows.values()) {
+      if (scheduler.sessionId === sessionId) {
+        console.log('[updateActiveFlowProviderModelForSession] Updating scheduler for session:', sessionId, { provider, model })
+        scheduler.updateProviderModel(provider, model)
+        return
+      }
+    }
+    console.log('[updateActiveFlowProviderModelForSession] No active flow found for session:', sessionId)
   } catch (e) {
     try { console.warn('[flows-v2] updateActiveFlowProviderModelForSession failed', e) } catch {}
   }

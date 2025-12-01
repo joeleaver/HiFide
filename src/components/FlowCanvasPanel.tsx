@@ -65,12 +65,11 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
 
   // ===== LOCAL STATE (Instant UI Updates - Renderer-only store) =====
   // Nodes and edges are kept in a renderer-local zustand store for responsiveness
-  // They are debounced-synced to the main store
+  // Single source of truth: read from store (no local state, no useEffect)
   const localNodes = useFlowEditorLocal((s) => s.nodes) as FlowNode[]
   const setLocalNodes = useFlowEditorLocal((s) => s.setNodes)
   const localEdges = useFlowEditorLocal((s) => s.edges) as Edge[]
   const setLocalEdges = useFlowEditorLocal((s) => s.setEdges)
-  const hydrateFromMain = useFlowEditorLocal((s) => s.hydrateFromMain)
 
   // ===== REMOTE STATE (Execution & Persistence) =====
   // Execution state (metadata only) - subscribe manually to avoid ref-only rerenders from IPC
@@ -159,20 +158,11 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
     try {
       const res = await useFlowEditor.getState().loadTemplate(value)
       if (res?.ok) {
-        // Graph will be updated via graphVersion increment in store
-        // Just need to hydrate locally
-        const g = await useFlowEditor.getState().fetchGraph()
-        if (g?.ok && g.nodes && g.edges) {
-          const styledNodes = g.nodes.map((n: any) => ({ ...n, data: { ...(n.data || {}), __runtime: runtimeNodeStateRef.current?.[n.id] || null } }))
-          hydrateFromMain({ nodes: styledNodes, edges: g.edges })
-          const nSig = JSON.stringify({ n: g.nodes.map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null })), e: g.edges.map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined })) })
-          ;(lastLoadedTemplateRef as any).currentSig = nSig
-          lastSyncedSigRef.current = nSig
-          setHasUnsavedChanges(false)
-        }
+        // Graph will be updated automatically via store event subscription
+        // No manual hydration needed
       }
     } catch {}
-  }, [hasUnsavedChanges, hydrateFromMain])
+  }, [hasUnsavedChanges])
 
   // Handle save as (create new profile)
   const handleSaveAs = useCallback(async () => {
@@ -204,18 +194,10 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
       if (res?.ok) {
         setLoadTemplateModalOpen(false)
         setPendingSelection(null)
-        const g = await useFlowEditor.getState().fetchGraph()
-        if (g?.ok && g.nodes && g.edges) {
-          const styledNodes = g.nodes.map((n: any) => ({ ...n, data: { ...(n.data || {}), __runtime: runtimeNodeStateRef.current?.[n.id] || null } }))
-          hydrateFromMain({ nodes: styledNodes, edges: g.edges })
-          const nSig = JSON.stringify({ n: g.nodes.map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null })), e: g.edges.map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined })) })
-          ;(lastLoadedTemplateRef as any).currentSig = nSig
-          lastSyncedSigRef.current = nSig
-          setHasUnsavedChanges(false)
-        }
+        // Graph will be updated automatically via store event subscription
       }
     } catch {}
-  }, [pendingSelection, hydrateFromMain])
+  }, [pendingSelection])
 
   // Handle modal cancel
   const handleCancelLoad = useCallback(() => {
@@ -228,97 +210,9 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   // Keep a ref of last synced signature to avoid sending unchanged graphs to backend
   const lastSyncedSigRef = useRef<string | null>(null)
 
-  // Hydrate graph from pre-fetched store state on mount
-  useEffect(() => {
-    const computeSig = (nodes: any[], edges: any[]) => {
-      try {
-        const n = (nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
-        const e = (edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
-        return JSON.stringify({ n, e })
-      } catch { return '' }
-    }
-
-    // Graph should already be pre-fetched during loading overlay phase
-    const currentGraph = useFlowEditor.getState().currentGraph
-    if (currentGraph?.nodes && currentGraph?.edges) {
-      const nodes = currentGraph.nodes
-      const edges = currentGraph.edges
-      console.log('[FlowCanvasPanel] Hydrating from pre-fetched graph:', { nodeCount: nodes.length, edgeCount: edges.length })
-      const styledNodes = nodes.map((n: any) => ({
-        ...n,
-        data: { ...(n.data || {}), __runtime: runtimeNodeStateRef.current?.[n.id] || null }
-      }))
-      hydrateFromMain({ nodes: styledNodes, edges })
-      const sig = computeSig(nodes, edges)
-      ;(lastLoadedTemplateRef as any).currentSig = sig
-      lastLoadedTemplateRef.current = selectedTemplate
-      lastSyncedSigRef.current = sig
-      setHasUnsavedChanges(false)
-    }
-  }, [hydrateFromMain, selectedTemplate])
-
-  // Re-hydrate graph when graphVersion changes (triggered by store subscription)
-  useEffect(() => {
-    // Skip initial mount (handled by mount effect above)
-    if (graphVersion === 0) return
-
-    ;(async () => {
-      try {
-        // Fetch graph via store action (not direct RPC)
-        const g = await useFlowEditor.getState().fetchGraph()
-        if (g?.ok && g.nodes && g.edges) {
-          const nodes = g.nodes
-          const edges = g.edges
-          const styledNodes = nodes.map((n: any) => ({
-            ...n,
-            data: { ...(n.data || {}), __runtime: runtimeNodeStateRef.current?.[n.id] || null }
-          }))
-          hydrateFromMain({ nodes: styledNodes, edges })
-
-          const n = (nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
-          const e = (edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
-          const sig = JSON.stringify({ n, e })
-          ;(lastLoadedTemplateRef as any).currentSig = sig
-          lastLoadedTemplateRef.current = selectedTemplate
-          lastSyncedSigRef.current = sig
-          setHasUnsavedChanges(false)
-        }
-      } catch {}
-    })()
-  }, [graphVersion, hydrateFromMain, selectedTemplate])
-
-
-  // Debounced sync of local graph to main store only when dirty
-  useEffect(() => {
-    // Guard: do not sync until we've hydrated from main to avoid overwriting with empty graph
-    if (!(lastLoadedTemplateRef as any).currentSig) {
-      return
-    }
-    const t = setTimeout(() => {
-      try {
-        const n = (localNodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
-        const e = (localEdges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
-        const sig = JSON.stringify({ n, e })
-
-        // On first run after hydration, seed from hydration signature if present
-        if (lastSyncedSigRef.current === null && (lastLoadedTemplateRef as any).currentSig) {
-          lastSyncedSigRef.current = (lastLoadedTemplateRef as any).currentSig
-        }
-
-        if (sig !== lastSyncedSigRef.current) {
-          void useFlowEditor.getState().setGraph({ nodes: localNodes, edges: localEdges })
-          lastSyncedSigRef.current = sig
-        }
-        // Update local unsaved marker vs last loaded snapshot
-        const loadedSig = (lastLoadedTemplateRef as any).currentSig
-        setHasUnsavedChanges(!!loadedSig && sig !== loadedSig)
-      } catch {
-        // Fallback: if signature fails, still sync to backend
-        void useFlowEditor.getState().setGraph({ nodes: localNodes, edges: localEdges })
-      }
-    }, 500)
-    return () => clearTimeout(t)
-  }, [localNodes, localEdges])
+  // No useEffect needed! Store automatically:
+  // 1. Hydrates from main via events
+  // 2. Debounced-saves to main when nodes/edges change
 
 
   // ===== NO CONTINUOUS SYNC OF GRAPH STRUCTURE =====
@@ -353,11 +247,28 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   }, [localNodes, setLocalNodes])
 
   const handleNodeConfigChange = useCallback((nodeId: string, patch: any) => {
+    console.log('[FlowCanvasPanel] handleNodeConfigChange:', { nodeId, patch })
+
+    // Find the original node to check its data
+    const originalNode = localNodes.find(n => n.id === nodeId)
+    console.log('[FlowCanvasPanel] Original node data:', {
+      id: originalNode?.id,
+      nodeType: originalNode?.data?.nodeType,
+      config: originalNode?.data?.config,
+      allDataKeys: originalNode?.data ? Object.keys(originalNode.data) : []
+    })
+
     const updated = localNodes.map(n =>
       n.id === nodeId
         ? { ...n, data: { ...n.data, config: { ...(n.data?.config || {}), ...patch } } }
         : n
     )
+    const updatedNode = updated.find(n => n.id === nodeId)
+    console.log('[FlowCanvasPanel] Updated node:', {
+      id: updatedNode?.id,
+      nodeType: updatedNode?.data?.nodeType,
+      config: updatedNode?.data?.config
+    })
     setLocalNodes(updated as any)
   }, [localNodes, setLocalNodes])
 
@@ -764,18 +675,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
                 try {
                   const res = await useFlowEditor.getState().deleteProfile(selectedTemplate)
                   if (res?.ok) {
-                    const g = await useFlowEditor.getState().fetchGraph()
-                    if (g?.ok && g.nodes && g.edges) {
-                      hydrateFromMain({ nodes: g.nodes, edges: g.edges })
-                      try {
-                        const n = (g.nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
-                        const e = (g.edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
-                        const sig = JSON.stringify({ n, e })
-                        ;(lastLoadedTemplateRef as any).currentSig = sig
-                        lastSyncedSigRef.current = sig
-                        setHasUnsavedChanges(false)
-                      } catch {}
-                    }
+                    // Graph will be updated automatically via store event subscription
                   }
                 } catch {}
               }
@@ -835,18 +735,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
               try {
                 const res = await useFlowEditor.getState().createNewFlowNamed(name)
                 if (res?.ok) {
-                  const g = await useFlowEditor.getState().fetchGraph()
-                  if (g?.ok && g.nodes && g.edges) {
-                    hydrateFromMain({ nodes: g.nodes, edges: g.edges })
-                    try {
-                      const n = (g.nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
-                      const e = (g.edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
-                      const sig = JSON.stringify({ n, e })
-                      ;(lastLoadedTemplateRef as any).currentSig = sig
-                      lastSyncedSigRef.current = sig
-                      setHasUnsavedChanges(false)
-                    } catch {}
-                  }
+                  // Graph will be updated automatically via store event subscription
                 }
               } catch {}
               resetNewFlowModal()
@@ -883,20 +772,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
               try {
                 const res = await useFlowEditor.getState().createNewFlowNamed(name)
                 if (res?.ok) {
-                  const g = await useFlowEditor.getState().fetchGraph()
-                  if (g?.ok && g.nodes && g.edges) {
-                    const nodes = g.nodes
-                    const edges = g.edges
-                    hydrateFromMain({ nodes, edges })
-                    try {
-                      const n = (nodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
-                      const e = (edges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
-                      const sig = JSON.stringify({ n, e })
-                      ;(lastLoadedTemplateRef as any).currentSig = sig
-                      lastSyncedSigRef.current = sig
-                      setHasUnsavedChanges(false)
-                    } catch {}
-                  }
+                  // Graph will be updated automatically via store event subscription
                 }
               } catch {}
               resetNewFlowModal()
