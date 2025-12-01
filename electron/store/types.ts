@@ -75,6 +75,11 @@ export type Badge = {
 
   // Tool-specific data (for matching when updating status)
   toolName?: string             // Original tool name (e.g., 'fs_read_file') for tool badges
+  callId?: string               // LLM tool call ID (for matching tool start/end events)
+  args?: any                    // Tool arguments
+  result?: any                  // Tool result (minimal format after toModelResult)
+  startTimestamp?: number       // When tool started
+  endTimestamp?: number         // When tool ended
 
   // Interactive badge data (future)
   interactive?: {

@@ -235,12 +235,31 @@ function createChatTimelineStore() {
     updateBadge: (nodeId, badgeId, updates, executionId) => {
       const items = [...get().items]
       const box = items.slice().reverse().find((it) => it.type === 'node-execution' && it.nodeId === nodeId && (!executionId || (it as any).executionId === executionId)) as any
-      if (!box) return
-      const idx = box.content.slice().reverse().findIndex((c: any) => c.type === 'badge' && c.badge?.id === badgeId)
+      if (!box) {
+        console.warn('[chatTimeline] updateBadge: box not found', { nodeId, executionId })
+        return
+      }
+      // Search by callId (which is passed as badgeId parameter)
+      const idx = box.content.slice().reverse().findIndex((c: any) => c.type === 'badge' && c.badge?.callId === badgeId)
       if (idx >= 0) {
         const revIdx = box.content.length - 1 - idx
-        box.content[revIdx] = { type: 'badge', badge: { ...(box.content[revIdx] as any).badge, ...updates } }
+        const oldBadge = (box.content[revIdx] as any).badge
+        const updatedBadge = { ...oldBadge, ...updates }
+        console.log('[chatTimeline] updateBadge: updating badge', {
+          callId: badgeId,
+          oldLabel: oldBadge?.label,
+          newLabel: updates.label,
+          oldStatus: oldBadge?.status,
+          newStatus: updates.status,
+          oldInteractive: oldBadge?.interactive,
+          newInteractive: updates.interactive,
+          finalInteractive: updatedBadge.interactive,
+          allUpdates: updates
+        })
+        box.content[revIdx] = { type: 'badge', badge: updatedBadge }
         set({ items, sig: computeSig(items) })
+      } else {
+        console.warn('[chatTimeline] updateBadge: badge not found', { callId: badgeId, boxContentCount: box.content.length })
       }
     },
 
@@ -287,7 +306,9 @@ export function initChatTimelineEvents(): void {
 
   const processDelta = (msg: any) => {
     const op = msg?.op
+    console.log('[chatTimeline] processDelta received:', { op, hasItem: !!msg?.item, item: msg?.item })
     if (op === 'message' && msg.item) {
+      console.log('[chatTimeline] Adding message to timeline:', msg.item)
       useChatTimeline.getState().appendRawItem(msg.item as TimelineItem)
       return
     }
@@ -317,6 +338,14 @@ export function initChatTimelineEvents(): void {
     }
 
     if (op === 'updateBadge' && msg.nodeId && msg.callId) {
+      console.log('[chatTimeline] Delta handler received updateBadge:', {
+        callId: msg.callId,
+        hasUpdates: !!msg.updates,
+        updatesInteractive: msg.updates?.interactive,
+        updatesInteractiveJSON: JSON.stringify(msg.updates?.interactive),
+        fullUpdatesJSON: JSON.stringify(msg.updates),
+        fullMsg: msg
+      })
       useChatTimeline.getState().updateBadge(msg.nodeId, msg.callId, msg.updates || {}, msg.executionId)
       return
     }

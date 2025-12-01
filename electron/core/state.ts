@@ -10,7 +10,6 @@ import Store from 'electron-store'
 import path from 'node:path'
 import fs from 'node:fs'
 import fsPromises from 'node:fs/promises'
-import { Indexer } from '../indexing/indexer'
 import { AnthropicAiSdkProvider } from '../providers-ai-sdk/anthropic'
 import { GeminiAiSdkProvider } from '../providers-ai-sdk/gemini'
 import { FireworksAiSdkProvider } from '../providers-ai-sdk/fireworks'
@@ -20,8 +19,6 @@ import { activeConnections, broadcastWorkspaceNotification } from '../backend/ws
 import { getSettingsService, getWorkspaceService } from '../services/index.js'
 import { readKanbanBoard } from '../store/utils/kanban.js'
 import { listItems } from '../store/utils/knowledgeBase.js'
-import { resolveWorkspaceRootAsync } from '../utils/workspace.js'
-import { getWorkspaceManager } from './workspaceManager.js'
 
 import type { ProviderAdapter } from '../providers/provider'
 
@@ -255,57 +252,4 @@ export const providers: Record<string, ProviderAdapter> = {
   xai: XaiAiSdkProvider,
 }
 
-/**
- * Indexers per workspace (no global singleton)
- */
-const indexers = new Map<string, Indexer>()
 
-/**
- * KB Indexers per workspace
- */
-const kbIndexers = new Map<string, Indexer>()
-
-/**
- * Get or create the indexer instance for a workspace.
- * If workspaceRoot is omitted, uses the currently active workspace in the store.
- *
- * Now delegates to WorkspaceManager for multi-window support.
- */
-export async function getIndexer(workspaceRoot?: string): Promise<Indexer> {  const root = await resolveWorkspaceRootAsync(workspaceRoot)
-  const manager = getWorkspaceManager()
-  return manager.getIndexer(root)
-}
-
-/**
- * Get or create the KB indexer instance (indexes .hifide-public/kb) for a workspace.
- *
- * Now delegates to WorkspaceManager for multi-window support.
- */
-export async function getKbIndexer(workspaceRoot?: string): Promise<Indexer> {  const root = await resolveWorkspaceRootAsync(workspaceRoot)
-  const manager = getWorkspaceManager()
-  return manager.getKbIndexer(root)
-}
-
-/**
- * Reset the indexer for a workspace (used when workspace root changes)
- */
-export async function resetIndexer(workspaceRoot?: string): Promise<void> {
-  const root = await resolveWorkspaceRootAsync(workspaceRoot)
-  const idx = indexers.get(root)
-  if (idx) {
-    try { idx.dispose() } catch (error) { console.error('[indexer] Failed to dispose indexer:', error) }
-    indexers.delete(root)
-  }
-}
-
-/**
- * Reset the KB indexer for a workspace
- */
-export async function resetKbIndexer(workspaceRoot?: string): Promise<void> {
-  const root = await resolveWorkspaceRootAsync(workspaceRoot)
-  const idx = kbIndexers.get(root)
-  if (idx) {
-    try { idx.dispose() } catch (error) { console.error('[indexer] Failed to dispose KB indexer:', error) }
-    kbIndexers.delete(root)
-  }
-}

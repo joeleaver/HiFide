@@ -7,10 +7,8 @@
 import { Service } from './base/Service.js'
 import {
   getSettingsService,
-  getProviderService,
-  getIndexingService
+  getProviderService
 } from './index.js'
-import { getIndexer } from '../core/state.js'
 
 interface AppState {
   appBootstrapping: boolean
@@ -86,7 +84,6 @@ export class AppService extends Service<AppState> {
       // Get services
       const settingsService = getSettingsService()
       const providerService = getProviderService()
-      const indexingService = getIndexingService()
 
       // Flow profiles are now loaded per-workspace during workspace initialization
       // No global initialization needed
@@ -171,79 +168,6 @@ export class AppService extends Service<AppState> {
       providerService.refreshAllModels().catch((e: any) => console.error('[app] Failed to refresh models:', e))
 
       // Sessions are NOT loaded at startup - they are loaded when workspace.open is called
-      // Workspace-scoped initialization (indexing, subscriptions) happens per-window in workspace-loader.ts
-
-      // Non-blocking index check removed - now happens per-workspace in workspace-loader.ts
-      // This allows each window to have its own workspace with independent indexing
-      if (false) {
-        try {
-          this.setStartupMessage('Checking code index…')
-          if (indexingService?.refreshIndexStatus) await indexingService.refreshIndexStatus()
-
-          // Check if index exists and is usable
-          const indexStatus = indexingService?.getStatus()
-
-          if (!indexStatus?.ready || (indexStatus?.chunks || 0) === 0) {
-            // No index or unusable - start background rebuild immediately (high priority)
-            log('No usable index found, starting high-priority background rebuild')
-            if (indexingService?.startBackgroundRebuild) {
-              // Don't await - let it run in background
-              indexingService.startBackgroundRebuild({ priority: 'high' }).catch((e: any) => {
-                console.error('[app] Background rebuild failed:', e)
-              })
-            }
-          } else {
-            // Index exists - check if rebuild needed (TTL, model change, etc.)
-            const shouldRebuild = await (async () => {
-              try {
-                const indexer = await getIndexer()
-                const cfg = indexingService?.getAutoRefresh() || {}
-                const now = Date.now()
-                const last = indexingService?.getLastRebuildAt() || 0
-
-                // Check model change
-                if (cfg.modelChangeTrigger && indexStatus) {
-                  const ei = await indexer.getEngineInfo()
-                  if (
-                    indexStatus.modelId &&
-                    indexStatus.dim &&
-                    (ei.id !== indexStatus.modelId || ei.dim !== indexStatus.dim)
-                  ) {
-                    log(`Index model changed (${indexStatus.modelId}/${indexStatus.dim} -> ${ei.id}/${ei.dim})`)
-                    return true
-                  }
-                }
-
-                // Check TTL
-                const ttlMs = Math.max(1, cfg.ttlMinutes || 120) * 60_000
-                if (last > 0 && now - last > ttlMs) {
-                  log(`Index TTL expired (last rebuild: ${new Date(last).toISOString()})`)
-                  return true
-                }
-
-                return false
-              } catch (e) {
-                console.error('[app] Failed to check if rebuild needed:', e)
-                return false
-              }
-            })()
-
-            if (shouldRebuild) {
-              log('Index rebuild needed, starting low-priority background rebuild')
-              if (indexingService?.startBackgroundRebuild) {
-                // Don't await - let it run in background
-                indexingService.startBackgroundRebuild({ priority: 'low' }).catch((e: any) => {
-                  console.error('[app] Background rebuild failed:', e)
-                })
-              }
-            } else {
-              log('Index is up-to-date, no rebuild needed')
-            }
-          }
-        } catch (e) {
-          console.error('[app] Index check failed:', e)
-        }
-      }
 
       // Clear startup banner if we have at least one valid provider
       try {

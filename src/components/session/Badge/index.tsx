@@ -34,5 +34,15 @@ export const Badge = memo(function Badge({ badge }: BadgeProps) {
       {canExpand && <BadgeContent badge={badge} />}
     </BadgeContainer>
   )
+}, (prevProps, nextProps) => {
+  // Custom comparison: re-render if any of these properties change
+  return (
+    prevProps.badge.id === nextProps.badge.id &&
+    prevProps.badge.label === nextProps.badge.label &&
+    prevProps.badge.status === nextProps.badge.status &&
+    prevProps.badge.expandable === nextProps.badge.expandable &&
+    prevProps.badge.contentType === nextProps.badge.contentType &&
+    prevProps.badge.interactive?.data?.key === nextProps.badge.interactive?.data?.key
+  )
 })
 

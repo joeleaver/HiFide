@@ -10,6 +10,7 @@ import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot } from '../utils
 import fs from 'node:fs/promises'
 import fssync from 'node:fs'
 import readline from 'node:readline'
+import { randomUUID } from 'node:crypto'
 
 
 
@@ -369,6 +370,20 @@ export const readLinesTool: AgentTool = {
     } catch (e: any) {
       return `Error: ${e?.message || String(e)}`
     }
+  },
+
+  toModelResult: (raw: any) => {
+    // For fs.read_lines, the result is typically a string or error
+    // Store it in the cache for the badge viewer
+    if (typeof raw === 'string' || (raw && typeof raw === 'object')) {
+      const previewKey = randomUUID()
+      return {
+        minimal: typeof raw === 'string' ? { text: raw, previewKey } : { ...raw, previewKey },
+        ui: raw,
+        previewKey
+      }
+    }
+    return { minimal: raw }
   }
 }
 

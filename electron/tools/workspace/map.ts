@@ -4,8 +4,7 @@ import fs from 'node:fs/promises'
 import fg from 'fast-glob'
 import { grepTool } from '../text/grep'
 import { resolveWorkspaceRootAsync } from '../../utils/workspace.js'
-
-import { getIndexer } from '../../core/state'
+import { randomUUID } from 'node:crypto'
 
 
 async function getWorkspaceRoot(workspaceId?: string): Promise<string> {
@@ -178,35 +177,7 @@ export const workspaceMapTool: AgentTool = {
 
     // Optional AST and semantic enrichments (time-budgeted)
     if (mode !== 'basic') {
-      const k2 = Math.min(6, maxPerSection)
-      const now2 = () => Date.now() - t0
-
-      // Semantic seeds: only when index is ready
-      if (now2() <= budgetMs) {
-        try {
-          const idx = await getIndexer()
-          const st = idx.status()
-          if (st.ready) {
-            const seedQueries = ['zustand store definition', 'agent tools registry', 'terminal pty lifecycle']
-            const semanticItems: any[] = []
-            for (const q of seedQueries) {
-              if (now2() > budgetMs) break
-              try {
-                const res = await idx.search(q, 3)
-                for (const c of res.chunks.slice(0, 1)) {
-                  const p = String(c.path || '').replace(/\\/g, '/')
-                  const start = Math.max(1, Number(c.startLine || 1))
-                  const end = Math.max(start, Number(c.endLine || start))
-                  semanticItems.push({ path: p, handle: toHandle(p, start, end), lines: { start, end }, why: `semantic: ${q}` })
-                }
-              } catch { /* ignore single seed failure */ }
-            }
-            if (semanticItems.length) sections.push({ title: 'Semantic seeds', items: semanticItems.slice(0, k2) })
-          }
-        } catch {
-          // indexer not available; skip
-        }
-      }
+      // Future: add AST-based enrichments here
     }
 
 
@@ -225,6 +196,22 @@ export const workspaceMapTool: AgentTool = {
 
     const elapsedMs = Date.now() - t0
     return { ok: true, data: { root: root.replace(/\\/g, '/'), sections, exampleQueries, meta: { elapsedMs, mode } } }
+  },
+
+  toModelResult: (raw: any) => {
+    if (raw?.ok && raw?.data) {
+      const previewKey = randomUUID()
+      return {
+        minimal: {
+          ok: true,
+          summary: `Workspace map generated (${raw.data.sections?.length || 0} sections)`,
+          previewKey
+        },
+        ui: raw.data,
+        previewKey
+      }
+    }
+    return { minimal: raw }
   }
 }
 

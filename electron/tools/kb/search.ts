@@ -1,6 +1,6 @@
 import type { AgentTool } from '../../providers/provider'
-import { listItems, search as kbSearch, type KbHit } from '../../store/utils/knowledgeBase'
-import { getKbIndexer } from '../../core/state'
+import { search as kbSearch } from '../../store/utils/knowledgeBase'
+import { randomUUID } from 'node:crypto'
 
 export const knowledgeBaseSearchTool: AgentTool = {
   name: 'knowledgeBaseSearch',
@@ -23,82 +23,15 @@ export const knowledgeBaseSearchTool: AgentTool = {
     const limit = typeof input?.limit === 'number' ? input.limit : 50
 
     const qLower = (query || '').toLowerCase().trim()
-    const idx = await getKbIndexer(baseDir)
-
-    // Ensure index is ready, and self-heal if empty results (helps tests without watchers)
-    const st1 = idx.status()
-    if (!st1.ready || (st1.chunks ?? 0) === 0) {
-      try { await idx.rebuild(() => {}) } catch {}
-    }
-
-    const items = await listItems(baseDir)
-    const byRel: Record<string, KbHit> = {}
-    for (const it of items) byRel[it.relPath.replace(/^\\?/, '')] = it as KbHit
-
-    const k = Math.max(100, limit * 3)
-    let sem = await idx.search(qLower || '', k)
-    if ((sem.chunks?.length || 0) === 0) {
-      // Rebuild once and retry, to catch very recent KB writes in CI
-      try { await idx.rebuild(() => {}) } catch {}
-      sem = await idx.search(qLower || '', k)
-    }
-
-    // Group top chunks by document path, keep the earliest-ranked chunk per doc
-    const seen = new Set<string>()
-    const groups: { path: string; baseScore: number; chunkText: string }[] = []
-    sem.chunks.forEach((c, i) => {
-      const p = String(c.path).replace(/^\\?/, '')
-      if (seen.has(p)) return
-      seen.add(p)
-      const baseScore = 1 - i / Math.max(1, sem.chunks.length)
-      groups.push({ path: p, baseScore, chunkText: String(c.text || '') })
-    })
-
-    // Tag filter (ALL-of), enrich, scoring
+    // Use simple text-based search from knowledgeBase utils
     const tagSet = new Set(tags.map((t: string) => t.toLowerCase()))
-    function hasAllTags(entryTags: string[]): boolean {
-      if (!tagSet.size) return true
-      const lc = new Set((entryTags || []).map((t) => t.toLowerCase()))
-      for (const t of tagSet) if (!lc.has(t)) return false
-      return true
-    }
-    function stripPreamble(s: string): string {
-      const idx = s.indexOf('\n\n')
-      return idx >= 0 ? s.slice(idx + 2) : s
-    }
-
-    const results: KbHit[] = []
-    for (const g of groups) {
-      const meta = byRel[g.path]
-      if (!meta) continue
-      if (!hasAllTags(meta.tags)) continue
-      const body = stripPreamble(g.chunkText)
-      const titleMatch = qLower && meta.title.toLowerCase().includes(qLower)
-      const literalMatch = qLower && body.toLowerCase().includes(qLower)
-      const tagBoost = Array.from(tagSet).filter((t) => meta.tags.map((x) => x.toLowerCase()).includes(t)).length * 0.05
-      const score = g.baseScore + (titleMatch ? 0.3 : 0) + (literalMatch ? 0.15 : 0) + tagBoost
-      const excerpt = body.slice(0, 320)
-      results.push({ ...meta, excerpt, score })
-    }
-
-    // Fallback: if semantic returned nothing, do a literal scan (helps just-created docs and CI)
-    let finalResults: KbHit[] = results
-    if (finalResults.length === 0) {
-      try {
-        const literal = await kbSearch(baseDir, { query: qLower, tags: Array.from(tagSet), limit })
-        finalResults = literal
-      } catch {}
-    }
-
-
-    finalResults.sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-    const limited = finalResults.slice(0, limit)
+    const results = await kbSearch(baseDir, { query: qLower, tags: Array.from(tagSet), limit })
 
     return {
       ok: true,
       data: {
-        count: limited.length,
-        results: limited.map((r) => ({
+        count: results.length,
+        results: results.map((r) => ({
           id: r.id,
           title: r.title,
           tags: r.tags,
@@ -109,6 +42,26 @@ export const knowledgeBaseSearchTool: AgentTool = {
         }))
       }
     }
+  },
+
+  toModelResult: (raw: any) => {
+    if (raw?.ok && raw?.data) {
+      const previewKey = randomUUID()
+      const resultData = raw.data
+      const resultCount = resultData?.count || 0
+
+      return {
+        minimal: {
+          ok: true,
+          count: resultCount,
+          previewKey,
+          resultCount
+        },
+        ui: resultData,
+        previewKey
+      }
+    }
+    return { minimal: raw }
   }
 }
 

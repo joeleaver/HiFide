@@ -31,9 +31,6 @@ import { truncateDirTool } from './fs/truncateDir'
 // Edit tools
 import { applyEditsTool } from './edits/apply'
 
-// Index tools
-import { indexSearchTool } from './index/search'
-
 // Kanban tools
 import { kanbanGetBoardTool } from './kanban/getBoard'
 import { kanbanCreateTaskTool } from './kanban/createTask'
@@ -46,7 +43,6 @@ import { kanbanDeleteEpicTool } from './kanban/deleteEpic'
 
 // Workspace tools
 import { searchWorkspaceTool } from './workspace/searchWorkspace'
-import { jumpWorkspaceTool } from './workspace/jump'
 import { workspaceMapTool } from './workspace/map'
 
 // Terminal tools
@@ -87,8 +83,6 @@ export const agentTools: AgentTool[] = [
 
   applyEditsTool,
 
-  indexSearchTool,
-
   kanbanGetBoardTool,
   kanbanCreateTaskTool,
   kanbanUpdateTaskTool,
@@ -99,7 +93,6 @@ export const agentTools: AgentTool[] = [
   kanbanDeleteEpicTool,
 
   searchWorkspaceTool,
-  jumpWorkspaceTool,
   workspaceMapTool,
 
   terminalExecTool,

@@ -9,8 +9,6 @@
  */
 
 import { BrowserWindow } from 'electron'
-import path from 'node:path'
-import { Indexer } from '../indexing/indexer.js'
 import { startKanbanWatcher, stopKanbanWatcher, startKbWatcher, stopKbWatcher } from './state.js'
 
 export type WorkspaceId = string // absolute folder path
@@ -19,9 +17,6 @@ interface WorkspaceEntry {
   id: WorkspaceId
   windows: Set<number> // BrowserWindow.id
   refCount: number
-  // Per-workspace services
-  indexer?: Indexer
-  kbIndexer?: Indexer
   // Note: Kanban and KB watchers are managed internally by state.ts, not stored here
 }
 
@@ -54,33 +49,6 @@ class WorkspaceManagerImpl {
   }
 
   list(): WorkspaceEntry[] { return [...this.workspaces.values()] }
-
-  /**
-   * Get indexer for a workspace (creates if needed)
-   */
-  async getIndexer(workspaceId: WorkspaceId): Promise<Indexer> {
-    const entry = await this.ensureEntry(workspaceId)
-    if (!entry.indexer) {      entry.indexer = new Indexer(workspaceId)
-    }
-    return entry.indexer
-  }
-
-  /**
-   * Get KB indexer for a workspace (creates if needed)
-   */
-  async getKbIndexer(workspaceId: WorkspaceId): Promise<Indexer> {
-    const entry = await this.ensureEntry(workspaceId)
-    if (!entry.kbIndexer) {
-      const kbRoot = path.join(workspaceId, '.hifide-public', 'kb')
-      entry.kbIndexer = new Indexer(workspaceId, {
-        scanRoot: kbRoot,
-        indexSubdir: 'kb-index',
-        useWorkspaceGitignore: false,
-        mode: 'kb',
-      })
-    }
-    return entry.kbIndexer
-  }
 
   private async ensureEntry(id: WorkspaceId): Promise<WorkspaceEntry> {
     let entry = this.workspaces.get(id)
@@ -120,18 +88,6 @@ class WorkspaceManagerImpl {
     try {      stopKbWatcher(id)
     } catch (error) {
       console.error(`[WorkspaceManager] Failed to stop KB watcher for ${id}:`, error)
-    }
-
-    // Stop indexer watch if active
-    try {
-      if (entry.indexer) {
-        entry.indexer.stopWatch()
-      }
-      if (entry.kbIndexer) {
-        entry.kbIndexer.stopWatch()
-      }
-    } catch (error) {
-      console.error(`[WorkspaceManager] Failed to stop indexers for ${id}:`, error)
     }
 
     this.workspaces.delete(id)

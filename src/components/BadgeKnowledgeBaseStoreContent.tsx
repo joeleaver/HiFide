@@ -19,7 +19,8 @@ export const BadgeKnowledgeBaseStoreContent = memo(function BadgeKnowledgeBaseSt
   useEffect(() => {
     const client = getBackendClient(); if (!client) return
     client.rpc('tool.getResult', { key: resultKey }).then((res: any) => {
-      const data = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      // tool.getResult returns { ok: true, result: <data> }
+      const data = res?.result ?? res?.data ?? res
       setResult(data)
     }).catch(() => {})
   }, [resultKey])

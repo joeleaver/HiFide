@@ -21,7 +21,8 @@ export const BadgeWorkspaceJumpContent = memo(function BadgeWorkspaceJumpContent
   useEffect(() => {
     const client = getBackendClient(); if (!client) return
     client.rpc('tool.getResult', { key: searchKey }).then((res: any) => {
-      const val = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      // tool.getResult returns { ok: true, result: <data> }
+      const val = res?.result ?? res?.data ?? res
       setData(val)
     }).catch(() => {})
   }, [searchKey])

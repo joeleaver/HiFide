@@ -5,9 +5,7 @@
  */
 
 import { activeConnections, getConnectionWorkspaceId } from '../broadcast.js'
-import { getIndexingService } from '../../../services/index.js'
 import { UiPayloadCache } from '../../../core/uiPayloadCache.js'
-import { getIndexer } from '../../../core/state.js'
 import { loadWorkspace } from '../workspace-loader.js'
 import type { RpcConnection } from '../types'
 
@@ -124,78 +122,6 @@ export function createMiscHandlers(
   })
 
   addMethod('handshake.ping', async () => ({ pong: true }))
-
-  // Indexing
-  addMethod('idx.status', async () => {
-    try {      const indexingService = getIndexingService()
-      return { ok: true, status: indexingService.getStatus() }
-    } catch (e: any) {
-      return { ok: false, error: e?.message || String(e) }
-    }
-  })
-
-  addMethod('idx.subscribe', async () => {
-    try {
-      // Subscribe this connection to indexing progress events
-      const indexingService = getIndexingService()
-
-      indexingService.on('progress', (data: any) => {
-        try {
-          connection.sendNotification('idx.progress', data)
-        } catch { }
-      })
-
-      return { ok: true }
-    } catch (e: any) {
-      return { ok: false, error: e?.message || String(e) }
-    }
-  })
-
-  addMethod('idx.rebuild', async () => {
-    try {      const indexingService = getIndexingService()
-      await indexingService.rebuildIndex()
-      return { ok: true }
-    } catch (e: any) {
-      return { ok: false, error: e?.message || String(e) }
-    }
-  })
-
-  addMethod('idx.clear', async () => {
-    try {      const indexingService = getIndexingService()
-      await indexingService.clearIndex()
-      return { ok: true }
-    } catch (e: any) {
-      return { ok: false, error: e?.message || String(e) }
-    }
-  })
-
-  addMethod('idx.cancel', async () => {
-    try {      const indexingService = getIndexingService()
-      await indexingService.cancelIndexing()
-      return { ok: true }
-    } catch (e: any) {
-      return { ok: false, error: e?.message || String(e) }
-    }
-  })
-
-  addMethod('idx.setAutoRefresh', async () => {
-    try {
-      // setAutoRefreshConfig doesn't exist - would need to update state directly
-      // For now, return not-implemented
-      return { ok: false, error: 'not-implemented' }
-    } catch (e: any) {
-      return { ok: false, error: e?.message || String(e) }
-    }
-  })
-
-  addMethod('idx.search', async ({ query }: { query: string; limit?: number }) => {
-    try {      const indexer = await getIndexer()
-      const results = await indexer.search(query, 20)
-      return { ok: true, results: results?.chunks || [] }
-    } catch (e: any) {
-      return { ok: false, error: e?.message || String(e) }
-    }
-  })
 
   // Flow tools
   addMethod('flows.getTools', async () => {

@@ -48,7 +48,8 @@ export const BadgeAstSearchContent = memo(function BadgeAstSearchContent({
   useEffect(() => {
     const client = getBackendClient(); if (!client) return
     client.rpc('tool.getResult', { key: searchKey }).then((res: any) => {
-      const data = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      // tool.getResult returns { ok: true, result: <data> }
+      const data = res?.result ?? res?.data ?? res
       setResults(data)
     }).catch(() => {})
   }, [searchKey])

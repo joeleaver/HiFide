@@ -9,29 +9,22 @@ interface BadgeWorkspaceSearchContentProps {
   previewKey?: string
 }
 
-export type SearchResultHit = {
-  type: 'SNIPPET' | 'AST' | 'FILE'
+export type SearchMatch = {
   path: string
-  lines?: { start: number; end: number }
-  score: number
-  preview: string
-  language?: string
-  reasons: string[]
-  matchedQueries?: string[]
-  handle: string
+  lineNumber: number
+  line: string
 }
 
 export type WorkspaceSearchResult = {
-  results: SearchResultHit[]
-  summary: string[]
-  meta: { elapsedMs: number; strategiesUsed: string[]; truncated: boolean }
+  results: SearchMatch[]
+  count: number
+  summary: string
+  meta: { elapsedMs: number; filesMatched: number; truncated: boolean }
 }
 
 /**
  * Workspace search results content for expandable tool badges
- * Displays:
- * 1. Full input parameters (queries, mode, filters)
- * 2. Search results with code snippets
+ * Displays search results grouped by file with line numbers and matched lines
  */
 export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchContent({
   badgeId,
@@ -41,15 +34,16 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
   void badgeId
 
   // Local state for results
-  const [results, setResults] = useState<any>(null)
+  const [results, setResults] = useState<WorkspaceSearchResult | null>(null)
 
   // Load results via WS
   useEffect(() => {
     const client = getBackendClient()
     if (!client) return
     client.rpc('tool.getResult', { key: searchKey }).then((res: any) => {
-      const data = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
-      setResults(data)
+      // tool.getResult returns { ok: true, result: <data> }
+      const data = res?.result ?? res?.data ?? res
+      setResults(data as WorkspaceSearchResult)
     }).catch(() => {})
   }, [searchKey])
 
@@ -61,33 +55,21 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
     )
   }
 
-  // Extract queries and normalize filters (fall back to fullParams and usedParams from results)
-  const pFull: any = fullParams || {}
-  const pUsed: any = (results as any).usedParams || {}
+  // Extract query from fullParams
+  const query = fullParams?.query || ''
+  const filters = fullParams?.filters || {}
+  const pathsInclude = filters.pathsInclude || []
+  const pathsExclude = filters.pathsExclude || []
+  const maxResults = filters.maxResults
 
-  // Prefer non-empty queries[] from store; otherwise fall back to single query or queries[] from full/used params
-  const queriesRawFull: any[] = Array.isArray(pFull?.queries) ? pFull.queries : (pFull?.query ? [pFull.query] : [])
-  const queriesRawUsed: any[] = Array.isArray(pUsed?.queries) ? pUsed.queries : (pUsed?.query ? [pUsed.query] : [])
-  const queriesRaw: any[] = (queriesRawFull && queriesRawFull.length > 0 ? queriesRawFull : queriesRawUsed)
-
-  const isMaxDepthToken = (s: any) => typeof s === 'string' && s.startsWith('[Max Depth Exceeded')
-  const queries = queriesRaw.map((s: any) => String(s || '')).filter(Boolean).filter((s: string) => !isMaxDepthToken(s))
-
-  // Merge filter/mode from full params, then usedParams (normalized defaults)
-  const mode = pFull?.mode || pUsed?.mode || 'auto'
-  const f = pFull?.filters || pUsed?.filters || {}
-  const languages: string[] = (Array.isArray(f.languages)
-    ? f.languages.map((s: any) => String(s))
-    : (typeof f.languages === 'string' ? [String(f.languages)] : [])).filter((s: string) => !isMaxDepthToken(s))
-  const pathsInclude: string[] = (Array.isArray(f.pathsInclude)
-    ? f.pathsInclude.map((s: any) => String(s))
-    : []).filter((s: string) => !isMaxDepthToken(s))
-  const pathsExclude: string[] = (Array.isArray(f.pathsExclude)
-    ? f.pathsExclude.map((s: any) => String(s))
-    : []).filter((s: string) => !isMaxDepthToken(s))
-  const k = typeof f.maxResults === 'number' ? f.maxResults : undefined
-  const linesClamp = typeof f.maxSnippetLines === 'number' ? f.maxSnippetLines : undefined
-  const action = pUsed?.action
+  // Group results by file
+  const fileGroups = new Map<string, SearchMatch[]>()
+  for (const match of results.results || []) {
+    if (!fileGroups.has(match.path)) {
+      fileGroups.set(match.path, [])
+    }
+    fileGroups.get(match.path)!.push(match)
+  }
 
   return (
     <Stack gap={12}>
@@ -97,39 +79,16 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
           Search Parameters
         </Text>
         <Stack gap={4}>
-          {queries.length > 0 && (
+          {query && (
             <Group gap={6}>
-              <Text size="xs" c="dimmed" fw={500}>Queries:</Text>
-              <Text size="xs" c="gray.3">{queries.join(' | ')}</Text>
+              <Text size="xs" c="dimmed" fw={500}>Query:</Text>
+              <Text size="xs" c="gray.3">{query}</Text>
             </Group>
           )}
-          <Group gap={6}>
-            <Text size="xs" c="dimmed" fw={500}>Mode:</Text>
-            <Badge size="xs" variant="light" color="blue">{mode}</Badge>
-          </Group>
-          {k !== undefined && (
+          {maxResults !== undefined && (
             <Group gap={6}>
               <Text size="xs" c="dimmed" fw={500}>Max results:</Text>
-              <Text size="xs" c="gray.3">{k}</Text>
-            </Group>
-          )}
-          {linesClamp !== undefined && (
-            <Group gap={6}>
-              <Text size="xs" c="dimmed" fw={500}>Snippet lines:</Text>
-              <Text size="xs" c="gray.3">{linesClamp}</Text>
-            </Group>
-          )}
-          {action && (
-            <Group gap={6}>
-              <Text size="xs" c="dimmed" fw={500}>Action:</Text>
-              <Badge size="xs" variant="light" color="grape">{action}</Badge>
-            </Group>
-          )}
-
-          {languages.length > 0 && (
-            <Group gap={6}>
-              <Text size="xs" c="dimmed" fw={500}>Languages:</Text>
-              <Text size="xs" c="gray.3">{languages.join(', ')}</Text>
+              <Text size="xs" c="gray.3">{maxResults}</Text>
             </Group>
           )}
           {pathsInclude.length > 0 && (
@@ -156,7 +115,10 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
             Results
           </Text>
           <Badge size="xs" variant="light" color="green">
-            {Array.isArray(results.results) ? results.results.length : 0} {(Array.isArray(results.results) && results.results.length === 1) ? 'match' : 'matches'}
+            {results.count} {results.count === 1 ? 'match' : 'matches'}
+          </Badge>
+          <Badge size="xs" variant="light" color="blue">
+            {fileGroups.size} {fileGroups.size === 1 ? 'file' : 'files'}
           </Badge>
           {results.meta?.truncated && (
             <Badge size="xs" variant="light" color="orange">
@@ -165,7 +127,7 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
           )}
         </Group>
 
-        {Array.isArray(results.results) && results.results.length === 0 ? (
+        {results.count === 0 ? (
           <Text size="sm" c="dimmed">
             No matches found
           </Text>
@@ -185,76 +147,46 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
               },
             }}
           >
-            {(Array.isArray(results.results) ? results.results.slice(0, 10) : []).map((hit: any, idx: number) => (
-              <Accordion.Item key={idx} value={`result-${idx}`}>
+            {Array.from(fileGroups.entries()).map(([filePath, matches], idx) => (
+              <Accordion.Item key={idx} value={`file-${idx}`}>
                 <Accordion.Control>
                   <Group gap={8}>
                     <Text size="xs" fw={500} c="gray.3" style={{ flex: 1 }}>
-                      {hit.path}
+                      {filePath}
                     </Text>
-                    {hit.lines && (
-                      <Badge size="xs" variant="light" color="gray">
-                        L{hit.lines.start}-{hit.lines.end}
-                      </Badge>
-                    )}
-                    {hit.language && (
-                      <Badge size="xs" variant="light" color="blue">
-                        {hit.language}
-                      </Badge>
-                    )}
-                    {typeof hit.score === 'number' && (
-                      <Badge size="xs" variant="light" color="grape">
-                        {hit.score.toFixed(2)}
-                      </Badge>
-                    )}
+                    <Badge size="xs" variant="light" color="gray">
+                      {matches.length} {matches.length === 1 ? 'match' : 'matches'}
+                    </Badge>
                   </Group>
                 </Accordion.Control>
                 <Accordion.Panel>
-                  <Stack gap={8}>
-                    {hit.matchedQueries && hit.matchedQueries.length > 0 && (
-                      <Group gap={4}>
-                        <Text size="xs" c="dimmed">Matched:</Text>
-                        {hit.matchedQueries.map((q: string, i: number) => (
-                          <Badge key={i} size="xs" variant="dot" color="green">
-                            {q}
+                  <Stack gap={6}>
+                    {matches.map((match, matchIdx) => (
+                      <div key={matchIdx}>
+                        <Group gap={6} mb={4}>
+                          <Badge size="xs" variant="light" color="blue">
+                            Line {match.lineNumber}
                           </Badge>
-                        ))}
-                      </Group>
-                    )}
-                    {hit.reasons && hit.reasons.length > 0 && (
-                      <Group gap={4}>
-                        <Text size="xs" c="dimmed">Reasons:</Text>
-                        {hit.reasons.map((r: string, i: number) => (
-                          <Badge key={i} size="xs" variant="light" color="gray">
-                            {r}
-                          </Badge>
-                        ))}
-                      </Group>
-                    )}
-                    <Code
-                      block
-                      style={{
-                        fontSize: 11,
-                        lineHeight: 1.4,
-                        maxHeight: 200,
-                        overflow: 'auto',
-                        background: '#0d0d0d',
-                        border: '1px solid #2d2d2d',
-                      }}
-                    >
-                      {hit.preview}
-                    </Code>
+                        </Group>
+                        <Code
+                          block
+                          style={{
+                            fontSize: 11,
+                            lineHeight: 1.4,
+                            background: '#0d0d0d',
+                            border: '1px solid #2d2d2d',
+                            padding: '6px 8px',
+                          }}
+                        >
+                          {match.line}
+                        </Code>
+                      </div>
+                    ))}
                   </Stack>
                 </Accordion.Panel>
               </Accordion.Item>
             ))}
           </Accordion>
-        )}
-
-        {Array.isArray(results.results) && results.results.length > 10 && (
-          <Text size="xs" c="dimmed" mt={8}>
-            Showing first 10 of {results.results.length} results
-          </Text>
         )}
       </div>
 
@@ -263,11 +195,9 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
         <Text size="xs" c="dimmed">
           {Math.round(results.meta?.elapsedMs ?? 0)}ms
         </Text>
-        {Array.isArray(results.meta?.strategiesUsed) && results.meta!.strategiesUsed.length > 0 && (
-          <Text size="xs" c="dimmed">
-            • {results.meta!.strategiesUsed.join(', ')}
-          </Text>
-        )}
+        <Text size="xs" c="dimmed">
+          • ripgrep
+        </Text>
       </Group>
     </Stack>
   )

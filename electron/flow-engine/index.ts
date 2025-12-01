@@ -82,6 +82,64 @@ export async function resumeFlow(
   }
 
   try {
+    // Add user message to session timeline
+    const sessionId = scheduler.sessionId
+    const workspaceId = scheduler.workspaceId
+
+    console.log('[resumeFlow] Adding user message to timeline:', { sessionId, workspaceId, userInputLength: userInput.length })
+
+    if (sessionId && workspaceId) {
+      const { getSessionService } = await import('../services/index.js')
+      const { broadcastWorkspaceNotification } = await import('../backend/ws/broadcast.js')
+
+      const sessionService = getSessionService()
+
+      console.log('[resumeFlow] Got sessionService:', !!sessionService)
+
+      const sessions = sessionService.getSessionsFor({ workspaceId })
+      const session = sessions.find((s: any) => s.id === sessionId)
+
+      console.log('[resumeFlow] Found session:', !!session, 'sessions count:', sessions.length)
+
+      if (session) {
+        // Create user message item
+        const userMessageItem = {
+          type: 'message' as const,
+          id: `msg-${Date.now()}`,
+          role: 'user' as const,
+          content: userInput,
+          timestamp: Date.now()
+        }
+
+        console.log('[resumeFlow] Created user message item:', userMessageItem.id)
+
+        // Add to session timeline
+        const updatedTimeline = [...(session.timeline || []), userMessageItem]
+        const updatedSessions = sessions.map((s: any) =>
+          s.id === sessionId
+            ? { ...s, timeline: updatedTimeline, updatedAt: Date.now() }
+            : s
+        )
+
+        sessionService.setSessionsFor({ workspaceId, sessions: updatedSessions })
+        sessionService.saveSessionFor({ workspaceId, sessionId }, false)
+
+        console.log('[resumeFlow] Broadcasting user message to renderer')
+
+        // Broadcast to renderer
+        broadcastWorkspaceNotification(workspaceId, 'session.timeline.delta', {
+          op: 'message',
+          item: userMessageItem
+        })
+
+        console.log('[resumeFlow] User message added to timeline successfully')
+      } else {
+        console.warn('[resumeFlow] Session not found for sessionId:', sessionId)
+      }
+    } else {
+      console.warn('[resumeFlow] Missing sessionId or workspaceId:', { sessionId, workspaceId })
+    }
+
     // Resolve the promise that the userInput node is awaiting
     // The scheduler knows which node is waiting - just resolve any waiting input
     // Provider/model will be refreshed from session context before next node execution

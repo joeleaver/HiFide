@@ -1,0 +1,219 @@
+{
+  "name": "workspace1",
+  "description": "",
+  "version": "7.0.0",
+  "nodes": [
+    {
+      "id": "defaultContextStart",
+      "nodeType": "defaultContextStart",
+      "label": "Context Start",
+      "config": {
+        "systemInstructions": "You are an **agentic coding assistant** in an IDE environment.\nYou have tools to **search, read, edit, and run code**. Your task is to fully resolve the user’s coding requests autonomously, continuing until the user confirms completion.\n\n**Tone:** friendly, concise, action-focused.\n\n---\n\n## Core Behavior\n\n* Follow **Orient → Document → Plan → Code → Verify** loop\n* **Bias toward action:** minimal orientation, act quickly\n* **Never stop mid-task:** continue until all subtasks are complete, verified, and user confirms\n* Only read code necessary for the next action\n* If requirements are unclear → ask user\n* You are on a budget! Be token aware and favor most-action-for-least-tokens.\n* Only end the turn if you're done or if you have a question that needs to be answered by the user to proceed.\n\n---\n\n## Turn Routine\n\n1. Determine if user query intent is planning or execution, then, before making any tool calls, print a brief outline of your intent for the turn, but don't stop your turn! Just move directly into your plan.\n1.1 If you do not access to the applyEdits tool, assume you are in planning mode\n1.2 If planning, proceed to Orient, Document, and Plan\n1.3 Ask follow up questions, prompting the user turn by turn to approve the plan.\n1.4 Once the plan is approved, or the user asks you to execute it \n2. If the user query intent is execution (and you can assume if the user query is a paste of an error log they just want you to fix it), determine the level of complexity.\n2.1 If the task is complex, prompt the user with a full execution plan and follow-up questions\n2.2 If the task is relatively straightforward, execute it immediately without requiring user interaction or confirmation\n3. Execute tool actions immediately\n4. Summarize discoveries or edits concisely\n5. **Do not dump full files** unless editing a line-range or explicitly requested\n\n---\n\n## Action Loop (Token-Safe)\n\n### 1) Orient\n\n* Use `workspaceSearch` **in parallel** with natural language search and exact file names\n* Max **2 discovery cycles per turn**\n* Prefer using fsReadLines to read a narrow range of relevant lines over reading the whole file with rsReadFile. \n* Minimize the token cost of reading in more data than\n* Summarize key findings **<10000 tokens**\n* Justify tool calls before using them\n\n### 2) Document\n\n* Record **new facts only if truly new**\n* Document features, systems, and architecture. \n* Use knowledgeBaseSearch and knowledgeBaseStore to keep documentation up to date\n* Avoid creating duplicate documentation or leaving behind stale documentation by finding and updating existing documentation when possible\n* Summarize in **short bullets**\n\n### 3) Plan\n\n* Decompose request into deliverables\n* Produce **diff-style change outline** (<1500 tokens)\n* If 2–5 loops pass without plan → stop exploration and produce plan\n\n### 4) Code\n\n* Use `applyEdits`\n* Keep edits **minimal and consistent**\n* Update docs only if needed\n* Avoid unnecessary license/copyright headers\n\n### 5) Verify\n\n* Run code after edits\n* Confirm correctness before yielding\n\n---\n\n## Token Discipline\n* Only open files needed for next action\n* Maximize how much editing you on any turn where you read files, since reading files is expensive",
+        "reasoningEffort": "medium",
+        "includeThoughts": true,
+        "thinkingBudget": 2048,
+        "temperature": 0.5,
+        "modelOverrides": [
+          {
+            "model": "gpt-5.1",
+            "temperature": 0.2
+          }
+        ]
+      },
+      "position": {
+        "x": -665.9652327630902,
+        "y": -487.38813591580697
+      },
+      "expanded": true
+    },
+    {
+      "id": "tools-1761193059289",
+      "nodeType": "tools",
+      "label": "Tools",
+      "config": {
+        "tools": [
+          "workspace.search",
+          "knowledgeBaseSearch",
+          "knowledgeBaseStore",
+          "terminal.exec",
+          "terminal.session_search_output",
+          "terminal.session_tail",
+          "terminal.session_restart",
+          "edits.apply",
+          "fs.read_file",
+          "fs.read_lines",
+          "fs.read_dir",
+          "fs.write_file",
+          "fs.create_dir",
+          "fs.delete_dir",
+          "fs.delete_file",
+          "fs.exists",
+          "fs.stat",
+          "fs.append_file",
+          "fs.move",
+          "fs.copy",
+          "fs.remove",
+          "fs.truncate_file",
+          "fs.truncate_dir",
+          "workspace.map",
+          "workspace.jump",
+          "apply_patch",
+          "fsReadFile",
+          "fsReadLines",
+          "fsReadDir",
+          "fsWriteFile",
+          "fsCreateDir",
+          "fsDeleteDir",
+          "fsDeleteFile",
+          "fsExists",
+          "fsStat",
+          "fsMove",
+          "fsCopy",
+          "fsRemove",
+          "editsApply",
+          "workspaceSearch",
+          "workspaceJump",
+          "workspaceMap",
+          "terminalExec",
+          "terminalSessionSearchOutput",
+          "terminalSessionTail",
+          "terminalSessionRestart",
+          "applyEdits",
+          "kanbanGetBoard",
+          "kanbanCreateTask",
+          "kanbanUpdateTask",
+          "kanbanDeleteTask",
+          "kanbanMoveTask",
+          "kanbanCreateEpic",
+          "kanbanUpdateEpic",
+          "kanbanDeleteEpic",
+          "knowledgeBaseDelete"
+        ]
+      },
+      "position": {
+        "x": -132.03643728844327,
+        "y": 276.29571938245414
+      },
+      "expanded": true
+    },
+    {
+      "id": "llmRequest-1761193060786",
+      "nodeType": "llmRequest",
+      "label": "LLM Request",
+      "config": {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "overrideEnabled": false,
+        "overrideModel": "claude-haiku-4-5-20251001",
+        "overrideProvider": "anthropic"
+      },
+      "position": {
+        "x": 398.89175555044244,
+        "y": 195.35006450831474
+      },
+      "expanded": true
+    },
+    {
+      "id": "userInput-1761193068230",
+      "nodeType": "userInput",
+      "label": "User Input",
+      "config": {},
+      "position": {
+        "x": -67.59144296844943,
+        "y": -192.26102654701984
+      },
+      "expanded": false
+    },
+    {
+      "id": "portalOutput-1761933770202",
+      "nodeType": "portalOutput",
+      "label": "Portal Out",
+      "config": {
+        "id": "main"
+      },
+      "position": {
+        "x": -284.3598817835628,
+        "y": 89.33934792295487
+      },
+      "expanded": false
+    },
+    {
+      "id": "portalInput-1761933773361",
+      "nodeType": "portalInput",
+      "label": "Portal In",
+      "config": {
+        "id": "main"
+      },
+      "position": {
+        "x": 821.8316344169732,
+        "y": 481.23896203168874
+      },
+      "expanded": false
+    },
+    {
+      "id": "readFile-1763492308062",
+      "nodeType": "readFile",
+      "label": "readFile",
+      "config": {
+        "filePath": "system_message_1.md",
+        "tokenEstimateTokens": 1007
+      },
+      "position": {
+        "x": -1154.9572329835325,
+        "y": -391.8478402126726
+      },
+      "expanded": true
+    }
+  ],
+  "edges": [
+    {
+      "id": "defaultContextStart-userInput-1761193068230-context-context",
+      "source": "defaultContextStart",
+      "target": "userInput-1761193068230",
+      "sourceHandle": "context",
+      "targetHandle": "context"
+    },
+    {
+      "id": "userInput-1761193068230-llmRequest-1761193060786-context-context",
+      "source": "userInput-1761193068230",
+      "target": "llmRequest-1761193060786",
+      "sourceHandle": "context",
+      "targetHandle": "context"
+    },
+    {
+      "id": "tools-1761193059289-llmRequest-1761193060786-tools-tools",
+      "source": "tools-1761193059289",
+      "target": "llmRequest-1761193060786",
+      "sourceHandle": "tools",
+      "targetHandle": "tools"
+    },
+    {
+      "id": "userInput-1761193068230-llmRequest-1761193060786-data-data",
+      "source": "userInput-1761193068230",
+      "target": "llmRequest-1761193060786",
+      "sourceHandle": "data",
+      "targetHandle": "data"
+    },
+    {
+      "id": "llmRequest-1761193060786-portalInput-1761933773361-context-context",
+      "source": "llmRequest-1761193060786",
+      "target": "portalInput-1761933773361",
+      "sourceHandle": "context",
+      "targetHandle": "context"
+    },
+    {
+      "id": "portalOutput-1761933770202-userInput-1761193068230-context-context",
+      "source": "portalOutput-1761933770202",
+      "target": "userInput-1761193068230",
+      "sourceHandle": "context",
+      "targetHandle": "context"
+    },
+    {
+      "id": "readFile-1763492308062-defaultContextStart-data-systemInstructionsIn",
+      "source": "readFile-1763492308062",
+      "target": "defaultContextStart",
+      "sourceHandle": "data",
+      "targetHandle": "systemInstructionsIn"
+    }
+  ]
+}

@@ -15,7 +15,8 @@ export const BadgeUsageBreakdownContent = memo(function BadgeUsageBreakdownConte
   useEffect(() => {
     const client = getBackendClient(); if (!client) return
     client.rpc('tool.getResult', { key: usageKey }).then((res: any) => {
-      const data = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      // tool.getResult returns { ok: true, result: <data> }
+      const data = res?.result ?? res?.data ?? res
       setBreakdown(data)
     }).catch(() => {})
   }, [usageKey])

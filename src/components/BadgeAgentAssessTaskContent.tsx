@@ -18,7 +18,8 @@ export const BadgeAgentAssessTaskContent = memo(function BadgeAgentAssessTaskCon
   useEffect(() => {
     const client = getBackendClient(); if (!client) return
     client.rpc('tool.getResult', { key: assessKey }).then((res: any) => {
-      const val = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      // tool.getResult returns { ok: true, result: <data> }
+      const val = res?.result ?? res?.data ?? res
       setData(val)
     }).catch(() => {})
   }, [assessKey])

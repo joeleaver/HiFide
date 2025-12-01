@@ -6,7 +6,6 @@
 
 import { readById, listItems, createItem, updateItem, deleteItem } from '../../../store/utils/knowledgeBase'
 import { listWorkspaceFiles } from '../../../store/utils/workspace-helpers'
-import { getKbIndexer } from '../../../core/state'
 import { getConnectionWorkspaceId } from '../broadcast.js'
 import type { RpcConnection } from '../types'
 
@@ -30,15 +29,7 @@ export function createKbHandlers(
     }
   })
 
-  addMethod('kb.reloadIndex', async () => {
-    try {
-      const kbIdx = await getKbIndexer()
-      await kbIdx.rebuild()
-      return { ok: true }
-    } catch (e: any) {
-      return { ok: false, error: e?.message || String(e) }
-    }
-  })
+
 
   addMethod('kb.search', async () => {
     try {
@@ -59,11 +50,6 @@ export function createKbHandlers(
       if (!baseDir) return { ok: false, error: 'no-workspace' }
 
       const item = await createItem(baseDir, { title, description, tags, files })
-      // Trigger index rebuild
-      try {
-        const kbIdx = await getKbIndexer()
-        void kbIdx.rebuild()
-      } catch { }
       return { ok: true, item }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
@@ -76,11 +62,6 @@ export function createKbHandlers(
       if (!baseDir) return { ok: false, error: 'no-workspace' }
 
       const item = await updateItem(baseDir, { id, patch })
-      // Trigger index rebuild
-      try {
-        const kbIdx = await getKbIndexer()
-        void kbIdx.rebuild()
-      } catch { }
       return { ok: true, item }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
@@ -93,11 +74,6 @@ export function createKbHandlers(
       if (!baseDir) return { ok: false, error: 'no-workspace' }
 
       await deleteItem(baseDir, id)
-      // Trigger index rebuild
-      try {
-        const kbIdx = await getKbIndexer()
-        void kbIdx.rebuild()
-      } catch { }
       return { ok: true }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }

@@ -15,7 +15,6 @@ import { SettingsService } from './SettingsService'
 import { KanbanService } from './KanbanService'
 import { KnowledgeBaseService } from './KnowledgeBaseService'
 import { AppService } from './AppService'
-import { IndexingService } from './IndexingService'
 import { TerminalService } from './TerminalService'
 import { SessionService } from './SessionService'
 import { FlowProfileService } from './FlowProfileService'
@@ -36,7 +35,6 @@ let settingsService: SettingsService | null = null
 let kanbanService: KanbanService | null = null
 let knowledgeBaseService: KnowledgeBaseService | null = null
 let appService: AppService | null = null
-let indexingService: IndexingService | null = null
 let terminalService: TerminalService | null = null
 let sessionService: SessionService | null = null
 let flowProfileService: FlowProfileService | null = null
@@ -65,7 +63,6 @@ export function initializeServices(): void {
 
   // Phase 3: Complex services
   appService = new AppService()
-  indexingService = new IndexingService()
   terminalService = new TerminalService()
 
   // Phase 4: Session services
@@ -87,7 +84,6 @@ export function initializeServices(): void {
   registry.register('kanban', kanbanService)
   registry.register('knowledgeBase', knowledgeBaseService)
   registry.register('app', appService)
-  registry.register('indexing', indexingService)
   registry.register('terminal', terminalService)
   registry.register('session', sessionService)
   registry.register('flowCache', flowCacheService)
@@ -160,11 +156,6 @@ export function getAppService(): AppService {
   return appService
 }
 
-export function getIndexingService(): IndexingService {
-  if (!indexingService) throw new Error('[Services] IndexingService not initialized')
-  return indexingService
-}
-
 export function getTerminalService(): TerminalService {
   if (!terminalService) throw new Error('[Services] TerminalService not initialized')
   return terminalService
@@ -207,7 +198,6 @@ export { SettingsService } from './SettingsService'
 export { KanbanService } from './KanbanService'
 export { KnowledgeBaseService } from './KnowledgeBaseService'
 export { AppService } from './AppService'
-export { IndexingService } from './IndexingService'
 export { TerminalService } from './TerminalService'
 export { SessionService } from './SessionService'
 export { FlowProfileService } from './FlowProfileService'

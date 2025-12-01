@@ -61,7 +61,8 @@ export const BadgeDiffContent = memo(function BadgeDiffContent({ badgeId, diffKe
     const client = getBackendClient()
     if (!client) return
     client.rpc('tool.getResult', { key: diffKey }).then((res: any) => {
-      const val = res && typeof res === 'object' && 'data' in res ? (res as any).data : res
+      // tool.getResult returns { ok: true, result: <data> }
+      const val = res?.result ?? res?.data ?? res
       const arr = Array.isArray(val) ? (val as DiffFile[]) : []
       setData(arr)
     }).catch(() => {})

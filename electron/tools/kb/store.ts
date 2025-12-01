@@ -1,5 +1,6 @@
 import type { AgentTool } from '../../providers/provider'
 import { createItem, normalizeMarkdown, updateItem } from '../../store/utils/knowledgeBase'
+import { randomUUID } from 'node:crypto'
 
 export const knowledgeBaseStoreTool: AgentTool = {
   name: 'knowledgeBaseStore',
@@ -47,6 +48,25 @@ export const knowledgeBaseStoreTool: AgentTool = {
       // File system watcher will update the service state automatically
       return { ok: true, data: { id: updated.id, path: updated.relPath, title: updated.title, tags: updated.tags, files: updated.files } }
     }
+  },
+
+  toModelResult: (raw: any) => {
+    if (raw?.ok && raw?.data) {
+      const previewKey = randomUUID()
+      const action = raw.data.id ? 'Updated' : 'Created'
+      return {
+        minimal: {
+          ok: true,
+          action,
+          id: raw.data.id,
+          title: raw.data.title,
+          previewKey
+        },
+        ui: raw.data,
+        previewKey
+      }
+    }
+    return { minimal: raw }
   }
 }
 
