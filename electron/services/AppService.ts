@@ -5,7 +5,12 @@
  */
 
 import { Service } from './base/Service.js'
-import { ServiceRegistry } from './base/ServiceRegistry.js'
+import {
+  getSettingsService,
+  getProviderService,
+  getIndexingService
+} from './index.js'
+import { getIndexer } from '../core/state.js'
 
 interface AppState {
   appBootstrapping: boolean
@@ -79,41 +84,15 @@ export class AppService extends Service<AppState> {
 
     try {
       // Get services
-      const workspaceService = ServiceRegistry.get<any>('workspace')
-      const settingsService = ServiceRegistry.get<any>('settings')
-      const providerService = ServiceRegistry.get<any>('provider')
-      const sessionService = ServiceRegistry.get<any>('session')
-      const viewService = ServiceRegistry.get<any>('view')
-      const indexingService = ServiceRegistry.get<any>('indexing')
+      const settingsService = getSettingsService()
+      const providerService = getProviderService()
+      const indexingService = getIndexingService()
 
-      // 1. Initialize workspace (main-process only)
-      let hasWorkspace = false
-      try {
-        const savedRoot: string | null = workspaceService?.getWorkspaceRoot() || null
-        hasWorkspace = !!savedRoot
-        if (hasWorkspace) {
-          const root = savedRoot as string
-          log(`Workspace root resolved: ${root}`)
+      // Flow profiles are now loaded per-workspace during workspace initialization
+      // No global initialization needed
 
-          this.setStartupMessage('Preparing workspace…')
-          try {
-            if (workspaceService?.ensureWorkspaceReady) {
-              const t = Date.now()
-              await workspaceService.ensureWorkspaceReady({ baseDir: root, preferAgent: false, overwrite: false })
-              log(`ensureWorkspaceReady done in ${Date.now() - t}ms`)
-            }
-          } catch (e) {
-            console.error('[app] ensureWorkspaceReady failed:', e)
-          }
-        } else {
-          log('No workspace configured; entering Welcome mode')
-          try {
-            viewService?.setCurrentView({ view: 'welcome' })
-          } catch {}
-        }
-      } catch (e) {
-        console.error('[app] Failed to initialize workspace:', e)
-      }
+      // Workspace initialization happens per-window in workspace-loader.ts
+      // when handshake.init is called with workspaceRoot from URL params
 
       // 2. Load API keys
       const keys = settingsService?.getApiKeys() || {
@@ -188,46 +167,15 @@ export class AppService extends Service<AppState> {
       }
 
       // 5. Refresh models (now that we have valid keys)
-      if (providerService?.refreshAllModels) {
-        // Don't await this; let it run in background so app boot isn't blocked
-        providerService.refreshAllModels().catch((e: any) => console.error('[app] Failed to refresh models:', e))
-      }
+      // Don't await this; let it run in background so app boot isn't blocked
+      providerService.refreshAllModels().catch((e: any) => console.error('[app] Failed to refresh models:', e))
 
-      // 7. Load sessions (only when a workspace is set)
-      if (hasWorkspace) {
-        try {
-          this.setStartupMessage('Loading sessions…')
-          const t = Date.now()
-          if (sessionService?.loadSessions) await sessionService.loadSessions()
-          let createdNewSession = false
-          try {
-            if (sessionService?.ensureSessionPresent) {
-              createdNewSession = sessionService.ensureSessionPresent()
-            }
-          } catch (e) {
-            console.error('[app] Failed to ensure session present:', e)
-          }
-          // Session initialization is now handled by event listeners in TerminalService
-          // No need to explicitly call initializeSession() here
-          log(`sessions ready in ${Date.now() - t}ms`)
-        } catch (e) {
-          console.error('[app] Failed to load sessions during init:', e)
-        }
-      }
+      // Sessions are NOT loaded at startup - they are loaded when workspace.open is called
+      // Workspace-scoped initialization (indexing, subscriptions) happens per-window in workspace-loader.ts
 
-      // 8. Subscriptions (workspace-scoped)
-      if (hasWorkspace) {
-        try {
-          if (indexingService?.ensureIndexProgressSubscription) {
-            indexingService.ensureIndexProgressSubscription()
-          }
-        } catch (e) {
-          console.error('[app] Failed to initialize subscriptions:', e)
-        }
-      }
-
-      // 9. Non-blocking index check (workspace-scoped)
-      if (hasWorkspace) {
+      // Non-blocking index check removed - now happens per-workspace in workspace-loader.ts
+      // This allows each window to have its own workspace with independent indexing
+      if (false) {
         try {
           this.setStartupMessage('Checking code index…')
           if (indexingService?.refreshIndexStatus) await indexingService.refreshIndexStatus()
@@ -248,14 +196,13 @@ export class AppService extends Service<AppState> {
             // Index exists - check if rebuild needed (TTL, model change, etc.)
             const shouldRebuild = await (async () => {
               try {
-                const { getIndexer } = await import('../core/state.js')
                 const indexer = await getIndexer()
                 const cfg = indexingService?.getAutoRefresh() || {}
                 const now = Date.now()
                 const last = indexingService?.getLastRebuildAt() || 0
 
                 // Check model change
-                if (cfg.modelChangeTrigger) {
+                if (cfg.modelChangeTrigger && indexStatus) {
                   const ei = await indexer.getEngineInfo()
                   if (
                     indexStatus.modelId &&
@@ -298,27 +245,17 @@ export class AppService extends Service<AppState> {
         }
       }
 
-      // Clear startup banner if we have at least one valid provider (workspace mode only)
-      if (hasWorkspace) {
-        try {
-          const hasValidProvider =
-            validMap.openai || validMap.anthropic || validMap.gemini || validMap.fireworks || validMap.xai
-          if (hasValidProvider) this.setState({ startupMessage: null })
-        } catch {}
-      }
-
-      // 6. Navigate if no providers (workspace mode only; in Welcome we stay on welcome)
-      if (hasWorkspace) {
-        try {
-          const hasValidProvider =
-            validMap.openai || validMap.anthropic || validMap.gemini || validMap.fireworks || validMap.xai
-          if (!hasValidProvider) {
-            if (viewService?.setCurrentView) viewService.setCurrentView({ view: 'settings' })
-            this.setState({ startupMessage: 'No valid API keys found. Open Settings to configure providers.' })
-          }
-        } catch (e) {
-          console.error('[app] Failed to set current view (post-indexing):', e)
+      // Clear startup banner if we have at least one valid provider
+      try {
+        const hasValidProvider =
+          validMap.openai || validMap.anthropic || validMap.gemini || validMap.fireworks || validMap.xai
+        if (hasValidProvider) {
+          this.setState({ startupMessage: null })
+        } else {
+          this.setState({ startupMessage: 'No valid API keys found. Open Settings to configure providers.' })
         }
+      } catch (e) {
+        console.error('[app] Failed to check provider validity:', e)
       }
     } catch (e) {
       console.error('[app] Initialization failed:', e)

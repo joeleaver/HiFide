@@ -345,9 +345,8 @@ export function initChatTimelineEvents(): void {
   })
 
   // Workspace changes - clear and wait for snapshot
-  // Only clear on workspace.bound (actual workspace change), not workspace.ready (just a ready signal)
-  client.subscribe('workspace.bound', () => {
-    console.log('[chatTimeline] workspace.bound received, clearing timeline')
+  client.subscribe('workspace.attached', () => {
+    console.log('[chatTimeline] workspace.attached received, clearing timeline')
     useChatTimeline.setState({ isHydrating: true })
     useChatTimeline.getState().clear()
   })

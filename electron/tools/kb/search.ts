@@ -1,7 +1,6 @@
 import type { AgentTool } from '../../providers/provider'
-import { listItems, type KbHit } from '../../store/utils/knowledgeBase'
+import { listItems, search as kbSearch, type KbHit } from '../../store/utils/knowledgeBase'
 import { getKbIndexer } from '../../core/state'
-import { ServiceRegistry } from '../../services/base/ServiceRegistry.js'
 
 export const knowledgeBaseSearchTool: AgentTool = {
   name: 'knowledgeBaseSearch',
@@ -15,14 +14,16 @@ export const knowledgeBaseSearchTool: AgentTool = {
     },
   },
   run: async (input: any, meta?: any) => {
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const baseDir = meta?.workspaceId || workspaceService?.getWorkspaceRoot() || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+    if (!meta?.workspaceId) {
+      return { ok: false, error: 'workspaceId required in meta' }
+    }
+    const baseDir = meta.workspaceId
     const query = typeof input?.query === 'string' ? input.query : ''
     const tags: string[] = Array.isArray(input?.tags) ? (input.tags as any[]).map((t) => String(t)) : []
     const limit = typeof input?.limit === 'number' ? input.limit : 50
 
     const qLower = (query || '').toLowerCase().trim()
-    const idx = await getKbIndexer()
+    const idx = await getKbIndexer(baseDir)
 
     // Ensure index is ready, and self-heal if empty results (helps tests without watchers)
     const st1 = idx.status()
@@ -84,8 +85,7 @@ export const knowledgeBaseSearchTool: AgentTool = {
     let finalResults: KbHit[] = results
     if (finalResults.length === 0) {
       try {
-        const raw = await import('../../store/utils/knowledgeBase')
-        const literal = await raw.search(baseDir, { query: qLower, tags: Array.from(tagSet), limit })
+        const literal = await kbSearch(baseDir, { query: qLower, tags: Array.from(tagSet), limit })
         finalResults = literal
       } catch {}
     }

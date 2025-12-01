@@ -83,11 +83,11 @@ export default function ActivityBar() {
       active: !mainCollapsed && currentView === 'flow',
       onClick: async () => {
         setCurrentViewLocal('flow')
-        try { await getBackendClient()?.rpc('view.set', { view: 'flow' }) } catch {}
         if (mainCollapsed) {
           try {
-            const res = await window.workspace?.getSettings?.()
-            const prev = (res && (res as any).settings) || {}
+            const client = getBackendClient()
+            const res: any = await client?.rpc('workspace.getSettings', {})
+            const prev = (res && res.settings) || {}
             const prevLayout = prev.layout || {}
             const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
             const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
@@ -97,7 +97,7 @@ export default function ActivityBar() {
             try { setSessionPanelWidth(persistedSessionWidth) } catch {}
 
             // Persist only collapse state (do not overwrite sessionPanelWidth here)
-            await window.workspace?.setSetting?.('layout', { ...prevLayout, mainCollapsed: false })
+            await client?.rpc('workspace.setSetting', { key: 'layout', value: { ...prevLayout, mainCollapsed: false } })
 
             // Allow effect cleanup to remove collapsed auto-resize handler before resizing window
             await new Promise((r) => setTimeout(r, 0))
@@ -117,18 +117,18 @@ export default function ActivityBar() {
       active: !mainCollapsed && currentView === 'explorer',
       onClick: async () => {
         setCurrentViewLocal('explorer')
-        try { await getBackendClient()?.rpc('view.set', { view: 'explorer' }) } catch {}
         if (mainCollapsed) {
           try {
-            const res = await window.workspace?.getSettings?.()
-            const prev = (res && (res as any).settings) || {}
+            const client = getBackendClient()
+            const res: any = await client?.rpc('workspace.getSettings', {})
+            const prev = (res && res.settings) || {}
             const prevLayout = prev.layout || {}
             const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
             const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
 
             setMainCollapsed(false)
             try { setSessionPanelWidth(persistedSessionWidth) } catch {}
-            await window.workspace?.setSetting?.('layout', { ...prevLayout, mainCollapsed: false })
+            await client?.rpc('workspace.setSetting', { key: 'layout', value: { ...prevLayout, mainCollapsed: false } })
             await new Promise((r) => setTimeout(r, 0))
 
             const currentContentWidth = Math.max(0, window.innerWidth || 0)
@@ -146,18 +146,18 @@ export default function ActivityBar() {
       active: !mainCollapsed && currentView === 'kanban',
       onClick: async () => {
         setCurrentViewLocal('kanban')
-        try { await getBackendClient()?.rpc('view.set', { view: 'kanban' }) } catch {}
         if (mainCollapsed) {
           try {
-            const res = await window.workspace?.getSettings?.()
-            const prev = (res && (res as any).settings) || {}
+            const client = getBackendClient()
+            const res: any = await client?.rpc('workspace.getSettings', {})
+            const prev = (res && res.settings) || {}
             const prevLayout = prev.layout || {}
             const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
             const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
 
             setMainCollapsed(false)
             try { setSessionPanelWidth(persistedSessionWidth) } catch {}
-            await window.workspace?.setSetting?.('layout', { ...prevLayout, mainCollapsed: false })
+            await client?.rpc('workspace.setSetting', { key: 'layout', value: { ...prevLayout, mainCollapsed: false } })
             await new Promise((r) => setTimeout(r, 0))
 
             const currentContentWidth = Math.max(0, window.innerWidth || 0)
@@ -175,18 +175,18 @@ export default function ActivityBar() {
       active: !mainCollapsed && currentView === 'sourceControl',
       onClick: async () => {
         setCurrentViewLocal('sourceControl')
-        try { await getBackendClient()?.rpc('view.set', { view: 'sourceControl' }) } catch {}
         if (mainCollapsed) {
           try {
-            const res = await window.workspace?.getSettings?.()
-            const prev = (res && (res as any).settings) || {}
+            const client = getBackendClient()
+            const res: any = await client?.rpc('workspace.getSettings', {})
+            const prev = (res && res.settings) || {}
             const prevLayout = prev.layout || {}
             const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
             const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
 
             setMainCollapsed(false)
             try { setSessionPanelWidth(persistedSessionWidth) } catch {}
-            await window.workspace?.setSetting?.('layout', { ...prevLayout, mainCollapsed: false })
+            await client?.rpc('workspace.setSetting', { key: 'layout', value: { ...prevLayout, mainCollapsed: false } })
             await new Promise((r) => setTimeout(r, 0))
 
             const currentContentWidth = Math.max(0, window.innerWidth || 0)
@@ -204,18 +204,18 @@ export default function ActivityBar() {
       active: !mainCollapsed && currentView === 'knowledgeBase',
       onClick: async () => {
         setCurrentViewLocal('knowledgeBase')
-        try { await getBackendClient()?.rpc('view.set', { view: 'knowledgeBase' }) } catch {}
         if (mainCollapsed) {
           try {
-            const res = await window.workspace?.getSettings?.()
-            const prev = (res && (res as any).settings) || {}
+            const client = getBackendClient()
+            const res: any = await client?.rpc('workspace.getSettings', {})
+            const prev = (res && res.settings) || {}
             const prevLayout = prev.layout || {}
             const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
             const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
 
             setMainCollapsed(false)
             try { setSessionPanelWidth(persistedSessionWidth) } catch {}
-            await window.workspace?.setSetting?.('layout', { ...prevLayout, mainCollapsed: false })
+            await client?.rpc('workspace.setSetting', { key: 'layout', value: { ...prevLayout, mainCollapsed: false } })
             await new Promise((r) => setTimeout(r, 0))
 
             const currentContentWidth = Math.max(0, window.innerWidth || 0)
@@ -251,8 +251,9 @@ export default function ActivityBar() {
               const currentContentHeight = Math.max(0, window.innerHeight || 0)
 
               try {
-                const res = await window.workspace?.getSettings?.()
-                const prev = (res && (res as any).settings) || {}
+                const client = getBackendClient()
+                const res: any = await client?.rpc('workspace.getSettings', {})
+                const prev = (res && res.settings) || {}
                 const prevLayout = prev.layout || {}
 
                 const layout: any = {
@@ -261,7 +262,7 @@ export default function ActivityBar() {
                   sessionPanelWidth: sessionWidth,
                   expandedWindowWidth: currentContentWidth, // remember expanded width
                 }
-                await window.workspace?.setSetting?.('layout', layout)
+                await client?.rpc('workspace.setSetting', { key: 'layout', value: layout })
 
                 try {
                   const client = getBackendClient()
@@ -302,18 +303,18 @@ export default function ActivityBar() {
         active={!mainCollapsed && currentView === 'settings'}
         onClick={async () => {
           setCurrentViewLocal('settings')
-          try { await getBackendClient()?.rpc('view.set', { view: 'settings' }) } catch {}
           if (mainCollapsed) {
             try {
-              const res = await window.workspace?.getSettings?.()
-              const prev = (res && (res as any).settings) || {}
+              const client = getBackendClient()
+              const res: any = await client?.rpc('workspace.getSettings', {})
+              const prev = (res && res.settings) || {}
               const prevLayout = prev.layout || {}
               const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
               const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
 
               setMainCollapsed(false)
               try { setSessionPanelWidth(persistedSessionWidth) } catch {}
-              await window.workspace?.setSetting?.('layout', { ...prevLayout, mainCollapsed: false })
+              await client?.rpc('workspace.setSetting', { key: 'layout', value: { ...prevLayout, mainCollapsed: false } })
               await new Promise((r) => setTimeout(r, 0))
 
               const currentContentWidth = Math.max(0, window.innerWidth || 0)

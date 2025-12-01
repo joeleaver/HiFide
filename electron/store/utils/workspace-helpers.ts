@@ -11,6 +11,7 @@ import { exec as execCb } from 'node:child_process'
 import { promisify } from 'node:util'
 import { providers, getProviderKey } from '../../core/state'
 import type { ProviderAdapter } from '../../providers/provider'
+import { resolveWorkspaceRootAsync } from '../../utils/workspace.js'
 
 const exec = promisify(execCb)
 
@@ -239,7 +240,6 @@ Be concise and specific to this repository.`
  */
 export async function bootstrapWorkspace(args: { baseDir?: string; preferAgent?: boolean; overwrite?: boolean }) {
   try {
-    const { resolveWorkspaceRootAsync } = await import('../../utils/workspace.js')
     const baseDir = path.resolve(String(args?.baseDir || await resolveWorkspaceRootAsync()))
     const publicDir = path.join(baseDir, '.hifide-public')
     const kbDir = path.join(publicDir, 'kb')

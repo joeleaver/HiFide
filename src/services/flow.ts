@@ -36,7 +36,8 @@ export const FlowService = {
     const client = getBackendClient()
     if (!client) return []
     try { await client.whenReady?.(5000) } catch {}
-    return client.rpc('flows.getTools', {})
+    const result = await client.rpc('flows.getTools', {})
+    return result?.tools || []
   },
 
   async getActive(): Promise<string[]> {

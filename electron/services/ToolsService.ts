@@ -50,7 +50,6 @@ const DEFAULT_TOOL_CATEGORY_MAP: Record<string, ToolCategory> = {
   kanbanDeleteEpic: 'project',
 
   // Edits
-  codeApplyEditsTargeted: 'edits',
 
   // Workspace + Knowledge Base
   workspaceSearch: 'workspace',

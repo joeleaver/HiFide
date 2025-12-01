@@ -84,12 +84,12 @@ export interface FlowAPI {
   checkCancelled: () => void
 
   // ===== Store Access =====
-  
+
   /**
-   * Full access to the main Zustand store
-   * Nodes can read/write any state they need
+   * DEPRECATED: Store access removed - use ServiceRegistry instead
+   * Nodes should use services for state management
    */
-  store: any  // ReturnType<typeof useMainStore.getState>
+  store: any  // Legacy field - no longer used
 
   // ===== Context Management =====
   
@@ -186,6 +186,18 @@ export interface FlowAPI {
    * Used by Portal Input nodes to push data through portals
    */
   triggerPortalOutputs: (portalId: string) => Promise<void>
+
+  /**
+   * Store data in portal registry
+   * Used by Portal Input nodes to store context/data for Portal Output nodes
+   */
+  setPortalData: (portalId: string, context?: any, data?: any) => void
+
+  /**
+   * Retrieve data from portal registry
+   * Used by Portal Output nodes to retrieve context/data stored by Portal Input nodes
+   */
+  getPortalData: (portalId: string) => { context?: any; data?: any } | undefined
 
   // ===== Execution Events =====
 

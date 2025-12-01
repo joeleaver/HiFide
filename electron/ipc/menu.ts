@@ -7,7 +7,7 @@ import { BrowserWindow, Menu, shell, app } from 'electron'
 import { getWindow, windowStateStore } from '../core/state'
 import { createWindow } from '../core/window'
 import type { ViewType } from '../store/types'
-import { ServiceRegistry } from '../services/base/ServiceRegistry.js'
+import { getWorkspaceService } from '../services/index.js'
 
 let currentViewForMenu: ViewType = 'flow'
 
@@ -41,15 +41,20 @@ export function buildMenu(): void {
   let recentFolders: Array<{ path: string; lastOpened: number }> = []
   try {
     // Source of truth: WorkspaceService
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    recentFolders = workspaceService?.getRecentFolders?.() || []
+    const workspaceService = getWorkspaceService()
+    recentFolders = workspaceService.getRecentFolders() || []
 
     // One-time migration from legacy windowStateStore if store is empty
     if (recentFolders.length === 0) {
       const legacy = windowStateStore.get('recentFolders') as any
       if (Array.isArray(legacy) && legacy.length > 0) {
         recentFolders = legacy.slice(0, 10)
-        try { workspaceService?.setRecentFolders?.(legacy) } catch {}
+        try {
+          // Migrate legacy folders to service
+          for (const folder of legacy) {
+            workspaceService.addRecentFolder(folder)
+          }
+        } catch {}
       }
     }
   } catch {}
@@ -174,11 +179,7 @@ export function registerMenuHandlers(ipc: IpcMain) {
     buildMenu()
   })
 
-  // Also support renderer-side app.setView bridge
-  ipc.handle('app:set-view', (_event, view: ViewType) => {
-    setCurrentViewForMenu(view)
-    buildMenu()
-  })
+  // app:set-view IPC handler removed - view changes now handled via WebSocket RPC (view.set)
 
 
 

@@ -1,5 +1,6 @@
 import type { AgentTool } from '../../providers/provider'
 import type { KanbanStatus } from '../../store'
+import { getKanbanService } from '../../services/index.js'
 
 export const kanbanMoveTaskTool: AgentTool = {
   name: 'kanbanMoveTask',
@@ -15,12 +16,7 @@ export const kanbanMoveTaskTool: AgentTool = {
     additionalProperties: false,
   },
   run: async (input: { taskId: string; status: KanbanStatus; index?: number }, meta?: any) => {
-    const { ServiceRegistry } = await import('../../services/base/ServiceRegistry.js')
-    const kanbanService = ServiceRegistry.get<any>('kanban')
-
-    if (!kanbanService) {
-      throw new Error('Kanban service is not initialized')
-    }
+    const kanbanService = getKanbanService()
 
     const idx = typeof input.index === 'number' && input.index >= 0 ? input.index : 0
 

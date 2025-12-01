@@ -5,12 +5,11 @@ import { useRef, useEffect, useState } from 'react'
 import CollapsiblePanel from './CollapsiblePanel'
 
 import { useRerenderTrace } from '../utils/perf'
-import { getBackendClient } from '../lib/backend/bootstrap'
 import { FlowService } from '../services/flow'
 
 export default function AgentDebugPanel() {
 
-  // Use UI store for local state
+  // UI state from store (persisted to workspace-scoped localStorage)
   const collapsed = useUiStore((s) => s.debugPanelCollapsed)
   const height = useUiStore((s) => s.debugPanelHeight)
   const userHasScrolledUp = useUiStore((s) => s.debugPanelUserScrolledUp)
@@ -20,19 +19,6 @@ export default function AgentDebugPanel() {
 
   // Local event log (renderer-only)
   const [flowEvents, setFlowEvents] = useState<any[]>([])
-
-  // Hydrate persisted window state on mount
-  useEffect(() => {
-    (async () => {
-      try {
-        const res: any = await getBackendClient()?.rpc('ui.getWindowState', {})
-        const ws = res?.windowState || {}
-        if (typeof ws.debugPanelCollapsed === 'boolean') setCollapsed(!!ws.debugPanelCollapsed)
-        if (typeof ws.debugPanelHeight === 'number') setHeight(ws.debugPanelHeight)
-      } catch {}
-    })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   // Subscribe to flow events and maintain a bounded log (<=500)
   useEffect(() => {
@@ -116,16 +102,9 @@ export default function AgentDebugPanel() {
     <CollapsiblePanel
       title="FLOW DEBUG"
       collapsed={collapsed}
-      onToggleCollapse={async () => {
-        const newCollapsed = !collapsed
-        setCollapsed(newCollapsed)
-        try { await getBackendClient()?.rpc('ui.updateWindowState', { updates: { debugPanelCollapsed: newCollapsed } }) } catch {}
-      }}
+      onToggleCollapse={() => setCollapsed(!collapsed)}
       height={height}
-      onHeightChange={async (newHeight) => {
-        setHeight(newHeight)
-        try { await getBackendClient()?.rpc('ui.updateWindowState', { updates: { debugPanelHeight: newHeight } }) } catch {}
-      }}
+      onHeightChange={setHeight}
       minHeight={150}
       maxHeight={600}
       badge={flowEvents.length > 0 ? flowEvents.length : undefined}

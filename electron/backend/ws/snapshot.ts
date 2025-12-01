@@ -6,74 +6,138 @@
  */
 
 import type { WorkspaceSnapshot } from '../../../shared/hydration.js'
-import { ServiceRegistry } from '../../services/base/ServiceRegistry.js'
+import {
+  getSessionService,
+  getProviderService,
+  getFlowProfileService,
+  getFlowGraphService,
+  getKanbanService,
+  getKnowledgeBaseService
+} from '../../services/index.js'
 
 /**
  * Build a complete workspace snapshot for a given workspace.
  * This is sent to the renderer on connection/workspace binding.
  */
-export function buildWorkspaceSnapshot(workspaceId: string): WorkspaceSnapshot | null {
+export async function buildWorkspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot | null> {
   try {
-    const sessionService = ServiceRegistry.get<any>('session')
-    if (!sessionService) return null
+    const sessionService = getSessionService()
+    const providerService = getProviderService()
+    const flowProfileService = getFlowProfileService()
+    const flowGraphService = getFlowGraphService()
+    const kanbanService = getKanbanService()
+    const kbService = getKnowledgeBaseService()
 
     // Get sessions for this workspace
-    const sessionsByWorkspace = sessionService.getSessionsByWorkspace() || {}
-    const sessions = sessionsByWorkspace[workspaceId] || []
-    const currentIdByWorkspace = state.currentIdByWorkspace || {}
-    const currentSessionId = currentIdByWorkspace[workspaceId] || null
-    
+    const sessions = sessionService.getSessionsFor({ workspaceId })
+    const currentSessionId = sessionService.getCurrentIdFor({ workspaceId })
+    console.log('[snapshot] Building snapshot - currentSessionId:', currentSessionId, 'sessions:', sessions.length)
+
     // Find the current session
     const currentSession = sessions.find((s: any) => s.id === currentSessionId)
-    
-    // Build timeline from current session
-    const timeline = currentSession?.timeline || []
-    
+    console.log('[snapshot] Current session found:', !!currentSession, currentSession ? `(${currentSession.title})` : '(none)')
+
+    // Build timeline from current session (items, not timeline)
+    const timeline = currentSession?.items || []
+
     // Get session metadata
+    // Provider/model come from the session's currentContext, not from ProviderService
+    // This ensures we restore the exact provider/model that was used in this session
+    // executedFlowId is the flow being run by scheduler (session panel chooser)
+    // If session doesn't have executedFlow, fall back to lastUsedFlow or 'default'
     const meta = {
-      executedFlowId: currentSession?.lastUsedFlow || state.feSelectedTemplate || '',
-      providerId: state.selectedProvider || '',
-      modelId: state.selectedModel || '',
+      executedFlowId: currentSession?.executedFlow || currentSession?.lastUsedFlow || 'default',
+      providerId: currentSession?.currentContext?.provider || providerService.getSelectedProvider() || '',
+      modelId: currentSession?.currentContext?.model || providerService.getSelectedModel() || '',
     }
-    
+
     // Get usage stats from current session
     const usage = {
       tokenUsage: currentSession?.tokenUsage,
       costs: currentSession?.costs,
       requestsLog: currentSession?.requestsLog,
     }
-    
+
     // Get flow editor state
-    const templates = state.feAvailableTemplates || []
+    // getTemplates() returns templates for this workspace
+    const allTemplates = flowProfileService.getTemplates(workspaceId) || []
+
+    // On initial load, use the session's executedFlow to initialize the Flow Editor
+    // After that, the Flow Editor maintains its own selectedTemplateId independently
+    let selectedTemplateId = flowGraphService.getSelectedTemplateId({ workspaceId })
+    if (!selectedTemplateId) {
+      // First load - initialize from session's executedFlow
+      selectedTemplateId = currentSession?.executedFlow || currentSession?.lastUsedFlow || 'default'
+    }
+
+    // Load the selected template to get its nodes/edges
+    let nodes: any[] = []
+    let edges: any[] = []
+    try {
+      console.log('[snapshot] Loading flow template:', selectedTemplateId)
+      const templateGraph = await flowProfileService.loadTemplate({ templateId: selectedTemplateId })
+      if (templateGraph) {
+        nodes = templateGraph.nodes || []
+        edges = templateGraph.edges || []
+        console.log('[snapshot] Loaded template graph:', { nodeCount: nodes.length, edgeCount: edges.length })
+        console.log('[snapshot] Node types:', nodes.map((n: any) => ({ id: n.id, nodeType: n.nodeType, type: n.type, dataNodeType: n.data?.nodeType })))
+        // Also update the FlowGraphService so the scheduler has the graph
+        flowGraphService.setGraph({ workspaceId, nodes, edges, templateId: selectedTemplateId })
+      } else {
+        console.warn('[snapshot] Template not found:', selectedTemplateId)
+      }
+    } catch (error) {
+      console.error('[snapshot] Failed to load template:', selectedTemplateId, error)
+    }
+
     const flowEditor = {
-      templates: templates.map((t: any) => ({
+      templates: allTemplates.map((t: any) => ({
         id: t.id,
         name: t.name,
         library: t.library,
       })),
-      selectedTemplate: state.feSelectedTemplate || '',
-      nodes: state.feNodes || [],
-      edges: state.feEdges || [],
+      selectedTemplate: selectedTemplateId,
+      nodes,
+      edges,
     }
-    
+
+    // Get flow contexts from current session
+    const flowContexts = {
+      mainContext: currentSession?.currentContext || null,
+      isolatedContexts: {} // Isolated contexts removed from architecture
+    }
+
     // Get kanban board for this workspace
-    const kanbanByWorkspace = state.kanbanByWorkspace || {}
     const kanban = {
-      board: kanbanByWorkspace[workspaceId] || null,
+      board: kanbanService.getBoard() || null,
     }
-    
+
     // Get provider/model settings
     const settings = {
-      providerValid: state.providerValid || {},
-      modelsByProvider: state.modelsByProvider || {},
+      providerValid: {
+        openai: providerService.getProviderValid('openai'),
+        anthropic: providerService.getProviderValid('anthropic'),
+        gemini: providerService.getProviderValid('gemini'),
+        fireworks: providerService.getProviderValid('fireworks'),
+        xai: providerService.getProviderValid('xai'),
+      },
+      modelsByProvider: {
+        openai: providerService.getModelsForProvider('openai'),
+        anthropic: providerService.getModelsForProvider('anthropic'),
+        gemini: providerService.getModelsForProvider('gemini'),
+        fireworks: providerService.getModelsForProvider('fireworks'),
+        xai: providerService.getModelsForProvider('xai'),
+      },
     }
-    
-    // Get knowledge base summary
-    const kbItems = state.kbItems || {}
+
+    // Get knowledge base items (full data, not just count)
+    const kbItems = kbService.getItems()
+    const kbFiles = kbService.getWorkspaceFiles()
     const knowledgeBase = {
-      itemCount: Object.keys(kbItems).length,
+      items: kbItems,
+      files: kbFiles,
     }
-    
+
     const snapshot: WorkspaceSnapshot = {
       workspaceId,
       workspaceRoot: workspaceId, // Currently using path as ID
@@ -83,6 +147,7 @@ export function buildWorkspaceSnapshot(workspaceId: string): WorkspaceSnapshot |
       meta,
       usage,
       flowEditor,
+      flowContexts,
       kanban,
       settings,
       knowledgeBase,
@@ -94,7 +159,16 @@ export function buildWorkspaceSnapshot(workspaceId: string): WorkspaceSnapshot |
       sessionCount: sessions.length,
       currentSessionId,
       timelineItems: timeline.length,
-      templateCount: templates.length,
+      templateCount: allTemplates.length,
+      meta,
+      flowEditor: {
+        templatesCount: flowEditor.templates.length,
+        selectedTemplate: flowEditor.selectedTemplate,
+        nodesCount: flowEditor.nodes.length,
+        edgesCount: flowEditor.edges.length,
+      },
+      kanbanBoard: !!kanban.board,
+      kbItemsCount: Object.keys(kbItems).length,
     })
     
     return snapshot
@@ -107,11 +181,11 @@ export function buildWorkspaceSnapshot(workspaceId: string): WorkspaceSnapshot |
 /**
  * Send a workspace snapshot to a connection
  */
-export function sendWorkspaceSnapshot(
+export async function sendWorkspaceSnapshot(
   connection: { sendNotification: (method: string, params: any) => void },
   workspaceId: string
-): boolean {
-  const snapshot = buildWorkspaceSnapshot(workspaceId)
+): Promise<boolean> {
+  const snapshot = await buildWorkspaceSnapshot(workspaceId)
   if (!snapshot) {
     connection.sendNotification('hydration.error', {
       phase: 'loading',
@@ -119,7 +193,7 @@ export function sendWorkspaceSnapshot(
     })
     return false
   }
-  
+
   try {
     connection.sendNotification('workspace.snapshot', snapshot)
     return true

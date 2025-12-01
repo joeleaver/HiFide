@@ -1,12 +1,11 @@
 /**
  * Phase 1 Services Tests
  *
- * Tests for DebugService, ViewService, and UiService
+ * Tests for DebugService
+ * (ViewService and UiService removed - UI state now managed in frontend localStorage)
  */
 
 import { DebugService } from '../DebugService'
-import { ViewService } from '../ViewService'
-import { UiService } from '../UiService'
 import { ServiceRegistry } from '../base/ServiceRegistry'
 
 describe('Phase 1 Services', () => {
@@ -59,96 +58,7 @@ describe('Phase 1 Services', () => {
     })
   })
 
-  describe('ViewService', () => {
-    it('should initialize with default view', () => {
-      const service = new ViewService()
-      expect(service.getCurrentView()).toBe('flow')
-    })
 
-    it('should set current view', () => {
-      const service = new ViewService()
-      
-      service.setView('explorer')
-      expect(service.getCurrentView()).toBe('explorer')
-      
-      service.setView('settings')
-      expect(service.getCurrentView()).toBe('settings')
-    })
-
-    it('should not update if view is the same', () => {
-      const service = new ViewService()
-      let changeCount = 0
-      
-      service.on('view:changed', () => {
-        changeCount++
-      })
-      
-      service.setView('flow') // Same as default
-      expect(changeCount).toBe(0)
-      
-      service.setView('explorer')
-      expect(changeCount).toBe(1)
-      
-      service.setView('explorer') // Same as current
-      expect(changeCount).toBe(1)
-    })
-  })
-
-  describe('UiService', () => {
-    it('should initialize with default window state', () => {
-      const service = new UiService()
-      const state = service.getWindowState()
-      
-      expect(state.agentMode).toBe('chat')
-      expect(state.flowCanvasWidth).toBe(600)
-      expect(state.metaPanelOpen).toBe(false)
-    })
-
-    it('should update window state', () => {
-      const service = new UiService()
-      
-      service.updateWindowState({ agentMode: 'flow' })
-      expect(service.getWindowState().agentMode).toBe('flow')
-      
-      service.updateWindowState({ flowCanvasWidth: 800 })
-      expect(service.getWindowState().flowCanvasWidth).toBe(800)
-    })
-
-    it('should not trigger change if values are the same', () => {
-      const service = new UiService()
-      let changeCount = 0
-      
-      service.on('windowState:changed', () => {
-        changeCount++
-      })
-      
-      service.updateWindowState({ agentMode: 'chat' }) // Same as default
-      expect(changeCount).toBe(0)
-      
-      service.updateWindowState({ agentMode: 'flow' })
-      expect(changeCount).toBe(1)
-      
-      service.updateWindowState({ agentMode: 'flow' }) // Same as current
-      expect(changeCount).toBe(1)
-    })
-
-    it('should persist window state without broadcasting', () => {
-      const service = new UiService()
-      let changeCount = 0
-      
-      service.on('windowState:changed', () => {
-        changeCount++
-      })
-      
-      service.persistWindowState({ flowCanvasWidth: 700 })
-      
-      // Should update in-memory state
-      expect(service.getWindowState().flowCanvasWidth).toBe(700)
-      
-      // Should not trigger change event
-      expect(changeCount).toBe(0)
-    })
-  })
 
   describe('ServiceRegistry', () => {
     it('should register and retrieve services', () => {

@@ -11,6 +11,7 @@ import { initAppBootEvents } from '../../store/appBoot'
 import { initTerminalTabsEvents } from '../../store/terminalTabs'
 import { initFlowEditorEvents } from '../../store/flowEditor'
 import { initHydrationEvents, useHydration } from '../../store/hydration'
+import { initUiEvents, reloadUiStateForWorkspace } from '../../store/ui'
 import { useBackendBinding } from '../../store/binding'
 import { useLoadingOverlay } from '../../store/loadingOverlay'
 
@@ -22,16 +23,21 @@ export function getBackendClient(): BackendClient | null {
 
 
 export function bootstrapBackendFromPreload(): void {
-  const boot = window.wsBackend?.getBootstrap?.()
-  if (!boot || !boot.url) {
+  // Read WebSocket bootstrap params directly from query string (no preload needed!)
+  const params = new URLSearchParams(location.search)
+  const url = params.get('wsUrl') || ''
+  const token = params.get('wsToken') || ''
+  const windowId = params.get('windowId') || ''
+
+  if (!url) {
     return
   }
 
   client = new BackendClient({
-    url: boot.url,
-    token: boot.token,
+    url,
+    token,
     onOpen: () => {
-      useBackendBinding.setState({ windowId: boot.windowId })
+      useBackendBinding.setState({ windowId })
       // Transition hydration from connecting → connected
       useHydration.getState().setPhase('connected')
     },
@@ -62,17 +68,21 @@ export function bootstrapBackendFromPreload(): void {
   initAppBootEvents()
   initTerminalTabsEvents()
   initFlowEditorEvents()
+  initUiEvents()
 
   // Workspace binding
   client.subscribe('workspace.attached', (p: any) => {
     console.log('[bootstrap] workspace.attached received:', p)
     const workspaceId = (p?.workspaceId || p?.id || p?.root || null) as string | null
     const root = (p?.root || (typeof workspaceId === 'string' ? workspaceId : null)) as string | null
-    console.log('[bootstrap] Setting attached:', { windowId: boot.windowId, workspaceId, root, attached: !!workspaceId })
+    console.log('[bootstrap] Setting attached:', { windowId, workspaceId, root, attached: !!workspaceId })
 
     console.log('[bootstrap] Before setState, current state:', useBackendBinding.getState())
-    useBackendBinding.setState({ windowId: boot.windowId, workspaceId, root, attached: !!workspaceId })
+    useBackendBinding.setState({ windowId, workspaceId, root, attached: !!workspaceId })
     console.log('[bootstrap] After setState, new state:', useBackendBinding.getState())
+
+    // Reload UI state for the new workspace (workspace-scoped localStorage)
+    reloadUiStateForWorkspace()
 
     // Force loading overlay to recompute
     setTimeout(() => {
@@ -83,83 +93,61 @@ export function bootstrapBackendFromPreload(): void {
 
   client.connect()
 
-  // Hydrate initial workspace state (in case already attached before renderer started)
-  setTimeout(async () => {
-    try {
-      await (client as any).whenReady?.(5000)
-      const ws: any = await client!.rpc('workspace.get', {})
-      console.log('[bootstrap] workspace.get response:', ws)
-      if (ws?.ok && ws.root) {
-        console.log('[bootstrap] Hydrating workspace state:', { root: ws.root, attached: true })
-        useBackendBinding.setState({
-          windowId: boot.windowId,
-          workspaceId: ws.root,
-          root: ws.root,
-          attached: true
-        })
-      }
-    } catch (e) {
-      console.error('[bootstrap] Failed to hydrate workspace state:', e)
-    }
-  }, 0)
-
-
-  // After ready, perform ping and init handshake
+  // After connection is ready and all listeners are set up, signal to main process
+  // that we're ready to receive workspace data
   setTimeout(async () => {
     try {
       const anyClient = client as any
       if (anyClient.whenReady) {
         await anyClient.whenReady(5000)
       }
-      await client!.rpc('handshake.ping', { windowId: boot.windowId })
 
-      await client!.rpc('handshake.init', {
-        windowId: boot.windowId,
-        capabilities: { client: 'renderer', features: ['terminal', 'agent-pty', 'workspace', 'flow'] }
-      })
+      console.log('[bootstrap] All listeners ready, signaling window.ready to main process')
 
-      // workspace.attached/ready notifications are the canonical binding signals.
-      // Now that the notification pipeline is fixed, we no longer need an RPC
-      // fallback snapshot here.
+      // Signal that renderer is ready - main will begin loading workspace
+      await client!.rpc('window.ready', { windowId })
 
-      // After subscriptions are in place, perform a conservative active-flow check so
-      // the runtime state is seeded if a flow is already running for this workspace.
+      // After workspace loads, check for active flows
       setTimeout(async () => {
         try {
-
           const active = await FlowService.getActive()
           if (Array.isArray(active) && active.length > 0) {
-            // Seed minimal runtime state so UI doesn't show "stopped"
             const id = active[0]
             try { useFlowRuntime.getState().setRequestId(id) } catch {}
-            try { useFlowRuntime.getState().setStatus('running') } catch {}
-            // Seed currently executing/paused nodes from backend snapshot so UI highlights instantly
+
+            // Get snapshot first to determine correct status
             try {
               const snap: any = await FlowService.getStatus(id)
               if (snap && !Array.isArray(snap)) {
                 const rt = useFlowRuntime.getState()
-                if (snap.status === 'waitingForInput') { try { rt.setStatus('waitingForInput') } catch {} }
+
+                // Set status based on snapshot (don't assume 'running')
+                if (snap.status === 'waitingForInput') {
+                  try { rt.setStatus('waitingForInput') } catch {}
+                } else if (snap.status === 'running') {
+                  try { rt.setStatus('running') } catch {}
+                } else {
+                  try { rt.setStatus('stopped') } catch {}
+                }
+
+                // Seed currently executing/paused nodes from backend snapshot so UI highlights instantly
                 if (Array.isArray(snap.activeNodeIds)) {
                   for (const nid of snap.activeNodeIds) {
                     try { rt.handleEvent({ type: 'nodeStart', nodeId: nid, requestId: id } as any) } catch {}
                   }
                 }
                 if (snap.pausedNodeId) {
-                  try { rt.handleEvent({ type: 'waitingForInput', nodeId: snap.pausedNodeId, requestId: id } as any) } catch {}
+                  try { rt.handleEvent({ type: 'waitingforinput', nodeId: snap.pausedNodeId, requestId: id } as any) } catch {}
                 }
               }
             } catch {}
-
-          } else {
-            // No active flow detected - this is normal during app startup
-            // The flow will be started by initializeSession after the session is loaded
           }
         } catch (e) {
           // Swallow active-flow check errors; UI will hydrate on next execution
         }
       }, 200)
     } catch (err) {
-      // Swallow init handshake errors; reconnect logic will retry
+      console.error('[bootstrap] window.ready failed:', err)
     }
   }, 250)
 }

@@ -8,14 +8,13 @@ import type { WebContents } from 'electron'
 import { FlowScheduler } from './scheduler'
 import { emitFlowEvent } from './events'
 import type { FlowExecutionArgs } from './types'
-import { ServiceRegistry } from '../../services/base/ServiceRegistry'
+import { startTimelineListener } from './timeline-event-handler.js'
 
 // Active flow schedulers
-
 const activeFlows = new Map<string, FlowScheduler>()
 
-// Track persistence subscriptions per request to clean up on cancel/error
-const persistSubs = new Map<string, () => void>()
+// Track timeline listeners per request to clean up on cancel/error
+const timelineListeners = new Map<string, () => void>()
 
 
 
@@ -30,12 +29,9 @@ export async function executeFlow(
 
   const { requestId, flowDef } = args
 
-  // Start timeline listening via SessionTimelineService
-  const sessionTimelineService = ServiceRegistry.get<any>('sessionTimeline')
-  if (sessionTimelineService) {
-    const persistUnsubscribe = sessionTimelineService.startListeningToFlow(requestId, args)
-    persistSubs.set(requestId, persistUnsubscribe)
-  }
+  // Start timeline event listener
+  const unsubscribe = startTimelineListener(requestId, args)
+  timelineListeners.set(requestId, unsubscribe)
 
   emitFlowEvent(requestId, { type: 'io', nodeId: 'system', data: `[Flow Engine] Starting execution with ${flowDef.nodes.length} nodes, ${flowDef.edges.length} edges` })
 
@@ -55,8 +51,8 @@ export async function executeFlow(
   } catch (e: any) {
     // Only clean up on actual errors
     activeFlows.delete(requestId)
-    try { persistSubs.get(requestId)?.() } catch {}
-    persistSubs.delete(requestId)
+    try { timelineListeners.get(requestId)?.() } catch {}
+    timelineListeners.delete(requestId)
     // Do not cleanup global flow event forwarders; keep listening for this requestId
     const error = e?.message || String(e)
     console.error('[executeFlow] Error:', error)
@@ -89,13 +85,15 @@ export async function resumeFlow(
     // Resolve the promise that the userInput node is awaiting
     // The scheduler knows which node is waiting - just resolve any waiting input
     // Provider/model will be refreshed from session context before next node execution
-    console.log('[resumeFlow] Calling scheduler.resolveAnyWaitingUserInput')
+    console.log('[resumeFlow] Calling scheduler.resolveAnyWaitingUserInput with input:', userInput.substring(0, 50))
     scheduler.resolveAnyWaitingUserInput(userInput)
+    console.log('[resumeFlow] resolveAnyWaitingUserInput returned successfully')
 
     return { ok: true }
   } catch (e: any) {
     const error = e?.message || String(e)
     console.error('[resumeFlow] Error:', error)
+    console.error('[resumeFlow] Stack:', e?.stack)
     emitFlowEvent(requestId, { type: 'error', error })
     return { ok: false, error }
   }
@@ -145,8 +143,8 @@ export async function cancelFlow(requestId: string): Promise<{ ok: boolean; erro
 
     // Allow the synchronous onFlowEvent handlers to run before cleanup
     // (EventEmitter dispatch is synchronous)
-    try { persistSubs.get(requestId)?.() } catch {}
-    persistSubs.delete(requestId)
+    try { timelineListeners.get(requestId)?.() } catch {}
+    timelineListeners.delete(requestId)
     // Keep flowEvents listeners attached; renderer should always be listening
 
     return { ok: true }
@@ -187,4 +185,11 @@ export function getAllFlowSnapshots(): Array<{ requestId: string; status: 'runni
  */
 export function listActiveFlows(): string[] {
   return Array.from(activeFlows.keys())
+}
+
+/**
+ * Get the active flows map (for RPC handlers)
+ */
+export function getActiveFlows(): Map<string, FlowScheduler> {
+  return activeFlows
 }

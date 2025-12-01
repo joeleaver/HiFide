@@ -1,13 +1,14 @@
 import type { AgentTool } from '../../providers/provider'
 import path from 'node:path'
 import fs from 'node:fs/promises'
-import fg from 'fast-glob'
 import ignore from 'ignore'
-
+import fg from 'fast-glob'
 
 import { grepTool } from '../text/grep'
-import { astGrepSearch } from '../../tools/astGrep'
 import { getIndexer } from '../../core/state'
+import { getIndexingService } from '../../services/index.js'
+import { resolveWorkspaceRootAsync } from '../../utils/workspace.js'
+import { getLocalEngine } from '../../indexing/engine'
 
 import { randomUUID } from 'node:crypto'
 
@@ -28,19 +29,6 @@ function normalizeFilters(f?: SearchWorkspaceParams['filters']) {
     // Back-compat: default to generous time budget so tests and typical searches don't timeout
     timeBudgetMs: Math.max(200, filters.timeBudgetMs ?? 10_000)
   }
-}
-
-function normalizeLanguageAliases(langs?: string[]): string[] | undefined {
-  if (!langs) return langs
-  const map: Record<string, string> = {
-    typescript: 'ts', javascript: 'js',
-  }
-  const out = [] as string[]
-  for (const l of langs) {
-    const k = String(l || '').toLowerCase()
-    out.push(map[k] || l)
-  }
-  return out
 }
 
 function makeCacheKey(root: string, args: SearchWorkspaceParams) {
@@ -120,7 +108,6 @@ export interface SearchWorkspaceResult {
 
 // ---- Helpers -------------------------------------------------------------------------
 async function getWorkspaceRoot(hint?: string): Promise<string> {
-  const { resolveWorkspaceRootAsync } = await import('../../utils/workspace')
   return resolveWorkspaceRootAsync(hint)
 }
 
@@ -388,11 +375,9 @@ async function countWorkspaceFiles(root: string): Promise<number> {
   return walk(root)
 }
 
-async function autoRefreshPreflight(): Promise<{ triggered: boolean }> {
+async function autoRefreshPreflight(workspaceId?: string): Promise<{ triggered: boolean }> {
   try {
-    const { ServiceRegistry } = await import('../../services/base/ServiceRegistry.js')
-    const indexingService = ServiceRegistry.get<any>('indexing')
-    if (!indexingService) return { triggered: false }
+    const indexingService = getIndexingService()
 
     const st = indexingService.getState()
     const cfg = st?.idxAutoRefresh
@@ -418,8 +403,8 @@ async function autoRefreshPreflight(): Promise<{ triggered: boolean }> {
 
     // Lockfile trigger
     if (!should && cfg.lockfileTrigger) {
-      const workspaceService = ServiceRegistry.get<any>('workspace')
-      const root = workspaceService?.getWorkspaceRoot() || process.cwd()
+      // Workspace root should come from workspaceId parameter
+      const root = await getWorkspaceRoot(workspaceId)
       const globs = Array.isArray(cfg.lockfileGlobs) ? cfg.lockfileGlobs : []
       for (const f of globs) {
         const m = await safeStatMtimeMs(path.join(root, f))
@@ -430,7 +415,6 @@ async function autoRefreshPreflight(): Promise<{ triggered: boolean }> {
     // Model change trigger
     if (!should && cfg.modelChangeTrigger) {
       try {
-        const { getLocalEngine } = await import('../../indexing/engine')
         const eng = await getLocalEngine()
         if (s?.modelId && !String(s.modelId).startsWith(eng.id)) should = true
       } catch {}
@@ -439,8 +423,7 @@ async function autoRefreshPreflight(): Promise<{ triggered: boolean }> {
     // Workspace churn (approximate)
     let currCount: number | undefined
     if (!should && sinceAttempt > minIntervalMs && (cfg.changeAbsoluteThreshold || cfg.changePercentThreshold)) {
-      const workspaceService = ServiceRegistry.get<any>('workspace')
-      const root = workspaceService?.getWorkspaceRoot() || process.cwd()
+      const root = await getWorkspaceRoot(workspaceId)
       currCount = await countWorkspaceFiles(root)
       const prev = st?.idxLastFileCount || currCount
       const abs = Math.abs((currCount || 0) - (prev || 0))
@@ -448,7 +431,7 @@ async function autoRefreshPreflight(): Promise<{ triggered: boolean }> {
       if ((cfg.changeAbsoluteThreshold && abs >= cfg.changeAbsoluteThreshold) || (cfg.changePercentThreshold && pct >= cfg.changePercentThreshold)) {
         should = true
       }
-      indexingService.setState({ idxLastScanAt: now, idxLastFileCount: currCount })
+      indexingService.updateIndexMetrics({ lastScanAt: now, lastFileCount: currCount })
     }
 
     // Rate limit
@@ -459,11 +442,11 @@ async function autoRefreshPreflight(): Promise<{ triggered: boolean }> {
     }
 
     if (should && !s?.inProgress) {
-      const prev = indexingService.getState()
-      indexingService.setState({
-        idxLastRebuildAt: now,
-        idxRebuildTimestamps: [ ...(prev?.idxRebuildTimestamps || []), now ].filter((t: number) => now - t < 60 * 60 * 1000),
-        ...(typeof currCount === 'number' ? { idxLastFileCount: currCount } : {}),
+      const prev = indexingService.getRebuildTimestamps() || []
+      indexingService.updateIndexMetrics({
+        lastRebuildAt: now,
+        rebuildTimestamps: [...prev, now].filter((t: number) => now - t < 60 * 60 * 1000),
+        ...(typeof currCount === 'number' ? { lastFileCount: currCount } : {}),
       })
       indexer.rebuild(() => {}).catch(() => {})
       return { triggered: true }
@@ -512,103 +495,7 @@ async function runGrep(query: string, include: string[]|undefined, exclude: stri
   return out
 }
 
-// Heuristic: only send safe, single-node patterns to ast-grep; avoid multi-line or multi-statement snippets
-function isLikelyAstPattern(q: string): boolean {
-  const s = (q || '').trim()
-  if (!s) return false
-  // Hard denylists: known crashy inputs for napi (not catchable from JS)
-  if (/[\r\n]/.test(s)) return false // multi-line => often multiple nodes
-  if (s.includes('@')) return false // decorators/email/package@version
-  if (s.length > 200) return false // overly large snippet
-  // Disallow obvious multi-node delimiters
-  if (/[;,]/.test(s)) return false
-  // Require balanced brackets
-  const stack: string[] = []
-  for (const ch of s) {
-    if (ch === '(' || ch === '{' || ch === '[') stack.push(ch)
-    else if (ch === ')') { if (stack.pop() !== '(') return false }
-    else if (ch === '}') { if (stack.pop() !== '{') return false }
-    else if (ch === ']') { if (stack.pop() !== '[') return false }
-  }
-  if (stack.length) return false
-  // Positive signals
-  if (/\$[A-Za-z_]/.test(s)) return true // ast-grep capture variables
-  if (/(?:kind|has|inside|matches|regex|and|or|not)\s*\(/i.test(s)) return true // DSL
-  // Allow simple single-node expressions like identifiers, call expr, arrow fn with braces
-  if (/=>/.test(s)) return true
-  if (/^[A-Za-z_$][A-Za-z0-9_$]*\s*\(/.test(s)) return true // call expression like foo(bar)
-  // Otherwise, be conservative
-  return false
-}
 
-
-function nlToAstPatterns(query: string, languages?: string[]): string[] {
-  const q = (query || '').toLowerCase().trim()
-  if (!q) return []
-  const wantsTsJs = !languages || !languages.length || languages.some(l => /^(ts|tsx|js|jsx|typescript|javascript)$/i.test(String(l)))
-  const pats: string[] = []
-
-  // Map common NL intents to AST patterns (TypeScript/JavaScript)
-  if (wantsTsJs) {
-    // "function definition", "method", "handler", etc.
-    if (/\b(function|method|handler)\b/.test(q)) {
-      pats.push(
-        // Function declarations
-        'function $NAME($$$) { $$$ }',
-        // Arrow/function expressions assigned to vars
-        'const $NAME = ($$$) => { $$$ }',
-        'let $NAME = ($$$) => { $$$ }',
-        'var $NAME = ($$$) => { $$$ }',
-        'const $NAME = function ($$$) { $$$ }',
-        'let $NAME = function ($$$) { $$$ }',
-        'var $NAME = function ($$$) { $$$ }',
-        // Class or object methods (shorthand)
-        'class $C { $NAME($$$) { $$$ } }'
-      )
-    }
-    // "exported function" / "export function"
-    if (/\bexport(ed)?\b/.test(q) && /\bfunction\b/.test(q)) {
-      pats.push('export function $NAME($$$) { $$$ }', 'export const $NAME = ($$$) => { $$$ }')
-    }
-  }
-
-  // De-duplicate while preserving order
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const p of pats) { if (!seen.has(p)) { seen.add(p); out.push(p) } }
-  return out
-}
-
-async function runAstGrep(query: string, languages: string[]|undefined, include: string[]|undefined, exclude: string[]|undefined, maxResults: number) {
-  // If not a direct AST pattern, try NL→AST mapping; if still nothing, return []
-  if (!isLikelyAstPattern(query)) {
-    const pats = nlToAstPatterns(query, languages)
-    if (!pats.length) return []
-    const tasks = pats.map(p => async () => {
-      try {
-        const r = await astGrepSearch({ pattern: p, languages: (languages && languages.length) ? languages : 'auto', includeGlobs: include, excludeGlobs: exclude, maxMatches: Math.max(1, Math.floor(maxResults / pats.length) || 1), contextLines: 1 })
-        return r.matches.map(m => ({ path: m.filePath, startLine: m.startLine, endLine: m.endLine, text: m.snippet }))
-      } catch { return [] }
-    })
-    const settled = await allWithLimit(tasks, 4)
-    // Flatten and de-dup by file + startLine
-    const flat = ([] as any[]).concat(...settled)
-    const seen = new Set<string>()
-    const merged: any[] = []
-    for (const it of flat) {
-      const key = `${it.path}:${it.startLine}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      merged.push(it)
-      if (merged.length >= maxResults) break
-    }
-    return merged
-  }
-  try {
-    const res = await astGrepSearch({ pattern: query, languages: (languages && languages.length) ? languages : 'auto', includeGlobs: include, excludeGlobs: exclude, maxMatches: maxResults, contextLines: 1 })
-    return res.matches.map(m => ({ path: m.filePath, startLine: m.startLine, endLine: m.endLine, text: m.snippet }))
-  } catch { return [] }
-}
 
 function toHandle(pathRel: string, start: number, end: number) {
   return b64({ t: 'h', p: pathRel, s: start|0, e: end|0 })
@@ -667,7 +554,7 @@ export function computeAutoBudget(numTerms: number, provided?: number): number {
 
 export const searchWorkspaceTool: AgentTool = {
   name: 'workspaceSearch',
-  description: 'Unified workspace code search (semantic + ripgrep + AST). Start here to locate code: accepts natural-language or exact text and returns ranked hits with compact snippets and handles. Then call with action="expand" + a handle to fetch the full region; after a couple of expands, switch to codeApplyEditsTargeted or applyEdits to change code.',
+  description: 'Unified workspace code search (semantic + ripgrep + AST). Start here to locate code: accepts natural-language or exact text and returns ranked hits with compact snippets and handles. Then call with action="expand" + a handle to fetch the full region; after a couple of expands, switch to applyEdits to change code.',
   parameters: {
     type: 'object',
     properties: {
@@ -718,7 +605,6 @@ export const searchWorkspaceTool: AgentTool = {
     const filters = normalizeFilters(args.filters)
     const include = filters.pathsInclude
     const exclude = [ ...(filters.pathsExclude || []), '.hifide-public/**', '.hifide_public/**', '.hifide-private/**', '.hifide_private/**' ]
-    const languages = normalizeLanguageAliases(filters.languages)
     let maxResults = filters.maxResults
     const maxSnippetLines = filters.maxSnippetLines
     if ((args as any)?.searchOnce) { maxResults = Math.min(1, maxResults) }
@@ -754,7 +640,7 @@ export const searchWorkspaceTool: AgentTool = {
     }
 
 	    // Auto-maintenance (non-blocking): opportunistically refresh semantic index when stale
-	    try { await autoRefreshPreflight() } catch {}
+	    try { await autoRefreshPreflight(meta?.workspaceId) } catch {}
 
 
     const strategiesUsed: string[] = []
@@ -794,9 +680,6 @@ export const searchWorkspaceTool: AgentTool = {
             addTermStrategy('path', tok, () => runPathSearch(tok, includeNorm, exclude, Math.min(200, maxResults), maxSnippetLines, meta?.workspaceId))
           }
         }
-      }
-      if (effectiveMode === 'ast' || /\(|\)\s*\.{3}|@\w/.test(rawTerm) || /^ast:/i.test(rawTerm)) {
-        addTermStrategy('ast', rawTerm, () => runAstGrep(term, languages, includeNorm, exclude, Math.min(200, maxResults*10)))
       }
     }
 

@@ -1,4 +1,5 @@
 import type { AgentTool } from '../../providers/provider'
+import { getKanbanService } from '../../services/index.js'
 
 export const kanbanDeleteEpicTool: AgentTool = {
   name: 'kanbanDeleteEpic',
@@ -10,12 +11,7 @@ export const kanbanDeleteEpicTool: AgentTool = {
     additionalProperties: false,
   },
   run: async (input: { epicId: string }, meta?: any) => {
-    const { ServiceRegistry } = await import('../../services/base/ServiceRegistry.js')
-    const kanbanService = ServiceRegistry.get<any>('kanban')
-
-    if (!kanbanService) {
-      throw new Error('Kanban service is not initialized')
-    }
+    const kanbanService = getKanbanService()
 
     const result = await kanbanService.kanbanDeleteEpic(input.epicId, meta?.workspaceId)
     if (!result?.ok) {

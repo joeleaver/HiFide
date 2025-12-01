@@ -1,7 +1,7 @@
 import type { AgentTool } from '../../providers/provider'
+import { getSessionService } from '../../services/index.js'
 import { sanitizeTerminalOutput, redactOutput } from '../utils'
 import * as agentPty from '../../services/agentPty'
-import { ServiceRegistry } from '../../services/base/ServiceRegistry.js'
 
 
 export const sessionSearchOutputTool: AgentTool = {
@@ -22,10 +22,9 @@ export const sessionSearchOutputTool: AgentTool = {
     args: { query: string; caseSensitive?: boolean; in?: 'commands'|'live'|'all'; maxResults?: number },
     meta?: { requestId?: string; workspaceId?: string }
   ) => {
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const sessionService = ServiceRegistry.get<any>('session')
-    const ws = meta?.workspaceId || workspaceService?.getWorkspaceRoot() || null
-    const sessionId = (ws && sessionService) ? sessionService.getCurrentIdFor({ workspaceId: ws }) : null
+    const sessionService = getSessionService()
+    const ws = meta?.workspaceId || null
+    const sessionId = ws ? sessionService.getCurrentIdFor({ workspaceId: ws }) : null
     if (!sessionId) {
       console.error('[terminal.session_search_output] No active sessionId')
       return { ok: false, error: 'no-session' }

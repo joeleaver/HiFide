@@ -67,7 +67,7 @@ export const portalInputNode: NodeFunction = async (flow, context, dataIn, input
   flow.log.debug('Storing portal data', { portalId, hasContext, hasData })
 
   // Store data in portal registry
-  flow.store.feSetPortalData(
+  flow.setPortalData(
     portalId,
     hasContext ? executionContext : undefined,
     hasData ? dataIn : undefined

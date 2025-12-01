@@ -54,8 +54,7 @@ export function initTerminalTabsEvents(): void {
   })
 
   // Workspace changes - rehydrate tabs
-  // Only rehydrate on workspace.bound (actual workspace change), not workspace.ready (just a ready signal)
-  client.subscribe('workspace.bound', () => {
+  client.subscribe('workspace.attached', () => {
     useTerminalTabs.getState().hydrateTabs()
   })
 }

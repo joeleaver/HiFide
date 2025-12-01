@@ -6,7 +6,7 @@
  */
 
 import { Service } from './base/Service.js'
-import { ServiceRegistry } from './base/ServiceRegistry.js'
+import { getSessionService } from './index.js'
 
 interface FlowCacheState {
   // No in-memory state - cache is stored in sessions
@@ -17,35 +17,32 @@ export class FlowCacheService extends Service<FlowCacheState> {
     super({})
   }
 
-  /**
-   * Get cached node output for current session
-   */
-  getNodeCache(nodeId: string): { data: any; timestamp: number } | undefined {
-    const sessionService = ServiceRegistry.get<any>('session')
-    if (!sessionService) return undefined
+  protected onStateChange(): void {
+    // No state to persist
+  }
 
-    const session = sessionService.getCurrentSession()
+  /**
+   * Get cached node output for a session
+   */
+  getNodeCacheFor(params: { workspaceId: string; sessionId: string; nodeId: string }): { data: any; timestamp: number } | undefined {
+    const { workspaceId, sessionId, nodeId } = params
+    const sessionService = getSessionService()
+    const sessions = sessionService.getSessionsFor({ workspaceId })
+    const session = sessions.find((s) => s.id === sessionId)
     if (!session || !session.flowCache) return undefined
     return session.flowCache[nodeId]
   }
 
   /**
-   * Set cached node output for current session
+   * Set cached node output for a session
    */
-  async setNodeCache(nodeId: string, cache: { data: any; timestamp: number }): Promise<void> {
-    const sessionService = ServiceRegistry.get<any>('session')
-    if (!sessionService) return
+  async setNodeCacheFor(params: { workspaceId: string; sessionId: string; nodeId: string; cache: { data: any; timestamp: number } }): Promise<void> {
+    const { workspaceId, sessionId, nodeId, cache } = params
+    const sessionService = getSessionService()
 
-    const session = sessionService.getCurrentSession()
-    if (!session) return
-
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) return
-
-    const sessions = sessionService.getSessionsFor({ workspaceId: ws })
+    const sessions = sessionService.getSessionsFor({ workspaceId })
     const updated = sessions.map((s: any) =>
-      s.id === session.id
+      s.id === sessionId
         ? {
             ...s,
             flowCache: {
@@ -57,28 +54,24 @@ export class FlowCacheService extends Service<FlowCacheState> {
         : s
     )
 
-    sessionService.setSessionsFor({ workspaceId: ws, sessions: updated })
-    await sessionService.saveCurrentSession(true) // Immediate
+    sessionService.setSessionsFor({ workspaceId, sessions: updated })
+    await sessionService.saveSessionFor({ workspaceId, sessionId }, true) // Immediate
   }
 
   /**
-   * Clear cached node output for current session
+   * Clear cached node output for a session
    */
-  async clearNodeCache(nodeId: string): Promise<void> {
-    const sessionService = ServiceRegistry.get<any>('session')
-    if (!sessionService) return
+  async clearNodeCacheFor(params: { workspaceId: string; sessionId: string; nodeId: string }): Promise<void> {
+    const { workspaceId, sessionId, nodeId } = params
+    const sessionService = getSessionService()
 
-    const session = sessionService.getCurrentSession()
+    const sessions = sessionService.getSessionsFor({ workspaceId })
+    const session = sessions.find((s) => s.id === sessionId)
     if (!session || !session.flowCache) return
 
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) return
-
     const { [nodeId]: _, ...rest } = session.flowCache
-    const sessions = sessionService.getSessionsFor({ workspaceId: ws })
     const updated = sessions.map((s: any) =>
-      s.id === session.id
+      s.id === sessionId
         ? {
             ...s,
             flowCache: rest,
@@ -87,27 +80,20 @@ export class FlowCacheService extends Service<FlowCacheState> {
         : s
     )
 
-    sessionService.setSessionsFor({ workspaceId: ws, sessions: updated })
-    await sessionService.saveCurrentSession(true) // Immediate
+    sessionService.setSessionsFor({ workspaceId, sessions: updated })
+    await sessionService.saveSessionFor({ workspaceId, sessionId }, true) // Immediate
   }
 
   /**
-   * Clear all cached outputs for current session
+   * Clear all cached outputs for a session
    */
-  async clearAllCache(): Promise<void> {
-    const sessionService = ServiceRegistry.get<any>('session')
-    if (!sessionService) return
+  async clearAllCacheFor(params: { workspaceId: string; sessionId: string }): Promise<void> {
+    const { workspaceId, sessionId } = params
+    const sessionService = getSessionService()
 
-    const session = sessionService.getCurrentSession()
-    if (!session) return
-
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) return
-
-    const sessions = sessionService.getSessionsFor({ workspaceId: ws })
+    const sessions = sessionService.getSessionsFor({ workspaceId })
     const updated = sessions.map((s: any) =>
-      s.id === session.id
+      s.id === sessionId
         ? {
             ...s,
             flowCache: {},
@@ -116,8 +102,8 @@ export class FlowCacheService extends Service<FlowCacheState> {
         : s
     )
 
-    sessionService.setSessionsFor({ workspaceId: ws, sessions: updated })
-    await sessionService.saveCurrentSession(true) // Immediate
+    sessionService.setSessionsFor({ workspaceId, sessions: updated })
+    await sessionService.saveSessionFor({ workspaceId, sessionId }, true) // Immediate
   }
 }
 

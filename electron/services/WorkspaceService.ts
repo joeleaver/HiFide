@@ -4,13 +4,12 @@
  * Manages workspace root, multi-window support, and recent folders.
  */
 
-import { EventEmitter } from 'node:events'
 import { Service } from './base/Service.js'
 import type { RecentFolder } from '../store/types.js'
-import { MAX_RECENT_FOLDERS } from '../store/utils/constants.js'
+import { MAX_RECENT_FOLDERS } from '../../src/store/utils/constants'
+import { buildMenu } from '../ipc/menu.js'
 
 interface WorkspaceState {
-  workspaceRoot: string | null
   windowWorkspaces: Record<number, string>
   recentFolders: RecentFolder[]
   fileWatchCleanup: (() => void) | null
@@ -23,7 +22,6 @@ export class WorkspaceService extends Service<WorkspaceState> {
   constructor() {
     super(
       {
-        workspaceRoot: null,
         windowWorkspaces: {},
         recentFolders: [],
         fileWatchCleanup: null,
@@ -36,33 +34,24 @@ export class WorkspaceService extends Service<WorkspaceState> {
   }
 
   protected onStateChange(updates: Partial<WorkspaceState>): void {
-    // Persist workspace state
-    if (updates.workspaceRoot !== undefined || updates.recentFolders !== undefined || updates.windowWorkspaces !== undefined) {
-      this.persistence.save('workspaceRoot', this.state.workspaceRoot)
-      this.persistence.save('windowWorkspaces', this.state.windowWorkspaces)
-      this.persistence.save('recentFolders', this.state.recentFolders)
-    }
-
-    // Emit events for workspace changes
-    if (updates.workspaceRoot !== undefined) {
-      this.events.emit('workspace:changed', this.state.workspaceRoot)
+    // Persist workspace state (use persistState to save entire state to 'workspace' key)
+    if (updates.recentFolders !== undefined || updates.windowWorkspaces !== undefined) {
+      this.persistState()
     }
 
     if (updates.recentFolders !== undefined) {
       this.events.emit('recentFolders:changed', this.state.recentFolders)
-      
+
       // Rebuild menu when recent folders change
-      import('../menu/index.js').then(({ buildMenu }) => {
-        buildMenu().catch(console.error)
-      })
+      try {
+        buildMenu()
+      } catch (err) {
+        console.error(err)
+      }
     }
   }
 
   // Getters
-  getWorkspaceRoot(): string | null {
-    return this.state.workspaceRoot
-  }
-
   getRecentFolders(): RecentFolder[] {
     return [...this.state.recentFolders]
   }
@@ -71,17 +60,11 @@ export class WorkspaceService extends Service<WorkspaceState> {
     return this.state.windowWorkspaces[windowId] || null
   }
 
-  getCurrentWorkspace(): string | null {
-    // For now, return the global workspace root
-    // In multi-window mode, this would need window context
-    return this.state.workspaceRoot
+  getAllWindowWorkspaces(): Record<number, string> {
+    return { ...this.state.windowWorkspaces }
   }
 
   // Setters
-  setWorkspaceRoot(root: string | null): void {
-    this.setState({ workspaceRoot: root })
-  }
-
   setWorkspaceForWindow(windowId: number, workspacePath: string): void {
     this.setState({
       windowWorkspaces: {
@@ -89,6 +72,11 @@ export class WorkspaceService extends Service<WorkspaceState> {
         [windowId]: workspacePath,
       },
     })
+  }
+
+  removeWorkspaceForWindow(windowId: number): void {
+    const { [windowId]: _, ...rest } = this.state.windowWorkspaces
+    this.setState({ windowWorkspaces: rest })
   }
 
   addRecentFolder(folder: RecentFolder): void {
@@ -123,24 +111,18 @@ export class WorkspaceService extends Service<WorkspaceState> {
     this.setState({ ctxResult: result })
   }
 
-  // Async operations (to be implemented with full workspace logic)
-  async ensureWorkspaceReady(): Promise<{ ok: boolean; error?: string }> {
-    // Placeholder - full implementation would check .hifide directories, etc.
-    return { ok: true }
-  }
-
   async hasUnsavedChanges(): Promise<boolean> {
     // Placeholder - full implementation would check git status
     return false
   }
 
-  async openFolder(path: string): Promise<void> {
-    this.setWorkspaceRoot(path)
+  async openFolder(path: string, windowId: number): Promise<void> {
+    this.setWorkspaceForWindow(windowId, path)
     this.addRecentFolder({ path, lastOpened: Date.now() })
   }
 
-  async closeWorkspace(): Promise<void> {
-    this.setWorkspaceRoot(null)
+  async closeWorkspace(windowId: number): Promise<void> {
+    this.removeWorkspaceForWindow(windowId)
   }
 }
 

@@ -1,5 +1,6 @@
 import { memo, useRef, useEffect } from 'react'
 import { useUiStore } from '../store/ui'
+import { useFlowRuntime } from '../store/flowRuntime'
 import { FlowService } from '../services/flow'
 import '../styles/mdx-dark.css'
 import { MDXEditor, BoldItalicUnderlineToggles, ListsToggle, markdownShortcutPlugin, listsPlugin, toolbarPlugin, MDXEditorMethods } from '@mdxeditor/editor'
@@ -7,6 +8,7 @@ import { MDXEditor, BoldItalicUnderlineToggles, ListsToggle, markdownShortcutPlu
 export default memo(function SessionInput() {
   const inputValue = useUiStore((s) => s.sessionInputValue || '')
   const setInputValue = useUiStore((s) => s.setSessionInputValue)
+  const requestId = useFlowRuntime((s) => s.requestId)
   const editorRef = useRef<MDXEditorMethods | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const placeCaret = () => {
@@ -45,7 +47,16 @@ export default memo(function SessionInput() {
     setInputValue('')
     try { editorRef.current?.setMarkdown('\u00A0') } catch {}
     placeCaret()
-    await FlowService.resume(undefined, text).catch(() => {})
+
+    // Get requestId from flowRuntime store
+    if (!requestId) {
+      console.warn('[SessionInput] No requestId available, cannot resume flow')
+      return
+    }
+
+    await FlowService.resume(requestId, text).catch((e) => {
+      console.error('[SessionInput] Failed to resume flow:', e)
+    })
   }
 
   return (

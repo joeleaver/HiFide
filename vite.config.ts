@@ -6,6 +6,10 @@ import { copyFileSync, mkdirSync, readdirSync } from 'node:fs'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  server: {
+    port: 5179,
+    strictPort: true, // Fail if port is busy instead of auto-incrementing to ensure consistent localStorage origin
+  },
   plugins: [
     react(),
     electron({

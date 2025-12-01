@@ -310,7 +310,7 @@ function applyHunksToContent(original: string, hunks: Hunk[]): { ok: boolean; co
 
 export const applyPatchTool: AgentTool = {
   name: 'applyPatch',
-  description: 'Apply a unified-diff patch (git-style). Accepts raw patch, fenced diff, or *** Begin/End Patch markers. Use dryRun to preview; for small, precise changes prefer applyEdits or codeApplyEditsTargeted.',
+  description: 'Apply a unified-diff patch (git-style). Accepts raw patch, fenced diff, or *** Begin/End Patch markers. Use dryRun to preview; for small, precise changes prefer applyEdits.',
   parameters: {
     type: 'object',
     properties: {

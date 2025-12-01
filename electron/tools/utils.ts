@@ -5,16 +5,11 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import * as logging from '../utils/logging'
-import * as edits from '../ipc/edits'
-import { resolveWithinWorkspace as resolveWithinWorkspaceUtil } from '../utils/workspace'
+import { resolveWithinWorkspace } from '../utils/workspace'
+import { redactOutput, isRiskyCommand } from '../utils/security'
 
-/**
- * Resolve a path within the workspace, preventing directory traversal
- * @deprecated Use resolveWithinWorkspace from '../utils/workspace' directly
- */
-export function resolveWithinWorkspace(p: string): string {
-  return resolveWithinWorkspaceUtil(p)
-}
+// Re-export for convenience
+export { resolveWithinWorkspace, redactOutput, isRiskyCommand }
 
 /**
  * Resolve a path within a provided workspace root, preventing directory traversal
@@ -46,42 +41,6 @@ export async function logEvent(sessionId: string, type: string, payload: any) {
 }
 
 /**
- * Check if a command is risky (installs, deletes, etc.)
- */
-export function isRiskyCommand(cmd: string): { risky: boolean; reason?: string } {
-  try {
-    // Use existing security utility
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const sec = require('../utils/security')
-    return sec.isRiskyCommand(cmd)
-  } catch {
-    // Conservative fallback
-    const c = (cmd || '').trim()
-    if (/\b(pnpm|npm|yarn)\s+install\b/i.test(c)) return { risky: true, reason: 'package install' }
-    if (/\b(pnpm|npm|yarn)\s+add\b/i.test(c)) return { risky: true, reason: 'package add' }
-    if (/\brm\s+-rf\b/i.test(c)) return { risky: true, reason: 'recursive delete' }
-    if (/\bgit\s+(push|force|reset)\b/i.test(c)) return { risky: true, reason: 'git dangerous op' }
-    return { risky: false }
-  }
-}
-
-/**
- * Redact sensitive information from output
- */
-export function redactOutput(input: string): { redacted: string; bytesRedacted: number } {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const sec = require('../utils/security')
-    return sec.redactOutput(input)
-  } catch {
-    let redacted = input || ''
-    const patterns: RegExp[] = [/(?:sk|rk|pk|ak)-[A-Za-z0-9]{16,}/g, /Bearer\s+[A-Za-z0-9\-_.=]+/gi]
-    const beforeLen = redacted.length
-    for (const re of patterns) redacted = redacted.replace(re, '[REDACTED]')
-    return { redacted, bytesRedacted: Math.max(0, beforeLen - redacted.length) }
-  }
-}
-/**
  * Sanitize terminal output for LLM consumption by stripping ANSI/VT escape sequences
  * and non-printable control chars while preserving newlines and tabs. Also normalizes EOLs to \n.
  */
@@ -106,18 +65,6 @@ export function sanitizeTerminalOutput(input: string, opts?: { normalizeEol?: bo
 }
 
 
-/**
- * Apply file edits using the edits module
- */
-export async function applyFileEditsInternal(editsArray: any[] = [], opts: { dryRun?: boolean; verify?: boolean; tsconfigPath?: string } = {}) {
-  return (edits as any).applyFileEditsInternal(editsArray, opts)
-}
 
-/**
- * Apply sequential, single-file line range edits via edits module
- */
-export async function applyLineRangeEditsInternal(pathRel: string, ranges: Array<{ startLine: number; endLine: number; newText: string }>, opts: { dryRun?: boolean } = {}) {
-  return (edits as any).applyLineRangeEditsInternal(pathRel, ranges, opts)
-}
 
 

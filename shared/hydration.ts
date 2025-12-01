@@ -101,21 +101,28 @@ export interface WorkspaceSnapshot {
     nodes: any[]
     edges: any[]
   }
-  
+
+  // Flow contexts
+  flowContexts: {
+    mainContext: any | null
+    isolatedContexts: Record<string, any>
+  }
+
   // Kanban
   kanban: {
     board: any | null
   }
-  
+
   // Provider/model settings
   settings: {
     providerValid: Record<string, boolean>
     modelsByProvider: Record<string, Array<{ value: string; label: string }>>
   }
-  
-  // Knowledge base (summary only - full items fetched on demand)
+
+  // Knowledge base (full data)
   knowledgeBase: {
-    itemCount: number
+    items: Record<string, any>
+    files: string[]
   }
   
   // Timestamp for freshness checking

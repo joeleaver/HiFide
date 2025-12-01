@@ -22,9 +22,3 @@ declare namespace NodeJS {
 }
 
 
-
-// Ambient module declarations for native/optional deps
-declare module '@ast-grep/napi' {
-  const mod: any
-  export = mod
-}

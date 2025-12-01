@@ -8,6 +8,7 @@ import fs from 'fs/promises'
 import path from 'path'
 
 import type { Session } from '../types'
+import { resolveWorkspaceRootAsync } from '../../utils/workspace.js'
 
 
 
@@ -16,8 +17,6 @@ import type { Session } from '../types'
  */
 export async function getSessionsDir(workspaceRoot?: string): Promise<string> {
   // Resolve workspace-relative sessions directory
-  const { resolveWorkspaceRootAsync } = await import('../../utils/workspace.js')
-
   // <workspaceRoot>/.hifide-private/sessions
   const baseDir = await resolveWorkspaceRootAsync(workspaceRoot)
   const privateDir = path.join(baseDir, '.hifide-private')
@@ -32,9 +31,10 @@ export async function getSessionsDir(workspaceRoot?: string): Promise<string> {
  * Uses a unique temp file to prevent race conditions
  * Handles Windows file locking issues with retry logic
  */
-export async function saveSessionToDisk(session: Session): Promise<void> {
-  const sessionsDir = await getSessionsDir()
+export async function saveSessionToDisk(session: Session, workspaceRoot?: string): Promise<void> {
+  const sessionsDir = await getSessionsDir(workspaceRoot)
   const filePath = path.join(sessionsDir, `${session.id}.json`)
+  console.log('[saveSessionToDisk] Saving to:', filePath)
 
   // Atomic write: write to temp file with unique suffix, then rename
   // Use timestamp + random to ensure uniqueness and prevent race conditions
@@ -296,6 +296,7 @@ export async function deleteSessionFromDisk(sessionId: string): Promise<void> {
 class DebouncedSessionSaver {
   private saveTimeouts = new Map<string, NodeJS.Timeout>()
   private activeSaves = new Map<string, Promise<void>>()
+  private workspaceBySession = new Map<string, string>()  // Track workspace for each session
   private readonly debounceMs: number
 
   constructor(debounceMs = 500) {
@@ -306,7 +307,14 @@ class DebouncedSessionSaver {
    * Save a session with optional debouncing
    * Returns a Promise when immediate=true, void when debounced
    */
-  save(session: Session, immediate = false): Promise<void> | void {
+  save(session: Session, immediate = false, workspaceRoot?: string): Promise<void> | void {
+    console.log('[sessionSaver] save() called:', { sessionId: session.id, immediate, workspaceRoot, itemCount: session.items?.length })
+
+    // Store workspace for this session
+    if (workspaceRoot) {
+      this.workspaceBySession.set(session.id, workspaceRoot)
+    }
+
     // Clear existing timeout for this session
     const existingTimeout = this.saveTimeouts.get(session.id)
     if (existingTimeout) {
@@ -319,7 +327,9 @@ class DebouncedSessionSaver {
       return this.performSave(session)
     } else {
       // Debounced save - fire and forget
+      console.log('[sessionSaver] Scheduling debounced save in', this.debounceMs, 'ms')
       const timeout = setTimeout(() => {
+        console.log('[sessionSaver] Debounce timeout fired, performing save')
         this.performSave(session)
         this.saveTimeouts.delete(session.id)
       }, this.debounceMs)
@@ -332,6 +342,9 @@ class DebouncedSessionSaver {
    * Perform the actual save, preventing concurrent saves to the same session
    */
   private async performSave(session: Session): Promise<void> {
+    const workspaceRoot = this.workspaceBySession.get(session.id)
+    console.log('[sessionSaver] performSave() starting for session:', session.id, 'workspace:', workspaceRoot)
+
     // Wait for any active save to complete
     const activeSave = this.activeSaves.get(session.id)
     if (activeSave) {
@@ -341,7 +354,10 @@ class DebouncedSessionSaver {
     }
 
     // Start new save
-    const savePromise = saveSessionToDisk(session)
+    const savePromise = saveSessionToDisk(session, workspaceRoot)
+      .then(() => {
+        console.log('[sessionSaver] Successfully saved session to disk:', session.id)
+      })
       .catch(e => {
         console.error('[session-persistence] Save failed:', e)
       })

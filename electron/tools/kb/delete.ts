@@ -1,6 +1,5 @@
 import type { AgentTool } from '../../providers/provider'
 import { deleteItem } from '../../store/utils/knowledgeBase'
-import { ServiceRegistry } from '../../services/base/ServiceRegistry.js'
 
 export const knowledgeBaseDeleteTool: AgentTool = {
   name: 'knowledgeBaseDelete',
@@ -14,7 +13,10 @@ export const knowledgeBaseDeleteTool: AgentTool = {
     required: ['id'],
   },
   run: async (input: any, meta?: any) => {
-    const baseDir = meta?.workspaceId || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
+    if (!meta?.workspaceId) {
+      return { ok: false, error: 'workspaceId required in meta' }
+    }
+    const baseDir = meta.workspaceId
 
     const id = typeof input?.id === 'string' ? input.id.trim() : ''
     if (!id) return { ok: false, error: 'id is required' }
@@ -22,15 +24,7 @@ export const knowledgeBaseDeleteTool: AgentTool = {
     const ok = await deleteItem(baseDir, id)
     if (!ok) return { ok: false, error: 'Not found' }
 
-    // Immediate best-effort store update to broadcast events without waiting for fs watcher
-    try {
-      const kbService = ServiceRegistry.get<any>('knowledgeBase')
-      if (kbService) {
-        const map = { ...kbService.getItems() }
-        delete map[id]
-        kbService.setState({ kbItems: map })
-      }
-    } catch {}
+    // File system watcher will update the service state automatically
 
     return { ok: true, data: { id } }
   },

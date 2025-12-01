@@ -86,14 +86,26 @@ function createFlowRuntimeStore() {
           cacheHit: false,
           style: { border: '3px solid #60a5fa', boxShadow: '0 0 0 2px rgba(96,165,250,0.15)' }
         })
-        set({ status: 'running', requestId: ev.requestId, lastEventAt: now })
+        // Don't override waitingForInput status when other nodes start
+        const currentStatus = get().status
+        if (currentStatus !== 'waitingForInput') {
+          set({ status: 'running', requestId: ev.requestId, lastEventAt: now })
+        } else {
+          set({ requestId: ev.requestId, lastEventAt: now })
+        }
         return
       }
 
       if (t === 'chunk') {
         const nodeId = ev.nodeId as string
         updateNode(nodeId, { status: 'streaming' })
-        set({ status: 'running', requestId: ev.requestId, lastEventAt: now })
+        // Don't override waitingForInput status when chunks arrive
+        const currentStatus = get().status
+        if (currentStatus !== 'waitingForInput') {
+          set({ status: 'running', requestId: ev.requestId, lastEventAt: now })
+        } else {
+          set({ requestId: ev.requestId, lastEventAt: now })
+        }
         return
       }
 
@@ -120,7 +132,13 @@ function createFlowRuntimeStore() {
           durationMs,
           style: { border: '3px solid #22c55e', boxShadow: '0 0 0 2px rgba(34,197,94,0.2)' }
         })
-        set({ status: 'running', requestId: ev.requestId, lastEventAt: now })
+        // Don't override waitingForInput status when other nodes complete
+        const currentStatus = get().status
+        if (currentStatus !== 'waitingForInput') {
+          set({ status: 'running', requestId: ev.requestId, lastEventAt: now })
+        } else {
+          set({ requestId: ev.requestId, lastEventAt: now })
+        }
         return
       }
 
@@ -221,7 +239,7 @@ export function initFlowRuntimeEvents(): void {
               }
             }
             if (snap.pausedNodeId) {
-              try { rt.handleEvent({ type: 'waitingForInput', nodeId: snap.pausedNodeId, requestId: rid } as any) } catch { }
+              try { rt.handleEvent({ type: 'waitingforinput', nodeId: snap.pausedNodeId, requestId: rid } as any) } catch { }
             }
           }
         } catch { }
@@ -247,7 +265,7 @@ export async function refreshFlowRuntimeStatus(): Promise<void> {
       if (snap.status === 'waitingForInput') {
         try { rt.setStatus('waitingForInput') } catch { }
         if (snap.pausedNodeId) {
-          try { rt.handleEvent({ type: 'waitingForInput', nodeId: snap.pausedNodeId, requestId: rid } as any) } catch { }
+          try { rt.handleEvent({ type: 'waitingforinput', nodeId: snap.pausedNodeId, requestId: rid } as any) } catch { }
         }
       } else if (snap.status === 'running') {
         try { rt.setStatus('running') } catch { }

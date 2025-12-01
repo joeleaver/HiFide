@@ -18,6 +18,7 @@ import { getBackendClient } from './lib/backend/bootstrap'
 
 import { useAppBoot } from './store/appBoot'
 import { useHydration, type HydrationState } from './store/hydration'
+import { useBackendBinding } from './store/binding'
 
 import { useMenuHandlers } from './hooks/useMenuHandlers'
 
@@ -25,6 +26,10 @@ import { useMenuHandlers } from './hooks/useMenuHandlers'
 import classes from './App.module.css'
 
 function App() {
+  // Source of truth: workspace attachment state
+  const workspaceAttached = useBackendBinding((s: any) => s.attached)
+
+  // Current view within the main app (only used when workspace is attached)
   const currentView = useUiStore((s) => s.currentView)
   const setCurrentViewLocal = useUiStore((s) => s.setCurrentViewLocal)
   const mainCollapsed = useUiStore((s) => s.mainCollapsed)
@@ -42,7 +47,7 @@ function App() {
   const wsLoadingMessage = useHydration((s: HydrationState) => s.loadingMessage)
 
   // DEBUG: Log every render to see what values the component sees
-  console.log('[App render] hydrationPhase:', hydrationPhase, 'overlayActive:', overlayActive, 'appBootstrapping:', appBootstrapping)
+  console.log('[App render] workspaceAttached:', workspaceAttached, 'currentView:', currentView, 'hydrationPhase:', hydrationPhase, 'overlayActive:', overlayActive, 'appBootstrapping:', appBootstrapping)
 
   // Hydrate boot status on mount
   useEffect(() => {
@@ -66,7 +71,6 @@ function App() {
         await client.whenReady(7000)
         const ws: any = await client.rpc('workspace.get', {})
         if (ws?.ok && ws.root) {
-          try { await client.rpc('view.set', { view: 'flow' }) } catch { }
           setCurrentViewLocal('flow')
         }
       } catch {
@@ -110,8 +114,9 @@ function App() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await window.workspace?.getSettings?.()
-        const layout = (res && (res as any).settings && (res as any).settings.layout) || {}
+        const client = getBackendClient()
+        const res: any = await client?.rpc('workspace.getSettings', {})
+        const layout = (res && res.settings && res.settings.layout) || {}
         // Restore Session Panel width first
         let spw = 300
         if (typeof layout.sessionPanelWidth === 'number') {
@@ -135,13 +140,16 @@ function App() {
 
 
   const renderView = useCallback(() => {
+    // Show welcome screen if no workspace is attached
+    if (!workspaceAttached) {
+      return <WelcomeScreen />
+    }
+
+    // Otherwise show the current view within the main app
     switch (currentView) {
-      case 'welcome':
-        return <WelcomeScreen />
       case 'flow':
         return <FlowView />
       case 'explorer':
-
         return <ExplorerView />
       case 'sourceControl':
         return <SourceControlView />
@@ -155,10 +163,13 @@ function App() {
             <SettingsPane />
           </div>
         )
+      case 'welcome':
+        // Shouldn't happen when workspace is attached, but fallback to flow
+        return <FlowView />
       default:
         return <FlowView />
     }
-  }, [currentView])
+  }, [workspaceAttached, currentView])
 
   if (appBootstrapping) {
     return <LoadingScreen message={startupMessage} />
@@ -237,7 +248,7 @@ function App() {
 
         <div className={classes.mainContent}>
           <div className={classes.workspace}>
-            {currentView === 'welcome' ? (
+            {!workspaceAttached ? (
               <div className={classes.viewContainer}>{renderView()}</div>
             ) : (
               <>
@@ -249,7 +260,7 @@ function App() {
               </>
             )}
           </div>
-          {currentView === 'welcome' ? null : <StatusBar />}
+          {!workspaceAttached ? null : <StatusBar />}
         </div>
       </div>
       {overlayActive && (

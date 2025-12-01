@@ -92,6 +92,7 @@ export const MAX_RECENT_FOLDERS = 10
 export const MAX_DEBUG_LOGS = 1000
 export const MAX_ROUTE_HISTORY = 100
 export const MAX_SESSIONS = 100
+export const AGENT_MAX_STEPS = 200
 
 // Terminal defaults
 export const TERMINAL_COLS = 80

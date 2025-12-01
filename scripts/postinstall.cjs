@@ -49,8 +49,6 @@ try {
     console.warn('[postinstall] Skipping electron-builder install-app-deps on Windows; native deps are rebuilt during packaging and via scripts/rebuild if needed.')
   }
 
-  // Always verify @ast-grep/napi usability (hard fail per requirements)
-  run(process.execPath, [path.join('scripts', 'verify-astgrep.cjs')])
   process.exit(0)
 } catch (e) {
   console.error('[postinstall] Failed:', e && e.message)

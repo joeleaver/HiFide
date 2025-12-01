@@ -8,24 +8,8 @@ try { (ipcRenderer as any)?.setMaxListeners?.(50) } catch {}
 
 
 
-// --------- WS Backend bootstrap (query-string based) ---------
-contextBridge.exposeInMainWorld('wsBackend', {
-  getBootstrap: () => {
-    try {
-      const search = typeof location !== 'undefined' ? location.search : ''
-      const params = new URLSearchParams(search || '')
-      return {
-        url: params.get('wsUrl') || '',
-        token: params.get('wsToken') || '',
-        windowId: params.get('windowId') || ''
-      }
-    } catch {
-      return { url: '', token: '', windowId: '' }
-    }
-  }
-})
-
-
+// WebSocket backend bootstrap removed - renderer reads query params directly via location.search
+// No preload bridge needed for standard browser APIs!
 
 // Legacy secrets and models APIs removed - now managed via Zustand store
 // - API keys: use settingsApiKeys in settings slice
@@ -64,149 +48,42 @@ contextBridge.exposeInMainWorld('menu', {
 })
 
 
-// App API
-contextBridge.exposeInMainWorld('app', {
-  setView: (view: string) => ipcRenderer.invoke('app:set-view', view),
-})
+// App API removed - view changes handled via WebSocket RPC (view.set)
+// The old IPC handler was calling a no-op stub in main process
 
-// File system API
-contextBridge.exposeInMainWorld('fs', {
-  getCwd: () => ipcRenderer.invoke('fs:getCwd'),
-  readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
-  readDir: (dirPath: string) => ipcRenderer.invoke('fs:readDir', dirPath),
-  watchDir: (dirPath: string) => ipcRenderer.invoke('fs:watchStart', dirPath),
-  unwatch: (id: number) => ipcRenderer.invoke('fs:watchStop', id),
-  onWatch: (listener: (payload: { id: number; type: 'rename'|'change'; path: string; dir: string }) => void) => {
-    const fn = (_: any, payload: any) => listener(payload)
+// Removed unused APIs (now handled via WebSocket JSON-RPC):
+// - window.fs (getCwd, readFile, readDir, watchDir, unwatch, onWatch)
+// - window.sessions (list, load, save, delete)
+// - window.capabilities (get)
+// - window.agent (onMetrics)
 
-    ipcRenderer.on('fs:watch:event', fn)
-    return () => ipcRenderer.off('fs:watch:event', fn)
-  },
-})
-
-// Session management API
-contextBridge.exposeInMainWorld('sessions', {
-  list: () => ipcRenderer.invoke('sessions:list'),
-
-  load: (sessionId: string) => ipcRenderer.invoke('sessions:load', sessionId),
-  save: (session: any) => ipcRenderer.invoke('sessions:save', session),
-  delete: (sessionId: string) => ipcRenderer.invoke('sessions:delete', sessionId),
-})
-
-// App capabilities API
-contextBridge.exposeInMainWorld('capabilities', {
-  get: () => ipcRenderer.invoke('capabilities:get'),
-})
-
-
-// Agent metrics API
-contextBridge.exposeInMainWorld('agent', {
-  onMetrics: (listener: (payload: any) => void) => {
-    const fn = (_: any, payload: any) => listener(payload)
-    ipcRenderer.on('agent:metrics', fn)
-    return () => ipcRenderer.off('agent:metrics', fn)
-  },
-})
-
-// PTY API removed: terminal now uses JSON-RPC over WebSocket (see src/services/pty.ts)
-
-// TypeScript refactor API (MVP)
-contextBridge.exposeInMainWorld('tsRefactor', {
-  rename: (filePath: string, oldName: string, newName: string, opts?: { verify?: boolean; tsconfigPath?: string }) =>
-    ipcRenderer.invoke('tsrefactor:rename', { filePath, oldName, newName, ...(opts || {}) }),
-  organizeImports: (opts?: { filePath?: string; verify?: boolean; tsconfigPath?: string }) =>
-    ipcRenderer.invoke('tsrefactor:organizeImports', opts || {}),
-})
-
-// Extended TS refactors
-contextBridge.exposeInMainWorld('tsRefactorEx', {
-  addExportNamed: (filePath: string, exportName: string, code?: string, opts?: { apply?: boolean; verify?: boolean; tsconfigPath?: string }) =>
-    ipcRenderer.invoke('tsrefactor:addExportNamed', { filePath, exportName, code, ...(opts || {}) }),
-  moveFile: (fromPath: string, toPath: string, opts?: { apply?: boolean; verify?: boolean; tsconfigPath?: string }) =>
-    ipcRenderer.invoke('tsrefactor:moveFile', { fromPath, toPath, ...(opts || {}) }),
-})
-contextBridge.exposeInMainWorld('tsExportUtils', {
-  ensureDefaultExport: (filePath: string, name?: string, code?: string, opts?: { apply?: boolean; verify?: boolean; tsconfigPath?: string }) =>
-    ipcRenderer.invoke('tsrefactor:ensureDefaultExport', { filePath, name, code, ...(opts || {}) }),
-  addExportFrom: (indexFilePath: string, exportName: string, fromFilePath: string, opts?: { apply?: boolean; verify?: boolean; tsconfigPath?: string }) =>
-    ipcRenderer.invoke('tsrefactor:addExportFrom', { indexFilePath, exportName, fromFilePath, ...(opts || {}) }),
-})
-contextBridge.exposeInMainWorld('tsTransform', {
-  suggestParams: (filePath: string, start: number, end: number, opts?: { tsconfigPath?: string }) =>
-    ipcRenderer.invoke('tsrefactor:suggestParams', { filePath, start, end, ...(opts||{}) }),
-  extractFunction: (filePath: string, start: number, end: number, newName: string, opts?: { params?: string[]; apply?: boolean; verify?: boolean; tsconfigPath?: string }) =>
-    ipcRenderer.invoke('tsrefactor:extractFunction', { filePath, start, end, newName, ...(opts||{}) }),
-})
-contextBridge.exposeInMainWorld('tsInline', {
-  inlineVariable: (filePath: string, name: string, opts?: { apply?: boolean; verify?: boolean; tsconfigPath?: string }) =>
-    ipcRenderer.invoke('tsrefactor:inlineVariable', { filePath, name, ...(opts||{}) }),
-  inlineFunction: (filePath: string, name: string, opts?: { apply?: boolean; verify?: boolean; tsconfigPath?: string }) =>
-    ipcRenderer.invoke('tsrefactor:inlineFunction', { filePath, name, ...(opts||{}) }),
-  defaultToNamed: (filePath: string, newName: string, opts?: { apply?: boolean; verify?: boolean; tsconfigPath?: string }) =>
-    ipcRenderer.invoke('tsrefactor:defaultToNamed', { filePath, newName, ...(opts||{}) }),
-  namedToDefault: (filePath: string, name: string, opts?: { apply?: boolean; verify?: boolean; tsconfigPath?: string }) =>
-    ipcRenderer.invoke('tsrefactor:namedToDefault', { filePath, name, ...(opts||{}) }),
-})
+// Removed unused TypeScript refactoring APIs (never used in renderer):
+// - window.tsRefactor (rename, organizeImports)
+// - window.tsRefactorEx (addExportNamed, moveFile)
+// - window.tsExportUtils (ensureDefaultExport, addExportFrom)
+// - window.tsTransform (suggestParams, extractFunction)
+// - window.tsInline (inlineVariable, inlineFunction, defaultToNamed, namedToDefault)
+// Implementations remain in electron/refactors/ts.ts and electron/ipc/refactoring.ts
+// for potential future use or LLM tool integration
 
 
 
-// Generic edits API
-contextBridge.exposeInMainWorld('edits', {
-  apply: (edits: Array<any>, opts?: { dryRun?: boolean; verify?: boolean; tsconfigPath?: string }) =>
-    ipcRenderer.invoke('edits:apply', { edits, ...(opts||{}) }),
-  propose: (instruction: string, model?: string, provider?: string, k?: number) =>
-    ipcRenderer.invoke('edits:propose', { instruction, model, provider, k }),
-})
+// Removed unused APIs (now handled via WebSocket JSON-RPC):
+// - window.edits (apply, propose)
+// - window.indexing (rebuild, cancel, status, clear, search, onProgress)
 
 
+// Workspace API removed - all workspace operations now handled via WebSocket RPC:
+// - workspace.openFolderDialog - Open native folder picker dialog
+// - workspace.open - Open workspace folder
+// - workspace.get - Get current workspace info
+// - workspace.listRecentFolders - List recent folders
+// - settings.get - Get workspace settings
+// - settings.* - Various setting operations
 
-
-contextBridge.exposeInMainWorld('indexing', {
-  rebuild: () => ipcRenderer.invoke('index:rebuild'),
-  cancel: () => ipcRenderer.invoke('index:cancel'),
-  status: () => ipcRenderer.invoke('index:status'),
-  clear: () => ipcRenderer.invoke('index:clear'),
-  search: (query: string, k?: number) => ipcRenderer.invoke('index:search', { query, k }),
-  onProgress: (listener: (prog: any) => void) => {
-    const fn = (_: any, payload: any) => listener(payload)
-    ipcRenderer.on('index:progress', fn)
-    return () => ipcRenderer.off('index:progress', fn)
-  },
-})
-
-
-// Workspace API
-contextBridge.exposeInMainWorld('workspace', {
-  getRoot: () => ipcRenderer.invoke('workspace:get-root'),
-  setRoot: (newRoot: string) => ipcRenderer.invoke('workspace:set-root', newRoot),
-  openFolderDialog: () => ipcRenderer.invoke('workspace:open-folder-dialog'),
-  notifyRecentFoldersChanged: (recentFolders: Array<{ path: string; lastOpened: number }>) =>
-    ipcRenderer.send('workspace:recent-folders-changed', recentFolders),
-  bootstrap: (baseDir: string, preferAgent?: boolean, overwrite?: boolean) =>
-    ipcRenderer.invoke('workspace:bootstrap', { baseDir, preferAgent, overwrite }),
-  ensureDirectory: (dirPath: string) => ipcRenderer.invoke('workspace:ensure-directory', dirPath),
-  getSettings: () => ipcRenderer.invoke('workspace:get-settings'),
-  setSetting: (key: string, value: any) => ipcRenderer.invoke('workspace:set-setting', key, value),
-  fileExists: (filePath: string) => ipcRenderer.invoke('workspace:file-exists', filePath),
-  readFile: (filePath: string) => ipcRenderer.invoke('workspace:read-file', filePath),
-  writeFile: (filePath: string, content: string) => ipcRenderer.invoke('workspace:write-file', filePath, content),
-  listFiles: (dirPath: string) => ipcRenderer.invoke('workspace:list-files', dirPath),
-})
-
-// Flow Profiles API
-contextBridge.exposeInMainWorld('flowProfiles', {
-  get: (profileName: string) => ipcRenderer.invoke('flow-profiles:get', profileName),
-  set: (profileName: string, profile: any) => ipcRenderer.invoke('flow-profiles:set', profileName, profile),
-  list: () => ipcRenderer.invoke('flow-profiles:list'),
-  delete: (profileName: string) => ipcRenderer.invoke('flow-profiles:delete', profileName),
-  has: (profileName: string) => ipcRenderer.invoke('flow-profiles:has', profileName),
-})
-
-// Rate limits API
-contextBridge.exposeInMainWorld('ratelimits', {
-  get: () => ipcRenderer.invoke('ratelimits:get'),
-  set: (config: any) => ipcRenderer.invoke('ratelimits:set', config),
-})
+// Removed unused APIs (now handled via WebSocket JSON-RPC):
+// - window.flowProfiles (get, set, list, delete, has)
+// - window.ratelimits (get, set)
 
 
 

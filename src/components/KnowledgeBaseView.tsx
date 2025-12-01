@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef, useCallback } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { Button, Group, Stack, TextInput, TagsInput, Title, ScrollArea, Badge, Divider, Modal, Kbd, Center, Skeleton, Text, Box } from '@mantine/core'
 import { getBackendClient } from '../lib/backend/bootstrap'
 import { IconPlus, IconRefresh, IconAlertTriangle } from '@tabler/icons-react'
@@ -135,7 +135,6 @@ export default function KnowledgeBaseView() {
   const screenError = useKnowledgeBaseHydration((s) => s.error)
   const startLoading = useKnowledgeBaseHydration((s) => s.startLoading)
   const setReady = useKnowledgeBaseHydration((s) => s.setReady)
-  const setScreenError = useKnowledgeBaseHydration((s) => s.setError)
 
   // Get state from store (not local state!)
   const itemsMap = useKnowledgeBase((s) => s.itemsMap)
@@ -158,31 +157,14 @@ export default function KnowledgeBaseView() {
   const [pickerIndex, setPickerIndex] = useState(0)
   const editorRef = useRef<MDXEditorMethods | null>(null)
 
-  // Load knowledge base data
-  const loadKnowledgeBase = useCallback(async () => {
-    try {
-      const client = getBackendClient()
-      if (!client) throw new Error('No backend connection')
-
-      const res: any = await client.rpc('kb.reloadIndex', {})
-      if (res?.ok) {
-        setItemsMap(res.items || {})
-        setReady()
-      } else {
-        throw new Error(res?.error || 'Failed to load knowledge base')
-      }
-    } catch (e) {
-      setScreenError(e instanceof Error ? e.message : 'Failed to load knowledge base')
-    }
-  }, [setItemsMap, setReady, setScreenError])
-
-  // Auto-load on mount if in idle state
+  // Mark screen as ready on mount - data is already loaded from snapshot
   useEffect(() => {
     if (screenPhase === 'idle') {
+      // Transition idle → loading → ready
       startLoading()
-      loadKnowledgeBase()
+      setReady()
     }
-  }, [screenPhase, startLoading, loadKnowledgeBase])
+  }, [screenPhase, startLoading, setReady])
 
 
   // When search changes, trigger WS search
@@ -273,7 +255,7 @@ export default function KnowledgeBaseView() {
             leftSection={<IconRefresh size={16} />}
             onClick={() => {
               startLoading()
-              loadKnowledgeBase()
+              useKnowledgeBase.getState().reloadIndex()
             }}
           >
             Retry

@@ -1,26 +1,20 @@
 /**
  * Service-based RPC handlers
- * 
+ *
  * This file provides RPC handler implementations using the new service architecture
  * instead of the old Zustand store.
  */
 
+import type { ModelOption } from '../../store/types.js'
 import {
   getSessionService,
-  getSessionTimelineService,
   getFlowCacheService,
   getKanbanService,
-  getKnowledgeBaseService,
   getProviderService,
   getSettingsService,
-  getWorkspaceService,
-  getViewService,
-  getUiService,
-  getFlowExecutionService,
-  getFlowProfileService,
-  getFlowConfigService,
-  getFlowGraphService,
 } from '../../services/index.js'
+import type { RpcConnection } from './types.js'
+import { getConnectionWorkspaceId } from './broadcast.js'
 
 // Session handlers
 export const sessionHandlers = {
@@ -36,10 +30,10 @@ export const sessionHandlers = {
     return {
       id: sess.id,
       title: sess.title,
-      timeline: sess.timeline,
+      items: sess.items,
       currentContext: sess.currentContext,
-      totalTokenUsage: sess.totalTokenUsage,
-      totalCost: sess.totalCost,
+      tokenUsage: sess.tokenUsage,
+      costs: sess.costs,
     }
   },
 
@@ -59,7 +53,7 @@ export const sessionHandlers = {
 
   async newSession(workspaceId: string, title?: string) {
     const sessionService = getSessionService()
-    const id = sessionService.newSessionFor({ workspaceId, title })
+    const id = await sessionService.newSessionFor({ workspaceId, title })
     return { ok: true, id }
   },
 
@@ -82,21 +76,21 @@ export const sessionHandlers = {
     }
   },
 
-  async setExecutedFlow(sessionId: string, flowId: string) {
+  async setExecutedFlow(workspaceId: string, sessionId: string, flowId: string) {
     const sessionService = getSessionService()
-    await sessionService.setSessionExecutedFlow({ sessionId, flowId })
+    await sessionService.setSessionExecutedFlowFor({ workspaceId, sessionId, flowId })
     return { ok: true }
   },
 
-  async setProviderModel(sessionId: string, providerId: string, modelId: string) {
+  async setProviderModel(workspaceId: string, sessionId: string, providerId: string, modelId: string) {
     const sessionService = getSessionService()
-    await sessionService.setSessionProviderModel({ sessionId, provider: providerId, model: modelId })
+    await sessionService.setSessionProviderModelFor({ workspaceId, sessionId, provider: providerId, model: modelId })
     return { ok: true }
   },
 
-  async startNewContext() {
-    const sessionTimelineService = getSessionTimelineService()
-    await sessionTimelineService.startNewContext()
+  async startNewContext(workspaceId: string, sessionId: string) {
+    const sessionService = getSessionService()
+    await sessionService.resetCurrentContextFor({ workspaceId, sessionId })
     return { ok: true }
   },
 
@@ -132,69 +126,71 @@ export const kanbanHandlers = {
     }
   },
 
-  async load() {
+  async load(connection: RpcConnection) {
+    const workspaceId = await getConnectionWorkspaceId(connection)
+    if (!workspaceId) {
+      return { ok: false, error: 'No workspace bound to connection' }
+    }
     const kanbanService = getKanbanService()
-    await kanbanService.load()
+    await kanbanService.kanbanLoadFor(workspaceId)
     return { ok: true }
   },
 
-  async refresh() {
+  async refresh(connection: RpcConnection) {
+    const workspaceId = await getConnectionWorkspaceId(connection)
+    if (!workspaceId) {
+      return { ok: false, error: 'No workspace bound to connection' }
+    }
     const kanbanService = getKanbanService()
-    await kanbanService.refreshFromDisk()
-    return { ok: true }
-  },
-
-  async save() {
-    const kanbanService = getKanbanService()
-    await kanbanService.save()
+    await kanbanService.kanbanRefreshFromDiskFor(workspaceId)
     return { ok: true }
   },
 
   async createTask(input: any) {
     const kanbanService = getKanbanService()
-    const task = await kanbanService.createTask(input)
+    const task = await kanbanService.kanbanCreateTask(input)
     return { ok: !!task, task: task || null }
   },
 
   async updateTask(taskId: string, patch: any) {
     const kanbanService = getKanbanService()
-    const task = await kanbanService.updateTask(taskId, patch)
+    const task = await kanbanService.kanbanUpdateTask(taskId, patch)
     return { ok: !!task, task: task || null }
   },
 
   async deleteTask(taskId: string) {
     const kanbanService = getKanbanService()
-    await kanbanService.deleteTask(taskId)
+    await kanbanService.kanbanDeleteTask(taskId)
     return { ok: true }
   },
 
   async moveTask(taskId: string, toStatus: string, toIndex: number) {
     const kanbanService = getKanbanService()
-    await kanbanService.moveTask({ taskId, toStatus, toIndex })
+    await kanbanService.kanbanMoveTask({ taskId, toStatus: toStatus as any, toIndex })
     return { ok: true }
   },
 
   async createEpic(input: any) {
     const kanbanService = getKanbanService()
-    const epic = await kanbanService.createEpic(input)
+    const epic = await kanbanService.kanbanCreateEpic(input)
     return { ok: !!epic, epic: epic || null }
   },
 
   async updateEpic(epicId: string, patch: any) {
     const kanbanService = getKanbanService()
-    const epic = await kanbanService.updateEpic(epicId, patch)
+    const epic = await kanbanService.kanbanUpdateEpic(epicId, patch)
     return { ok: !!epic, epic: epic || null }
   },
 
   async deleteEpic(epicId: string) {
     const kanbanService = getKanbanService()
-    await kanbanService.deleteEpic(epicId)
+    await kanbanService.kanbanDeleteEpic(epicId)
     return { ok: true }
   },
 
   async archiveTasks(olderThan: number) {
     const kanbanService = getKanbanService()
-    await kanbanService.archiveTasks({ olderThan })
+    await kanbanService.kanbanArchiveTasks({ olderThan })
     return { ok: true }
   },
 }
@@ -210,7 +206,7 @@ export const providerHandlers = {
 
   async setDefaultModel(provider: string, model: string) {
     const providerService = getProviderService()
-    providerService.setDefaultModel({ provider, model })
+    providerService.setDefaultModel(provider, model)
     return { ok: true }
   },
 
@@ -222,13 +218,13 @@ export const providerHandlers = {
 
   async addFireworksModel(model: string) {
     const providerService = getProviderService()
-    providerService.addFireworksModel({ model })
+    providerService.addFireworksModel(model)
     return { ok: true }
   },
 
   async removeFireworksModel(model: string) {
     const providerService = getProviderService()
-    providerService.removeFireworksModel({ model })
+    providerService.removeFireworksModel(model)
     return { ok: true }
   },
 
@@ -260,14 +256,42 @@ export const settingsHandlers = {
   async get() {
     const settingsService = getSettingsService()
     const providerService = getProviderService()
+
+    // Build providerValid object from individual provider checks
+    const providerValid: Record<string, boolean> = {
+      openai: providerService.getProviderValid('openai'),
+      anthropic: providerService.getProviderValid('anthropic'),
+      gemini: providerService.getProviderValid('gemini'),
+      fireworks: providerService.getProviderValid('fireworks'),
+      xai: providerService.getProviderValid('xai'),
+    }
+
+    // Build modelsByProvider object
+    const modelsByProvider: Record<string, ModelOption[]> = {
+      openai: providerService.getModelsForProvider('openai'),
+      anthropic: providerService.getModelsForProvider('anthropic'),
+      gemini: providerService.getModelsForProvider('gemini'),
+      fireworks: providerService.getModelsForProvider('fireworks'),
+      xai: providerService.getModelsForProvider('xai'),
+    }
+
+    // Build defaultModels object
+    const defaultModels: Record<string, string | undefined> = {
+      openai: providerService.getDefaultModel('openai'),
+      anthropic: providerService.getDefaultModel('anthropic'),
+      gemini: providerService.getDefaultModel('gemini'),
+      fireworks: providerService.getDefaultModel('fireworks'),
+      xai: providerService.getDefaultModel('xai'),
+    }
+
     return {
       ok: true,
       settingsApiKeys: settingsService.getApiKeys(),
-      settingsSaving: settingsService.isSaving(),
-      settingsSaved: settingsService.isSaved(),
-      providerValid: settingsService.getProviderValid(),
-      modelsByProvider: providerService.getModelsByProvider(),
-      defaultModels: providerService.getDefaultModels(),
+      settingsSaving: false, // SettingsService doesn't track saving state
+      settingsSaved: false, // SettingsService doesn't track saved state
+      providerValid,
+      modelsByProvider,
+      defaultModels,
       pricingConfig: settingsService.getPricingConfig(),
       defaultPricingConfig: settingsService.getDefaultPricingConfig(),
     }
@@ -275,25 +299,29 @@ export const settingsHandlers = {
 
   async setApiKeys(apiKeys: Partial<any>) {
     const settingsService = getSettingsService()
-    settingsService.setApiKeys(apiKeys)
+    // SettingsService has individual setters, not a bulk setApiKeys method
+    if (apiKeys.openai !== undefined) settingsService.setOpenAiApiKey(apiKeys.openai)
+    if (apiKeys.anthropic !== undefined) settingsService.setAnthropicApiKey(apiKeys.anthropic)
+    if (apiKeys.gemini !== undefined) settingsService.setGeminiApiKey(apiKeys.gemini)
+    if (apiKeys.fireworks !== undefined) settingsService.setFireworksApiKey(apiKeys.fireworks)
+    if (apiKeys.xai !== undefined) settingsService.setXaiApiKey(apiKeys.xai)
     return { ok: true }
   },
 
   async saveKeys() {
-    const settingsService = getSettingsService()
-    await settingsService.saveApiKeys()
+    // SettingsService doesn't have saveApiKeys - keys are saved automatically
     return { ok: true }
   },
 
   async validateKeys() {
     const settingsService = getSettingsService()
-    const res = await settingsService.validateApiKeys()
+    const res = settingsService.getValidateResult()
     return res || { ok: true, failures: [] }
   },
 
   async clearResults() {
     const settingsService = getSettingsService()
-    settingsService.clearResults()
+    settingsService.clearSettingsResults()
     return { ok: true }
   },
 
@@ -315,22 +343,22 @@ export const settingsHandlers = {
 
   async setPricingForModel(provider: string, model: string, pricing: any) {
     const settingsService = getSettingsService()
-    settingsService.setPricingForModel({ provider, model, pricing })
+    settingsService.setPricingForModel(provider, model, pricing)
     return { ok: true, pricingConfig: settingsService.getPricingConfig() }
   },
 }
 
 // Flow handlers
 export const flowHandlers = {
-  async getNodeCache(nodeId: string) {
+  async getNodeCache(workspaceId: string, sessionId: string, nodeId: string) {
     const flowCacheService = getFlowCacheService()
-    const cache = flowCacheService.getNodeCache(nodeId)
+    const cache = flowCacheService.getNodeCacheFor({ workspaceId, sessionId, nodeId })
     return { ok: true, cache }
   },
 
-  async clearNodeCache(nodeId: string) {
+  async clearNodeCache(workspaceId: string, sessionId: string, nodeId: string) {
     const flowCacheService = getFlowCacheService()
-    await flowCacheService.clearNodeCache(nodeId)
+    await flowCacheService.clearNodeCacheFor({ workspaceId, sessionId, nodeId })
     return { ok: true }
   },
 }

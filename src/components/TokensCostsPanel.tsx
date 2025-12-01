@@ -1,6 +1,4 @@
 import { ScrollArea, Text, Stack, Group } from '@mantine/core'
-import { useEffect } from 'react'
-import { getBackendClient } from '../lib/backend/bootstrap'
 import { useUiStore } from '../store/ui'
 import CollapsiblePanel from './CollapsiblePanel'
 import { useSessionUi } from '../store/sessionUi'
@@ -9,7 +7,7 @@ import { useSessionUi } from '../store/sessionUi'
 type TokenUsage = { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number; reasoningTokens?: number }
 
 export default function TokensCostsPanel() {
-  // Use UI store for local state
+  // UI state from store (persisted to workspace-scoped localStorage)
   const collapsed = useUiStore((s) => s.tokensCostsCollapsed)
   const height = useUiStore((s) => s.tokensCostsHeight)
   const setCollapsed = useUiStore((s) => s.setTokensCostsCollapsed)
@@ -24,21 +22,6 @@ export default function TokensCostsPanel() {
   const costs = useSessionUi((s: any) => s.costs) as any
   const requestsLog = useSessionUi((s: any) => s.requestsLog) as any[]
 
-  // Hydrate UI-only sizing from backend window state; usage comes from sessionUi store
-  useEffect(() => {
-    const client = getBackendClient()
-    if (!client) return
-      ; (async () => {
-        try {
-          const ws = await client.rpc('ui.getWindowState', {})
-          const windowState = ws?.windowState || {}
-          if (typeof windowState.tokensCostsCollapsed === 'boolean') setCollapsed(windowState.tokensCostsCollapsed)
-          if (typeof windowState.tokensCostsHeight === 'number') setHeight(windowState.tokensCostsHeight)
-        } catch { }
-      })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   const total = tokenUsage?.total || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
   const byProvider = tokenUsage?.byProvider ?? ({} as Record<string, TokenUsage>)
   const byProviderAndModelTokens: Record<string, Record<string, TokenUsage>> = tokenUsage?.byProviderAndModel ?? {}
@@ -50,18 +33,9 @@ export default function TokensCostsPanel() {
     <CollapsiblePanel
       title="TOKENS & COSTS"
       collapsed={collapsed}
-      onToggleCollapse={() => {
-        const newCollapsed = !collapsed
-        setCollapsed(newCollapsed)
-        const client = getBackendClient()
-        try { void client?.rpc('ui.updateWindowState', { updates: { tokensCostsCollapsed: newCollapsed } }) } catch { }
-      }}
+      onToggleCollapse={() => setCollapsed(!collapsed)}
       height={height}
-      onHeightChange={(newHeight) => {
-        setHeight(newHeight)
-        const client = getBackendClient()
-        try { void client?.rpc('ui.updateWindowState', { updates: { tokensCostsHeight: newHeight } }) } catch { }
-      }}
+      onHeightChange={setHeight}
       minHeight={150}
       maxHeight={400}
     >

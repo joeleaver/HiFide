@@ -20,17 +20,17 @@
 
 import type { MainFlowContext } from './types'
 import type { FlowAPI } from './flow-api'
-import type { AgentTool, ChatMessage } from '../../providers/provider'
-import { providers } from '../../core/state'
-import { getProviderKey } from '../../core/state'
+import type { AgentTool, ChatMessage } from '../providers/provider'
+import { providers } from '../core/state'
+import { getProviderKey } from '../core/state'
 import { createCallbackEventEmitters } from './execution-events'
-import { rateLimitTracker } from '../../providers/rate-limit-tracker'
-import { parseRateLimitError, sleep, withRetries } from '../../providers/retry'
+import { rateLimitTracker } from '../providers/rate-limit-tracker'
+import { parseRateLimitError, sleep, withRetries } from '../providers/retry'
 
-import { DEFAULT_PRICING } from '../../data/defaultPricing'
+import { DEFAULT_PRICING } from '../data/defaultPricing'
 import { encoding_for_model, get_encoding } from '@dqbd/tiktoken'
 
-import { UiPayloadCache } from '../../core/uiPayloadCache'
+import { UiPayloadCache } from '../core/uiPayloadCache'
 
 const DEBUG_USAGE = process.env.HF_DEBUG_USAGE === '1' || process.env.HF_DEBUG_TOKENS === '1'
 
@@ -1069,7 +1069,7 @@ class LLMService {
             {
               max: 3,
               maxWaitMs: 60000,
-              onRateLimitWait: ({ attempt, waitMs, reason }) => {
+              onRateLimitWait: ({ attempt, waitMs, reason }: { attempt: number; waitMs: number; reason?: string }) => {
 
 
                 // Emit event to UI

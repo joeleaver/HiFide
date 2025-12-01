@@ -1,0 +1,1 @@
+fatal: path 'electron/services/SessionTimelineService.ts' exists on disk, but not in 'f23c9bb~2'

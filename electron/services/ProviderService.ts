@@ -6,9 +6,9 @@
 
 import { Service } from './base/Service.js'
 import type { ModelOption, RouteRecord } from '../store/types.js'
-import { MAX_ROUTE_HISTORY } from '../store/utils/constants.js'
+import { MAX_ROUTE_HISTORY } from '../../src/store/utils/constants'
 import { DEFAULT_PRICING } from '../data/defaultPricing.js'
-import { ServiceRegistry } from './base/ServiceRegistry.js'
+import { getSettingsService } from './index.js'
 
 interface ProviderState {
   selectedModel: string
@@ -54,24 +54,53 @@ export class ProviderService extends Service<ProviderState> {
       },
       'provider'
     )
+
+    // One-time migration: load from old individual keys if new key doesn't exist
+    if (!this.persistence.has('provider')) {
+      const oldModel = this.persistence.load<string>('selectedModel', 'gpt-4o')
+      const oldProvider = this.persistence.load<string>('selectedProvider', 'openai')
+      const oldAutoRetry = this.persistence.load<boolean>('autoRetry', false)
+      const oldDefaultModels = this.persistence.load<Record<string, string>>('defaultModels', {})
+      const oldFireworksModels = this.persistence.load<string[]>('fireworksAllowedModels', [])
+
+      if (
+        oldModel !== 'gpt-4o' ||
+        oldProvider !== 'openai' ||
+        oldAutoRetry !== false ||
+        Object.keys(oldDefaultModels).length > 0 ||
+        oldFireworksModels.length > 0
+      ) {
+        this.state = {
+          ...this.state,
+          selectedModel: oldModel,
+          selectedProvider: oldProvider,
+          autoRetry: oldAutoRetry,
+          defaultModels: oldDefaultModels,
+          fireworksAllowedModels:
+            oldFireworksModels.length > 0 ? oldFireworksModels : this.state.fireworksAllowedModels,
+        }
+        // Save to new format
+        this.persistState()
+        // Clean up old keys
+        this.persistence.delete('selectedModel')
+        this.persistence.delete('selectedProvider')
+        this.persistence.delete('autoRetry')
+        this.persistence.delete('defaultModels')
+        this.persistence.delete('fireworksAllowedModels')
+      }
+    }
   }
 
   protected onStateChange(updates: Partial<ProviderState>): void {
-    // Persist provider state
-    if (updates.selectedModel !== undefined) {
-      this.persistence.save('selectedModel', this.state.selectedModel)
-    }
-    if (updates.selectedProvider !== undefined) {
-      this.persistence.save('selectedProvider', this.state.selectedProvider)
-    }
-    if (updates.autoRetry !== undefined) {
-      this.persistence.save('autoRetry', this.state.autoRetry)
-    }
-    if (updates.defaultModels !== undefined) {
-      this.persistence.save('defaultModels', this.state.defaultModels)
-    }
-    if (updates.fireworksAllowedModels !== undefined) {
-      this.persistence.save('fireworksAllowedModels', this.state.fireworksAllowedModels)
+    // Persist provider state (use persistState to save entire state to 'provider' key)
+    if (
+      updates.selectedModel !== undefined ||
+      updates.selectedProvider !== undefined ||
+      updates.autoRetry !== undefined ||
+      updates.defaultModels !== undefined ||
+      updates.fireworksAllowedModels !== undefined
+    ) {
+      this.persistState()
     }
 
     // Emit events
@@ -127,16 +156,7 @@ export class ProviderService extends Service<ProviderState> {
   // Setters
   setSelectedModel(model: string): void {
     this.setState({ selectedModel: model })
-
-    // Update current session context immediately
-    try {
-      const sessionService = ServiceRegistry.get<any>('session')
-      if (sessionService?.updateCurrentContext) {
-        sessionService.updateCurrentContext({ model })
-      }
-    } catch (e) {
-      // Session service may not be initialized yet
-    }
+    // Note: Session provider/model is set explicitly via setSessionProviderModelFor(), not auto-synced
   }
 
   setSelectedProvider(provider: string): void {
@@ -149,30 +169,16 @@ export class ProviderService extends Service<ProviderState> {
     const preferred = this.state.defaultModels?.[provider]
     const hasPreferred = preferred && models.some((m) => m.value === preferred)
 
-    let newModel: string | undefined
     if (hasPreferred) {
       // Use preferred model if it's available
-      newModel = preferred
       this.setState({ selectedModel: preferred })
     } else if (models.length > 0) {
       // Otherwise use first available model
       const first = models[0]
-      newModel = first.value
       this.setState({ selectedModel: first.value })
     }
 
-    // Update current session context immediately
-    try {
-      const sessionService = ServiceRegistry.get<any>('session')
-      if (sessionService?.updateCurrentContext) {
-        sessionService.updateCurrentContext({
-          provider,
-          ...(newModel && { model: newModel }),
-        })
-      }
-    } catch (e) {
-      // Session service may not be initialized yet
-    }
+    // Note: Session provider/model is set explicitly via setSessionProviderModelFor(), not auto-synced
   }
 
   setAutoRetry(value: boolean): void {
@@ -301,13 +307,13 @@ export class ProviderService extends Service<ProviderState> {
   async refreshModels(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai'): Promise<void> {
     try {
       // Get API key from settings service
-      const settingsService = ServiceRegistry.get<any>('settings')
-      const keys = settingsService?.getApiKeys() || {}
+      const settingsService = getSettingsService()
+      const keys = settingsService.getApiKeys() || {}
 
       let key: string | null = null
       if (provider === 'openai') key = (keys.openai || '').trim()
       else if (provider === 'anthropic') key = (keys.anthropic || '').trim()
-      else if (provider === 'gemini') key = (keys.google || keys.gemini || '').trim()
+      else if (provider === 'gemini') key = (keys.gemini || '').trim()
       else if (provider === 'fireworks') key = (keys.fireworks || '').trim()
       else if (provider === 'xai') key = (keys.xai || '').trim()
 

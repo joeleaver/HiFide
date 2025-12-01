@@ -30,19 +30,19 @@ const menuHandlers = {
         }
     },
     openFolder: async () => {
-        const result = await window.workspace?.openFolderDialog?.()
-        if (result?.ok && result.path) {
-            const client = getBackendClient()
-            if (!client) return
-            try {
-                await client.whenReady(7000)
-            } catch { }
-            try {
+        const client = getBackendClient()
+        if (!client) return
+        try {
+            await client.whenReady(7000)
+        } catch { }
+        try {
+            const result: any = await client.rpc('workspace.openFolderDialog', {})
+            if (result?.ok && result.path) {
                 await client.rpc('workspace.open', { root: result.path })
                 // View will switch to 'flow' on workspace.ready
-            } catch (e) {
-                // Silently ignore openFolder failures here; StatusBar can reflect workspace state
             }
+        } catch (e) {
+            // Silently ignore openFolder failures here; StatusBar can reflect workspace state
         }
     },
     openRecentFolder: async (folderPath: string) => {

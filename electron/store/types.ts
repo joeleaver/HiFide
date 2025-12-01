@@ -190,7 +190,8 @@ export type Session = {
   flowCache?: Record<string, { data: any; timestamp: number }>
 
   // Flow state - which flow is being used and its current state
-  lastUsedFlow?: string  // Flow template ID (e.g., 'default', 'user/my-flow')
+  lastUsedFlow?: string  // Flow template ID loaded in Flow Editor (e.g., 'default', 'user/my-flow')
+  executedFlow?: string  // Flow template ID being executed by scheduler (session panel chooser)
   flowState?: {
     requestId: string  // Current flow execution requestId
     status: 'stopped' | 'running' | 'waitingForInput'

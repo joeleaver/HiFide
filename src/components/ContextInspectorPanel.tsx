@@ -4,8 +4,6 @@ import CollapsiblePanel from './CollapsiblePanel'
 import JsonView from '@uiw/react-json-view'
 import { darkTheme } from '@uiw/react-json-view/dark'
 import { useFlowContexts } from '../store/flowContexts'
-import { getBackendClient } from '../lib/backend/bootstrap'
-import { useEffect } from 'react'
 
 // Context colors (matching connection-colors.ts)
 const CONTEXT_COLORS = {
@@ -14,7 +12,7 @@ const CONTEXT_COLORS = {
 }
 
 export default function ContextInspectorPanel() {
-  // Use UI store for local state
+  // UI state from store (persisted to workspace-scoped localStorage)
   const collapsed = useUiStore((s) => s.contextInspectorCollapsed)
   const height = useUiStore((s) => s.contextInspectorHeight)
   const setCollapsed = useUiStore((s) => s.setContextInspectorCollapsed)
@@ -24,34 +22,15 @@ export default function ContextInspectorPanel() {
   const mainContext = useFlowContexts((s: any) => s.mainContext)
   const isolatedContexts = useFlowContexts((s: any) => s.isolatedContexts)
 
-  // Hydrate persisted UI state on mount (renderer-only)
-  // Keep this one effect for per-window UI persistence; it doesn't mirror backend data
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    const client = getBackendClient(); if (!client) return
-    client.rpc('ui.getWindowState', {}).then((res: any) => {
-      const ws = (res && res.windowState) || {}
-      setCollapsed(ws.contextInspectorCollapsed ?? false)
-      setHeight(ws.contextInspectorHeight ?? 240)
-    }).catch(() => {})
-  }, [])
-
   const hasIsolatedContexts = Object.keys(isolatedContexts).length > 0
 
   return (
     <CollapsiblePanel
       title="CONTEXT INSPECTOR"
       collapsed={collapsed}
-      onToggleCollapse={() => {
-        const newCollapsed = !collapsed
-        setCollapsed(newCollapsed)
-        const client = getBackendClient(); if (client) client.rpc('ui.updateWindowState', { updates: { contextInspectorCollapsed: newCollapsed } }).catch(() => {})
-      }}
+      onToggleCollapse={() => setCollapsed(!collapsed)}
       height={height}
-      onHeightChange={(newHeight) => {
-        setHeight(newHeight)
-        const client = getBackendClient(); if (client) client.rpc('ui.updateWindowState', { updates: { contextInspectorHeight: newHeight } }).catch(() => {})
-      }}
+      onHeightChange={setHeight}
       minHeight={150}
       maxHeight={400}
     >

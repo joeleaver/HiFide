@@ -76,11 +76,13 @@ function createHydrationStore() {
         currentSessionId: snapshot.currentSessionId,
         timelineItems: snapshot.timeline.length,
       })
-      
+
       set({ snapshot })
-      
-      // Hydrate all dependent stores from the snapshot
-      hydrateStoresFromSnapshot(snapshot)
+
+      // Hydrate all dependent stores from the snapshot (async, fire-and-forget)
+      hydrateStoresFromSnapshot(snapshot).catch((err) => {
+        console.error('[hydration] Failed to hydrate stores from snapshot:', err)
+      })
     },
     
     reset: () => {
@@ -129,44 +131,74 @@ function createHydrationStore() {
  * Hydrate all dependent stores from a workspace snapshot.
  * This is called once when the snapshot is received.
  */
-function hydrateStoresFromSnapshot(snapshot: WorkspaceSnapshot): void {
+async function hydrateStoresFromSnapshot(snapshot: WorkspaceSnapshot): Promise<void> {
   // Import stores dynamically to avoid circular deps
   // Each store will be hydrated with its relevant portion of the snapshot
-  
+
   try {
     // Session UI store
-    const { useSessionUi } = require('./sessionUi')
+    const { useSessionUi } = await import('./sessionUi')
+    console.log('[hydration] Hydrating sessionUi with:', {
+      sessions: snapshot.sessions.length,
+      currentSessionId: snapshot.currentSessionId,
+      meta: snapshot.meta,
+      flows: snapshot.flowEditor.templates.length,
+      providerValid: snapshot.settings.providerValid,
+      modelsByProvider: Object.keys(snapshot.settings.modelsByProvider),
+    })
     useSessionUi.getState().__setSessions(snapshot.sessions, snapshot.currentSessionId)
     useSessionUi.getState().__setMeta(snapshot.meta)
     useSessionUi.getState().__setUsage(snapshot.usage.tokenUsage, snapshot.usage.costs, snapshot.usage.requestsLog)
     useSessionUi.getState().__setSettings(snapshot.settings.providerValid, snapshot.settings.modelsByProvider)
+    useSessionUi.getState().__setFlows(snapshot.flowEditor.templates)
+    console.log('[hydration] sessionUi hydrated, current state:', {
+      flows: useSessionUi.getState().flows.length,
+      executedFlowId: useSessionUi.getState().executedFlowId,
+      providerId: useSessionUi.getState().providerId,
+      modelId: useSessionUi.getState().modelId,
+    })
   } catch (e) {
     console.warn('[hydration] Failed to hydrate sessionUi:', e)
   }
-  
+
   try {
-    // Chat timeline store  
-    const { useChatTimeline } = require('./chatTimeline')
+    // Chat timeline store
+    const { useChatTimeline } = await import('./chatTimeline')
     useChatTimeline.getState().hydrateFromSession(snapshot.timeline)
   } catch (e) {
     console.warn('[hydration] Failed to hydrate chatTimeline:', e)
   }
-  
+
   try {
     // Flow editor store
-    const { useFlowEditor } = require('./flowEditor')
+    const { useFlowEditor } = await import('./flowEditor')
     useFlowEditor.getState().setTemplates(
       snapshot.flowEditor.templates,
       true,
       snapshot.flowEditor.selectedTemplate
     )
+    // Also hydrate the current graph
+    const nodes = Array.isArray(snapshot.flowEditor.nodes) ? snapshot.flowEditor.nodes : []
+    const edges = Array.isArray(snapshot.flowEditor.edges) ? snapshot.flowEditor.edges : []
+    useFlowEditor.setState({ currentGraph: { nodes, edges }, isHydratingGraph: false })
   } catch (e) {
     console.warn('[hydration] Failed to hydrate flowEditor:', e)
   }
-  
+
+  try {
+    // Flow contexts store
+    const { useFlowContexts } = await import('./flowContexts')
+    useFlowContexts.getState().setContexts(
+      snapshot.flowContexts.mainContext || null,
+      snapshot.flowContexts.isolatedContexts || {}
+    )
+  } catch (e) {
+    console.warn('[hydration] Failed to hydrate flowContexts:', e)
+  }
+
   try {
     // Kanban store
-    const { useKanban } = require('./kanban')
+    const { useKanban } = await import('./kanban')
     useKanban.getState().setBoard(snapshot.kanban.board)
     useKanban.getState().setLoading(false)
   } catch (e) {
@@ -174,8 +206,17 @@ function hydrateStoresFromSnapshot(snapshot: WorkspaceSnapshot): void {
   }
 
   try {
+    // Knowledge base store
+    const { useKnowledgeBase } = await import('./knowledgeBase')
+    useKnowledgeBase.getState().setItemsMap(snapshot.knowledgeBase.items)
+    useKnowledgeBase.getState().setWorkspaceFiles(snapshot.knowledgeBase.files)
+  } catch (e) {
+    console.warn('[hydration] Failed to hydrate knowledgeBase:', e)
+  }
+
+  try {
     // Backend binding store
-    const { useBackendBinding } = require('./binding')
+    const { useBackendBinding } = await import('./binding')
     useBackendBinding.getState().setBinding({
       workspaceId: snapshot.workspaceId,
       root: snapshot.workspaceRoot,
@@ -213,12 +254,17 @@ export function initHydrationEvents(): void {
     useHydration.getState().setPhase(params.phase)
   })
 
-  // Complete workspace snapshot (future - not currently sent by main)
+  // Complete workspace snapshot
   client.subscribe('workspace.snapshot', (snapshot: WorkspaceSnapshot) => {
-    console.log('[hydration] Received workspace snapshot')
+    console.log('[hydration] Received workspace snapshot:', {
+      workspaceId: snapshot.workspaceId,
+      sessions: snapshot.sessions.length,
+      currentSessionId: snapshot.currentSessionId,
+      meta: snapshot.meta,
+      flows: snapshot.flowEditor.templates.length,
+    })
     useHydration.getState().applySnapshot(snapshot)
-    // Transition to ready after applying snapshot
-    useHydration.getState().setPhase('ready')
+    // Don't transition to ready here - wait for loading.complete event
   })
 
   // Error notification
@@ -227,19 +273,19 @@ export function initHydrationEvents(): void {
     useHydration.getState().setPhase('error', params.error)
   })
 
-  // Workspace binding notification (start loading phase)
-  client.subscribe('workspace.bound', () => {
-    useHydration.getState().setPhase('binding')
-  })
-
-  // Workspace attached - this triggers the loading phase
-  // The existing sessionUi.runOnce will do the actual hydration
+  // Workspace attached - start loading phase
   client.subscribe('workspace.attached', () => {
     const phase = useHydration.getState().phase
     console.log('[hydration] workspace.attached received, current phase:', phase)
-    if (phase === 'binding' || phase === 'connected') {
+    if (phase === 'connected') {
       useHydration.getState().setPhase('loading')
     }
+  })
+
+  // Loading complete - all data has been streamed, transition to ready
+  client.subscribe('loading.complete', () => {
+    console.log('[hydration] loading.complete received, transitioning to ready')
+    useHydration.getState().setPhase('ready')
   })
 
   // Set initial phase to 'connecting' - the WebSocket is about to connect

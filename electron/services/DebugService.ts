@@ -12,7 +12,7 @@
 
 import { Service } from './base/Service'
 import type { DebugLogEntry } from '../store/types'
-import { MAX_DEBUG_LOGS } from '../store/utils/constants'
+import { MAX_DEBUG_LOGS } from '../../src/store/utils/constants'
 
 // ============================================================================
 // Types

@@ -1,4 +1,4 @@
-import { Stack, Card, ScrollArea, Text, Badge as MantineBadge, Skeleton } from '@mantine/core'
+import { Stack, Card, ScrollArea, Text, Skeleton } from '@mantine/core'
 
 // zubridge removed from session pane reads
 // import { useAppStore, useDispatch, selectCurrentId, selectCurrentSession } from './store'
@@ -9,30 +9,14 @@ const DEBUG_RENDERS = true
 
 
 import DiffPreviewModal from './components/DiffPreviewModal'
-import { InlineBadgeDiff } from './components/InlineBadgeDiff'
-import ToolBadgeContainer from './components/ToolBadgeContainer'
-import { BadgeDiffContent } from './components/BadgeDiffContent'
-import { BadgeSearchContent } from './components/BadgeSearchContent'
-import { BadgeWorkspaceSearchContent } from './components/BadgeWorkspaceSearchContent'
-import { BadgeKnowledgeBaseSearchContent } from './components/BadgeKnowledgeBaseSearchContent'
-import { BadgeKnowledgeBaseStoreContent } from './components/BadgeKnowledgeBaseStoreContent'
-import { BadgeAstSearchContent } from './components/BadgeAstSearchContent'
-import { BadgeReadLinesContent } from './components/BadgeReadLinesContent'
-import { BadgeWorkspaceJumpContent } from './components/BadgeWorkspaceJumpContent'
-import { BadgeWorkspaceMapContent } from './components/BadgeWorkspaceMapContent'
+import { Badge } from './components/session/Badge'
 import { useChatTimeline } from './store/chatTimeline'
-import { getBackendClient } from './lib/backend/bootstrap'
-
-
-import { BadgeAgentAssessTaskContent } from './components/BadgeAgentAssessTaskContent'
-
 import { useFlowRuntime } from './store/flowRuntime'
-import { BadgeUsageBreakdownContent } from './components/BadgeUsageBreakdownContent'
 
 import { NodeOutputBox } from './components/NodeOutputBox'
 
 import type { NodeExecutionBox } from '../electron/store/types'
-import { useRef, useEffect, useMemo, Fragment } from 'react'
+import { useRef, useEffect, useMemo } from 'react'
 
 import SessionControlsBar from './components/SessionControlsBar'
 
@@ -257,155 +241,7 @@ function SessionPane() {
                 }
                 if (contentItem.type === 'badge') {
                   const badge = contentItem.badge
-
-                  // Use ToolBadgeContainer for tool and error badges (widgets)
-                  // This ensures consistent rendering and expand/collapse behavior
-                  if (badge.type === 'tool' || badge.type === 'error') {
-                    return (
-                      <ToolBadgeContainer key={`badge-${badge.id}`} badge={badge}>
-                        {badge.contentType === 'diff' && badge.interactive?.data?.key && (
-                          <BadgeDiffContent badgeId={badge.id} diffKey={badge.interactive.data.key} />
-                        )}
-                        {badge.contentType === 'search' && badge.interactive?.data?.key && (
-                          <BadgeSearchContent
-                            badgeId={badge.id}
-                            searchKey={badge.interactive.data.key}
-                            fullParams={badge.metadata?.fullParams}
-                          />
-                        )}
-                        {badge.contentType === 'workspace-search' && badge.interactive?.data?.key && (
-                          <BadgeWorkspaceSearchContent
-                            badgeId={badge.id}
-                            searchKey={badge.interactive.data.key}
-                            fullParams={badge.metadata?.fullParams}
-                            previewKey={(badge as any)?.interactive?.data?.previewKey}
-                          />
-                        )}
-                        {badge.contentType === 'workspace-jump' && badge.interactive?.data?.key && (
-                          <BadgeWorkspaceJumpContent
-                            badgeId={badge.id}
-                            searchKey={badge.interactive.data.key}
-                            fullParams={badge.metadata?.fullParams}
-                          />
-                        )}
-                        {badge.contentType === 'workspace-map' && badge.interactive?.data?.key && (
-                          <BadgeWorkspaceMapContent
-                            badgeId={badge.id}
-                            searchKey={badge.interactive.data.key}
-                            fullParams={badge.metadata?.fullParams}
-                          />
-                        )}
-                        {badge.contentType === 'ast-search' && badge.interactive?.data?.key && (
-                          <BadgeAstSearchContent
-                            badgeId={badge.id}
-                            searchKey={badge.interactive.data.key}
-                            fullParams={badge.metadata?.fullParams}
-                          />
-                        )}
-                        {badge.contentType === 'read-lines' && badge.interactive?.data?.key && (
-                          <BadgeReadLinesContent
-                            badgeId={badge.id}
-                            readKey={badge.interactive.data.key}
-                          />
-                        )}
-                        {badge.contentType === 'kb-search' && badge.interactive?.data?.key && (
-                          <BadgeKnowledgeBaseSearchContent
-                            badgeId={badge.id}
-                            searchKey={badge.interactive.data.key}
-                            fullParams={badge.metadata?.fullParams}
-                          />
-                        )}
-                        {badge.contentType === 'kb-store' && badge.interactive?.data?.key && (
-                          <BadgeKnowledgeBaseStoreContent
-                            badgeId={badge.id}
-                            resultKey={badge.interactive.data.key}
-                            fullParams={badge.metadata?.fullParams}
-                          />
-                        )}
-                        {badge.contentType === 'agent-assess' && badge.interactive?.data?.key && (
-                          <BadgeAgentAssessTaskContent
-                            badgeId={badge.id}
-                            assessKey={badge.interactive.data.key}
-                          />
-                        )}
-                        {badge.contentType === 'usage-breakdown' && badge.interactive?.data?.key && (
-                          <BadgeUsageBreakdownContent
-                            badgeId={badge.id}
-                            usageKey={badge.interactive.data.key}
-                          />
-                        )}
-                        {badge.type === 'error' && (
-                          <Text size="xs" c="red.4" className={classes.errorText}>
-                            {badge.error || ''}
-                          </Text>
-                        )}
-                      </ToolBadgeContainer>
-                    )
-                  }
-
-                  // Legacy simple badge rendering for non-tool badges
-                  return (
-                    <Fragment key={`badge-${badge.id}`}>
-                      <MantineBadge
-                        key={idx}
-                        color={badge.color || 'gray'}
-                        variant={badge.variant || 'light'}
-                        size="sm"
-                        leftSection={badge.icon}
-                        tt="none"
-                        style={{
-                          opacity: badge.status === 'running' ? 0.7 : 1,
-                          cursor: badge.interactive?.type === 'diff' ? 'pointer' as const : 'default',
-                        }}
-                        onClick={badge.interactive?.type === 'diff' ? async () => {
-                          const ui = useUiStore.getState()
-                          const payload = badge.interactive.data
-                          const state = useUiStore.getState()
-                          const isOpen = !!state.inlineDiffOpenByBadge?.[badge.id]
-                          const existing = state.inlineDiffByBadge?.[badge.id]
-                          if (isOpen) {
-                            ui.closeInlineDiffForBadge(badge.id)
-                            return
-                          }
-                          if (Array.isArray(payload)) {
-                            // Set data cache and open
-                            ui.openInlineDiffForBadge(badge.id, payload)
-                          } else if (payload && typeof payload === 'object' && payload.key) {
-                            try {
-                              // If we already have cached data, just open it
-                              if (existing && existing.length) {
-                                ui.openInlineDiffForBadge(badge.id, existing)
-                                return
-                              }
-                              const client = getBackendClient()
-                              if (client) {
-                                const res: any = await client.rpc('edits.preview', { key: payload.key })
-                                const files = Array.isArray(res?.data) ? res.data : []
-                                if (files.length) ui.openInlineDiffForBadge(badge.id, files)
-                              }
-                            } catch (e) {
-                              // Swallow diff preview errors; badge remains clickable for full modal
-                            }
-                          }
-                        } : undefined}
-                      >
-                        <span className={classes.badgeLabel}>
-                          <span>
-                            {badge.label}
-                            {badge.status === 'running' && ' ...'}
-                            {badge.status === 'error' && ' ✗'}
-                          </span>
-                          {typeof badge.addedLines === 'number' && (
-                            <span className={classes.addedLines}>+{badge.addedLines}</span>
-                          )}
-                          {typeof badge.removedLines === 'number' && (
-                            <span className={classes.removedLines}>-{badge.removedLines}</span>
-                          )}
-                        </span>
-                      </MantineBadge>
-                      <InlineBadgeDiff badgeId={badge.id} />
-                    </Fragment>
-                  )
+                  return <Badge key={`badge-${badge.id}`} badge={badge} />
                 }
                 return null
               })}

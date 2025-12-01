@@ -2,7 +2,7 @@ import { streamText, tool as aiTool, stepCountIs, jsonSchema } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { z } from 'zod'
 import { UiPayloadCache } from '../core/uiPayloadCache'
-import { AGENT_MAX_STEPS } from '../store/utils/constants'
+import { AGENT_MAX_STEPS } from '../../src/store/utils/constants'
 
 import type { ProviderAdapter, StreamHandle, AgentTool } from '../providers/provider'
 

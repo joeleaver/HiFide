@@ -17,7 +17,6 @@ import {
   kanbanSaver,
 } from '../store/utils/kanban.js'
 import { broadcastWorkspaceNotification } from '../backend/ws/broadcast.js'
-import { ServiceRegistry } from './base/ServiceRegistry.js'
 
 interface KanbanState {
   kanbanBoard: KanbanBoard | null
@@ -43,18 +42,18 @@ export class KanbanService extends Service<KanbanState> {
 
     // Emit events when kanban board changes
     if (
-      updates.board !== undefined ||
-      updates.loading !== undefined ||
-      updates.saving !== undefined ||
-      updates.error !== undefined ||
-      updates.lastLoadedAt !== undefined
+      updates.kanbanBoard !== undefined ||
+      updates.kanbanLoading !== undefined ||
+      updates.kanbanSaving !== undefined ||
+      updates.kanbanError !== undefined ||
+      updates.kanbanLastLoadedAt !== undefined
     ) {
       this.events.emit('kanban:board:changed', {
-        board: this.state.board,
-        loading: this.state.loading,
-        saving: this.state.saving,
-        error: this.state.error,
-        lastLoadedAt: this.state.lastLoadedAt,
+        board: this.state.kanbanBoard,
+        loading: this.state.kanbanLoading,
+        saving: this.state.kanbanSaving,
+        error: this.state.kanbanError,
+        lastLoadedAt: this.state.kanbanLastLoadedAt,
       })
     }
   }
@@ -81,13 +80,11 @@ export class KanbanService extends Service<KanbanState> {
   }
 
   // Helper methods
-  private resolveWorkspaceRoot(workspaceId?: string): string {
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const root = workspaceId || workspaceService?.getWorkspaceRoot() || process.env.HIFIDE_WORKSPACE_ROOT
-    if (!root) {
-      throw new Error('Workspace root is not set. Open a workspace before using the Kanban board.')
+  private async resolveWorkspaceRoot(workspaceId?: string): Promise<string> {
+    if (!workspaceId) {
+      throw new Error('Workspace ID is required. Kanban board is workspace-scoped.')
     }
-    return root
+    return workspaceId
   }
 
   private async persistBoard(params: {
@@ -97,7 +94,7 @@ export class KanbanService extends Service<KanbanState> {
     immediate?: boolean
   }): Promise<void> {
     const { board, workspaceId, immediate = false } = params
-    const workspaceRoot = this.resolveWorkspaceRoot(workspaceId)
+    const workspaceRoot = await this.resolveWorkspaceRoot(workspaceId)
 
     this.setState({ kanbanSaving: true, kanbanError: null })
     try {
@@ -143,9 +140,9 @@ export class KanbanService extends Service<KanbanState> {
   }
 
   // Load/Save operations
-  async kanbanLoad(): Promise<{ ok: boolean; board?: KanbanBoard }> {
+  async kanbanLoadFor(workspaceId: string): Promise<{ ok: boolean; board?: KanbanBoard }> {
     try {
-      const workspaceRoot = this.resolveWorkspaceRoot()
+      const workspaceRoot = await this.resolveWorkspaceRoot(workspaceId)
       this.setState({ kanbanLoading: true, kanbanError: null })
       const board = await readKanbanBoard(workspaceRoot)
       const ts = Date.now()
@@ -164,7 +161,7 @@ export class KanbanService extends Service<KanbanState> {
       console.error('[kanban] Load failed:', error)
       this.setState({ kanbanLoading: false, kanbanError: String(error) })
       try {
-        const workspaceRoot = this.resolveWorkspaceRoot()
+        const workspaceRoot = await this.resolveWorkspaceRoot(workspaceId)
         broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', {
           board: null,
           loading: false,
@@ -176,9 +173,9 @@ export class KanbanService extends Service<KanbanState> {
     }
   }
 
-  async kanbanRefreshFromDisk(): Promise<{ ok: boolean; board?: KanbanBoard }> {
+  async kanbanRefreshFromDiskFor(workspaceId: string): Promise<{ ok: boolean; board?: KanbanBoard }> {
     try {
-      const workspaceRoot = this.resolveWorkspaceRoot()
+      const workspaceRoot = await this.resolveWorkspaceRoot(workspaceId)
       const board = await readKanbanBoard(workspaceRoot)
       const ts = Date.now()
       this.setState({ kanbanBoard: board, kanbanError: null, kanbanLastLoadedAt: ts })
@@ -196,7 +193,7 @@ export class KanbanService extends Service<KanbanState> {
       console.error('[kanban] Refresh failed:', error)
       this.setState({ kanbanError: String(error) })
       try {
-        const workspaceRoot = this.resolveWorkspaceRoot()
+        const workspaceRoot = await this.resolveWorkspaceRoot(workspaceId)
         broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', {
           board: this.state.kanbanBoard || null,
           loading: false,
@@ -205,19 +202,6 @@ export class KanbanService extends Service<KanbanState> {
           lastLoadedAt: this.state.kanbanLastLoadedAt || null,
         })
       } catch {}
-      return { ok: false }
-    }
-  }
-
-  async kanbanSave(): Promise<{ ok: boolean }> {
-    const board = this.state.kanbanBoard
-    if (!board) return { ok: false }
-
-    try {
-      await this.persistBoard({ board, previous: board })
-      return { ok: true }
-    } catch (error) {
-      console.error('[kanban] Save failed:', error)
       return { ok: false }
     }
   }

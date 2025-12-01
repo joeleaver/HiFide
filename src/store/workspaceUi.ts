@@ -29,11 +29,9 @@ export function initWorkspaceUiEvents(): void {
   if (!client) return
 
   try {
-    // Only set root/view on workspace.bound (actual workspace change), not workspace.ready (just a ready signal)
-    client.subscribe('workspace.bound', async (p: any) => {
+    // Set root on workspace.attached (canonical workspace binding signal)
+    client.subscribe('workspace.attached', async (p: any) => {
       try { useWorkspaceUi.getState().__setRoot(p?.root || null) } catch {}
-      try { useUiStore.getState().setCurrentViewLocal('flow') } catch {}
-      try { await client.rpc('view.set', { view: 'flow' }) } catch {}
     })
     client.subscribe('workspace.error', (_p: any) => {
       // keep previous root; optionally show welcome view

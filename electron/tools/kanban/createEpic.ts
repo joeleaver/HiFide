@@ -1,4 +1,5 @@
 import type { AgentTool } from '../../providers/provider'
+import { getKanbanService } from '../../services/index.js'
 import type { KanbanEpic } from '../../store'
 
 export const kanbanCreateEpicTool: AgentTool = {
@@ -15,18 +16,13 @@ export const kanbanCreateEpicTool: AgentTool = {
     additionalProperties: false,
   },
   run: async (input: { name: string; color?: string; description?: string }, meta?: any) => {
-    const { ServiceRegistry } = await import('../../services/base/ServiceRegistry.js')
-    const kanbanService = ServiceRegistry.get<any>('kanban')
-
-    if (!kanbanService) {
-      throw new Error('Kanban service is not initialized')
-    }
+    const kanbanService = getKanbanService()
 
     const epic: KanbanEpic = await kanbanService.kanbanCreateEpic({
       workspaceId: meta?.workspaceId,
       name: input.name,
-      color: input.color,
-      description: input.description,
+      color: input.color || '#3b82f6',
+      description: input.description || '',
     })
 
     return {

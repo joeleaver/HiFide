@@ -16,21 +16,22 @@
 import { Service } from './base/Service.js'
 import type { Node, Edge } from 'reactflow'
 
-interface FlowGraphState {
-  // Last-saved graph (used by scheduler)
+interface WorkspaceGraph {
   nodes: Node[]
   edges: Edge[]
-  
-  // Selected node (for config panel)
   selectedNodeId: string | null
+  selectedTemplateId: string | null  // Which flow template is currently loaded in the editor
+}
+
+interface FlowGraphState {
+  // Workspace-scoped graph state
+  graphsByWorkspace: Record<string, WorkspaceGraph>
 }
 
 export class FlowGraphService extends Service<FlowGraphState> {
   constructor() {
     super({
-      nodes: [],
-      edges: [],
-      selectedNodeId: null,
+      graphsByWorkspace: {},
     })
   }
 
@@ -39,95 +40,169 @@ export class FlowGraphService extends Service<FlowGraphState> {
     // (Graphs are persisted as flow profiles, not as raw state)
 
     // Emit events when graph changes
-    if (updates.nodes !== undefined || updates.edges !== undefined) {
-      this.events.emit('flowGraph:changed', {
-        nodes: this.state.nodes,
-        edges: this.state.edges,
-      })
+    if (updates.graphsByWorkspace !== undefined) {
+      for (const workspaceId in updates.graphsByWorkspace) {
+        const graph = updates.graphsByWorkspace[workspaceId]
+        if (graph) {
+          this.events.emit('flowGraph:changed', {
+            workspaceId,
+            nodes: graph.nodes,
+            edges: graph.edges,
+          })
+        }
+      }
     }
+  }
+
+  // Helper to get or create workspace graph
+  private getWorkspaceGraph(workspaceId: string): WorkspaceGraph {
+    if (!this.state.graphsByWorkspace[workspaceId]) {
+      // Initialize empty graph for this workspace
+      const graphsByWorkspace = { ...this.state.graphsByWorkspace }
+      graphsByWorkspace[workspaceId] = {
+        nodes: [],
+        edges: [],
+        selectedNodeId: null,
+        selectedTemplateId: null,
+      }
+      this.setState({ graphsByWorkspace })
+    }
+    return this.state.graphsByWorkspace[workspaceId]
   }
 
   // Getters
-  getNodes(): Node[] {
-    return this.state.nodes
+  getNodes(params: { workspaceId: string }): Node[] {
+    const graph = this.getWorkspaceGraph(params.workspaceId)
+    return graph.nodes
   }
 
-  getEdges(): Edge[] {
-    return this.state.edges
+  getEdges(params: { workspaceId: string }): Edge[] {
+    const graph = this.getWorkspaceGraph(params.workspaceId)
+    return graph.edges
   }
 
-  getGraph(): { nodes: Node[]; edges: Edge[] } {
+  getGraph(params: { workspaceId: string }): { nodes: Node[]; edges: Edge[] } {
+    console.log('[FlowGraphService.getGraph] Getting graph for workspace:', params.workspaceId, 'Available workspaces:', Object.keys(this.state.graphsByWorkspace))
+    const graph = this.getWorkspaceGraph(params.workspaceId)
+    console.log('[FlowGraphService.getGraph] Returning graph with nodeCount:', graph.nodes.length, 'edgeCount:', graph.edges.length)
     return {
-      nodes: this.state.nodes,
-      edges: this.state.edges,
+      nodes: graph.nodes,
+      edges: graph.edges,
     }
   }
 
-  getSelectedNodeId(): string | null {
-    return this.state.selectedNodeId
+  getSelectedNodeId(params: { workspaceId: string }): string | null {
+    const graph = this.getWorkspaceGraph(params.workspaceId)
+    return graph.selectedNodeId
   }
 
-  getNode(nodeId: string): Node | undefined {
-    return this.state.nodes.find((n) => n.id === nodeId)
+  getSelectedTemplateId(params: { workspaceId: string }): string | null {
+    const graph = this.getWorkspaceGraph(params.workspaceId)
+    return graph.selectedTemplateId
+  }
+
+  getNode(params: { workspaceId: string; nodeId: string }): Node | undefined {
+    const graph = this.getWorkspaceGraph(params.workspaceId)
+    return graph.nodes.find((n) => n.id === params.nodeId)
   }
 
   /**
-   * Set the graph (called when user saves in renderer)
+   * Set the graph (called when user saves in renderer or loads a template)
    * This is the "committed" graph that the scheduler will read
    */
-  setGraph(params: { nodes: Node[]; edges: Edge[] }): void {
-    const { nodes, edges } = params
+  setGraph(params: { workspaceId: string; nodes: Node[]; edges: Edge[]; templateId?: string }): void {
+    const { workspaceId, nodes, edges, templateId } = params
 
     console.log('[FlowGraph] Setting graph:', {
+      workspaceId,
       nodeCount: nodes.length,
       edgeCount: edges.length,
+      templateId: templateId || '(unchanged)',
     })
 
-    this.setState({ nodes, edges })
+    const graphsByWorkspace = { ...this.state.graphsByWorkspace }
+    const currentGraph = this.getWorkspaceGraph(workspaceId)
+    graphsByWorkspace[workspaceId] = {
+      ...currentGraph,
+      nodes,
+      edges,
+      // Only update selectedTemplateId if explicitly provided
+      selectedTemplateId: templateId !== undefined ? templateId : currentGraph.selectedTemplateId,
+    }
+
+    this.setState({ graphsByWorkspace })
   }
 
   /**
    * Set selected node
    */
-  setSelectedNodeId(params: { id: string | null }): void {
-    this.setState({ selectedNodeId: params.id })
+  setSelectedNodeId(params: { workspaceId: string; id: string | null }): void {
+    const { workspaceId, id } = params
+
+    const graphsByWorkspace = { ...this.state.graphsByWorkspace }
+    graphsByWorkspace[workspaceId] = {
+      ...this.getWorkspaceGraph(workspaceId),
+      selectedNodeId: id,
+    }
+
+    this.setState({ graphsByWorkspace })
   }
 
   /**
    * Update node label
    */
-  setNodeLabel(params: { id: string; label: string }): void {
-    const { id, label } = params
+  setNodeLabel(params: { workspaceId: string; id: string; label: string }): void {
+    const { workspaceId, id, label } = params
+    const graph = this.getWorkspaceGraph(workspaceId)
 
-    const nodes = this.state.nodes.map((n) =>
+    const nodes = graph.nodes.map((n) =>
       n.id === id ? { ...n, data: { ...n.data, label } } : n
     )
 
-    this.setState({ nodes })
+    const graphsByWorkspace = { ...this.state.graphsByWorkspace }
+    graphsByWorkspace[workspaceId] = {
+      ...graph,
+      nodes,
+    }
+
+    this.setState({ graphsByWorkspace })
   }
 
   /**
    * Patch node config
    */
-  patchNodeConfig(params: { id: string; patch: Record<string, any> }): void {
-    const { id, patch } = params
+  patchNodeConfig(params: { workspaceId: string; id: string; patch: Record<string, any> }): void {
+    const { workspaceId, id, patch } = params
+    const graph = this.getWorkspaceGraph(workspaceId)
 
-    const nodes = this.state.nodes.map((n) =>
+    const nodes = graph.nodes.map((n) =>
       n.id === id ? { ...n, data: { ...n.data, ...patch } } : n
     )
 
-    this.setState({ nodes })
+    const graphsByWorkspace = { ...this.state.graphsByWorkspace }
+    graphsByWorkspace[workspaceId] = {
+      ...graph,
+      nodes,
+    }
+
+    this.setState({ graphsByWorkspace })
   }
 
   /**
-   * Clear the graph
+   * Clear the graph for a workspace
    */
-  clearGraph(): void {
-    this.setState({
+  clearGraph(params: { workspaceId: string }): void {
+    const { workspaceId } = params
+
+    const graphsByWorkspace = { ...this.state.graphsByWorkspace }
+    graphsByWorkspace[workspaceId] = {
       nodes: [],
       edges: [],
       selectedNodeId: null,
-    })
+      selectedTemplateId: null,
+    }
+
+    this.setState({ graphsByWorkspace })
   }
 }
 

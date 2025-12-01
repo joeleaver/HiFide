@@ -1,9 +1,9 @@
 import type { AgentTool } from '../../providers/provider'
-import fg from 'fast-glob'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import ignore from 'ignore'
 import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot } from '../utils'
+import { discoverWorkspaceFiles, DEFAULT_EXCLUDE_PATTERNS } from '../../utils/fileDiscovery'
 
 function escapeRegExp(str: string) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -272,12 +272,8 @@ export const grepTool: AgentTool = {
     const root = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, '.') : resolveWithinWorkspace('.')
 
     const includeGlobs = Array.isArray(files) && files.length ? files : ['**/*']
-    let excludeGlobs = [
-      'node_modules/**','dist/**','dist-electron/**','release/**','.git/**',
-      'coverage/**','.next/**','out/**','build/**','.turbo/**','.cache/**','target/**','vendor/**','.pnpm-store/**',
-      '.venv/**','venv/**','.idea/**',
-      '.hifide-public/**','.hifide_public/**','.hifide-private/**','.hifide_private/**'
-    ].concat(options.exclude || [])
+    // Use canonical exclude patterns from shared utility
+    const excludeGlobs = [...DEFAULT_EXCLUDE_PATTERNS, ...(options.exclude || [])]
 
     // Build full .gitignore semantics filter if available
     const ig = await buildGitIgnore(root)
@@ -315,12 +311,18 @@ export const grepTool: AgentTool = {
 
     const matches: Array<any> = []
 
-    // Discover files (sorted for deterministic traversal) and post-filter using .gitignore if present
-    const discovered = await fg(includeGlobs, { cwd: root, ignore: excludeGlobs, absolute: true, onlyFiles: true, dot: false })
+    // Discover files using shared utility (sorted for deterministic traversal)
+    const discovered = await discoverWorkspaceFiles({
+      cwd: root,
+      includeGlobs,
+      excludeGlobs,
+      absolute: true,
+    })
     discovered.sort((a, b) => a.localeCompare(b))
     if (process.env.DEBUG_GREP) {
       try { console.log('[grep] discovered', discovered.map(p => path.relative(root, p))) } catch {}
     }
+    // Additional .gitignore filtering if available (shared utility already applies .gitignore, but keep for compatibility)
     const filtered = ig
       ? (() => {
           const filter = ig.createFilter()

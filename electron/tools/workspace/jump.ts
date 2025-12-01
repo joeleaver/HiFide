@@ -1,6 +1,7 @@
 import type { AgentTool } from '../../providers/provider'
 import path from 'node:path'
 import fs from 'node:fs/promises'
+import { resolveWorkspaceRootAsync } from '../../utils/workspace.js'
 
 import { searchWorkspaceTool } from './searchWorkspace'
 
@@ -10,7 +11,6 @@ function toHandle(pathRel: string, start: number, end: number): string {
 }
 
 async function getWorkspaceRoot(workspaceId?: string): Promise<string> {
-  const { resolveWorkspaceRootAsync } = await import('../../utils/workspace')
   return resolveWorkspaceRootAsync(workspaceId)
 }
 

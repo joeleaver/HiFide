@@ -1,6 +1,6 @@
 /**
  * Workspace resolution utilities
- * 
+ *
  * This module provides a single source of truth for resolving workspace roots.
  * It eliminates the duplication of workspace resolution logic across the codebase.
  */
@@ -9,12 +9,11 @@ import path from 'node:path'
 
 /**
  * Resolve workspace root with consistent fallback order
- * 
+ *
  * Priority:
  * 1. Explicit hint parameter (e.g., meta.workspaceId from flow execution)
- * 2. Main store workspaceRoot (global, single-window)
- * 3. process.cwd() (fallback for tests/early boot)
- * 
+ * 2. process.cwd() (fallback for tests/early boot)
+ *
  * @param hint - Optional workspace ID (absolute path) to use
  * @returns Absolute path to workspace root
  */
@@ -23,44 +22,17 @@ export function resolveWorkspaceRoot(hint?: string): string {
     return path.resolve(hint)
   }
 
-  try {
-    // Dynamic import to avoid circular dependencies
-    const { ServiceRegistry } = require('../services/base/ServiceRegistry.js')
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const root = workspaceService?.getWorkspaceRoot()
-    if (root) {
-      return path.resolve(root)
-    }
-  } catch (error) {
-    // Store not available (tests, early boot)
-  }
-
   return path.resolve(process.cwd())
 }
 
 /**
  * Async version of resolveWorkspaceRoot for consistency with existing patterns
- * 
+ *
  * @param hint - Optional workspace ID (absolute path) to use
  * @returns Absolute path to workspace root
  */
-export async function resolveWorkspaceRootAsync(hint?: string): Promise<string> {
-  if (hint) {
-    return path.resolve(hint)
-  }
-
-  try {
-    const { ServiceRegistry } = await import('../services/base/ServiceRegistry.js')
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const root = workspaceService?.getWorkspaceRoot()
-    if (root) {
-      return path.resolve(root)
-    }
-  } catch (error) {
-    // Store not available (tests, early boot)
-  }
-
-  return path.resolve(process.cwd())
+export function resolveWorkspaceRootAsync(hint?: string): string {
+  return resolveWorkspaceRoot(hint)
 }
 
 /**

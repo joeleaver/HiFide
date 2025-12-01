@@ -55,12 +55,6 @@ import { sessionSearchOutputTool } from './terminal/sessionSearchOutput'
 import { sessionTailTool } from './terminal/sessionTail'
 import { sessionRestartTool } from './terminal/sessionRestart'
 
-// Code tools
-import { searchAstTool } from './code/searchAst'
-import { applyEditsTargetedTool } from './code/applyEditsTargeted'
-import { replaceCallTool } from './code/replaceCall'
-import { replaceConsoleLevelTool } from './code/replaceConsoleLevel'
-
 // Text tools
 import { grepTool } from './text/grep'
 
@@ -112,11 +106,6 @@ export const agentTools: AgentTool[] = [
   sessionSearchOutputTool,
   sessionTailTool,
   sessionRestartTool,
-
-  searchAstTool,
-  applyEditsTargetedTool,
-  replaceCallTool,
-  replaceConsoleLevelTool,
 
   grepTool,
 

@@ -5,20 +5,26 @@
  * - Session CRUD (create, read, update, delete)
  * - Token usage and cost tracking (in-flight and finalized)
  * - Session persistence
+ * - Session context management (provider, model, message history)
  *
  * Delegates to specialized services for:
- * - SessionTimelineService: Timeline items, node execution boxes, badges
  * - FlowCacheService: Flow node cache
+ *
+ * Timeline items are managed by timeline-event-handler.ts in flow-engine.
  */
 
 import { Service } from './base/Service.js'
-import type { Session, ActivityEvent, TokenUsage, TokenCost } from '../store/types.js'
-import { MAX_SESSIONS } from '../store/utils/constants.js'
-import { deriveTitle, initialSessionTitle } from '../store/utils/sessions.js'
+import type { Session, ActivityEvent, TokenUsage } from '../store/types.js'
 import { loadAllSessions, sessionSaver, deleteSessionFromDisk } from '../store/utils/session-persistence.js'
-import { ServiceRegistry } from './base/ServiceRegistry.js'
+import { getProviderService, getSettingsService } from './index.js'
 
 const DEBUG_USAGE = process.env.HF_DEBUG_USAGE === '1' || process.env.HF_DEBUG_TOKENS === '1'
+const MAX_SESSIONS = 100
+
+// Helper function to generate initial session title
+function initialSessionTitle(): string {
+  return `Session ${new Date().toLocaleString()}`
+}
 
 interface SessionState {
   // Workspace-scoped session state
@@ -84,23 +90,6 @@ export class SessionService extends Service<SessionState> {
     return this.state.currentIdByWorkspace[workspaceId] ?? null
   }
 
-  getCurrentId(): string | null {
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) return null
-    return this.getCurrentIdFor({ workspaceId: ws })
-  }
-
-  getCurrentSession(): Session | null {
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) return null
-    const id = this.getCurrentIdFor({ workspaceId: ws })
-    if (!id) return null
-    const sessions = this.getSessionsFor({ workspaceId: ws })
-    return sessions.find((s) => s.id === id) || null
-  }
-
   getActivityForRequest(requestId: string): ActivityEvent[] {
     return this.state.activityByRequestId[requestId] || []
   }
@@ -150,18 +139,7 @@ export class SessionService extends Service<SessionState> {
     }
   }
 
-  /**
-   * Load sessions for current workspace
-   */
-  async loadSessions(): Promise<void> {
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) {
-      console.warn('[Session] No workspace root, cannot load sessions')
-      return
-    }
-    await this.loadSessionsFor({ workspaceId: ws })
-  }
+
 
   // ============================================================================
   // Session Creation
@@ -170,54 +148,54 @@ export class SessionService extends Service<SessionState> {
   /**
    * Ensure at least one session exists for a workspace
    */
-  ensureSessionPresentFor(params: { workspaceId: string }): boolean {
+  async ensureSessionPresentFor(params: { workspaceId: string }): Promise<boolean> {
     const { workspaceId } = params
     const sessions = this.getSessionsFor({ workspaceId })
     if (sessions.length > 0) return false
 
     // Create initial session
-    this.newSessionFor({ workspaceId, title: initialSessionTitle() })
+    await this.newSessionFor({ workspaceId, title: initialSessionTitle() })
     return true
   }
 
-  /**
-   * Ensure at least one session exists for current workspace
-   */
-  ensureSessionPresent(): boolean {
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) return false
-    return this.ensureSessionPresentFor({ workspaceId: ws })
-  }
+
 
   /**
    * Create a new session for a workspace
    */
-  newSessionFor(params: { workspaceId: string; title?: string }): string {
+  async newSessionFor(params: { workspaceId: string; title?: string }): Promise<string> {
     const { workspaceId, title } = params
     const sessions = this.getSessionsFor({ workspaceId })
 
     // Get default provider/model from ProviderService
-    const providerService = ServiceRegistry.get<any>('provider')
-    const defaultProvider = providerService?.getSelectedProvider() || 'openai'
-    const defaultModel = providerService?.getSelectedModel() || 'gpt-4o'
+    const providerService = getProviderService()
+    const defaultProvider = providerService.getSelectedProvider() || 'openai'
+    const defaultModel = providerService.getSelectedModel() || 'gpt-4o'
 
     // Generate new session
     const newSession: Session = {
       id: crypto.randomUUID(),
       title: title || initialSessionTitle(),
-      timeline: [],
+      items: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
       lastActivityAt: Date.now(),
       currentContext: {
-        contextId: crypto.randomUUID(),
         provider: defaultProvider,
         model: defaultModel,
         messageHistory: [],
       },
-      totalTokenUsage: {},
-      totalCost: {},
+      tokenUsage: {
+        total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 },
+        byProvider: {},
+        byProviderAndModel: {},
+      },
+      costs: {
+        byProviderAndModel: {},
+        totalCost: 0,
+        currency: 'USD',
+      },
+      requestsLog: [],
     }
 
     // Limit to MAX_SESSIONS
@@ -229,20 +207,12 @@ export class SessionService extends Service<SessionState> {
     this.emit('session:created', { workspaceId, sessionId: newSession.id })
 
     // Persist
-    this.saveCurrentSession(true) // Immediate
+    await this.saveSessionFor({ workspaceId, sessionId: newSession.id }, true) // Immediate
 
     return newSession.id
   }
 
-  /**
-   * Create a new session for current workspace
-   */
-  newSession(title?: string): string {
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) throw new Error('No workspace root')
-    return this.newSessionFor({ workspaceId: ws, title })
-  }
+
 
   // ============================================================================
   // Session Selection
@@ -271,33 +241,87 @@ export class SessionService extends Service<SessionState> {
     this.emit('session:selected', { workspaceId, sessionId: id, previousSessionId: previousId })
 
     // Persist
-    await this.saveCurrentSession(true) // Immediate
+    await this.saveSessionFor({ workspaceId, sessionId: id }, true) // Immediate
   }
 
   /**
    * Select a session for current workspace
    */
-  async select(id: string): Promise<void> {
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) throw new Error('No workspace root')
-    await this.selectFor({ workspaceId: ws, id })
-  }
+
 
   // ============================================================================
   // Session Modification
   // ============================================================================
 
   /**
+   * Reset current session context (clear timeline and message history)
+   */
+  async resetCurrentContextFor(params: { workspaceId: string; sessionId: string }): Promise<void> {
+    const { workspaceId, sessionId } = params
+
+    const sessions = this.getSessionsFor({ workspaceId })
+    const updated = sessions.map((s) =>
+      s.id === sessionId
+        ? {
+            ...s,
+            timeline: [],
+            currentContext: {
+              ...s.currentContext,
+              contextId: crypto.randomUUID(),
+              messageHistory: [],
+            },
+            updatedAt: Date.now(),
+          }
+        : s
+    )
+
+    this.setSessionsFor({ workspaceId, sessions: updated })
+    await this.saveSessionFor({ workspaceId, sessionId }, true) // Immediate
+  }
+
+  /**
+   * Update session context message history
+   */
+  updateMessageHistoryFor(params: {
+    workspaceId: string
+    sessionId: string
+    messageHistory: Array<{
+      role: 'system' | 'user' | 'assistant'
+      content: string
+      metadata?: {
+        id: string
+        pinned?: boolean
+        priority?: number
+      }
+    }>
+  }): void {
+    const { workspaceId, sessionId, messageHistory } = params
+
+    const sessions = this.getSessionsFor({ workspaceId })
+    const updated = sessions.map((s) =>
+      s.id === sessionId
+        ? {
+            ...s,
+            currentContext: {
+              ...s.currentContext,
+              messageHistory,
+            },
+            updatedAt: Date.now(),
+          }
+        : s
+    )
+
+    this.setSessionsFor({ workspaceId, sessions: updated })
+    this.saveSessionFor({ workspaceId, sessionId }, false) // Debounced
+  }
+
+  /**
    * Rename a session
    */
-  rename(params: { id: string; title: string }): void {
-    const { id, title } = params
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) return
+  renameFor(params: { workspaceId: string; id: string; title: string }): void {
+    const { workspaceId, id, title } = params
 
-    const sessions = this.getSessionsFor({ workspaceId: ws })
+    const sessions = this.getSessionsFor({ workspaceId })
     const updated = sessions.map((s) =>
       s.id === id
         ? {
@@ -308,41 +332,42 @@ export class SessionService extends Service<SessionState> {
         : s
     )
 
-    this.setSessionsFor({ workspaceId: ws, sessions: updated })
-    this.saveCurrentSession() // Debounced
+    this.setSessionsFor({ workspaceId, sessions: updated })
+    this.saveSessionFor({ workspaceId, sessionId: id }) // Debounced
   }
 
   /**
    * Delete a session
    */
-  async remove(id: string): Promise<void> {
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) return
+  async removeFor(params: { workspaceId: string; id: string }): Promise<void> {
+    const { workspaceId, id } = params
 
-    const sessions = this.getSessionsFor({ workspaceId: ws })
+    const sessions = this.getSessionsFor({ workspaceId })
     const updated = sessions.filter((s) => s.id !== id)
-    this.setSessionsFor({ workspaceId: ws, sessions: updated })
+    this.setSessionsFor({ workspaceId, sessions: updated })
 
     // If we deleted the current session, select the first one
-    const currentId = this.getCurrentIdFor({ workspaceId: ws })
+    const currentId = this.getCurrentIdFor({ workspaceId })
     if (currentId === id) {
       const nextId = updated[0]?.id || null
-      this.setCurrentIdFor({ workspaceId: ws, id: nextId })
+      this.setCurrentIdFor({ workspaceId, id: nextId })
     }
 
     // Emit event for other services to react (e.g., TerminalService to cleanup PTY)
-    this.emit('session:deleted', { workspaceId: ws, sessionId: id })
+    this.emit('session:deleted', { workspaceId, sessionId: id })
 
     // Delete from disk
     try {
-      await deleteSessionFromDisk(ws, id)
+      await deleteSessionFromDisk(id)
     } catch (error) {
       console.error('[Session] Failed to delete session from disk:', error)
     }
 
     // Persist
-    await this.saveCurrentSession(true) // Immediate
+    const nextSessionId = updated[0]?.id
+    if (nextSessionId) {
+      await this.saveSessionFor({ workspaceId, sessionId: nextSessionId }, true) // Immediate
+    }
   }
 
   // ============================================================================
@@ -350,20 +375,23 @@ export class SessionService extends Service<SessionState> {
   // ============================================================================
 
   /**
-   * Save current session to disk
+   * Save a session to disk
    */
-  async saveCurrentSession(immediate = false): Promise<void> {
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) return
+  async saveSessionFor(params: { workspaceId: string; sessionId: string }, immediate = false): Promise<void> {
+    const { workspaceId, sessionId } = params
 
-    const session = this.getCurrentSession()
-    if (!session) return
+    const sessions = this.getSessionsFor({ workspaceId })
+    const session = sessions.find((s) => s.id === sessionId)
+    if (!session) {
+      console.warn('[SessionService] saveSessionFor: session not found:', sessionId)
+      return
+    }
 
+    console.log('[SessionService] saveSessionFor:', { sessionId, workspaceId, immediate, itemCount: session.items?.length })
     if (immediate) {
-      await sessionSaver.save(ws, session)
+      await sessionSaver.save(session, true, workspaceId)
     } else {
-      sessionSaver.save(ws, session) // Debounced
+      sessionSaver.save(session, false, workspaceId) // Debounced
     }
   }
 
@@ -374,60 +402,45 @@ export class SessionService extends Service<SessionState> {
   /**
    * Update session's last used flow
    */
-  async updateCurrentSessionFlow(flowId: string): Promise<void> {
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) return
+  async updateSessionFlowFor(params: { workspaceId: string; sessionId: string; flowId: string }): Promise<void> {
+    const { workspaceId, sessionId, flowId } = params
 
-    const session = this.getCurrentSession()
-    if (!session) return
-
-    const sessions = this.getSessionsFor({ workspaceId: ws })
+    const sessions = this.getSessionsFor({ workspaceId })
     const updated = sessions.map((s) =>
-      s.id === session.id ? { ...s, lastUsedFlow: flowId, updatedAt: Date.now() } : s
+      s.id === sessionId ? { ...s, lastUsedFlow: flowId, updatedAt: Date.now() } : s
     )
 
-    this.setSessionsFor({ workspaceId: ws, sessions: updated })
-    await this.saveCurrentSession(true)
+    this.setSessionsFor({ workspaceId, sessions: updated })
+    await this.saveSessionFor({ workspaceId, sessionId }, true)
   }
 
   /**
-   * Set executed flow for a session
+   * Set executed flow for a session (the flow being run by the scheduler)
    */
-  async setSessionExecutedFlow(params: { sessionId: string; flowId: string }): Promise<void> {
-    const { sessionId, flowId } = params
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) return
+  async setSessionExecutedFlowFor(params: { workspaceId: string; sessionId: string; flowId: string }): Promise<void> {
+    const { workspaceId, sessionId, flowId } = params
 
-    const sessions = this.getSessionsFor({ workspaceId: ws })
+    const sessions = this.getSessionsFor({ workspaceId })
     const updated = sessions.map((s) =>
       s.id === sessionId ? { ...s, executedFlow: flowId, updatedAt: Date.now() } : s
     )
 
-    this.setSessionsFor({ workspaceId: ws, sessions: updated })
-
-    // Save if this is the current session
-    const currentId = this.getCurrentIdFor({ workspaceId: ws })
-    if (currentId === sessionId) {
-      await this.saveCurrentSession(true)
-    }
+    this.setSessionsFor({ workspaceId, sessions: updated })
+    await this.saveSessionFor({ workspaceId, sessionId }, true)
   }
 
   /**
    * Set provider/model for a session
    */
-  async setSessionProviderModel(params: {
+  async setSessionProviderModelFor(params: {
+    workspaceId: string
     sessionId: string
     provider: string
     model: string
   }): Promise<void> {
-    const { sessionId, provider, model } = params
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) return
+    const { workspaceId, sessionId, provider, model } = params
 
-    const sessions = this.getSessionsFor({ workspaceId: ws })
+    const sessions = this.getSessionsFor({ workspaceId })
     const updated = sessions.map((s) =>
       s.id === sessionId
         ? {
@@ -442,13 +455,8 @@ export class SessionService extends Service<SessionState> {
         : s
     )
 
-    this.setSessionsFor({ workspaceId: ws, sessions: updated })
-
-    // Save if this is the current session
-    const currentId = this.getCurrentIdFor({ workspaceId: ws })
-    if (currentId === sessionId) {
-      await this.saveCurrentSession(true)
-    }
+    this.setSessionsFor({ workspaceId, sessions: updated })
+    await this.saveSessionFor({ workspaceId, sessionId }, true)
   }
 
   // ============================================================================
@@ -468,7 +476,7 @@ export class SessionService extends Service<SessionState> {
     model: string
     usage: TokenUsage
   }): void {
-    const { sessionId, requestId, nodeId, executionId, provider, model, usage } = params
+    const { requestId, nodeId, executionId, provider, model, usage } = params
 
     const key = `${requestId}:${nodeId}:${executionId}`
     const prev = this.state.inFlightUsageByKey[key]?.usage || {
@@ -495,8 +503,8 @@ export class SessionService extends Service<SessionState> {
     }
 
     // Calculate cost
-    const settingsService = ServiceRegistry.get<any>('settings')
-    const cost = settingsService?.calculateCost(provider, model, cumUsage) || null
+    const settingsService = getSettingsService()
+    const cost = settingsService.calculateCost(provider, model, cumUsage) || null
 
     if (DEBUG_USAGE) {
       console.log('[usage:recordTokenUsage]', {
@@ -520,47 +528,30 @@ export class SessionService extends Service<SessionState> {
       },
     })
 
-    // Trigger session save
-    this.saveCurrentSession()
+    // Note: No save here - in-flight usage is ephemeral and will be persisted when finalized
   }
 
   /**
    * Finalize node usage - add to session totals and remove from in-flight
    */
-  finalizeNodeUsage(params: {
-    sessionId?: string
+  async finalizeNodeUsageFor(params: {
+    workspaceId: string
+    sessionId: string
     requestId: string
     nodeId: string
     executionId: string
-  }): void {
-    const { sessionId, requestId, nodeId, executionId } = params
+  }): Promise<void> {
+    const { workspaceId, sessionId, requestId, nodeId, executionId } = params
 
     const key = `${requestId}:${nodeId}:${executionId}`
     const acc = this.state.inFlightUsageByKey[key]
     if (!acc) return
 
-    const workspaceService = ServiceRegistry.get<any>('workspace')
-    const ws = workspaceService?.getWorkspaceRoot()
-    if (!ws) {
-      // Remove from in-flight
-      const { [key]: _, ...rest } = this.state.inFlightUsageByKey
-      this.setState({ inFlightUsageByKey: rest })
-      return
-    }
-
-    const sid = sessionId || this.getCurrentIdFor({ workspaceId: ws })
-    if (!sid) {
-      // Remove from in-flight
-      const { [key]: _, ...rest } = this.state.inFlightUsageByKey
-      this.setState({ inFlightUsageByKey: rest })
-      return
-    }
-
     const { provider, model, usage } = acc
 
     // Calculate cost
-    const settingsService = ServiceRegistry.get<any>('settings')
-    const cost = settingsService?.calculateCost(provider, model, usage) || null
+    const settingsService = getSettingsService()
+    const cost = settingsService.calculateCost(provider, model, usage) || null
 
     if (DEBUG_USAGE) {
       console.log('[usage:finalizeNodeUsage]', {
@@ -575,9 +566,9 @@ export class SessionService extends Service<SessionState> {
     }
 
     // Update session totals
-    const sessions = this.getSessionsFor({ workspaceId: ws })
+    const sessions = this.getSessionsFor({ workspaceId })
     const updated = sessions.map((sess: Session) => {
-      if (sess.id !== sid) return sess
+      if (sess.id !== sessionId) return sess
 
       // Update tokenUsage structure
       const byProvider = sess.tokenUsage?.byProvider || {}
@@ -672,41 +663,15 @@ export class SessionService extends Service<SessionState> {
       }
     })
 
-    this.setSessionsFor({ workspaceId: ws, sessions: updated })
+    this.setSessionsFor({ workspaceId, sessions: updated })
 
     // Remove from in-flight
     const { [key]: _, ...rest } = this.state.inFlightUsageByKey
     this.setState({ inFlightUsageByKey: rest })
 
-    // Persist
-    this.saveCurrentSession()
+    // Persist (debounced)
+    await this.saveSessionFor({ workspaceId, sessionId }, false)
   }
-
-  /**
-   * Finalize all nodes in a request
-   */
-  finalizeRequestUsage(params: { sessionId?: string; requestId: string }): void {
-    const { sessionId, requestId } = params
-
-    if (DEBUG_USAGE) {
-      console.log('[usage:finalizeRequestUsage]', { requestId })
-    }
-
-    // Find all in-flight usage for this request
-    const toFinalize: Array<{ nodeId: string; executionId: string }> = []
-    for (const [key, entry] of Object.entries(this.state.inFlightUsageByKey)) {
-      if (entry.requestId === requestId) {
-        const [, nodeId, executionId] = key.split(':')
-        toFinalize.push({ nodeId, executionId })
-      }
-    }
-
-    // Finalize each node
-    for (const { nodeId, executionId } of toFinalize) {
-      this.finalizeNodeUsage({ sessionId, requestId, nodeId, executionId })
-    }
-  }
-
 
 }
 

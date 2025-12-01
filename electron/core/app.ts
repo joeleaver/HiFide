@@ -9,7 +9,7 @@ import { createWindow } from './window'
 
 /**
  * Initialize the application
- * 
+ *
  * Sets up app lifecycle handlers and creates the main window
  */
 export function initializeApp(onReady?: () => void): void {
@@ -19,7 +19,7 @@ export function initializeApp(onReady?: () => void): void {
   app.whenReady().then(() => {
     // Create main window
     createWindow()
-    
+
     // Call optional ready callback (for menu building, etc.)
     onReady?.()
   })

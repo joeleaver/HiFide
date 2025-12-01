@@ -9,7 +9,7 @@ export type FlowEvent = (
   | { type: 'nodeEnd'; nodeId: string; executionId: string; durationMs?: number }
   | { type: 'io'; nodeId: string; data: string }
   | { type: 'error'; nodeId?: string; error: string }
-  | { type: 'waitingForInput'; nodeId: string }
+  | { type: 'waitingforinput'; nodeId: string }
   | { type: 'done' }
   | { type: 'chunk'; nodeId: string; text: string; executionId: string }
   | { type: 'reasoning'; nodeId: string; text: string; executionId: string }

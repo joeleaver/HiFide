@@ -9,8 +9,8 @@ import type { PtySession } from '../store/types.js'
 import * as ptySvc from '../services/pty.js'
 import * as terminalInstances from '../services/terminalInstances.js'
 import * as agentPty from '../services/agentPty.js'
-import { DEFAULTS } from '../store/utils/constants.js'
-import { ServiceRegistry } from './base/ServiceRegistry.js'
+import { DEFAULTS } from '../../src/store/utils/constants'
+import { getSessionService } from './index.js'
 
 interface TerminalState {
   agentTerminalTabs: string[]
@@ -66,8 +66,8 @@ export class TerminalService extends Service<TerminalState> {
    */
   private setupSessionEventListeners(): void {
     // Wait for SessionService to be initialized
-    setTimeout(() => {
-      const sessionService = ServiceRegistry.get<any>('session')
+    setTimeout(async () => {
+      const sessionService = getSessionService()
       if (!sessionService) {
         console.warn('[Terminal] SessionService not available for event listeners')
         return
@@ -77,7 +77,7 @@ export class TerminalService extends Service<TerminalState> {
       sessionService.on('session:created', async (data: { workspaceId: string; sessionId: string }) => {
         console.log('[Terminal] Session created, ensuring PTY:', data.sessionId)
         try {
-          await agentPty.ensurePtyForSession(data.sessionId)
+          await agentPty.getOrCreateAgentPtyFor(data.sessionId)
           console.log('[Terminal] PTY created for session:', data.sessionId)
         } catch (error) {
           console.error('[Terminal] Failed to create PTY for session:', error)
@@ -90,7 +90,7 @@ export class TerminalService extends Service<TerminalState> {
         async (data: { workspaceId: string; sessionId: string; previousSessionId: string | null }) => {
           console.log('[Terminal] Session selected, ensuring PTY:', data.sessionId)
           try {
-            await agentPty.ensurePtyForSession(data.sessionId)
+            await agentPty.getOrCreateAgentPtyFor(data.sessionId)
             console.log('[Terminal] PTY ensured for session:', data.sessionId)
           } catch (error) {
             console.error('[Terminal] Failed to ensure PTY for session:', error)
@@ -210,36 +210,7 @@ export class TerminalService extends Service<TerminalState> {
     this.setState({ explorerTerminalTabs: [], explorerActiveTerminal: null })
   }
 
-  async ensureSessionTerminal(): Promise<void> {
-    const sessionService = ServiceRegistry.get<any>('session')
-    const currentSessionId = sessionService?.getCurrentId()
-
-    console.log('[terminal] ensureSessionTerminal called:', { currentSessionId, hasCurrentId: !!currentSessionId })
-
-    if (!currentSessionId) {
-      console.warn('[terminal] ensureSessionTerminal: no current session')
-      return
-    }
-
-    // Check if we already have a terminal for this session
-    const existingTabs = this.state.agentTerminalTabs || []
-
-    if (existingTabs.length === 0) {
-      // No terminals exist - create one
-      const tabId = `a${crypto.randomUUID().slice(0, 7)}`
-      this.setState({
-        agentTerminalTabs: [tabId],
-        agentActiveTerminal: tabId,
-      })
-      console.log('[terminal] Created session terminal:', tabId, 'for session:', currentSessionId)
-    } else {
-      // Terminal already exists - ensure it's active
-      if (!this.state.agentActiveTerminal) {
-        this.setState({ agentActiveTerminal: existingTabs[0] })
-      }
-      console.log('[terminal] Session terminal already exists:', existingTabs[0], 'for session:', currentSessionId)
-    }
-  }
+  // Removed ensureSessionTerminal() - dead code that used global getCurrentId()
 
   // Terminal Instance Actions
   async mountTerminal(params: {
@@ -447,8 +418,8 @@ export class TerminalService extends Service<TerminalState> {
       // Agent terminals need to bind to the session's PTY session
       if (context === 'agent') {
         // Use session ID as requestId so terminal binds to the session's PTY
-        const sessionService = ServiceRegistry.get<any>('session')
-        const requestId = sessionService?.getCurrentId() || 'agent'
+        // TODO: This needs workspace context - for now use 'agent' fallback
+        const requestId = 'agent' // Fallback since we don't have workspace context here
         const attach = await ptySvc.attachAgent({ requestId, tailBytes: 400 })
 
         if (!attach?.sessionId) {
@@ -492,9 +463,13 @@ export class TerminalService extends Service<TerminalState> {
       }
 
       // Non-agent (explorer) terminals create their own PTY
-      const workspaceService = ServiceRegistry.get<any>('workspace')
+      // Explorer terminals must provide explicit cwd
+      if (!opts?.cwd) {
+        throw new Error('Explorer terminal requires explicit cwd')
+      }
+
       const create = await ptySvc.create({
-        cwd: opts?.cwd ?? workspaceService?.getWorkspaceRoot() ?? undefined,
+        cwd: opts.cwd,
         shell: opts?.shell,
         cols,
         rows,

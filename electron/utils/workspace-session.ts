@@ -3,7 +3,7 @@
  * Used by both flows-v2 and WebSocket server
  */
 
-import { ServiceRegistry } from '../services/base/ServiceRegistry.js'
+import { getSessionService } from '../services/index.js'
 
 /**
  * Find which workspace contains a given session ID
@@ -13,9 +13,9 @@ import { ServiceRegistry } from '../services/base/ServiceRegistry.js'
 export function getWorkspaceIdForSessionId(sessionId: string | null | undefined): string | null {
   if (!sessionId) return null
   try {
-    const sessionService = ServiceRegistry.get<any>('session')
-    if (!sessionService) return null
-    const map = sessionService.getSessionsByWorkspace() || {}
+    const sessionService = getSessionService()
+    const state = sessionService.getState()
+    const map = state.sessionsByWorkspace || {}
     for (const [ws, list] of Object.entries(map as Record<string, any[]>)) {
       if (Array.isArray(list) && (list as any[]).some((s: any) => s?.id === sessionId)) {
         return ws as string

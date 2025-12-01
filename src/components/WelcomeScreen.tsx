@@ -1,26 +1,28 @@
 import { useEffect, useState, useMemo } from 'react'
-import { Button, Group, Title, Text, Card, Stack, TextInput, Divider, ScrollArea, Badge, Loader } from '@mantine/core'
+import { Button, Group, Title, Text, Card, Stack, Divider, ScrollArea, Badge, Loader } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { getBackendClient } from '@/lib/backend/bootstrap'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import hljs from 'highlight.js'
+import { ApiKeysForm } from './ApiKeysForm'
+import { useApiKeyManagement } from '../hooks/useApiKeyManagement'
 
 interface RecentFolder { path: string; lastOpened: number }
 
 export default function WelcomeScreen() {
   const [recents, setRecents] = useState<RecentFolder[]>([])
   const [loadingRecents, setLoadingRecents] = useState(false)
-  const [savingKeys, setSavingKeys] = useState(false)
-  const [validating, setValidating] = useState(false)
-  const [apiKeys, setApiKeys] = useState<{ openai?: string; anthropic?: string; gemini?: string; fireworks?: string; xai?: string }>({})
   const [whatsNewHtml, setWhatsNewHtml] = useState<string | null>(null)
   const [whatsNewLoading, setWhatsNewLoading] = useState(false)
 
-  const hasAnyKey = useMemo(() => {
-    const vals = Object.values(apiKeys || {})
-    return vals.some((v) => typeof v === 'string' && v.trim().length > 0)
-  }, [apiKeys])
+  // Use the reusable API key management hook
+  const { apiKeys, setApiKeys, providerValid, saving, validating, saveAndValidate, hydrate } = useApiKeyManagement(false)
+
+  // Check if any provider is validated (not just if keys are entered)
+  const hasValidatedKey = useMemo(() => {
+    return Object.values(providerValid || {}).some((valid) => valid === true)
+  }, [providerValid])
 
   // Markdown renderer for What's New (code highlighting + sanitized HTML)
   const md = useMemo(() => {
@@ -59,19 +61,7 @@ export default function WelcomeScreen() {
     }
   }
 
-  const hydrateSettings = async () => {
-    const client = getBackendClient()
-    if (!client) return
-    try {
-      try { await (client as any).whenReady?.(5000) } catch {}
-      const res: any = await client.rpc('settings.get', {})
-      if (res?.ok) {
-        setApiKeys(res.settingsApiKeys || {})
-      }
-    } catch (e) {
-      console.error('[welcome] settings.get failed:', e)
-    }
-  }
+
 
   const fetchWhatsNew = async () => {
     setWhatsNewLoading(true)
@@ -117,27 +107,28 @@ export default function WelcomeScreen() {
         const c = getBackendClient() as any
         await c?.whenReady?.(5000)
       } catch {}
-      await Promise.allSettled([refreshRecents(), hydrateSettings(), fetchWhatsNew()])
+      await Promise.allSettled([refreshRecents(), hydrate(), fetchWhatsNew()])
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const openFolderDialogAndLoad = async () => {
-    const result = await window.workspace?.openFolderDialog?.()
-    if (result?.ok && result.path) {
-      try {
-        const client = getBackendClient()
-        if (!client) throw new Error('Backend not ready')
-        try { await (client as any).whenReady?.(5000) } catch {}
+    try {
+      const client = getBackendClient()
+      if (!client) throw new Error('Backend not ready')
+      try { await (client as any).whenReady?.(5000) } catch {}
+
+      const result: any = await client.rpc('workspace.openFolderDialog', {})
+      if (result?.ok && result.path) {
         const res: any = await client.rpc('workspace.open', { root: result.path })
         if (res && res.ok === false) {
           notifications.show({ color: 'red', title: 'Open folder failed', message: String(res.error || 'Failed to open workspace') })
           return
         }
         // View will switch to 'flow' on workspace.ready
-      } catch (e) {
-        notifications.show({ color: 'red', title: 'Open folder failed', message: String(e) })
       }
+    } catch (e) {
+      notifications.show({ color: 'red', title: 'Open folder failed', message: String(e) })
     }
   }
 
@@ -157,48 +148,12 @@ export default function WelcomeScreen() {
     }
   }
 
-  const saveKeys = async () => {
-    const client = getBackendClient()
-    if (!client) return
-    setSavingKeys(true)
-    try {
-      try { await (client as any).whenReady?.(5000) } catch {}
-      await client.rpc('settings.setApiKeys', { apiKeys })
-      await client.rpc('settings.saveKeys', {})
-      notifications.show({ color: 'green', title: 'Saved', message: 'API keys saved' })
-    } catch (e) {
-      notifications.show({ color: 'red', title: 'Save failed', message: String(e) })
-    } finally {
-      setSavingKeys(false)
-    }
-  }
 
-  const validateKeys = async () => {
-    const client = getBackendClient()
-    if (!client) return
-    setValidating(true)
-    try {
-      try { await (client as any).whenReady?.(5000) } catch {}
-      const res: any = await client.rpc('settings.validateKeys', {})
-      if (res?.ok) {
-        const failures: string[] = res.failures || []
-        if (!failures.length) {
-          notifications.show({ color: 'green', title: 'Keys valid', message: 'All configured providers validated' })
-        } else {
-          notifications.show({ color: 'yellow', title: 'Some providers failed', message: failures.join(', ') })
-        }
-      }
-    } catch (e) {
-      notifications.show({ color: 'red', title: 'Validation failed', message: String(e) })
-    } finally {
-      setValidating(false)
-    }
-  }
 
   return (
     <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'stretch', background: '#1e1e1e' }}>
       <div style={{ width: 980, padding: 24, overflow: 'auto' }}>
-        {hasAnyKey ? (
+        {hasValidatedKey ? (
           <>
             <Group justify="space-between" mb="sm">
               <div>
@@ -271,21 +226,25 @@ export default function WelcomeScreen() {
 
             <Card withBorder shadow="sm" padding="md" radius="md" style={{ background: '#232323' }}>
               <Stack gap="sm">
-                <Group justify="space-between">
-                  <Title order={4} c="#eee">Quick setup: API keys</Title>
-                  <Group gap="xs">
-                    <Button size="compact-xs" variant="light" loading={savingKeys} onClick={saveKeys}>Save</Button>
-                    <Button size="compact-xs" variant="default" loading={validating} onClick={validateKeys}>Validate</Button>
-                  </Group>
-                </Group>
+                <Title order={4} c="#eee">Quick setup: API keys</Title>
                 <Divider my={2} />
-                <Stack gap={8}>
-                  <TextInput label="OpenAI" placeholder="sk-..." value={apiKeys.openai || ''} onChange={(e) => setApiKeys((k) => ({ ...k, openai: e.currentTarget.value }))} />
-                  <TextInput label="Anthropic" placeholder="sk-ant-..." value={apiKeys.anthropic || ''} onChange={(e) => setApiKeys((k) => ({ ...k, anthropic: e.currentTarget.value }))} />
-                  <TextInput label="Gemini" placeholder="AIza..." value={apiKeys.gemini || ''} onChange={(e) => setApiKeys((k) => ({ ...k, gemini: e.currentTarget.value }))} />
-                  <TextInput label="Fireworks" placeholder="fwk-..." value={apiKeys.fireworks || ''} onChange={(e) => setApiKeys((k) => ({ ...k, fireworks: e.currentTarget.value }))} />
-                  <TextInput label="xAI" placeholder="xai-..." value={apiKeys.xai || ''} onChange={(e) => setApiKeys((k) => ({ ...k, xai: e.currentTarget.value }))} />
-                </Stack>
+                <ApiKeysForm
+                  apiKeys={apiKeys}
+                  onChange={setApiKeys}
+                  providerValid={providerValid}
+                  showValidation={true}
+                  compact={true}
+                />
+                <Button
+                  fullWidth
+                  size="md"
+                  variant="filled"
+                  loading={saving || validating}
+                  onClick={saveAndValidate}
+                  style={{ marginTop: 8 }}
+                >
+                  Save & Validate Keys
+                </Button>
               </Stack>
             </Card>
           </>

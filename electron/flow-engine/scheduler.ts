@@ -29,6 +29,7 @@ import type { ExecutionEvent } from './execution-events'
 import { getNodeFunction } from './nodes'
 import { createContextAPI } from './context-api'
 import { createEventEmitter } from './execution-events'
+import { getSessionService, getFlowGraphService } from '../services/index.js'
 
 import { emitFlowEvent } from './events'
 
@@ -95,6 +96,9 @@ export class FlowScheduler {
   private activeNodeIds = new Set<string>()
   private pausedNodeId: string | null = null
 
+  // Portal data registry (for portal nodes)
+  private portalRegistry = new Map<string, { context?: MainFlowContext; data?: any }>()
+
   constructor(
     wc: WebContents | undefined,
     requestId: string,
@@ -109,6 +113,7 @@ export class FlowScheduler {
 
     // Session scoping for events
     this.sessionId = (args as any)?.sessionId
+    console.log('[FlowScheduler] Constructor - sessionId:', this.sessionId, 'workspaceId:', (args as any)?.workspaceId)
 
     this.workspaceId = (args as any)?.workspaceId
 
@@ -154,9 +159,7 @@ export class FlowScheduler {
    * This ensures the session persists the conversation state when the scheduler stops
    */
   public async flushToSession(): Promise<void> {
-    try {
-      const { getSessionService, getSessionTimelineService } = await import('../services/index.js')
-      const sessionService = getSessionService()
+    try {      const sessionService = getSessionService()
 
       // Defensive: only flush if we're still the active session
       const ws = this.workspaceId
@@ -176,14 +179,20 @@ export class FlowScheduler {
       }
 
       // Write final messageHistory back to session
-      const timelineService = getSessionTimelineService()
       console.log('[Scheduler.flushToSession] Flushing messageHistory to session', {
         sessionId: this.sessionId,
         messageCount: this.mainContext.messageHistory.length
       })
-      timelineService.updateCurrentContext({
-        messageHistory: this.mainContext.messageHistory
-      })
+
+      if (this.workspaceId && this.sessionId) {
+        sessionService.updateMessageHistoryFor({
+          workspaceId: this.workspaceId,
+          sessionId: this.sessionId,
+          messageHistory: this.mainContext.messageHistory
+        })
+      } else {
+        console.warn('[Scheduler.flushToSession] Missing workspaceId or sessionId, cannot flush')
+      }
     } catch (e) {
       console.error('[Scheduler.flushToSession] Error flushing to session:', e)
     }
@@ -200,11 +209,8 @@ export class FlowScheduler {
       }
     } catch {}
 
-    // Resolve any pending user input promises to unblock waiters
+    // Clear user input resolvers - the abort signal will reject the promises
     try {
-      for (const resolve of this.userInputResolvers.values()) {
-        try { resolve('') } catch {}
-      }
       this.userInputResolvers.clear()
     } catch {}
 
@@ -276,9 +282,9 @@ export class FlowScheduler {
     const portalOutputsByKey = new Map<string, string[]>()
 
     for (const n of this.flowDef.nodes) {
-      const nodeType = (n as any).nodeType || (n as any).type
+      const nodeType = (n as any).nodeType || (n as any).data?.nodeType || (n as any).type
       if (nodeType !== 'portalInput' && nodeType !== 'portalOutput') continue
-      const pid = (n as any)?.config?.id
+      const pid = (n as any)?.config?.id || (n as any)?.data?.config?.id
       if (!pid) continue
       if (nodeType === 'portalInput') {
         const arr = portalInputsByKey.get(pid) || []
@@ -295,7 +301,7 @@ export class FlowScheduler {
     const isPortalNodeId = (id: string) => {
       const node = nodesById.get(id)
       if (!node) return false
-      const t = (node as any).nodeType || (node as any).type
+      const t = (node as any).nodeType || (node as any).data?.nodeType || (node as any).type
       return t === 'portalInput' || t === 'portalOutput'
     }
 
@@ -379,7 +385,12 @@ export class FlowScheduler {
     try {
       // Find the entry node - there should be exactly one: defaultContextStart
       // We explicitly look for this node type rather than assuming nodes with no incoming edges are entry nodes
-      let entryNode = this.flowDef.nodes.find((n: any) => (n.nodeType === 'defaultContextStart') || (n.type === 'defaultContextStart'))
+      // Check both top-level nodeType/type and data.nodeType (ReactFlow format)
+      let entryNode = this.flowDef.nodes.find((n: any) =>
+        (n.nodeType === 'defaultContextStart') ||
+        (n.type === 'defaultContextStart') ||
+        (n.data?.nodeType === 'defaultContextStart')
+      )
 
       if (!entryNode) {
         // Fallback: allow flows without defaultContextStart by selecting the single node with no incoming edges
@@ -527,7 +538,7 @@ export class FlowScheduler {
       // Update context tracking based on result
       if (result.context) {
         const resultContext = result.context
-        const nodeType = (nodeConfig as any)?.nodeType || (nodeConfig as any)?.type
+        const nodeType = (nodeConfig as any)?.nodeType || (nodeConfig as any)?.data?.nodeType || (nodeConfig as any)?.type
         const isPortalNode = nodeType === 'portalInput' || nodeType === 'portalOutput'
 
         if (!isPortalNode) {
@@ -710,13 +721,12 @@ export class FlowScheduler {
       }
       console.error(`[FlowScheduler] Error in ${nodeId}:`, error)
       if (callerId) {
-        // Non-entry node failed: emit error event (SessionTimelineService will create badge)
+        // Non-entry node failed: emit error event
         try {
           emitFlowEvent(this.requestId, {
             type: 'error',
             nodeId,
             error,
-            executionId,
             sessionId: this.sessionId
           })
         } catch {}
@@ -727,7 +737,6 @@ export class FlowScheduler {
             type: 'error',
             nodeId,
             error,
-            executionId,
             sessionId: this.sessionId
           })
         } catch {}
@@ -757,24 +766,18 @@ export class FlowScheduler {
         }
       },
       emitExecutionEvent: emit,
-      store: this.storeCache?.() || {},
+      store: {},
       context: createContextAPI(),
       conversation: {
-        streamChunk: (chunk: string) => {
-          // Streaming is handled by SessionTimelineService listening to flow events
-          // Nodes should emit 'chunk' events instead of calling this directly
-          emit({ type: 'chunk', data: chunk })
+        streamChunk: (_chunk: string) => {
+          // No-op: streaming is handled by execution events
         },
-        addBadge: (badge: Badge) => {
-          // Badge creation is handled by SessionTimelineService listening to flow events
-          // This is a convenience method for nodes that want to add simple badges
-          const badgeId = `badge-${Date.now()}`
-          emit({ type: 'badge', badge: { ...badge, id: badgeId } })
-          return badgeId
+        addBadge: (_badge: Badge) => {
+          // No-op: badges are handled by execution events
+          return `badge-${Date.now()}`
         },
-        updateBadge: (badgeId: string, updates: Partial<Badge>) => {
-          // Badge updates are handled by SessionTimelineService listening to flow events
-          emit({ type: 'badgeUpdate', badgeId, updates })
+        updateBadge: (_badgeId: string, _updates: Partial<Badge>) => {
+          // No-op: badge updates are handled by execution events
         }
       },
       log: {
@@ -812,14 +815,25 @@ export class FlowScheduler {
         console.log('[FlowAPI.waitForUserInput] Waiting for input, nodeId:', nodeId)
 
         // Notify renderer that we're waiting for input
-    try { emitFlowEvent(this.requestId, { type: 'waitingForInput', nodeId, sessionId: this.sessionId }) } catch {}
+    try { emitFlowEvent(this.requestId, { type: 'waitingforinput', nodeId, sessionId: this.sessionId }) } catch {}
     // Record paused state for snapshot/status queries
     try { this.pausedNodeId = nodeId } catch {}
 
         // Create a promise that will be resolved when resumeWithInput is called
-        const userInput = await new Promise<string>((resolve) => {
+        const userInput = await new Promise<string>((resolve, reject) => {
           console.log('[FlowAPI.waitForUserInput] Storing resolver for nodeId:', nodeId)
           this.userInputResolvers.set(nodeId, resolve)
+
+          // If already aborted, reject immediately
+          if (this.abortController.signal.aborted) {
+            reject(new Error('Flow execution cancelled'))
+            return
+          }
+
+          // Listen for abort signal
+          this.abortController.signal.addEventListener('abort', () => {
+            reject(new Error('Flow execution cancelled'))
+          }, { once: true })
         })
 
         console.log('[FlowAPI.waitForUserInput] Received input:', userInput.substring(0, 50))
@@ -829,6 +843,15 @@ export class FlowScheduler {
       triggerPortalOutputs: async (portalId: string) => {
         console.log(`[FlowAPI.triggerPortalOutputs] Triggering portal outputs for ID: ${portalId}`)
         await this.triggerPortalOutputs(portalId)
+      },
+      setPortalData: (portalId: string, context?: MainFlowContext, data?: any) => {
+        console.log(`[FlowAPI.setPortalData] Storing portal data for ID: ${portalId}`)
+        this.portalRegistry.set(portalId, { context, data })
+      },
+      getPortalData: (portalId: string) => {
+        const data = this.portalRegistry.get(portalId)
+        console.log(`[FlowAPI.getPortalData] Retrieved portal data for ID: ${portalId}`, { hasData: !!data })
+        return data
       }
     }
   }
@@ -874,7 +897,8 @@ export class FlowScheduler {
             const brief = (event.chunk || '').slice(0, 60).replace(/\n/g, '\\n')
             console.log(`[FlowAPI] chunk node=${event.nodeId} exec=${event.executionId} len=${event.chunk.length} brief=${brief}`)
           }
-          try { emitFlowEvent(this.requestId, { type: 'chunk', nodeId: event.nodeId, text: event.chunk, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
+          const chunkEvent = { type: 'chunk' as const, nodeId: event.nodeId, text: event.chunk, executionId: event.executionId, sessionId: this.sessionId }
+          try { emitFlowEvent(this.requestId, chunkEvent) } catch {}
         }
         break
 
@@ -1119,9 +1143,14 @@ export class FlowScheduler {
   private async getNodeConfig(nodeId: string): Promise<Record<string, any>> {
     try {
       // Prefer live config from FlowGraphService (renderer-edited)
-      const { getFlowGraphService } = await import('../services/index.js')
       const flowGraphService = getFlowGraphService()
-      const nodes = flowGraphService.getState().nodes
+
+      // Get nodes for this workspace
+      let nodes: any[] = []
+      if (this.workspaceId) {
+        nodes = flowGraphService.getNodes({ workspaceId: this.workspaceId })
+      }
+
       const nodeFromService = nodes?.find((n: any) => n.id === nodeId)
       const cfgFromService = (nodeFromService?.data as any)?.config
       if (cfgFromService && Object.keys(cfgFromService).length > 0) {
@@ -1197,10 +1226,11 @@ export class FlowScheduler {
   async triggerPortalOutputs(portalId: string): Promise<void> {
     console.log(`[Scheduler] Triggering portal outputs for ID: ${portalId}`)
 
-    // Find all Portal Output nodes with matching ID (support nodeType or legacy type)
+    // Find all Portal Output nodes with matching ID (support nodeType in multiple locations)
     const portalOutputNodes = this.flowDef.nodes.filter((node: any) => {
-      const t = node.nodeType || node.type
-      return t === 'portalOutput' && node.config?.id === portalId
+      const t = node.nodeType || node.data?.nodeType || node.type
+      const configId = node.config?.id || node.data?.config?.id
+      return t === 'portalOutput' && configId === portalId
     })
 
     console.log(`[Scheduler] Found ${portalOutputNodes.length} portal output nodes with ID: ${portalId}`)

@@ -8,6 +8,7 @@ import { app, BrowserWindow, screen } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setWindow, windowStateStore } from './state'
+import { getWorkspaceManager } from './workspaceManager.js'
 
 import { startWsBackend } from '../backend/ws/server'
 
@@ -239,9 +240,7 @@ export function createWindow(opts?: { offsetFromCurrent?: boolean; workspaceId?:
     saveWindowState()
 
     // Unbind window from workspace
-    try {
-      const { getWorkspaceManager } = await import('./workspaceManager.js')
-      const manager = getWorkspaceManager()
+    try {      const manager = getWorkspaceManager()
       await manager.unbindWindow(win)
     } catch (error) {
       console.error('[window] Failed to unbind workspace:', error)
@@ -267,24 +266,7 @@ export function createWindow(opts?: { offsetFromCurrent?: boolean; workspaceId?:
   } catch {}
 
 
-  // Bind window to workspace if provided
-  if (opts?.workspaceId) {
-    const workspaceId = opts.workspaceId
-    ;(async () => {
-      try {
-        const { getWorkspaceManager } = await import('./workspaceManager.js')
-        const manager = getWorkspaceManager()
-        await manager.bindWindowToWorkspace(win, workspaceId)
-
-        // Update store
-        const { ServiceRegistry } = await import('../services/base/ServiceRegistry.js')
-        const workspaceService = ServiceRegistry.get<any>('workspace')
-        workspaceService?.setWorkspaceForWindow({ windowId: win.id, workspaceId })
-      } catch (error) {
-        console.error('[window] Failed to bind workspace:', error)
-      }
-    })()
-  }
+  // Workspace binding happens via handshake.init, not at window creation
 
   // Start WS backend and wait for bootstrap, then load the renderer with query params
   ;(async () => {
@@ -310,9 +292,8 @@ export function createWindow(opts?: { offsetFromCurrent?: boolean; workspaceId?:
         win.webContents.openDevTools({ mode: 'detach' })
       } else {
         console.time('[window] loadFile(prod)')
-        await win.loadFile(path.join(DIRNAME, '../dist/index.html'), {
-          query: { wsUrl, wsToken, windowId: String(win.id) }
-        } as any)
+        const query: any = { wsUrl, wsToken, windowId: String(win.id) }
+        await win.loadFile(path.join(DIRNAME, '../dist/index.html'), { query } as any)
         console.timeEnd('[window] loadFile(prod)')
         // DevTools disabled in production
       }

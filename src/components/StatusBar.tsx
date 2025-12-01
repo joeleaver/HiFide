@@ -43,11 +43,16 @@ export default function StatusBar() {
 
 
   const handleFolderClick = async () => {
-    const result = await window.workspace?.openFolderDialog?.()
-    if (result?.ok && result.path) {
-      const client = getBackendClient()
-      try { await client?.rpc('workspace.open', { root: result.path }) } catch {}
-      // Workspace root will update on workspace.bound/ready notifications
+    const client = getBackendClient()
+    if (!client) return
+    try {
+      const result: any = await client.rpc('workspace.openFolderDialog', {})
+      if (result?.ok && result.path) {
+        await client.rpc('workspace.open', { root: result.path })
+        // Workspace root will update on workspace.attached notification
+      }
+    } catch (e) {
+      // Silently ignore errors
     }
   }
 

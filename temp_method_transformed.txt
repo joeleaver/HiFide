@@ -1,0 +1,965 @@
+export function startListeningToFlow(requestId: string, args: FlowExecutionArgs): () => void {
+  const sessionId = (args as any).sessionId as string | undefined
+  if (!sessionId) {
+    return () => {}
+  }
+
+  console.log('[TimelineListener] startListeningToFlow:', { requestId, sessionId })
+
+  // Build fast node metadata lookup
+  const nodeMeta = new Map<string, { label: string; kind: string }>()
+  try {
+    for (const n of args.flowDef?.nodes || []) {
+      const label =
+        (n as any)?.data?.label ||
+        (n as any)?.data?.labelBase ||
+        (n as any)?.data?.nodeType ||
+        'Node'
+      const kind = (n as any)?.data?.nodeType || (n as any)?.type || 'unknown'
+      nodeMeta.set((n as any).id, { label, kind })
+    }
+  } catch {}
+
+  // Local buffers per node for debounced flushes
+  const textBuffers = new Map<string, string>()
+  const badgeQueues = new Map<string, any[]>()
+  const flushTimeouts = new Map<string, NodeJS.Timeout>()
+  const openBoxIds = new Map<string, string>()
+  const reasoningBuffers = new Map<string, string>()
+
+  // Track last tool args per tool for header reconstruction on end/error
+  const lastToolArgs = new Map<string, any>()
+
+  // Helper: broadcast current session usage snapshot to all renderers
+  const broadcastSessionUsage = () => {
+    try {
+      const svc = getServices()
+      if (!svc) return
+
+      const { sessionService, workspaceId } = svc
+      const ws = getWorkspaceIdForSessionId(sessionId) || workspaceId
+      if (!ws) return
+
+      const sessions = sessionService.getSessionsFor({ workspaceId: ws })
+      const sess = sessions.find((s: any) => s.id === sessionId)
+      if (!sess) return
+
+      const tokenUsage = sess.tokenUsage || {
+        total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 },
+        byProvider: {},
+        byProviderAndModel: {},
+      }
+      const costs = sess.costs || {
+        byProviderAndModel: {},
+        totalCost: 0,
+        currency: 'USD',
+      }
+      const requestsLog = Array.isArray(sess.requestsLog) ? sess.requestsLog : []
+      if (ws)
+        broadcastWorkspaceNotification(ws, 'session.usage.changed', {
+          tokenUsage,
+          costs,
+          requestsLog,
+        })
+    } catch (e) {
+      console.warn('[TimelineListener] broadcastSessionUsage failed', e)
+    }
+  }
+
+  // Flush function: creates/updates node execution boxes
+  const flush = (key: string, immediate = false) => {
+    const parts = String(key).split('::')
+    const nodeId = parts[0]
+    const executionId = parts[1]
+    const reasoning = reasoningBuffers.get(key) || ''
+
+    const txt = textBuffers.get(key) || ''
+    const badges = badgeQueues.get(key) || []
+    if (!txt.trim() && !reasoning && badges.length === 0) {
+      // Nothing meaningful to flush
+      const pending = flushTimeouts.get(key)
+      if (pending) {
+        try {
+          clearTimeout(pending)
+        } catch {}
+        flushTimeouts.delete(key)
+      }
+      return
+    }
+
+    const meta = nodeMeta.get(nodeId) || { label: 'Node', kind: 'unknown' }
+
+    const svc = getServices()
+    if (!svc) return
+
+    const { sessionService, workspaceId } = svc
+
+    const sessions = sessionService.getSessionsFor({ workspaceId })
+    const idx = sessions.findIndex((sess: any) => sess.id === sessionId)
+    if (idx === -1) return
+
+    const sess = sessions[idx]
+    const items = Array.isArray(sess.items) ? [...sess.items] : []
+
+    let boxId = openBoxIds.get(key)
+    let didCreate = false
+
+    if (!boxId) {
+      // Create new box
+      boxId = `box-${nodeId}-${executionId || Date.now()}`
+      openBoxIds.set(key, boxId)
+      const newBox: any = {
+        type: 'node-execution',
+        id: boxId,
+        nodeId,
+        executionId,
+        nodeLabel: meta.label,
+        nodeKind: meta.kind,
+        timestamp: Date.now(),
+        content: [],
+      }
+      if (reasoning) newBox.content.push({ type: 'reasoning', text: reasoning })
+      if (txt.trim()) newBox.content.push({ type: 'text', text: txt })
+      for (const b of badges) newBox.content.push({ type: 'badge', badge: b })
+      items.push(newBox)
+      didCreate = true
+    } else {
+      // Update existing box
+      const boxIdx = items.findIndex((it: any) => it.type === 'node-execution' && it.id === boxId)
+      if (boxIdx >= 0) {
+        const box: any = { ...items[boxIdx] }
+        if (reasoning) box.content = [...box.content, { type: 'reasoning', text: reasoning }]
+        if (txt.trim()) box.content = [...box.content, { type: 'text', text: txt }]
+        for (const b of badges) box.content = [...box.content, { type: 'badge', badge: b }]
+        items[boxIdx] = box
+      } else {
+        // Box disappeared (e.g., session switched), create a new one
+        openBoxIds.delete(key)
+        const newBox: any = {
+          type: 'node-execution',
+          id: `box-${nodeId}-${executionId || Date.now()}`,
+          nodeId,
+          executionId,
+          nodeLabel: meta.label,
+          nodeKind: meta.kind,
+          timestamp: Date.now(),
+          content: [],
+        }
+        if (reasoning) newBox.content.push({ type: 'reasoning', text: reasoning })
+        if (txt.trim()) newBox.content.push({ type: 'text', text: txt })
+        for (const b of badges) newBox.content.push({ type: 'badge', badge: b })
+        items.push(newBox)
+        didCreate = true
+      }
+    }
+
+    // Update session
+    const updated = { ...sess, items, updatedAt: Date.now(), lastActivityAt: Date.now() }
+    const updatedSessions = sessions.slice()
+    updatedSessions[idx] = updated
+    sessionService.setSessionsFor({ workspaceId, sessions: updatedSessions })
+
+    console.log('[TimelineListener] broadcast delta', {
+      op: didCreate ? 'upsertBox' : 'appendToBox',
+      sessionId,
+      nodeId,
+      executionId,
+      textLen: txt.length,
+      reasonLen: reasoning.length,
+      badgesLen: badges.length,
+    })
+
+    // Broadcast delta to renderers
+    try {
+      const wsId = getWorkspaceIdForSessionId(sessionId) || ws
+      if (!wsId) {
+        console.warn(
+          `[TimelineListener] flush: NO workspace found for session ${sessionId}`
+        )
+      }
+
+      if (didCreate) {
+        if (wsId) {
+          console.log(`[TimelineListener] Broadcasting upsertBox to workspace ${wsId}:`, {
+            sessionId,
+            nodeId,
+            executionId,
+          })
+          broadcastWorkspaceNotification(wsId, 'session.timeline.delta', {
+            sessionId,
+            op: 'upsertBox',
+            nodeId,
+            executionId,
+            append: { text: txt, reasoning, badges },
+          })
+        }
+      } else if (txt.trim() || reasoning || (badges && badges.length)) {
+        if (wsId) {
+          console.log(`[TimelineListener] Broadcasting appendToBox to workspace ${wsId}:`, {
+            sessionId,
+            nodeId,
+            executionId,
+            textLen: txt.length,
+            reasoningLen: reasoning.length,
+            badgesLen: badges.length,
+          })
+          broadcastWorkspaceNotification(wsId, 'session.timeline.delta', {
+            sessionId,
+            op: 'appendToBox',
+            nodeId,
+            executionId,
+            append: { text: txt, reasoning, badges },
+          })
+        }
+      }
+    } catch (e) {
+      console.error(`[TimelineListener] flush: broadcast error`, e)
+    }
+
+    // Clear local buffers and timeouts
+    textBuffers.delete(key)
+    reasoningBuffers.delete(key)
+    badgeQueues.delete(key)
+    const t = flushTimeouts.get(key)
+    if (t) {
+      clearTimeout(t)
+      flushTimeouts.delete(key)
+    }
+
+    // Debounced disk save for this specific session
+    sessionService.saveCurrentSession()
+  }
+
+  const debounceFlush = (key: string) => {
+    if (flushTimeouts.has(key)) return
+    const t = setTimeout(() => flush(key, false), 100)
+    flushTimeouts.set(key, t)
+  }
+
+  // Event listener: handle all flow events
+  const unsubscribe = flowEvents.onFlowEvent(requestId, (ev: any) => {
+    const t = ev?.type
+    const nid = ev?.nodeId as string | undefined
+    const execId = (ev?.executionId as string | undefined) || undefined
+
+    // Defensive: warn if executionId is missing for events that should have it
+    if (
+      !execId &&
+      nid &&
+      (t === 'chunk' ||
+        t === 'reasoning' ||
+        t === 'toolStart' ||
+        t === 'toolEnd' ||
+        t === 'toolError' ||
+        t === 'tokenUsage')
+    ) {
+      console.warn(`[TimelineListener] Missing executionId for ${t} event on node ${nid}`)
+    }
+
+    const key = nid ? `${nid}${execId ? `::${execId}` : ''}` : undefined
+
+    // Handle chunk event (streaming text)
+    if (t === 'chunk' && key && nid) {
+      const prev = textBuffers.get(key) || ''
+      const next = prev + (ev.text ?? '')
+      textBuffers.set(key, next)
+      debounceFlush(key)
+      return
+    }
+
+    // Handle reasoning event (streaming reasoning)
+    if (t === 'reasoning' && key && nid) {
+      const prev = reasoningBuffers.get(key) || ''
+      const next = prev + (ev.text ?? '')
+      reasoningBuffers.set(key, next)
+      debounceFlush(key)
+      return
+    }
+
+    // Handle badge event (simple badge creation from nodes)
+    if (t === 'badge' && key && nid && ev.badge) {
+      const arr = badgeQueues.get(key) || []
+      arr.push(ev.badge)
+      badgeQueues.set(key, arr)
+      flush(key, true)
+      return
+    }
+
+    // Handle badgeUpdate event (update existing badge)
+    if (t === 'badgeUpdate' && nid && ev.badgeId && ev.updates) {
+      // Find and update the badge in the session timeline
+      const svc = getServices()
+      if (!svc) return
+
+      const { sessionService, workspaceId } = svc
+
+      const sessions = sessionService.getSessionsFor({ workspaceId })
+      const idx = sessions.findIndex((sess: any) => sess.id === sessionId)
+      if (idx === -1) return
+
+      const sess = sessions[idx]
+      const items = Array.isArray(sess.items) ? [...sess.items] : []
+
+      // Find the node execution box
+      const boxIndex = items
+        .slice()
+        .reverse()
+        .findIndex(
+          (it: any) =>
+            it.type === 'node-execution' &&
+            it.nodeId === nid &&
+            (!execId || it.executionId === execId)
+        )
+      if (boxIndex === -1) return
+
+      const box: any = { ...items[items.length - 1 - boxIndex] }
+      const rel = box.content
+        .slice()
+        .reverse()
+        .findIndex((c: any) => c.type === 'badge' && c.badge?.id === ev.badgeId)
+      if (rel !== -1) {
+        const rev = box.content.length - 1 - rel
+        const cur = box.content[rev]
+        box.content = box.content.slice()
+        box.content[rev] = { type: 'badge', badge: { ...(cur as any).badge, ...ev.updates } }
+
+        items[items.length - 1 - boxIndex] = box
+        const updated = { ...sess, items, updatedAt: Date.now(), lastActivityAt: Date.now() }
+        const updatedSessions = sessions.slice()
+        updatedSessions[idx] = updated
+        sessionService.setSessionsFor({ workspaceId, sessions: updatedSessions })
+
+        // Broadcast update
+        try {
+          const wsId = getWorkspaceIdForSessionId(sessionId) || workspaceId
+          if (wsId)
+            broadcastWorkspaceNotification(wsId, 'session.timeline.delta', {
+              sessionId,
+              op: 'updateBadge',
+              nodeId: nid,
+              executionId: execId,
+              badgeId: ev.badgeId,
+              updates: ev.updates,
+            })
+        } catch {}
+
+        // Save session
+        sessionService.saveCurrentSession()
+      }
+      return
+    }
+
+    // Handle toolStart event (create badge)
+    if (t === 'toolStart' && key && nid) {
+      const arr = badgeQueues.get(key) || []
+      const label = formatToolName(ev.toolName || 'Tool')
+      const { normalized, key: tkey } = normalizeTool(ev.toolName || '')
+      if (ev.toolArgs) {
+        try {
+          lastToolArgs.set(tkey || normalized, ev.toolArgs)
+        } catch {}
+      }
+      let metadata: any = undefined
+      // fs.read_lines: show file path + line range in header
+      if (normalized === 'fs_read_lines' || tkey === 'fsreadlines') {
+        metadata = deriveFsReadLinesMeta(ev.toolArgs)
+      }
+      // workspace.search: show query header
+      if (tkey === 'workspacesearch') {
+        const q = deriveWorkspaceSearchHeader(ev.toolArgs)
+        if (q) metadata = { ...(metadata || {}), query: q, fullParams: ev.toolArgs }
+      }
+      // fs.write_file: show file path in header
+      if (normalized === 'fs_write_file' || tkey === 'fswritefile') {
+        const p = ev.toolArgs?.path
+        if (p) metadata = { ...(metadata || {}), filePath: p }
+      }
+      // fs.delete_file: show file path in header
+      if (normalized === 'fs_delete_file' || tkey === 'fsdeletefile') {
+        const p = ev.toolArgs?.path
+        if (p) metadata = { ...(metadata || {}), filePath: p }
+      }
+
+      arr.push({
+        id: ev.callId || `badge-${Date.now()}`,
+        type: 'tool',
+        label,
+        status: 'running',
+        timestamp: Date.now(),
+        ...(metadata ? { metadata } : {}),
+      })
+      badgeQueues.set(key, arr)
+      flush(key, true)
+      return
+    }
+
+    // Handle toolEnd event (update badge with expansion + metadata)
+    if (t === 'toolEnd' && nid) {
+      // Ensure pending text is flushed
+      if (key) flush(key)
+
+      // Build rich badge updates (title already set on start); add expansion + metadata
+      const { normalized, key: tkey } = normalizeTool(ev.toolName || '')
+      const argsUsed = ev.toolArgs || lastToolArgs.get(tkey || normalized) || {}
+      const result = ev.result || {}
+
+      let updates: any = { status: 'success', color: 'green' }
+
+      // workspace.search → expandable list of results
+      if (tkey === 'workspacesearch') {
+        const previewKey = (result as any)?.previewKey
+        const count = Number(
+          (result as any)?.previewCount ??
+            (Array.isArray((result as any)?.data?.results)
+              ? (result as any).data.results.length
+              : 0) ??
+            0
+        )
+        updates = {
+          ...updates,
+          expandable: true,
+          defaultExpanded: false,
+          contentType: 'workspace-search',
+          metadata: {
+            resultCount: count,
+            ...(deriveWorkspaceSearchHeader(argsUsed)
+              ? { query: deriveWorkspaceSearchHeader(argsUsed) }
+              : {}),
+          },
+          // Use provider's previewKey for UI fetch (falls back to callId if missing)
+          interactive: { type: 'workspace-search', data: { key: previewKey || ev.callId, count } },
+        }
+      }
+
+      // fs.read_lines → show file + lines, expandable to full content
+      if (normalized === 'fs_read_lines' || tkey === 'fsreadlines') {
+        const meta = deriveFsReadLinesMeta((result as any)?.usedParams || argsUsed)
+        updates = {
+          ...updates,
+          expandable: true,
+          defaultExpanded: false,
+          contentType: 'read-lines',
+          ...(meta ? { metadata: meta } : {}),
+          interactive: { type: 'read-lines', data: { key: ev.callId } },
+        }
+      }
+
+      // fs.read_file → expandable to raw content
+      if (normalized === 'fs_read_file' || tkey === 'fsreadfile') {
+        const used = (result as any)?.usedParams || argsUsed
+        const filePath = used?.path || used?.file_path
+        updates = {
+          ...updates,
+          expandable: true,
+          defaultExpanded: false,
+          contentType: 'read-lines',
+          ...(filePath ? { metadata: { filePath } } : {}),
+          interactive: { type: 'read-lines', data: { key: ev.callId } },
+        }
+      }
+
+      // fs.write_file / fsWriteFile → single-file diff preview and filename in header
+      if (normalized === 'fs_write_file' || tkey === 'fswritefile') {
+        const previews = Array.isArray((result as any)?.fileEditsPreview)
+          ? (result as any).fileEditsPreview
+          : []
+        const filePath = (result as any)?.path || argsUsed?.path
+        if (previews.length) {
+          // Put previews keyed by callId so edits.preview works
+          try {
+            UiPayloadCache.put(String(ev.callId), previews)
+          } catch {}
+          // Compute line deltas
+          let addedLines = 0,
+            removedLines = 0
+          for (const f of previews) {
+            const { added, removed } = computeLineDiff(f.before, f.after)
+            addedLines += added
+            removedLines += removed
+          }
+          updates = {
+            ...updates,
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'diff',
+            addedLines,
+            removedLines,
+            filesChanged: previews.length,
+            metadata: {
+              fileCount: previews.length,
+              ...(previews.length === 1 ? { filePath: previews[0]?.path || filePath } : filePath ? { filePath } : {}),
+            },
+            interactive: { type: 'diff', data: { key: ev.callId, count: previews.length } },
+          }
+        } else if (filePath) {
+          updates = { ...updates, metadata: { filePath } }
+        }
+      }
+
+      // fs.delete_file → include filename in header (no expansion)
+      if (normalized === 'fs_delete_file' || tkey === 'fsdeletefile') {
+        const used = (result as any)?.usedParams || argsUsed
+        const filePath = (result as any)?.path || used?.path
+        if (filePath) {
+          updates = { ...updates, metadata: { filePath } }
+        }
+      }
+
+      // edits.apply / applyPatch / code.applyEditsTargeted → diff preview
+      if (tkey === 'applyedits' || tkey === 'applypatch' || tkey === 'codeapplyeditstargeted') {
+        const previewKey = (result as any)?.previewKey
+        let previews: any[] = []
+        if (previewKey) {
+          try {
+            const p = UiPayloadCache.peek(previewKey)
+            if (Array.isArray(p)) previews = p
+          } catch {}
+        }
+        const filesChanged = Number(
+          (result as any)?.previewCount || (Array.isArray(previews) ? previews.length : 0) || 0
+        )
+
+        // Compute line deltas and single-file header if we have previews
+        let addedLines = 0,
+          removedLines = 0
+        let singleFilePath: string | undefined = undefined
+        if (previews.length) {
+          if (previews.length === 1 && typeof previews[0]?.path === 'string')
+            singleFilePath = String(previews[0].path)
+          for (const f of previews) {
+            const { added, removed } = computeLineDiff(f.before, f.after)
+            addedLines += added
+            removedLines += removed
+          }
+        }
+
+        if (filesChanged || previewKey) {
+          updates = {
+            ...updates,
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'diff',
+            ...(addedLines || removedLines ? { addedLines, removedLines } : {}),
+            metadata: {
+              fileCount: filesChanged || undefined,
+              ...(singleFilePath ? { filePath: singleFilePath } : {}),
+            },
+            // Use provider's previewKey for UI fetch (falls back to callId if missing)
+            interactive: { type: 'diff', data: { key: previewKey || ev.callId, count: filesChanged } },
+          }
+        }
+      }
+
+      // index.search / indexSearch → vector search results
+      if (normalized === 'index_search' || tkey === 'indexsearch') {
+        const chunks = Array.isArray((result as any)?.chunks) ? (result as any).chunks : []
+        if (chunks.length) {
+          try {
+            UiPayloadCache.put(String(ev.callId), chunks)
+          } catch {}
+          updates = {
+            ...updates,
+            expandable: true,
+            defaultExpanded: false,
+            contentType: 'search',
+            metadata: { resultCount: chunks.length },
+            interactive: { type: 'search', data: { key: ev.callId, count: chunks.length } },
+          }
+        }
+      }
+
+      // agentAssessTask / agent_assess_task → task assessment
+      if (
+        normalized === 'agentAssessTask' ||
+        normalized === 'agent_assess_task' ||
+        tkey === 'agentassesstask'
+      ) {
+        const assessment = (result as any)?.assessment || {}
+        const taskType = typeof assessment.task_type === 'string' ? assessment.task_type : undefined
+        const tokenBudget =
+          typeof assessment.token_budget === 'number' ? assessment.token_budget : undefined
+        const maxIterations =
+          typeof assessment.max_iterations === 'number' ? assessment.max_iterations : undefined
+
+        try {
+          UiPayloadCache.put(String(ev.callId), result)
+        } catch {}
+
+        updates = {
+          ...updates,
+          expandable: true,
+          defaultExpanded: false,
+          contentType: 'agent-assess',
+          metadata: {
+            ...(taskType ? { taskType } : {}),
+            ...(tokenBudget !== undefined ? { tokenBudget } : {}),
+            ...(maxIterations !== undefined ? { maxIterations } : {}),
+          },
+          interactive: { type: 'agent-assess', data: { key: ev.callId } },
+        }
+      }
+
+      // knowledgeBaseSearch / knowledge_base_search → KB search results
+      if (
+        normalized === 'knowledgeBaseSearch' ||
+        normalized === 'knowledge_base_search' ||
+        normalized === 'knowledgebase_search'
+      ) {
+        const resultData = (result as any)?.data || result
+        const resultCount =
+          typeof resultData.count === 'number'
+            ? resultData.count
+            : Array.isArray(resultData.results)
+              ? resultData.results.length
+              : 0
+
+        try {
+          UiPayloadCache.put(String(ev.callId), resultData)
+        } catch {}
+
+        updates = {
+          ...updates,
+          expandable: true,
+          defaultExpanded: false,
+          contentType: 'kb-search',
+          metadata: { resultCount },
+          interactive: { type: 'kb-search', data: { key: ev.callId, count: resultCount } },
+        }
+      }
+
+      // knowledgeBaseStore / knowledge_base_store → KB store result
+      if (
+        normalized === 'knowledgeBaseStore' ||
+        normalized === 'knowledge_base_store' ||
+        normalized === 'knowledgebase_store'
+      ) {
+        const data = (result as any)?.data || result || {}
+        const filePath = data?.path
+        const id = data?.id
+        const title = data?.title
+
+        try {
+          UiPayloadCache.put(String(ev.callId), data)
+        } catch {}
+
+        updates = {
+          ...updates,
+          expandable: true,
+          defaultExpanded: false,
+          contentType: 'kb-store',
+          metadata: {
+            ...(filePath ? { filePath } : {}),
+            ...(id ? { id } : {}),
+            ...(title ? { title } : {}),
+          },
+          interactive: { type: 'kb-store', data: { key: ev.callId, id } },
+        }
+      }
+
+      // workspace.jump / workspaceJump → jump to file result
+      if (normalized === 'workspace_jump' || tkey === 'workspacejump') {
+        const resultData = (result as any)?.data || result || {}
+        const filePath = resultData?.path || resultData?.bestHandle?.path || undefined
+        const hasPreview =
+          typeof resultData?.preview === 'string' ||
+          (Array.isArray(resultData?.results) && resultData.results.length > 0)
+        const resultCount = hasPreview ? 1 : 0
+
+        try {
+          UiPayloadCache.put(String(ev.callId), resultData)
+        } catch {}
+
+        updates = {
+          ...updates,
+          expandable: true,
+          defaultExpanded: false,
+          contentType: 'workspace-jump',
+          metadata: {
+            ...(filePath ? { filePath } : {}),
+            resultCount,
+          },
+          interactive: { type: 'workspace-jump', data: { key: ev.callId, count: resultCount } },
+        }
+      }
+
+      // workspace.map / workspaceMap → workspace overview
+      if (normalized === 'workspace_map' || tkey === 'workspacemap') {
+        const resultData = (result as any)?.data || result || {}
+        const sectionCount = Array.isArray(resultData?.sections) ? resultData.sections.length : 0
+
+        try {
+          UiPayloadCache.put(String(ev.callId), resultData)
+        } catch {}
+
+        updates = {
+          ...updates,
+          expandable: true,
+          defaultExpanded: false,
+          contentType: 'workspace-map',
+          metadata: { resultCount: sectionCount },
+          interactive: { type: 'workspace-map', data: { key: ev.callId, count: sectionCount } },
+        }
+      }
+
+      // code.searchAst / searchAst → AST grep results
+      if (normalized === 'code_searchAst' || normalized === 'searchAst' || tkey === 'searchast') {
+        const resultData = (result as any)?.data || result || {}
+        const matchCount = Array.isArray(resultData?.matches) ? resultData.matches.length : 0
+
+        try {
+          UiPayloadCache.put(String(ev.callId), resultData)
+        } catch {}
+
+        updates = {
+          ...updates,
+          expandable: true,
+          defaultExpanded: false,
+          contentType: 'ast-search',
+          metadata: { resultCount: matchCount },
+          interactive: { type: 'ast-search', data: { key: ev.callId, count: matchCount } },
+        }
+      }
+
+      // Apply updates to session
+      const svc = getServices()
+      if (!svc) return
+
+      const { sessionService, workspaceId } = svc
+
+      const sessions = sessionService.getSessionsFor({ workspaceId })
+      const idx = sessions.findIndex((sess: any) => sess.id === sessionId)
+      if (idx === -1) return
+
+      const sess = sessions[idx]
+      const items = [...(sess.items || [])]
+      let boxIndex = items
+        .slice()
+        .reverse()
+        .findIndex(
+          (it: any) =>
+            it.type === 'node-execution' && it.nodeId === nid && (!execId || it.executionId === execId)
+        )
+      if (boxIndex !== -1) {
+        boxIndex = items.length - 1 - boxIndex
+        const box: any = { ...items[boxIndex] }
+        const rel = box.content
+          .slice()
+          .reverse()
+          .findIndex((c: any) => c.type === 'badge' && c.badge?.id === ev.callId)
+        if (rel !== -1) {
+          const rev = box.content.length - 1 - rel
+          const cur = box.content[rev]
+          box.content = box.content.slice()
+          box.content[rev] = { type: 'badge', badge: { ...(cur as any).badge, ...updates } }
+
+          items[boxIndex] = box
+          const updated = { ...sess, items, updatedAt: Date.now(), lastActivityAt: Date.now() }
+          const updatedSessions = sessions.slice()
+          updatedSessions[idx] = updated
+          sessionService.setSessionsFor({ workspaceId, sessions: updatedSessions })
+        }
+      }
+
+      // Persist & notify renderers
+      sessionService.saveCurrentSession()
+      try {
+        const wsId = getWorkspaceIdForSessionId(sessionId) || workspaceId
+        if (wsId)
+          broadcastWorkspaceNotification(wsId, 'session.timeline.delta', {
+            sessionId,
+            op: 'updateBadge',
+            nodeId: nid,
+            executionId: execId,
+            callId: ev.callId,
+            updates,
+          })
+      } catch {}
+      return
+    }
+
+    // Handle toolError event
+    if (t === 'toolError' && key && nid) {
+      const arr = badgeQueues.get(key) || []
+      arr.push({
+        id: ev.callId || `badge-${Date.now()}`,
+        type: 'error',
+        label: ev.toolName,
+        status: 'error',
+        error: ev.error,
+      })
+      badgeQueues.set(key, arr)
+      flush(key, true)
+      return
+    }
+
+    // Handle error event
+    if (t === 'error') {
+      const k = key || `${nid || 'system'}`
+      const arr = badgeQueues.get(k) || []
+      arr.push({
+        id: `err-${Date.now()}`,
+        type: 'error',
+        label: 'Error',
+        status: 'error',
+        error: ev.error,
+      })
+      badgeQueues.set(k, arr)
+      flush(k, true)
+      return
+    }
+
+    // Handle usageBreakdown event
+    if (t === 'usageBreakdown' && key && nid) {
+      try {
+        const br = (ev as any)?.breakdown
+        const usageKey = `usage:${requestId}:${nid}:${execId || '0'}`
+        if (br) UiPayloadCache.put(usageKey, br)
+        const arr = badgeQueues.get(key) || []
+        const meta = {
+          inputTokens: br?.totals?.inputTokens,
+          outputTokens: br?.totals?.outputTokens,
+          totalTokens: br?.totals?.totalTokens,
+          estimated: !!br?.estimated,
+        }
+        arr.push({
+          id: `usage-${Date.now()}`,
+          type: 'tool',
+          label: 'Usage',
+          icon: '📊',
+          color: 'grape',
+          variant: 'light',
+          status: 'success',
+          timestamp: Date.now(),
+          expandable: true,
+          defaultExpanded: false,
+          contentType: 'usage-breakdown',
+          interactive: { type: 'usage-breakdown', data: { key: usageKey } },
+          metadata: meta,
+        })
+        badgeQueues.set(key, arr)
+        flush(key, true)
+      } catch {}
+      return
+    }
+
+    // Handle tokenUsage event
+    if (t === 'tokenUsage') {
+      try {
+        const { provider, model, usage } = ev
+        const svc = getServices()
+        if (!svc) return
+
+        const { sessionService, workspaceId } = svc
+
+        const sessions = sessionService.getSessionsFor({ workspaceId })
+        const idx = sessions.findIndex((sess: any) => sess.id === sessionId)
+        if (idx === -1) return
+
+        const sess = sessions[idx]
+        const items = [...(sess.items || [])]
+        let boxIndex = items
+          .slice()
+          .reverse()
+          .findIndex(
+            (it: any) =>
+              it.type === 'node-execution' &&
+              it.nodeId === (ev.nodeId || '') &&
+              (!execId || it.executionId === execId)
+          )
+        if (boxIndex !== -1) {
+          boxIndex = items.length - 1 - boxIndex
+          const box: any = {
+            ...items[boxIndex],
+            provider: provider || items[boxIndex].provider,
+            model: model || items[boxIndex].model,
+            cost: usage || items[boxIndex].cost,
+          }
+          items[boxIndex] = box
+          const updated = { ...sess, items, updatedAt: Date.now(), lastActivityAt: Date.now() }
+          const updatedSessions = sessions.slice()
+          updatedSessions[idx] = updated
+          sessionService.setSessionsFor({ workspaceId, sessions: updatedSessions })
+        }
+      } catch {}
+      // Record usage into session totals (for Tokens & Costs panel)
+      try {
+        const sessionService = ServiceRegistry.get<any>('session')
+        if (sessionService && ev.nodeId && execId) {
+          sessionService.recordTokenUsage({
+            sessionId,
+            requestId,
+            nodeId: ev.nodeId,
+            executionId: execId,
+            provider: ev.provider,
+            model: ev.model,
+            usage: ev.usage,
+          })
+        }
+      } catch {}
+      try {
+        const ws = getWorkspaceIdForSessionId(sessionId)
+        if (ws)
+          broadcastWorkspaceNotification(ws, 'session.timeline.delta', {
+            sessionId,
+            op: 'updateBoxMeta',
+            nodeId: ev.nodeId,
+            executionId: execId,
+            meta: { provider: ev.provider, model: ev.model, cost: ev.usage },
+          })
+      } catch {}
+      return
+    }
+
+    // Handle nodeEnd event
+    if (t === 'nodeEnd' && key && nid) {
+      flush(key, true)
+      openBoxIds.delete(key)
+      // Finalize per-node usage into session totals
+      try {
+        const sessionService = ServiceRegistry.get<any>('session')
+        if (sessionService && execId) {
+          sessionService.finalizeNodeUsage({
+            sessionId,
+            requestId,
+            nodeId: nid,
+            executionId: execId,
+          })
+        }
+      } catch {}
+      // Proactively notify usage snapshot so Tokens & Costs panel reacts immediately
+      try {
+        broadcastSessionUsage()
+      } catch {}
+      return
+    }
+
+    // Handle done event
+    if (t === 'done') {
+      // Flush any remaining content
+      for (const k of Array.from(textBuffers.keys())) flush(k, true)
+      for (const k of Array.from(badgeQueues.keys())) flush(k, true)
+      // Finalize any remaining usage for this request
+      try {
+        const tokenTrackingService = ServiceRegistry.get<any>('tokenTracking')
+        if (tokenTrackingService) {
+          tokenTrackingService.finalizeRequestUsage({ sessionId, requestId })
+        }
+      } catch {}
+      // Proactively notify usage snapshot so Tokens & Costs panel reacts immediately
+      try {
+        broadcastSessionUsage()
+      } catch {}
+      return
+    }
+  })
+
+  return () => {
+    console.log('[TimelineListener] Cleanup for flow:', requestId)
+    try {
+      for (const t of flushTimeouts.values()) clearTimeout(t)
+    } catch {}
+    try {
+      unsubscribe()
+    } catch {}
+  }
+}

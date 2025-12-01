@@ -120,7 +120,9 @@ export default function SessionControlsBar() {
       setFlowError(null)
 
       const rid = res.requestId
+      console.log('[SessionControlsBar] flow.start succeeded, requestId:', rid)
       if (rid) {
+        console.log('[SessionControlsBar] Setting requestId in flowRuntime store:', rid)
         try { useFlowRuntime.getState().setRequestId(rid) } catch {}
         // Do not force status="running" here; let runtime events / snapshots drive it
         setTimeout(async () => {

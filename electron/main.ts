@@ -28,12 +28,11 @@ import { GeminiAiSdkProvider } from './providers-ai-sdk/gemini'
 
 // State management
 import { providers, providerCapabilities } from './core/state'
-import { initializeMainStore } from './store'
+import { initializeServices, getAppService } from './services'
 
 // Agent dependencies
 import { initAgentSessionsCleanup } from './session/agentSessions'
 import { agentTools } from './tools'
-import { verifyAstGrepAvailable } from './tools/astGrep'
 
 // Environment setup
 const DIRNAME = path.dirname(fileURLToPath(import.meta.url))
@@ -146,7 +145,13 @@ providerCapabilities.gemini = { tools: true, jsonSchema: true, vision: true, str
  * Initialize the application
  */
 async function initialize(): Promise<void> {
-  // Create the window immediately so UI appears fast
+  // Initialize services
+  console.time('[main] initializeServices')
+  initializeServices()
+  console.timeEnd('[main] initializeServices')
+
+  // Create the window
+  // Workspace attachment happens via handshake.init based on persisted window→workspace mapping
   initializeApp(() => {
     // Build menu after window is created
     buildMenu()
@@ -160,32 +165,15 @@ async function initialize(): Promise<void> {
 
   // Continue heavy initialization after a tick to let the window paint and bridge connect
   setImmediate(async () => {
-    let astGrepOk = true
     try {
-      console.time('[main] verifyAstGrepAvailable')
-      await verifyAstGrepAvailable()
-      console.timeEnd('[main] verifyAstGrepAvailable')
-    } catch (err) {
-      astGrepOk = false
-      console.error('[main] ast-grep unavailable; continuing without structural search:', err)
-    }
+      console.time('[main] initializeApp')
+      const appService = getAppService()
+      await appService.initializeApp()
+      console.timeEnd('[main] initializeApp')
 
-    try {
-      console.time('[main] initializeMainStore')
-      await initializeMainStore()
-      console.timeEnd('[main] initializeMainStore')
+      // Index watchers will be started when workspace is attached via handshake.init
     } catch (err) {
-      console.error('[main] initializeMainStore failed:', err)
-    }
-
-    // Optionally surface a non-blocking warning in logs if ast-grep is missing
-    if (!astGrepOk) {
-      try {
-        const { ServiceRegistry } = await import('./services/base/ServiceRegistry.js')
-        const appService = ServiceRegistry.get<any>('app')
-        // Keep app usable; StatusBar can read this message if desired
-        appService?.setStartupMessage?.('Structural search disabled: @ast-grep/napi not available')
-      } catch {}
+      console.error('[main] Initialization failed:', err)
     }
   })
 

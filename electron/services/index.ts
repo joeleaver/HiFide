@@ -7,14 +7,11 @@
 
 import { ServiceRegistry } from './base/ServiceRegistry'
 import { DebugService } from './DebugService'
-import { ViewService } from './ViewService'
-import { UiService } from './UiService'
 import { ToolsService } from './ToolsService'
 import { WorkspaceService } from './WorkspaceService'
 import { ExplorerService } from './ExplorerService'
 import { ProviderService } from './ProviderService'
 import { SettingsService } from './SettingsService'
-import { PlanningService } from './PlanningService'
 import { KanbanService } from './KanbanService'
 import { KnowledgeBaseService } from './KnowledgeBaseService'
 import { AppService } from './AppService'
@@ -25,21 +22,17 @@ import { FlowProfileService } from './FlowProfileService'
 import { FlowConfigService } from './FlowConfigService'
 import { FlowGraphService } from './FlowGraphService'
 import { FlowCacheService } from './FlowCacheService'
-import { SessionTimelineService } from './SessionTimelineService'
 
 // Singleton registry instance
 const registry = ServiceRegistry.getInstance()
 
 // Service instances (initialized lazily)
 let debugService: DebugService | null = null
-let viewService: ViewService | null = null
-let uiService: UiService | null = null
 let toolsService: ToolsService | null = null
 let workspaceService: WorkspaceService | null = null
 let explorerService: ExplorerService | null = null
 let providerService: ProviderService | null = null
 let settingsService: SettingsService | null = null
-let planningService: PlanningService | null = null
 let kanbanService: KanbanService | null = null
 let knowledgeBaseService: KnowledgeBaseService | null = null
 let appService: AppService | null = null
@@ -50,7 +43,6 @@ let flowProfileService: FlowProfileService | null = null
 let flowConfigService: FlowConfigService | null = null
 let flowGraphService: FlowGraphService | null = null
 let flowCacheService: FlowCacheService | null = null
-let sessionTimelineService: SessionTimelineService | null = null
 
 /**
  * Initialize all services
@@ -61,8 +53,6 @@ export function initializeServices(): void {
 
   // Phase 1: Simple services
   debugService = new DebugService()
-  viewService = new ViewService()
-  uiService = new UiService()
 
   // Phase 2: Medium complexity
   toolsService = new ToolsService()
@@ -70,7 +60,6 @@ export function initializeServices(): void {
   explorerService = new ExplorerService()
   providerService = new ProviderService()
   settingsService = new SettingsService()
-  planningService = new PlanningService()
   kanbanService = new KanbanService()
   knowledgeBaseService = new KnowledgeBaseService()
 
@@ -79,9 +68,8 @@ export function initializeServices(): void {
   indexingService = new IndexingService()
   terminalService = new TerminalService()
 
-  // Phase 4: Session services (order matters - SessionService must be first)
+  // Phase 4: Session services
   sessionService = new SessionService()
-  sessionTimelineService = new SessionTimelineService()
   flowCacheService = new FlowCacheService()
 
   // Phase 5: Flow services
@@ -91,21 +79,17 @@ export function initializeServices(): void {
 
   // Register all services
   registry.register('debug', debugService)
-  registry.register('view', viewService)
-  registry.register('ui', uiService)
   registry.register('tools', toolsService)
   registry.register('workspace', workspaceService)
   registry.register('explorer', explorerService)
   registry.register('provider', providerService)
   registry.register('settings', settingsService)
-  registry.register('planning', planningService)
   registry.register('kanban', kanbanService)
   registry.register('knowledgeBase', knowledgeBaseService)
   registry.register('app', appService)
   registry.register('indexing', indexingService)
   registry.register('terminal', terminalService)
   registry.register('session', sessionService)
-  registry.register('sessionTimeline', sessionTimelineService)
   registry.register('flowCache', flowCacheService)
   registry.register('flowProfile', flowProfileService)
   registry.register('flowConfig', flowConfigService)
@@ -136,16 +120,6 @@ export function getDebugService(): DebugService {
   return debugService
 }
 
-export function getViewService(): ViewService {
-  if (!viewService) throw new Error('[Services] ViewService not initialized')
-  return viewService
-}
-
-export function getUiService(): UiService {
-  if (!uiService) throw new Error('[Services] UiService not initialized')
-  return uiService
-}
-
 export function getToolsService(): ToolsService {
   if (!toolsService) throw new Error('[Services] ToolsService not initialized')
   return toolsService
@@ -169,11 +143,6 @@ export function getProviderService(): ProviderService {
 export function getSettingsService(): SettingsService {
   if (!settingsService) throw new Error('[Services] SettingsService not initialized')
   return settingsService
-}
-
-export function getPlanningService(): PlanningService {
-  if (!planningService) throw new Error('[Services] PlanningService not initialized')
-  return planningService
 }
 
 export function getKanbanService(): KanbanService {
@@ -226,23 +195,15 @@ export function getFlowCacheService(): FlowCacheService {
   return flowCacheService
 }
 
-export function getSessionTimelineService(): SessionTimelineService {
-  if (!sessionTimelineService) throw new Error('[Services] SessionTimelineService not initialized')
-  return sessionTimelineService
-}
-
 /**
  * Export service classes for type imports
  */
 export { DebugService } from './DebugService'
-export { ViewService } from './ViewService'
-export { UiService } from './UiService'
 export { ToolsService } from './ToolsService'
 export { WorkspaceService } from './WorkspaceService'
 export { ExplorerService } from './ExplorerService'
 export { ProviderService } from './ProviderService'
 export { SettingsService } from './SettingsService'
-export { PlanningService } from './PlanningService'
 export { KanbanService } from './KanbanService'
 export { KnowledgeBaseService } from './KnowledgeBaseService'
 export { AppService } from './AppService'
@@ -253,8 +214,4 @@ export { FlowProfileService } from './FlowProfileService'
 export { FlowConfigService } from './FlowConfigService'
 export { FlowGraphService } from './FlowGraphService'
 export { FlowCacheService } from './FlowCacheService'
-export { SessionTimelineService } from './SessionTimelineService'
-
-// Export types
-export type { WindowState } from './UiService'
 

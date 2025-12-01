@@ -6,8 +6,7 @@ export interface RpcConnection {
 }
 
 export interface ConnectionMeta {
-  workspaceId?: string
-  windowId?: string
+  windowId: number  // Required - every connection belongs to a window
   selectedSessionId?: string
   // Hydration state machine (all optional with defaults applied in registerConnection)
   hydrationPhase?: HydrationPhase
@@ -18,7 +17,7 @@ export interface ConnectionMeta {
 // Active JSON-RPC connections with metadata
 export const activeConnections = new Map<RpcConnection, ConnectionMeta>()
 
-export function registerConnection(connection: RpcConnection, meta: Partial<ConnectionMeta> = {}): void {
+export function registerConnection(connection: RpcConnection, meta: Partial<ConnectionMeta> & { windowId: number }): void {
   const now = Date.now()
   const existing = activeConnections.get(connection)
   activeConnections.set(connection, {
@@ -26,7 +25,7 @@ export function registerConnection(connection: RpcConnection, meta: Partial<Conn
     hydrationSince: now,
     snapshotVersion: 0,
     ...existing,
-    ...meta,
+    ...meta, // windowId is required in meta, so it will always be set
   })
 }
 
@@ -91,23 +90,31 @@ export function unregisterConnection(connection: RpcConnection): void {
   activeConnections.delete(connection)
 }
 
-export function setConnectionWorkspace(connection: RpcConnection, workspaceId?: string | null): void {
-  const existing = activeConnections.get(connection) || {}
-  activeConnections.set(connection, { ...existing, workspaceId: workspaceId || undefined })
-}
-
-export function setConnectionWindowId(connection: RpcConnection, windowId?: string | null): void {
-  const existing = activeConnections.get(connection) || {}
-  activeConnections.set(connection, { ...existing, windowId: windowId || undefined })
-}
-
-export function getConnectionWorkspaceId(connection: RpcConnection): string | undefined {
+export function getConnectionWindowId(connection: RpcConnection): number | undefined {
   const meta = activeConnections.get(connection)
-  return meta?.workspaceId
+  return meta?.windowId
+}
+
+export async function getConnectionWorkspaceId(connection: RpcConnection): Promise<string | undefined> {
+  const meta = activeConnections.get(connection)
+  if (!meta?.windowId) return undefined
+
+  // Get workspace from window→workspace mapping
+  try {
+    const { getWorkspaceService } = await import('../../services/index.js')
+    const workspaceService = getWorkspaceService()
+    return workspaceService.getWorkspaceForWindow(meta.windowId) || undefined
+  } catch {
+    return undefined
+  }
 }
 
 export function setConnectionSelectedSessionId(connection: RpcConnection, sessionId?: string | null): void {
-  const existing = activeConnections.get(connection) || {}
+  const existing = activeConnections.get(connection)
+  if (!existing) {
+    console.warn('[broadcast] setConnectionSelectedSessionId called on unregistered connection')
+    return
+  }
   activeConnections.set(connection, { ...existing, selectedSessionId: sessionId || undefined })
 }
 
@@ -128,14 +135,20 @@ function sameWorkspaceId(a?: string | null, b?: string | null): boolean {
   try { return !!a && !!b && path.resolve(String(a)) === path.resolve(String(b)) } catch { return a === b }
 }
 
-export function broadcastWorkspaceNotification(workspaceId: string, method: string, params: any): void {
+export async function broadcastWorkspaceNotification(workspaceId: string, method: string, params: any): Promise<void> {
   let sentCount = 0
   let totalConnections = 0
   const resolvedTarget = path.resolve(workspaceId)
 
+  // Get workspace service to look up window→workspace mappings
+  const { getWorkspaceService } = await import('../../services/index.js')
+  const workspaceService = getWorkspaceService()
+
   for (const [conn, meta] of Array.from(activeConnections.entries())) {
     totalConnections++
-    const connWs = meta.workspaceId || null
+
+    // Get workspace for this connection's window
+    const connWs = meta.windowId ? workspaceService.getWorkspaceForWindow(meta.windowId) : null
     const matches = sameWorkspaceId(connWs, workspaceId)
 
     if (matches) {
@@ -150,7 +163,7 @@ export function broadcastWorkspaceNotification(workspaceId: string, method: stri
   }
   if (sentCount === 0 && totalConnections > 0) {
     const connWorkspaces = Array.from(activeConnections.values()).map(m => {
-      const ws = m.workspaceId
+      const ws = m.windowId ? workspaceService.getWorkspaceForWindow(m.windowId) : null
       return ws ? `${ws} (resolved: ${path.resolve(ws)})` : 'null'
     })
     console.warn(`[broadcast] No connections matched workspace ${workspaceId} (resolved: ${resolvedTarget}) for ${method}. Total connections: ${totalConnections}, connection workspaces:`, connWorkspaces)

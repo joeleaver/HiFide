@@ -11,7 +11,7 @@
  */
 
 import fs from 'node:fs/promises'
-import { resolveWithinWorkspace } from '../../../utils/workspace.js'
+import { resolveWithinWorkspace } from '../../utils/workspace.js'
 import type { NodeFunction, NodeExecutionPolicy } from '../types'
 
 export const metadata = {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActionIcon,
   Badge,
@@ -98,7 +98,6 @@ export default function KanbanView() {
   const screenError = useKanbanHydration((s) => s.error)
   const startLoading = useKanbanHydration((s) => s.startLoading)
   const setReady = useKanbanHydration((s) => s.setReady)
-  const setScreenError = useKanbanHydration((s) => s.setError)
 
   // Get state from store (not local state!)
   const board = useKanban((s) => s.board)
@@ -108,36 +107,14 @@ export default function KanbanView() {
 
   const epics = board?.epics ?? []
 
-  // Load kanban data
-  const loadKanban = useCallback(async () => {
-    try {
-      const client = getBackendClient()
-      if (!client) throw new Error('No backend connection')
-
-      // First trigger a load from disk if not already loaded
-      await client.rpc('kanban.load', {})
-
-      // Then get the current board state
-      const res: any = await client.rpc('kanban.getBoard', {})
-      if (res?.ok) {
-        // Board can be null if no kanban.yaml exists yet - that's fine
-        setBoard(res.board)
-        setReady()
-      } else {
-        throw new Error(res?.error || 'Failed to load board')
-      }
-    } catch (e) {
-      setScreenError(e instanceof Error ? e.message : 'Failed to load kanban board')
-    }
-  }, [setBoard, setReady, setScreenError])
-
-  // Auto-load on mount if in idle state
+  // Mark screen as ready on mount - data is already loaded from snapshot
   useEffect(() => {
     if (screenPhase === 'idle') {
+      // Transition idle → loading → ready
       startLoading()
-      loadKanban()
+      setReady()
     }
-  }, [screenPhase, startLoading, loadKanban])
+  }, [screenPhase, startLoading, setReady])
 
   const tasksByStatus = useMemo(() => {
     const grouped: Record<KanbanStatus, KanbanTask[]> = {
@@ -397,7 +374,7 @@ export default function KanbanView() {
             leftSection={<IconRefresh size={16} />}
             onClick={() => {
               startLoading()
-              loadKanban()
+              useKanban.getState().hydrateBoard()
             }}
           >
             Retry

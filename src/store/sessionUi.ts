@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import { getBackendClient } from '../lib/backend/bootstrap'
 import { useChatTimeline } from './chatTimeline'
 import { useFlowRuntime, refreshFlowRuntimeStatusWithRetry } from './flowRuntime'
-import { useBackendBinding } from './binding'
 
 
 export interface SessionSummary { id: string; title: string }
@@ -75,55 +74,19 @@ function createSessionUiStore() {
       try { useSessionUi.getState().__setSelected(id) } catch {}
       // Ensure runtime scoping follows the newly selected session immediately
       try { useFlowRuntime.getState().setSessionScope(id) } catch {}
-
       // Immediately reset flow runtime to follow the newly selected session
       try { useFlowRuntime.getState().reset() } catch {}
+
       try {
         await client.rpc('session.select', { id })
+        // Backend will emit session.selected, session.meta.changed, session.usage.changed, and session.timeline.snapshot events
+        // Seed the flow runtime status shortly after switch
+        try { await refreshFlowRuntimeStatusWithRetry([150, 300, 600]) } catch {}
       } catch (e) {
         // Roll back selection on failure
         try { useSessionUi.getState().__setSelected(prev || null) } catch {}
-        return
+        console.warn('[sessionUi] selectSession failed:', e)
       }
-      // Proactively hydrate timeline and meta to avoid races with WS notifications
-      // Use timeout to prevent hanging if RPC fails
-      const RPC_TIMEOUT = 5000
-      const withTimeout = <T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> => {
-        return Promise.race([
-          promise,
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs))
-        ])
-      }
-
-      try {
-        set({ isHydratingMeta: true, isHydratingUsage: true })
-        const [meta, usage, snap] = await Promise.all([
-          withTimeout(client.rpc('session.getCurrentMeta', {}), RPC_TIMEOUT),
-          withTimeout(client.rpc('session.getUsageStrict', {}), RPC_TIMEOUT),
-          withTimeout(client.rpc('session.getCurrentStrict', {}), RPC_TIMEOUT),
-        ])
-        if (meta?.ok) {
-          useSessionUi.getState().__setMeta({
-            executedFlowId: meta.lastUsedFlow || '',
-            providerId: meta.providerId || '',
-            modelId: meta.modelId || '',
-          })
-        }
-        if (usage?.ok) {
-          useSessionUi.getState().__setUsage(usage.tokenUsage, usage.costs, Array.isArray(usage.requestsLog) ? usage.requestsLog : [])
-        }
-        if (snap && snap.id === id) {
-          const items = Array.isArray(snap.items) ? snap.items : []
-          try { useChatTimeline.getState().hydrateFromSession(items) } catch {}
-        }
-      } catch (e) {
-        console.warn('[sessionUi] selectSession hydration error (continuing):', e)
-      } finally {
-        set({ isHydratingMeta: false, isHydratingUsage: false })
-      }
-      // Seed the flow runtime status shortly after switch (snapshots waiting/running if already active)
-      try { await refreshFlowRuntimeStatusWithRetry([150, 300, 600]) } catch {}
-
     },
     newSession: async () => {
       const client = getBackendClient()
@@ -137,40 +100,14 @@ function createSessionUiStore() {
             try { useSessionUi.getState().__setSessions(sessions, curId) } catch {}
             // Scope runtime to the new session immediately
             try { useFlowRuntime.getState().setSessionScope(curId) } catch {}
-
           }
           if (curId) {
             try { useSessionUi.getState().__setSelected(curId) } catch {}
             try { useFlowRuntime.getState().reset() } catch {}
-            // Hydrate meta/usage/timeline proactively
-            try {
-              useSessionUi.setState({ isHydratingMeta: true, isHydratingUsage: true })
-              try { useChatTimeline.setState({ isHydrating: true }) } catch {}
-              const [meta, usage, snap] = await Promise.all([
-                client.rpc('session.getCurrentMeta', {}),
-                client.rpc('session.getUsageStrict', {}),
-                client.rpc('session.getCurrentStrict', {}),
-              ])
-              if (meta?.ok) {
-                useSessionUi.getState().__setMeta({
-                  executedFlowId: meta.lastUsedFlow || '',
-                  providerId: meta.providerId || '',
-                  modelId: meta.modelId || '',
-                })
-              }
-              if (usage?.ok) {
-                useSessionUi.getState().__setUsage(usage.tokenUsage, usage.costs, Array.isArray(usage.requestsLog) ? usage.requestsLog : [])
-              }
-              if (snap && snap.id === curId) {
-                const items = Array.isArray(snap.items) ? snap.items : []
-                try { useChatTimeline.getState().hydrateFromSession(items) } catch {}
-              }
-            } finally {
-              useSessionUi.setState({ isHydratingMeta: false, isHydratingUsage: false })
-            }
-              // Seed runtime status shortly after new session creation
-              try { await refreshFlowRuntimeStatusWithRetry([150, 300, 600]) } catch {}
-
+            // Clear timeline for new session
+            try { useChatTimeline.getState().clear() } catch {}
+            // Seed runtime status shortly after new session creation
+            try { await refreshFlowRuntimeStatusWithRetry([150, 300, 600]) } catch {}
           }
         }
       } catch {}
@@ -243,89 +180,14 @@ export function initSessionUiEvents(): void {
 
   useSessionUi.setState({ eventsInited: true })
 
-  // Session selection changes
+  // Session selection changes - just update UI state (meta/usage come from snapshot or events)
   client.subscribe('session.selected', (p: any) => {
     const id = p?.id || null
     useSessionUi.getState().__setSelected(id)
     useFlowRuntime.getState().reset()
     useFlowRuntime.getState().setSessionScope(id)
     void refreshFlowRuntimeStatusWithRetry([150, 300, 600])
-
-    // Only fetch meta/usage here; timeline snapshot will arrive via 'session.timeline.snapshot'
-    // Use timeout to prevent infinite hangs
-    const RPC_TIMEOUT = 5000
-    const withTimeout = <T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> => {
-      return Promise.race([
-        promise,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs))
-      ])
-    }
-
-    setTimeout(async () => {
-      try {
-        console.log('[sessionUi] session.selected: fetching meta/usage')
-        useSessionUi.setState({ isHydratingMeta: true, isHydratingUsage: true })
-        const [meta, usage] = await Promise.all([
-          withTimeout(client.rpc('session.getCurrentMeta', {}), RPC_TIMEOUT),
-          withTimeout(client.rpc('session.getUsageStrict', {}), RPC_TIMEOUT),
-        ])
-        if (meta?.ok) {
-          useSessionUi.getState().__setMeta({
-            executedFlowId: meta.lastUsedFlow || '',
-            providerId: meta.providerId || '',
-            modelId: meta.modelId || '',
-          })
-        }
-        if (usage?.ok) {
-          useSessionUi.getState().__setUsage(usage.tokenUsage, usage.costs, Array.isArray(usage.requestsLog) ? usage.requestsLog : [])
-        }
-        console.log('[sessionUi] session.selected: meta/usage fetch complete')
-      } catch (e) {
-        console.error('[sessionUi] session.selected: meta/usage fetch error:', e)
-      } finally {
-        console.log('[sessionUi] session.selected: clearing hydration flags')
-        useSessionUi.setState({ isHydratingMeta: false, isHydratingUsage: false })
-      }
-    }, 0)
   })
-
-  // Initial hydration and re-hydration helper (hoisted above runOnce to avoid race)
-  // This now focuses only on session-scoped meta and usage. Provider/model settings
-  // and flow templates are hydrated via hydrateSessionUiSettingsAndFlows() so they
-  // are not coupled to session list/timeline hydration.
-  const hydrateAll = async () => {
-    ;(async () => {
-      try {
-        const settled = await Promise.allSettled([
-          client.rpc('session.getCurrentMeta', {}),
-          client.rpc('session.getUsageStrict', {}),
-        ])
-
-        const getVal = (idx: number) => (settled[idx] && (settled[idx] as PromiseSettledResult<any>).status === 'fulfilled')
-          ? (settled[idx] as PromiseFulfilledResult<any>).value
-          : null
-
-        const metaRes = getVal(0)
-        const usageRes = getVal(1)
-
-        if (metaRes?.ok) {
-          useSessionUi.getState().__setMeta({
-            executedFlowId: metaRes.lastUsedFlow || '',
-            providerId: metaRes.providerId || '',
-            modelId: metaRes.modelId || '',
-          })
-        } else {
-          useSessionUi.getState().__setMeta({ executedFlowId: '', providerId: '', modelId: '' })
-        }
-
-        if (usageRes?.ok) {
-          useSessionUi.getState().__setUsage(usageRes.tokenUsage, usageRes.costs, Array.isArray(usageRes.requestsLog) ? usageRes.requestsLog : [])
-        } else {
-          useSessionUi.getState().__setUsage(undefined, undefined, [])
-        }
-      } catch {}
-    })()
-  }
 
   // Ensure there is a selected session after hydration (new window -> open workspace)
   const ensureSelectionIfNone = async () => {
@@ -352,73 +214,12 @@ export function initSessionUiEvents(): void {
     }
   }
 
-  // Hydrate exactly once per window when the backend declares the workspace ready.
-  // Even if the sessions list was already hydrated via push events, we still
-  // need to fetch meta/settings/usage/templates here, so do not short-circuit
-  // on hasHydratedList.
-  let hydratedOnce = false
-  const runOnce = async (source: string) => {
-    if (hydratedOnce) {
-      console.log('[sessionUi] runOnce: already ran, source=', source)
-      return
-    }
-    hydratedOnce = true
-    console.log('[sessionUi] runOnce: starting hydration, source=', source)
-    try { await hydrateAll() } catch (e) {
-      console.error('[sessionUi] runOnce: hydrateAll error', e)
-    }
-    try {
-      console.log('[sessionUi] runOnce: calling hydrateSessionUiSettingsAndFlows')
-      await hydrateSessionUiSettingsAndFlows()
-    } catch (e) {
-      console.error('[sessionUi] runOnce: hydrateSessionUiSettingsAndFlows error', e)
-    }
-    try { await ensureSelectionIfNone() } catch (e) {
-      console.error('[sessionUi] runOnce: ensureSelectionIfNone error', e)
-    }
-    console.log('[sessionUi] runOnce: finished hydration')
-
-    // Signal to the hydration state machine that we're ready
-    try {
-      const { markHydrationReady } = await import('./hydration')
-      markHydrationReady()
-    } catch (e) {
-      console.warn('[sessionUi] Failed to mark hydration ready:', e)
-    }
-  }
-
-  // Primary trigger: workspace.ready from backend
-  console.log('[sessionUi] Registering workspace.ready subscription')
+  // All data now comes via workspace.snapshot event (handled by hydration store)
+  // No need for manual hydration - just ensure a session is selected if none exists
   client.subscribe('workspace.ready', async (_p: any) => {
-    console.log('[sessionUi] workspace.ready received, triggering runOnce')
-    await runOnce('workspace.ready')
-  })
-  console.log('[sessionUi] workspace.ready subscription registered')
-
-  // Fallback: if we are already attached and never see workspace.ready (e.g. auto-bound first window)
-  const b = useBackendBinding.getState()
-  if (b.attached) {
-    console.log('[sessionUi] backend already attached, triggering runOnce fallback')
-    void runOnce('backend.attached.initial')
-  } else {
-    console.log('[sessionUi] backend not yet attached at init, waiting on workspace.attached to hydrate')
-  }
-
-  // Subscribe to workspace.attached so we can hydrate when this window binds
-  console.log('[sessionUi] Registering workspace.attached subscription')
-  client.subscribe('workspace.attached', async (p: any) => {
-    console.log('[sessionUi] workspace.attached received, triggering runOnce', p)
-    await runOnce('workspace.attached')
-  })
-  console.log('[sessionUi] workspace.attached subscription registered')
-
-  // Keep flows/models selectors fresh when Flow Editor or settings change
-  client.subscribe('flowEditor.graph.changed', async (_p: any) => {
-    console.log('[sessionUi] flowEditor.graph.changed received, refreshing templates snapshot')
-    try {
-      await hydrateSessionUiSettingsAndFlows()
-    } catch (e) {
-      console.error('[sessionUi] flowEditor.graph.changed: hydrateSessionUiSettingsAndFlows error', e)
+    console.log('[sessionUi] workspace.ready received, ensuring session selection')
+    try { await ensureSelectionIfNone() } catch (e) {
+      console.error('[sessionUi] ensureSelectionIfNone error', e)
     }
   })
 
@@ -440,78 +241,6 @@ export function initSessionUiEvents(): void {
   client.subscribe('session.usage.changed', (p: any) => {
     try { useSessionUi.getState().__setUsage(p?.tokenUsage, p?.costs, Array.isArray(p?.requestsLog) ? p.requestsLog : []) } catch {}
   })
-
-
-
-
-
-
-
-  // Safety fallback: if attach happens but primary hydrate path was skipped due to early exception,
-  // run a minimal hydration after a short delay. This lives outside the main try/catch so it always runs.
-  try {
-    let fallbackRan = false
-    const RPC_TIMEOUT = 5000
-    const withTimeout = <T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> => {
-      return Promise.race([
-        promise,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs))
-      ])
-    }
-
-    const fallbackHydrate = async () => {
-      if (fallbackRan || useSessionUi.getState().hasHydratedList) return
-      fallbackRan = true
-      const c = getBackendClient()
-      if (!c) return
-      try {
-        const res = await withTimeout(c.rpc('session.list', {}), RPC_TIMEOUT)
-        const sessions: Array<{ id: string; title: string }> = Array.isArray(res?.sessions) ? res.sessions : []
-        const currentId: string | null = (res?.currentId ?? null) as any
-        try { useSessionUi.getState().__setSessions(sessions, currentId) } catch {}
-        if (currentId) {
-          try { useChatTimeline.setState({ isHydrating: true }) } catch {}
-          try {
-            const snap = await withTimeout(c.rpc('session.getCurrentStrict', {}), RPC_TIMEOUT)
-            if (snap && snap.id === currentId) {
-              const items = Array.isArray(snap.items) ? snap.items : []
-              try { useChatTimeline.getState().hydrateFromSession(items) } catch {}
-            } else {
-              // If no snapshot, ensure isHydrating is cleared
-              try { useChatTimeline.setState({ isHydrating: false }) } catch {}
-            }
-          } catch {
-            // Ensure isHydrating is cleared on error
-            try { useChatTimeline.setState({ isHydrating: false }) } catch {}
-          }
-        } else if (sessions.length > 0) {
-          // Ensure there is a selected session so timeline/meta can proceed
-          try { await withTimeout(c.rpc('session.select', { id: sessions[0].id }), RPC_TIMEOUT) } catch {}
-        }
-      } catch (e) {
-        console.warn('[sessionUi] fallbackHydrate failed:', e)
-        // Ensure all hydration flags are cleared on failure
-        try { useChatTimeline.setState({ isHydrating: false }) } catch {}
-      }
-    }
-
-    // If already attached when this file loads, schedule fallback soon
-    try {
-      const b = useBackendBinding.getState()
-      if (b.attached) {
-        setTimeout(() => { void fallbackHydrate() }, 350)
-      }
-    } catch {}
-
-    // Also subscribe to future attachments
-    useBackendBinding.subscribe((s: { attached: boolean }) => s.attached, (attached: boolean) => {
-      if (!attached) return
-      setTimeout(() => {
-        void fallbackHydrate()
-      }, 350)
-    })
-  } catch {}
-
 }
 
 // Explicit helper to hydrate provider/model settings and available flows without

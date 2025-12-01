@@ -6,6 +6,7 @@ import { useSessionUi } from '../store/sessionUi'
 import { useChatTimeline } from '../store/chatTimeline'
 import SessionPane from '../SessionPane'
 import TerminalPanel from './TerminalPanel'
+import { getBackendClient } from '../lib/backend/bootstrap'
 
 const NAV_WIDTH = 48
 const MIN_SESSION_WIDTH = 240
@@ -30,10 +31,11 @@ export default function GlobalSessionPanel() {
   // Persist layout to per-project settings
   async function persistLayout(next?: { width?: number; mainCollapsed?: boolean }) {
     try {
-      const settingsRes = await window.workspace?.getSettings?.()
-      const prev = (settingsRes && (settingsRes as any).settings) || {}
+      const client = getBackendClient()
+      const settingsRes: any = await client?.rpc('workspace.getSettings', {})
+      const prev = (settingsRes && settingsRes.settings) || {}
       const layout = { ...(prev.layout || {}), sessionPanelWidth: next?.width ?? sessionPanelWidth, mainCollapsed: next?.mainCollapsed ?? mainCollapsed }
-      await window.workspace?.setSetting?.('layout', layout)
+      await client?.rpc('workspace.setSetting', { key: 'layout', value: layout })
     } catch {}
   }
 

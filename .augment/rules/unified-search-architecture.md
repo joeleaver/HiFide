@@ -9,10 +9,11 @@ Owner: Main process (Electron). Single entrypoint: workspace.search tool. Update
 ## Goals
 - Ultra-fast literal and phrase search: ripgrep via vscode-ripgrep
 - Robust NL semantic retrieval: embeddings (transformers.js)
-- Structure-aware search: AST-grep (existing)
 - Unified corpus: Workspace code and Knowledge Base (KB)
-- One API: workspace.search returns merged, ranked results with reasons [literal|semantic|ast] and corpus tag [workspace|kb]
+- One API: workspace.search returns merged, ranked results with reasons [literal|semantic] and corpus tag [workspace|kb]
 - Replace legacy glob-as-search; keep globs only as include/exclude filters
+
+**Note**: AST-grep was removed (2025-11-27) as the agent couldn't use it effectively. Search now uses only literal (ripgrep) and semantic (embeddings) lanes.
 
 ## Phases
 
@@ -34,15 +35,14 @@ Owner: Main process (Electron). Single entrypoint: workspace.search tool. Update
 
 ## Design
 
-- workspace.search backend executes three lanes in parallel:
+- workspace.search backend executes two lanes in parallel:
   1) literal (ripgrep) → fast exact string/regex
   2) semantic (indexer.search) → vector similarity over chunks
-  3) structure (AST-grep) → code-aware patterns
 - Merge policy: dedupe by (path,line/window), combine reasons, compute blended score; sort by score desc.
 - Filters: include/exclude globs applied uniformly; sensitive files always excluded (.env*, .hifide-private/secrets/**, api_key.txt).
 
 ## Packaging & Gating
-- Dependencies: vscode-ripgrep (bin), @xenova/transformers, sharp (transformers dep), @ast-grep/napi (existing)
+- Dependencies: vscode-ripgrep (bin), @xenova/transformers, sharp (transformers dep)
 - electron-builder: add "**/vscode-ripgrep/**" and "**/sharp/**/*.{node,dll,so,dylib}" to asarUnpack so binaries are executable outside ASAR.
 - Rebuild native deps for Electron: electron-rebuild for node-pty and sharp in dev/build; electron-builder install-app-deps on postinstall.
 - transformers.js model cache path: set to Electron userData/models/transformers (fallback: ~/.hifide/models/transformers) to ensure writeable location across Windows/Linux/macOS.
@@ -61,7 +61,6 @@ Owner: Main process (Electron). Single entrypoint: workspace.search tool. Update
 - Add golden tests for queries like: "Find where '[main-store] changed keys' is printed".
 - Verify ripgrep lane returns correct files/lines.
 - Verify semantic returns top chunks for paraphrases.
-- Verify AST-grep for logging/dispatch patterns.
 
 ## Status Log
 - [x] Write plan (this file)

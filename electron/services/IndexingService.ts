@@ -7,6 +7,8 @@
 import { Service } from './base/Service.js'
 import type { IndexStatus, IndexProgress } from '../store/types.js'
 import { getIndexer } from '../core/state.js'
+import path from 'node:path'
+import { getAppService } from './index.js'
 
 // Shallow equality to avoid spamming setState with identical values
 function shallowEqual(a: any, b: any): boolean {
@@ -153,6 +155,20 @@ export class IndexingService extends Service<IndexingState> {
 
   setIndexAutoRefresh(params: { config: Partial<AutoRefreshConfig> }): void {
     this.setState({ idxAutoRefresh: { ...this.state.idxAutoRefresh, ...params.config } })
+  }
+
+  updateIndexMetrics(params: {
+    lastScanAt?: number
+    lastFileCount?: number
+    lastRebuildAt?: number
+    rebuildTimestamps?: number[]
+  }): void {
+    this.setState({
+      ...(params.lastScanAt !== undefined ? { idxLastScanAt: params.lastScanAt } : {}),
+      ...(params.lastFileCount !== undefined ? { idxLastFileCount: params.lastFileCount } : {}),
+      ...(params.lastRebuildAt !== undefined ? { idxLastRebuildAt: params.lastRebuildAt } : {}),
+      ...(params.rebuildTimestamps !== undefined ? { idxRebuildTimestamps: params.rebuildTimestamps } : {}),
+    })
   }
 
   // Progress subscription
@@ -360,7 +376,6 @@ export class IndexingService extends Service<IndexingState> {
       // Create new version directory
       const newVersion = `v${Date.now()}`
       const versionInfo = indexer.getVersionInfo()
-      const path = await import('node:path')
       const newIndexDir = path.join(versionInfo.versionsDir, newVersion)
 
       console.log(`[indexing] Starting background rebuild to ${newVersion} (priority: ${priority})`)
@@ -505,7 +520,7 @@ export class IndexingService extends Service<IndexingState> {
         try {
           const t0 = Date.now()
           console.time('[indexing] rebuild')
-          const appService = (await import('./index.js')).getAppService?.()
+          const appService = getAppService()
           appService?.setStartupMessage('Indexing workspace...')
           await indexer.rebuild((p) => {
             // Update progress state

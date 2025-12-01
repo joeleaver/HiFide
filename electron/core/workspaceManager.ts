@@ -9,7 +9,9 @@
  */
 
 import { BrowserWindow } from 'electron'
-import type { Indexer } from '../indexing/indexer'
+import path from 'node:path'
+import { Indexer } from '../indexing/indexer.js'
+import { startKanbanWatcher, stopKanbanWatcher, startKbWatcher, stopKbWatcher } from './state.js'
 
 export type WorkspaceId = string // absolute folder path
 
@@ -58,9 +60,7 @@ class WorkspaceManagerImpl {
    */
   async getIndexer(workspaceId: WorkspaceId): Promise<Indexer> {
     const entry = await this.ensureEntry(workspaceId)
-    if (!entry.indexer) {
-      const { Indexer } = await import('../indexing/indexer.js')
-      entry.indexer = new Indexer(workspaceId)
+    if (!entry.indexer) {      entry.indexer = new Indexer(workspaceId)
     }
     return entry.indexer
   }
@@ -71,8 +71,6 @@ class WorkspaceManagerImpl {
   async getKbIndexer(workspaceId: WorkspaceId): Promise<Indexer> {
     const entry = await this.ensureEntry(workspaceId)
     if (!entry.kbIndexer) {
-      const path = await import('node:path')
-      const { Indexer } = await import('../indexing/indexer.js')
       const kbRoot = path.join(workspaceId, '.hifide-public', 'kb')
       entry.kbIndexer = new Indexer(workspaceId, {
         scanRoot: kbRoot,
@@ -96,17 +94,13 @@ class WorkspaceManagerImpl {
   }
 
   private async startWatchers(workspaceId: WorkspaceId, _entry: WorkspaceEntry): Promise<void> {
-    try {
-      const { startKanbanWatcher } = await import('./state.js')
-      await startKanbanWatcher(workspaceId)
+    try {      await startKanbanWatcher(workspaceId)
       // Note: _entry.kanbanWatcher is not set because state.ts manages watchers internally
     } catch (error) {
       console.error(`[WorkspaceManager] Failed to start Kanban watcher for ${workspaceId}:`, error)
     }
 
-    try {
-      const { startKbWatcher } = await import('./state.js')
-      await startKbWatcher(workspaceId)
+    try {      await startKbWatcher(workspaceId)
       // Note: entry.kbWatcher is not set because state.ts manages watchers internally
     } catch (error) {
       console.error(`[WorkspaceManager] Failed to start KB watcher for ${workspaceId}:`, error)
@@ -118,16 +112,12 @@ class WorkspaceManagerImpl {
     if (!entry) return
 
     // Stop watchers
-    try {
-      const { stopKanbanWatcher } = await import('./state.js')
-      stopKanbanWatcher(id)
+    try {      stopKanbanWatcher(id)
     } catch (error) {
       console.error(`[WorkspaceManager] Failed to stop Kanban watcher for ${id}:`, error)
     }
 
-    try {
-      const { stopKbWatcher } = await import('./state.js')
-      stopKbWatcher(id)
+    try {      stopKbWatcher(id)
     } catch (error) {
       console.error(`[WorkspaceManager] Failed to stop KB watcher for ${id}:`, error)
     }

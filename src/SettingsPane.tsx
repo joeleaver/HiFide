@@ -3,28 +3,22 @@ import { Button, Group, Stack, Text, TextInput, Title, Select, Switch, Progress,
 import { notifications } from '@mantine/notifications'
 import PricingSettings from './components/PricingSettings'
 import { useEffect, useState } from 'react'
+import { ApiKeysForm } from './components/ApiKeysForm'
+import { useApiKeyManagement } from './hooks/useApiKeyManagement'
 
 export default function SettingsPane() {
+  // Use the reusable API key management hook
+  const { apiKeys, setApiKeys, providerValid, saving, validating, saveAndValidate } = useApiKeyManagement(false)
+
   // Local UI state hydrated from backend snapshots
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, any>>({})
-  const [providerValid, setProviderValid] = useState<Record<string, boolean>>({})
   const [defaultModels, setDefaultModels] = useState<Record<string, string>>({})
   const [autoRetry, setAutoRetry] = useState(false)
-
-  const [settingsApiKeys, setSettingsApiKeys] = useState<any>({})
-  const [settingsSaving, setSettingsSaving] = useState(false)
-  const [settingsSaved, setSettingsSaved] = useState(false)
   const [startupMessage, setStartupMessage] = useState<string | null>(null)
 
-  // Local-only edits
-  const [localApiKeys, setLocalApiKeys] = useState<any>({})
+  // Fireworks allowlist management
   const [newFwModel, setNewFwModel] = useState('')
   const [fireworksAllowed, setFireworksAllowed] = useState<string[]>([])
-  // Hydrate local state once on mount to avoid clobbering in-progress edits
-  useEffect(() => {
-    setLocalApiKeys(settingsApiKeys)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   const openaiOptions = (modelsByProvider as any).openai || []
   const anthropicOptions = (modelsByProvider as any).anthropic || []
@@ -64,13 +58,12 @@ export default function SettingsPane() {
     client.rpc<any>('settings.get', {}).then((snap) => {
       if (!snap?.ok) return
       setModelsByProvider(snap.modelsByProvider || {})
-      setProviderValid(snap.providerValid || {})
       setDefaultModels(snap.defaultModels || {})
       setAutoRetry(!!snap.autoRetry)
-      setSettingsApiKeys(snap.settingsApiKeys || {})
       setStartupMessage(snap.startupMessage || null)
       setFireworksAllowed(snap.fireworksAllowedModels || [])
-      setLocalApiKeys(snap.settingsApiKeys || {})
+      // Hydrate API keys into the hook
+      setApiKeys(snap.settingsApiKeys || {})
     }).catch(() => { })
 
     // Index snapshot
@@ -134,40 +127,20 @@ export default function SettingsPane() {
   const save = async () => {
     const client = getBackendClient(); if (!client) return
     try {
-      setSettingsSaving(true)
-      // Clear previous results (backend clears any transient result state)
-      await client.rpc('settings.clearResults', {})
+      // Use the hook's saveAndValidate function
+      await saveAndValidate()
 
-      // Send partial keys update then persist
-      await client.rpc('settings.setApiKeys', { apiKeys: localApiKeys })
-      await client.rpc('settings.saveKeys', {})
-
-      // Validate
-      const v: any = await client.rpc('settings.validateKeys', {})
-      if (v?.ok) {
-        notifications.show({ color: 'teal', title: 'API keys saved', message: 'Settings have been saved and validated successfully.' })
-        setSettingsSaved(true)
-      } else {
-        const failures = v?.failures || []
-        notifications.show({ color: 'orange', title: 'Some keys failed validation', message: failures.join(' | ') || 'Unknown error' })
-      }
-
-      // Refresh snapshot (models, providerValid, etc.)
+      // Refresh snapshot (models, defaultModels, etc.)
       const snap: any = await client.rpc('settings.get', {})
       if (snap?.ok) {
         setModelsByProvider(snap.modelsByProvider || {})
-        setProviderValid(snap.providerValid || {})
         setDefaultModels(snap.defaultModels || {})
         setAutoRetry(!!snap.autoRetry)
-        setSettingsApiKeys(snap.settingsApiKeys || {})
         setStartupMessage(snap.startupMessage || null)
         setFireworksAllowed(snap.fireworksAllowedModels || [])
       }
     } catch (e: any) {
       console.error('[SettingsPane] Save error:', e)
-      notifications.show({ color: 'red', title: 'Save failed', message: e?.message || String(e) })
-    } finally {
-      setSettingsSaving(false)
     }
   }
 
@@ -188,116 +161,79 @@ export default function SettingsPane() {
           <Text size="sm" c="dimmed">Configure provider API keys (persisted locally via Electron Store in the main process)</Text>
         </div>
 
-        <Stack gap="sm">
-          <TextInput
-            label="OpenAI API Key"
-            placeholder="sk-..."
-            type="password"
-            value={localApiKeys.openai || ''}
-            onChange={(e) => setLocalApiKeys({ ...localApiKeys, openai: e.currentTarget.value })}
-            rightSection={providerValid.openai ? <Text size="xs" c="teal">✓</Text> : null}
-          />
-          <TextInput
-            label="Anthropic API Key"
-            placeholder="sk-ant-..."
-            type="password"
-            value={localApiKeys.anthropic || ''}
-            onChange={(e) => setLocalApiKeys({ ...localApiKeys, anthropic: e.currentTarget.value })}
-            rightSection={providerValid.anthropic ? <Text size="xs" c="teal">✓</Text> : null}
-          />
-          <TextInput
-            label="Gemini API Key"
-            placeholder="AIza..."
-            type="password"
-            value={localApiKeys.gemini || ''}
-            onChange={(e) => setLocalApiKeys({ ...localApiKeys, gemini: e.currentTarget.value })}
-            rightSection={providerValid.gemini ? <Text size="xs" c="teal">✓</Text> : null}
-          />
-          <TextInput
-            label="Fireworks API Key"
-            placeholder="fk-..."
-            type="password"
-            value={(localApiKeys as any).fireworks || ''}
-            onChange={(e) => setLocalApiKeys({ ...localApiKeys, fireworks: e.currentTarget.value })}
-            rightSection={(providerValid as any).fireworks ? <Text size="xs" c="teal">✓</Text> : null}
-          />
-          <TextInput
-            label="xAI API Key"
-            placeholder="xai-..."
-            type="password"
-            value={(localApiKeys as any).xai || ''}
-            onChange={(e) => setLocalApiKeys({ ...localApiKeys, xai: e.currentTarget.value })}
-            rightSection={(providerValid as any).xai ? <Text size="xs" c="teal">✓</Text> : null}
-          />
+        <ApiKeysForm
+          apiKeys={apiKeys}
+          onChange={setApiKeys}
+          providerValid={providerValid}
+          showValidation={true}
+        />
 
-          {/* Fireworks Models Allowlist (only when Fireworks key is valid) */}
-          {(providerValid as any).fireworks && (
-            <Stack gap="xs">
-              <Title order={4}>Fireworks Models</Title>
-              <Text size="sm" c="dimmed">Select which Fireworks models to expose in the app. Start with recommended defaults or add specific model IDs.</Text>
+        {/* Fireworks Models Allowlist (only when Fireworks key is valid) */}
+        {(providerValid as any).fireworks && (
+          <Stack gap="xs">
+            <Title order={4}>Fireworks Models</Title>
+            <Text size="sm" c="dimmed">Select which Fireworks models to expose in the app. Start with recommended defaults or add specific model IDs.</Text>
 
-              <Group align="flex-end">
-                <TextInput
-                  style={{ flex: 1 }}
-                  label="Add model by ID"
-                  placeholder="e.g., accounts/fireworks/models/qwen3-coder-480b-a35b-instruct"
-                  value={newFwModel}
-                  onChange={(e) => setNewFwModel(e.currentTarget.value)}
-                />
-                <Button
-                  onClick={async () => {
-                    const v = newFwModel.trim(); if (!v) return
-                    const client = getBackendClient(); if (!client) return
-                    await client.rpc('provider.fireworks.add', { model: v })
-                    setNewFwModel('')
-                    const snap: any = await client.rpc('settings.get', {})
-                    if (snap?.ok) { setFireworksAllowed(snap.fireworksAllowedModels || []); setModelsByProvider(snap.modelsByProvider || {}) }
-                  }}
-                  disabled={!newFwModel.trim()}
-                >
-                  Add
-                </Button>
-                <Button variant="light" onClick={async () => {
+            <Group align="flex-end">
+              <TextInput
+                style={{ flex: 1 }}
+                label="Add model by ID"
+                placeholder="e.g., accounts/fireworks/models/qwen3-coder-480b-a35b-instruct"
+                value={newFwModel}
+                onChange={(e) => setNewFwModel(e.currentTarget.value)}
+              />
+              <Button
+                onClick={async () => {
+                  const v = newFwModel.trim(); if (!v) return
                   const client = getBackendClient(); if (!client) return
-                  await client.rpc('provider.fireworks.loadDefaults', {})
-                  const snap: any = await client.rpc('settings.get', {}); if (snap?.ok) setFireworksAllowed(snap.fireworksAllowedModels || [])
-                }}>
-                  Load Recommended Defaults
-                </Button>
-                <Button variant="light" onClick={async () => {
-                  const client = getBackendClient(); if (!client) return
-                  await client.rpc('provider.refreshModels', { provider: 'fireworks' })
-                  const snap: any = await client.rpc('settings.get', {}); if (snap?.ok) setModelsByProvider(snap.modelsByProvider || {})
-                }}>
-                  Refresh
-                </Button>
-              </Group>
+                  await client.rpc('provider.fireworks.add', { model: v })
+                  setNewFwModel('')
+                  const snap: any = await client.rpc('settings.get', {})
+                  if (snap?.ok) { setFireworksAllowed(snap.fireworksAllowedModels || []); setModelsByProvider(snap.modelsByProvider || {}) }
+                }}
+                disabled={!newFwModel.trim()}
+              >
+                Add
+              </Button>
+              <Button variant="light" onClick={async () => {
+                const client = getBackendClient(); if (!client) return
+                await client.rpc('provider.fireworks.loadDefaults', {})
+                const snap: any = await client.rpc('settings.get', {}); if (snap?.ok) setFireworksAllowed(snap.fireworksAllowedModels || [])
+              }}>
+                Load Recommended Defaults
+              </Button>
+              <Button variant="light" onClick={async () => {
+                const client = getBackendClient(); if (!client) return
+                await client.rpc('provider.refreshModels', { provider: 'fireworks' })
+                const snap: any = await client.rpc('settings.get', {}); if (snap?.ok) setModelsByProvider(snap.modelsByProvider || {})
+              }}>
+                Refresh
+              </Button>
+            </Group>
 
-              {/* Current allowlist */}
-              <Stack gap={4}>
-                {fireworksAllowed.length === 0 ? (
-                  <Text size="xs" c="dimmed">No allowed models yet.</Text>
-                ) : (
-                  fireworksAllowed.map((m: string) => (
-                    <Group key={m} justify="space-between" wrap="nowrap">
-                      <Text size="xs" c="#ccc" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</Text>
+            {/* Current allowlist */}
+            <Stack gap={4}>
+              {fireworksAllowed.length === 0 ? (
+                <Text size="xs" c="dimmed">No allowed models yet.</Text>
+              ) : (
+                fireworksAllowed.map((m: string) => (
+                  <Group key={m} justify="space-between" wrap="nowrap">
+                    <Text size="xs" c="#ccc" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</Text>
 
-                      <Button size="xs" variant="light" color="red" onClick={async () => { const client = getBackendClient(); if (!client) return; await client.rpc('provider.fireworks.remove', { model: m }); const snap: any = await client.rpc('settings.get', {}); if (snap?.ok) setFireworksAllowed(snap.fireworksAllowedModels || []) }}>Remove</Button>
-                    </Group>
-                  ))
-                )}
-              </Stack>
+                    <Button size="xs" variant="light" color="red" onClick={async () => { const client = getBackendClient(); if (!client) return; await client.rpc('provider.fireworks.remove', { model: m }); const snap: any = await client.rpc('settings.get', {}); if (snap?.ok) setFireworksAllowed(snap.fireworksAllowedModels || []) }}>Remove</Button>
+                  </Group>
+                ))
+              )}
             </Stack>
-          )}
+          </Stack>
+        )}
 
-          <Divider />
-        </Stack>
+        <Divider />
 
         <Group>
-          <Button onClick={save} loading={settingsSaving}>
+          <Button onClick={save} loading={saving || validating}>
             Save & Validate Keys
           </Button>
-          {settingsSaved && <Text c="teal" size="sm">✓ Saved successfully</Text>}
         </Group>
       </Stack>
 
@@ -581,7 +517,6 @@ export default function SettingsPane() {
           )}
         </Stack>
       </Stack>
-
     </Stack>
   )
 }

@@ -1,7 +1,6 @@
 import { Text, UnstyledButton, Stack, Skeleton, Center, Button } from '@mantine/core'
 import { IconChevronLeft, IconChevronRight, IconRefresh, IconAlertTriangle } from '@tabler/icons-react'
-import { useEffect, useCallback } from 'react'
-import { getBackendClient } from '../lib/backend/bootstrap'
+import { useEffect } from 'react'
 import { useUiStore } from '../store/ui'
 import { useFlowEditorHydration } from '../store/screenHydration'
 import { useFlowEditor } from '../store/flowEditor'
@@ -51,7 +50,6 @@ export default function FlowView() {
   const screenError = useFlowEditorHydration((s) => s.error)
   const startLoading = useFlowEditorHydration((s) => s.startLoading)
   const setReady = useFlowEditorHydration((s) => s.setReady)
-  const setError = useFlowEditorHydration((s) => s.setError)
 
   // Renderer-only UI state
   const metaPanelOpen = useUiStore((s) => s.metaPanelOpen)
@@ -63,37 +61,14 @@ export default function FlowView() {
   // Perf: trace rerenders for FlowView hot path
   useRerenderTrace('FlowView', { metaPanelOpen, screenPhase })
 
-  // Load flow editor data
-  const loadFlowEditor = useCallback(async () => {
-    try {
-      const client = getBackendClient()
-      if (!client) throw new Error('No backend connection')
-
-      // Load templates and graph in parallel
-      await Promise.all([
-        useFlowEditor.getState().hydrateTemplates(),
-        useFlowEditor.getState().fetchGraph(),
-      ])
-
-      // Also get UI state
-      const res: any = await client.rpc('ui.getWindowState', {})
-      const ws = res?.windowState || {}
-      setMetaPanelWidth(typeof ws.metaPanelWidth === 'number' ? ws.metaPanelWidth : 300)
-      setMetaPanelOpen(Boolean(ws.metaPanelOpen))
-
-      setReady()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load flow editor')
-    }
-  }, [setMetaPanelWidth, setMetaPanelOpen, setReady, setError])
-
-  // Auto-load on mount if in idle state
+  // Mark screen as ready on mount - data is already loaded from snapshot
   useEffect(() => {
     if (screenPhase === 'idle') {
+      // Transition idle → loading → ready
       startLoading()
-      loadFlowEditor()
+      setReady()
     }
-  }, [screenPhase, startLoading, loadFlowEditor])
+  }, [screenPhase, startLoading, setReady])
 
   // Meta panel resize handler
   const handleMetaPanelMouseDown = (e: React.MouseEvent) => {
@@ -111,7 +86,7 @@ export default function FlowView() {
       setIsDraggingMetaPanel(false)
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
-      void getBackendClient()?.rpc('ui.updateWindowState', { updates: { metaPanelWidth: useUiStore.getState().metaPanelWidth } })
+      // Width is already persisted to localStorage by setMetaPanelWidth
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -137,7 +112,8 @@ export default function FlowView() {
             leftSection={<IconRefresh size={16} />}
             onClick={() => {
               startLoading()
-              loadFlowEditor()
+              useFlowEditor.getState().hydrateTemplates()
+              useFlowEditor.getState().fetchGraph()
             }}
           >
             Retry
@@ -213,7 +189,7 @@ export default function FlowView() {
               Tools
             </Text>
             <UnstyledButton
-              onClick={() => { setMetaPanelOpen(false); void getBackendClient()?.rpc('ui.updateWindowState', { updates: { metaPanelOpen: false } }) }}
+              onClick={() => setMetaPanelOpen(false)}
               style={{
                 color: '#cccccc',
                 display: 'flex',
@@ -253,7 +229,7 @@ export default function FlowView() {
       {/* Toggle button when panel is closed */}
       {!metaPanelOpen && (
         <UnstyledButton
-          onClick={() => { setMetaPanelOpen(true); void getBackendClient()?.rpc('ui.updateWindowState', { updates: { metaPanelOpen: true } }) }}
+          onClick={() => setMetaPanelOpen(true)}
           style={{
             width: 24,
             height: '100%',

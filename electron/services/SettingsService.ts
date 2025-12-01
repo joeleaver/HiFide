@@ -7,7 +7,7 @@
 import { Service } from './base/Service.js'
 import type { ApiKeys, ModelPricing, PricingConfig, TokenUsage, TokenCost } from '../store/types.js'
 import { DEFAULT_PRICING } from '../data/defaultPricing.js'
-import { ServiceRegistry } from './base/ServiceRegistry.js'
+import { getProviderService, getAppService } from './index.js'
 
 interface SettingsState {
   settingsApiKeys: ApiKeys
@@ -42,13 +42,8 @@ export class SettingsService extends Service<SettingsState> {
   }
 
   protected onStateChange(updates: Partial<SettingsState>): void {
-    // Persist settings
-    if (updates.settingsApiKeys !== undefined) {
-      this.persistence.save('settingsApiKeys', this.state.settingsApiKeys)
-    }
-    if (updates.pricingConfig !== undefined) {
-      this.persistence.save('pricingConfig', this.state.pricingConfig)
-    }
+    // Persist entire state to 'settings' key (matches persistKey in constructor)
+    this.persistState()
 
     // Emit events
     if (updates.settingsApiKeys !== undefined) {
@@ -313,17 +308,14 @@ export class SettingsService extends Service<SettingsState> {
           fireworks: !!keys.fireworks?.trim() && !lc.some((f) => f.includes('fireworks')),
           xai: !!keys.xai?.trim() && !lc.some((f) => f.includes('xai')),
         }
-
-        const providerService = ServiceRegistry.get<any>('provider')
-        if (providerService) {
-          providerService.setProvidersValid(map)
-          // Fetch models for newly valid providers (non-blocking)
-          void providerService.refreshAllModels()
-        }
+        const providerService = getProviderService()
+        providerService.setProvidersValid(map)
+        // Fetch models for newly valid providers (non-blocking)
+        void providerService.refreshAllModels()
 
         // Clear startup banner if at least one provider is valid
         if (map.openai || map.anthropic || map.gemini || map.fireworks || map.xai) {
-          const appService = ServiceRegistry.get<any>('app')
+          const appService = getAppService()
           if (appService?.setStartupMessage) {
             appService.setStartupMessage(null)
           }

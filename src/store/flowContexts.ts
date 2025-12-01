@@ -29,34 +29,12 @@ export function initFlowContextsEvents(): void {
   const client = getBackendClient()
   if (!client) return
 
-  // Context updates
+  // Context updates (incremental changes after initial hydration)
   client.subscribe('flow.contexts.changed', (p: any) => {
     useFlowContexts.getState().setContexts(p?.mainContext || null, p?.isolatedContexts || {})
   })
 
-  // Initial hydration
-  ;(async () => {
-    try {
-      await (client as any).whenReady?.(5000)
-      const ws = await client.rpc('workspace.get', {})
-      if (!ws?.ok || !ws.root) return
-      const res = await client.rpc('flow.getContexts', {})
-      if (res?.ok) {
-        useFlowContexts.getState().setContexts(res.mainContext || null, res.isolatedContexts || {})
-      }
-    } catch {}
-  })()
-
-  // Workspace changes - clear and re-hydrate
-  // Only clear/rehydrate on workspace.bound (actual workspace change), not workspace.ready (just a ready signal)
-  client.subscribe('workspace.bound', async () => {
-    useFlowContexts.getState().setContexts(null, {})
-    try {
-      const res = await client.rpc('flow.getContexts', {})
-      if (res?.ok) {
-        useFlowContexts.getState().setContexts(res.mainContext || null, res.isolatedContexts || {})
-      }
-    } catch {}
-  })
+  // Initial hydration happens via workspace snapshot in hydration.ts
+  // No RPC call needed here
 }
 

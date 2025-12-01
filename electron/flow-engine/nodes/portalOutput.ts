@@ -49,8 +49,8 @@ export const portalOutputNode: NodeFunction = async (flow, context, _dataIn, inp
     }
   }
 
-  // Retrieve data from portal registry (via store action)
-  const portalData = flow.store.feGetPortalData(portalId)
+  // Retrieve data from portal registry
+  const portalData = flow.getPortalData(portalId)
 
   if (!portalData) {
     // No portal data yet (first iteration in a loop, or Portal Input hasn't executed)

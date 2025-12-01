@@ -1,20 +1,19 @@
 /**
  * Renderer-Only UI Store
  *
- * Manages transient UI state that doesn't need to be persisted or synced to main process.
+ * Manages UI state with workspace-scoped localStorage persistence.
  * This includes:
- * - Panel resize state (local width during drag)
- * - Scroll positions and auto-scroll behavior
- * - Drag states
- * - Other ephemeral UI state
+ * - Panel widths and heights (persisted per workspace)
+ * - Panel collapsed states (persisted per workspace)
+ * - Current view/routing (persisted per workspace)
+ * - Transient state (drag states, scroll positions, modal states - not persisted)
  *
- * This lives outside the main (backend) store because:
- * 1. This state is renderer-only (doesn't need to sync to backend)
- * 2. This state is transient (doesn't need persistence)
- * 3. This state changes frequently during interactions (keeps JSON-RPC chatter minimal)
+ * UI state is persisted to localStorage with workspace-scoped keys to ensure
+ * each workspace has independent UI preferences in multi-window scenarios.
  */
 
 import { create } from 'zustand'
+import { loadUiState, saveUiState, saveUiStateDebounced } from './utils/uiPersistence'
 
 type ViewType = 'welcome' | 'flow' | 'explorer' | 'sourceControl' | 'knowledgeBase' | 'kanban' | 'settings'
 
@@ -102,57 +101,101 @@ interface UiStore {
 
 }
 
-export const useUiStore = create<UiStore>((set) => ({
-  // State - initialized with defaults, will be synced from main store on mount
-  sessionPanelWidth: 300,
-  mainCollapsed: false,
+// Load persisted UI state from localStorage (workspace-scoped)
+const persisted = loadUiState()
 
-  metaPanelWidth: 300,
+export const useUiStore = create<UiStore>((set) => ({
+  // Persisted state - initialized from localStorage with fallback to defaults
+  sessionPanelWidth: persisted.sessionPanelWidth ?? 300,
+  metaPanelWidth: persisted.metaPanelWidth ?? 300,
+  metaPanelOpen: persisted.metaPanelOpen ?? false,
+  debugPanelCollapsed: persisted.debugPanelCollapsed ?? false,
+  debugPanelHeight: persisted.debugPanelHeight ?? 300,
+  contextInspectorCollapsed: persisted.contextInspectorCollapsed ?? false,
+  contextInspectorHeight: persisted.contextInspectorHeight ?? 200,
+  tokensCostsCollapsed: persisted.tokensCostsCollapsed ?? false,
+  tokensCostsHeight: persisted.tokensCostsHeight ?? 250,
+  rightPaneCollapsed: persisted.rightPaneCollapsed ?? false,
+  currentView: (persisted.currentView as ViewType) ?? 'welcome',
+
+  // Transient state - not persisted, always starts with defaults
+  mainCollapsed: false,
   isDraggingSessionPanel: false,
   isDraggingMetaPanel: false,
-  rightPaneCollapsed: false,
-  // App-level view defaults to 'welcome' until hydrated from backend or workspace binds
-  currentView: 'welcome',
   shouldAutoScroll: true,
   sessionInputValue: '',
-
-  // Collapsible panel states - defaults, will be synced from main store
-  metaPanelOpen: false,
-  debugPanelCollapsed: false,
-  debugPanelHeight: 300,
   debugPanelUserScrolledUp: false,
-  contextInspectorCollapsed: false,
-  // Diff Preview state
+
+  // Diff Preview state (transient)
   diffPreviewOpen: false,
   diffPreviewData: null,
 
-  // Inline diff state
+  // Inline diff state (transient)
   inlineDiffByBadge: {},
   inlineDiffOpenByBadge: {},
 
-  // Badge expansion state
+  // Badge expansion state (transient)
   expandedBadges: new Set<string>(),
 
-  contextInspectorHeight: 200,
-  tokensCostsCollapsed: false,
-  tokensCostsHeight: 250,
-
-
-  // New Flow Modal state
+  // New Flow Modal state (transient)
   newFlowModalOpen: false,
   newFlowName: '',
   newFlowError: null,
 
-  // Actions
-  setSessionPanelWidth: (width) => set({ sessionPanelWidth: width }),
-  setMetaPanelWidth: (width) => set({ metaPanelWidth: width }),
+  // Actions with localStorage persistence
+  setSessionPanelWidth: (width) => {
+    set({ sessionPanelWidth: width })
+    saveUiStateDebounced({ sessionPanelWidth: width })
+  },
+  setMetaPanelWidth: (width) => {
+    set({ metaPanelWidth: width })
+    saveUiStateDebounced({ metaPanelWidth: width })
+  },
+  setMetaPanelOpen: (open) => {
+    set({ metaPanelOpen: open })
+    saveUiState({ metaPanelOpen: open })
+  },
+  setDebugPanelCollapsed: (collapsed) => {
+    set({ debugPanelCollapsed: collapsed })
+    saveUiState({ debugPanelCollapsed: collapsed })
+  },
+  setDebugPanelHeight: (height) => {
+    set({ debugPanelHeight: height })
+    saveUiStateDebounced({ debugPanelHeight: height })
+  },
+  setContextInspectorCollapsed: (collapsed) => {
+    set({ contextInspectorCollapsed: collapsed })
+    saveUiState({ contextInspectorCollapsed: collapsed })
+  },
+  setContextInspectorHeight: (height) => {
+    set({ contextInspectorHeight: height })
+    saveUiStateDebounced({ contextInspectorHeight: height })
+  },
+  setTokensCostsCollapsed: (collapsed) => {
+    set({ tokensCostsCollapsed: collapsed })
+    saveUiState({ tokensCostsCollapsed: collapsed })
+  },
+  setTokensCostsHeight: (height) => {
+    set({ tokensCostsHeight: height })
+    saveUiStateDebounced({ tokensCostsHeight: height })
+  },
+  setRightPaneCollapsed: (collapsed) => {
+    set({ rightPaneCollapsed: collapsed })
+    saveUiState({ rightPaneCollapsed: collapsed })
+  },
+  setCurrentViewLocal: (view) => {
+    set({ currentView: view })
+    saveUiState({ currentView: view })
+  },
+
+  // Transient actions (no persistence)
   setIsDraggingSessionPanel: (dragging) => set({ isDraggingSessionPanel: dragging }),
   setIsDraggingMetaPanel: (dragging) => set({ isDraggingMetaPanel: dragging }),
-  setCurrentViewLocal: (view) => set({ currentView: view }),
   setShouldAutoScroll: (should) => set({ shouldAutoScroll: should }),
   setSessionInputValue: (value) => set({ sessionInputValue: value }),
-  setMetaPanelOpen: (open) => set({ metaPanelOpen: open }),
-  // Diff actions
+  setDebugPanelUserScrolledUp: (scrolledUp) => set({ debugPanelUserScrolledUp: scrolledUp }),
+  setMainCollapsed: (collapsed) => set({ mainCollapsed: collapsed }),
+  // Diff actions (transient)
   openDiffPreview: (data) => set({ diffPreviewData: data, diffPreviewOpen: true }),
   closeDiffPreview: () => set({ diffPreviewOpen: false, diffPreviewData: null }),
   openInlineDiffForBadge: (badgeId, data) => set((s) => ({
@@ -170,18 +213,7 @@ export const useUiStore = create<UiStore>((set) => ({
     return { inlineDiffByBadge: dataMap, inlineDiffOpenByBadge: openMap }
   }),
 
-  setDebugPanelCollapsed: (collapsed) => set({ debugPanelCollapsed: collapsed }),
-  setDebugPanelHeight: (height) => set({ debugPanelHeight: height }),
-  setMainCollapsed: (collapsed) => set({ mainCollapsed: collapsed }),
-
-  setDebugPanelUserScrolledUp: (scrolledUp) => set({ debugPanelUserScrolledUp: scrolledUp }),
-  setContextInspectorCollapsed: (collapsed) => set({ contextInspectorCollapsed: collapsed }),
-  setContextInspectorHeight: (height) => set({ contextInspectorHeight: height }),
-  setTokensCostsCollapsed: (collapsed) => set({ tokensCostsCollapsed: collapsed }),
-  setTokensCostsHeight: (height) => set({ tokensCostsHeight: height }),
-  setRightPaneCollapsed: (collapsed) => set({ rightPaneCollapsed: collapsed }),
-
-  // New Flow Modal actions
+  // New Flow Modal actions (transient)
   setNewFlowModalOpen: (open) => set({ newFlowModalOpen: open }),
   setNewFlowName: (name) => set({ newFlowName: name }),
   setNewFlowError: (err) => set({ newFlowError: err }),
@@ -210,3 +242,33 @@ export const useUiStore = create<UiStore>((set) => ({
   collapseAllBadges: () => set({ expandedBadges: new Set<string>() }),
 }))
 
+/**
+ * Reload UI state from localStorage for the current workspace
+ * Should be called when workspace.attached event fires
+ */
+export function reloadUiStateForWorkspace(): void {
+  const persisted = loadUiState()
+  useUiStore.setState({
+    sessionPanelWidth: persisted.sessionPanelWidth ?? 300,
+    metaPanelWidth: persisted.metaPanelWidth ?? 300,
+    metaPanelOpen: persisted.metaPanelOpen ?? false,
+    debugPanelCollapsed: persisted.debugPanelCollapsed ?? false,
+    debugPanelHeight: persisted.debugPanelHeight ?? 300,
+    contextInspectorCollapsed: persisted.contextInspectorCollapsed ?? false,
+    contextInspectorHeight: persisted.contextInspectorHeight ?? 200,
+    tokensCostsCollapsed: persisted.tokensCostsCollapsed ?? false,
+    tokensCostsHeight: persisted.tokensCostsHeight ?? 250,
+    rightPaneCollapsed: persisted.rightPaneCollapsed ?? false,
+    currentView: (persisted.currentView as ViewType) ?? 'welcome',
+  })
+  console.log('[ui] Reloaded UI state for workspace')
+}
+
+/**
+ * Initialize UI event subscriptions
+ */
+export function initUiEvents(): void {
+  // View is now derived from workspace attachment state
+  // No need to subscribe to view changes
+  console.log('[ui] UI events initialized (view derived from workspace state)')
+}

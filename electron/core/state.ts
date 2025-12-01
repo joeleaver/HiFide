@@ -17,6 +17,11 @@ import { FireworksAiSdkProvider } from '../providers-ai-sdk/fireworks'
 import { OpenAiSdkProvider } from '../providers-ai-sdk/openai'
 import { XaiAiSdkProvider } from '../providers-ai-sdk/xai'
 import { activeConnections, broadcastWorkspaceNotification } from '../backend/ws/broadcast'
+import { getSettingsService, getWorkspaceService } from '../services/index.js'
+import { readKanbanBoard } from '../store/utils/kanban.js'
+import { listItems } from '../store/utils/knowledgeBase.js'
+import { resolveWorkspaceRootAsync } from '../utils/workspace.js'
+import { getWorkspaceManager } from './workspaceManager.js'
 
 import type { ProviderAdapter } from '../providers/provider'
 
@@ -66,13 +71,10 @@ const legacySecureStore = new Store({
  * Get provider API key from Zustand store or environment
  */
 export async function getProviderKey(provider: string): Promise<string | null> {
-  // NOTE: Use explicit index.js path for compatibility with bundled Electron builds
-  const { ServiceRegistry } = await import('../services/base/ServiceRegistry.js')
-  const providerService = ServiceRegistry.get<any>('provider')
-  if (!providerService) return null
+  const settingsService = getSettingsService()
 
   // 1) Try service first (primary storage)
-  const keys = providerService.getApiKeys()
+  const keys = settingsService.getApiKeys()
   if (keys) {
     if (provider === 'openai' && keys.openai?.trim()) return keys.openai
     if (provider === 'anthropic' && keys.anthropic?.trim()) return keys.anthropic
@@ -128,9 +130,7 @@ function scheduleKanbanReload(workspaceRoot: string): void {
 }
 
 async function triggerKanbanReload(workspaceRoot: string): Promise<void> {
-  try {
-    const { readKanbanBoard } = await import('../store/utils/kanban.js')
-    const board = await readKanbanBoard(workspaceRoot)
+  try {    const board = await readKanbanBoard(workspaceRoot)
     const ts = Date.now()
     try { broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', { board, loading: false, saving: false, error: null, lastLoadedAt: ts }) } catch {}
   } catch (error) {
@@ -157,10 +157,12 @@ export function stopKanbanWatcher(workspaceRoot?: string): void {
   // If a specific workspace is provided, stop only when no active connections remain
   if (workspaceRoot) {
     try {
-      // Count connections bound to this workspace; if any, keep watcher running
+      // Count connections bound to this workspace via window→workspace mapping
       let hasConsumer = false
+      const workspaceService = getWorkspaceService()
       for (const [, meta] of Array.from(activeConnections.entries())) {
-        if (meta.workspaceId === workspaceRoot) { hasConsumer = true; break }
+        const wsId = workspaceService.getWorkspaceForWindow(meta.windowId)
+        if (wsId === workspaceRoot) { hasConsumer = true; break }
       }
       if (hasConsumer) return
     } catch {}
@@ -193,9 +195,7 @@ function scheduleKbReload(workspaceRoot: string): void {
 }
 
 async function triggerKbReload(workspaceRoot: string): Promise<void> {
-  try {
-    const { listItems } = await import('../store/utils/knowledgeBase.js')
-    const items = await listItems(workspaceRoot)
+  try {    const items = await listItems(workspaceRoot)
     const map: Record<string, any> = {}
     for (const it of items) map[it.id] = it
     try { broadcastWorkspaceNotification(workspaceRoot, 'kb.items.changed', { items: map, error: null }) } catch {}
@@ -223,8 +223,10 @@ export function stopKbWatcher(workspaceRoot?: string): void {
   if (workspaceRoot) {
     try {
       let hasConsumer = false
+      const workspaceService = getWorkspaceService()
       for (const [, meta] of Array.from(activeConnections.entries())) {
-        if (meta.workspaceId === workspaceRoot) { hasConsumer = true; break }
+        const wsId = workspaceService.getWorkspaceForWindow(meta.windowId)
+        if (wsId === workspaceRoot) { hasConsumer = true; break }
       }
       if (hasConsumer) return
     } catch {}
@@ -269,10 +271,7 @@ const kbIndexers = new Map<string, Indexer>()
  *
  * Now delegates to WorkspaceManager for multi-window support.
  */
-export async function getIndexer(workspaceRoot?: string): Promise<Indexer> {
-  const { resolveWorkspaceRootAsync } = await import('../utils/workspace.js')
-  const { getWorkspaceManager } = await import('./workspaceManager.js')
-  const root = await resolveWorkspaceRootAsync(workspaceRoot)
+export async function getIndexer(workspaceRoot?: string): Promise<Indexer> {  const root = await resolveWorkspaceRootAsync(workspaceRoot)
   const manager = getWorkspaceManager()
   return manager.getIndexer(root)
 }
@@ -282,10 +281,7 @@ export async function getIndexer(workspaceRoot?: string): Promise<Indexer> {
  *
  * Now delegates to WorkspaceManager for multi-window support.
  */
-export async function getKbIndexer(workspaceRoot?: string): Promise<Indexer> {
-  const { resolveWorkspaceRootAsync } = await import('../utils/workspace.js')
-  const { getWorkspaceManager } = await import('./workspaceManager.js')
-  const root = await resolveWorkspaceRootAsync(workspaceRoot)
+export async function getKbIndexer(workspaceRoot?: string): Promise<Indexer> {  const root = await resolveWorkspaceRootAsync(workspaceRoot)
   const manager = getWorkspaceManager()
   return manager.getKbIndexer(root)
 }
@@ -294,11 +290,7 @@ export async function getKbIndexer(workspaceRoot?: string): Promise<Indexer> {
  * Reset the indexer for a workspace (used when workspace root changes)
  */
 export async function resetIndexer(workspaceRoot?: string): Promise<void> {
-  const { ServiceRegistry } = await import('../services/base/ServiceRegistry.js')
-  const workspaceService = ServiceRegistry.get<any>('workspace')
-  const root = path.resolve(
-    workspaceRoot || workspaceService?.getWorkspaceRoot() || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
-  )
+  const root = await resolveWorkspaceRootAsync(workspaceRoot)
   const idx = indexers.get(root)
   if (idx) {
     try { idx.dispose() } catch (error) { console.error('[indexer] Failed to dispose indexer:', error) }
@@ -310,11 +302,7 @@ export async function resetIndexer(workspaceRoot?: string): Promise<void> {
  * Reset the KB indexer for a workspace
  */
 export async function resetKbIndexer(workspaceRoot?: string): Promise<void> {
-  const { ServiceRegistry } = await import('../services/base/ServiceRegistry.js')
-  const workspaceService = ServiceRegistry.get<any>('workspace')
-  const root = path.resolve(
-    workspaceRoot || workspaceService?.getWorkspaceRoot() || process.env.HIFIDE_WORKSPACE_ROOT || process.cwd()
-  )
+  const root = await resolveWorkspaceRootAsync(workspaceRoot)
   const idx = kbIndexers.get(root)
   if (idx) {
     try { idx.dispose() } catch (error) { console.error('[indexer] Failed to dispose KB indexer:', error) }

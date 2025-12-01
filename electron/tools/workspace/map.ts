@@ -3,13 +3,12 @@ import path from 'node:path'
 import fs from 'node:fs/promises'
 import fg from 'fast-glob'
 import { grepTool } from '../text/grep'
+import { resolveWorkspaceRootAsync } from '../../utils/workspace.js'
 
-import { astGrepSearch } from '../astGrep'
 import { getIndexer } from '../../core/state'
 
 
 async function getWorkspaceRoot(workspaceId?: string): Promise<string> {
-  const { resolveWorkspaceRootAsync } = await import('../../utils/workspace')
   return resolveWorkspaceRootAsync(workspaceId)
 }
 
@@ -74,12 +73,19 @@ export const workspaceMapTool: AgentTool = {
       sections.push({ title: d.title, items: top.length ? top : [{ path: d.dir + '/', why: d.why }] })
     }
 
-    // Key Electron files
+    // Key Electron files - entry points and core infrastructure
+    // These represent the main architectural layers of the application
     const electronFiles = uniq([
-      'electron/main.ts','electron/core/app.ts','electron/core/window.ts',
-      'electron/store/index.ts','electron/tools/index.ts',
-      'electron/ipc/registry.ts','electron/ipc/pty.ts',
-      'electron/providers-ai-sdk/openai.ts','electron/providers-ai-sdk/anthropic.ts','electron/providers/gemini.ts'
+      'electron/main.ts',                           // Main process entry point
+      'electron/core/app.ts',                       // App lifecycle
+      'electron/core/window.ts',                    // Window management
+      'electron/store/index.ts',                    // Type exports (post-Zustand)
+      'electron/tools/index.ts',                    // Agent tools registry
+      'electron/ipc/registry.ts',                   // IPC handler registration
+      'electron/services/index.ts',                 // Service registry
+      'electron/providers-ai-sdk/openai.ts',        // OpenAI provider
+      'electron/providers-ai-sdk/anthropic.ts',     // Anthropic provider
+      'electron/providers-ai-sdk/gemini.ts',        // Gemini provider
     ])
     const electronExisting = (await Promise.all(electronFiles.map(async (p) => {
       const abs = path.join(root, p)
@@ -174,29 +180,6 @@ export const workspaceMapTool: AgentTool = {
     if (mode !== 'basic') {
       const k2 = Math.min(6, maxPerSection)
       const now2 = () => Date.now() - t0
-
-      // AST-grep: exported symbols (functions/classes)
-      if (now2() <= budgetMs) {
-        try {
-          const [fx, cx] = await Promise.all([
-            astGrepSearch({ pattern: 'export function $NAME', languages: 'auto', includeGlobs: ['electron/**/*.{ts,tsx,js,jsx}','src/**/*.{ts,tsx,js,jsx}'], contextLines: 1, maxMatches: 50 }),
-            astGrepSearch({ pattern: 'export class $NAME', languages: 'auto', includeGlobs: ['electron/**/*.{ts,tsx,js,jsx}','src/**/*.{ts,tsx,js,jsx}'], contextLines: 1, maxMatches: 50 })
-          ])
-          const toItems = (arr: any[], why: string) => (arr||[]).slice(0, k2).map((m: any) => {
-            const p = String(m.filePath || '').replace(/\\/g, '/')
-            const start = Math.max(1, Number(m.startLine || 1) - 2)
-            const end = Math.max(start, Number(m.endLine || m.startLine || 1) + 2)
-            return { path: p, handle: toHandle(p, start, end), lines: { start, end }, why }
-          })
-          const items = [
-            ...toItems(fx?.matches || [], 'export function'),
-            ...toItems(cx?.matches || [], 'export class')
-          ].slice(0, Math.max(1, k2))
-          if (items.length) sections.push({ title: 'Symbols (AST)', items })
-        } catch {
-          // AST optional; ignore if unavailable
-        }
-      }
 
       // Semantic seeds: only when index is ready
       if (now2() <= budgetMs) {

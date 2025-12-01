@@ -12,6 +12,7 @@ import Store from 'electron-store'
 import type { Node, Edge } from 'reactflow'
 import * as path from 'path'
 import * as fs from 'fs/promises'
+import { resolveWorkspaceRootAsync } from '../utils/workspace.js'
 
 /**
  * Minimal node data for serialization - only essential fields
@@ -129,28 +130,27 @@ function deserializeEdge(serialized: SerializedEdge): Edge {
 let systemTemplates: Record<string, FlowProfile> | null = null
 let systemTemplatesLoading: Promise<Record<string, FlowProfile>> | null = null
 
-const DEFAULT_PROFILE_NAME = 'default'
-
-// Cache for workspace templates, keyed by absolute workspace root
+// Cache for workspace templates (keyed by absolute workspace root path)
 const workspaceTemplatesCache = new Map<string, Record<string, FlowProfile>>()
 
-async function getWorkspaceRoot(): Promise<string> {
-  const { resolveWorkspaceRootAsync } = await import('../utils/workspace.js')
-  return resolveWorkspaceRootAsync()
+const DEFAULT_PROFILE_NAME = 'default'
+
+async function getWorkspaceRoot(workspaceId?: string): Promise<string> {
+  return resolveWorkspaceRootAsync(workspaceId)
 }
 
-async function loadWorkspaceTemplates(): Promise<Record<string, FlowProfile>> {
-  const root = await getWorkspaceRoot()
+async function loadWorkspaceTemplates(workspaceId?: string): Promise<Record<string, FlowProfile>> {
+  const root = await getWorkspaceRoot(workspaceId)
   const absRoot = path.resolve(root)
 
-  const cached = workspaceTemplatesCache.get(absRoot)
-  if (cached) return cached
+  console.log('[loadWorkspaceTemplates] workspaceId:', workspaceId, 'resolved root:', absRoot)
 
   const templates: Record<string, FlowProfile> = {}
   const flowsDir = path.join(absRoot, '.hifide-public', 'flows')
 
   try {
     const files = await fs.readdir(flowsDir)
+    console.log('[loadWorkspaceTemplates] Found files in', flowsDir, ':', files)
     for (const file of files) {
       if (!file.endsWith('.json')) continue
       try {
@@ -158,6 +158,7 @@ async function loadWorkspaceTemplates(): Promise<Record<string, FlowProfile>> {
         const content = await fs.readFile(filePath, 'utf-8')
         const profile = JSON.parse(content) as FlowProfile
         const id = profile.name || path.basename(file, '.json')
+        console.log('[loadWorkspaceTemplates] Loaded template:', id, 'from', file)
         templates[id] = profile
       } catch (error) {
         console.error(`[flowProfiles] Failed to load workspace flow ${file}:`, error)
@@ -166,10 +167,12 @@ async function loadWorkspaceTemplates(): Promise<Record<string, FlowProfile>> {
   } catch (error: any) {
     if (error && (error as any).code !== 'ENOENT') {
       console.error('[flowProfiles] Failed to read workspace flows directory:', error)
+    } else {
+      console.log('[loadWorkspaceTemplates] Flows directory does not exist:', flowsDir)
     }
   }
 
-  workspaceTemplatesCache.set(absRoot, templates)
+  console.log('[loadWorkspaceTemplates] Loaded', Object.keys(templates).length, 'workspace templates from:', absRoot)
   return templates
 }
 
@@ -253,7 +256,7 @@ export async function isSystemTemplate(id: string): Promise<boolean> {
  * Checks libraries in order: system -> workspace -> user.
  * Returns deserialized nodes and edges ready for ReactFlow.
  */
-export async function loadFlowTemplate(id: string): Promise<{ nodes: Node[]; edges: Edge[] } | null> {
+export async function loadFlowTemplate(id: string, workspaceId?: string): Promise<{ nodes: Node[]; edges: Edge[] } | null> {
   try {
     let rawProfile: any = null
 
@@ -264,7 +267,7 @@ export async function loadFlowTemplate(id: string): Promise<{ nodes: Node[]; edg
     } else {
       // Then check workspace library (per-workspace flows)
       try {
-        const workspaceTemplates = await loadWorkspaceTemplates()
+        const workspaceTemplates = await loadWorkspaceTemplates(workspaceId)
         if (workspaceTemplates[id]) {
           rawProfile = workspaceTemplates[id]
         } else {
@@ -492,7 +495,7 @@ export async function deleteFlowProfile(
 /**
  * List all available flow templates (system + workspace + user)
  */
-export async function listFlowTemplates(): Promise<FlowTemplate[]> {
+export async function listFlowTemplates(workspaceId?: string): Promise<FlowTemplate[]> {
   try {
     const templates: FlowTemplate[] = []
     const seenIds = new Set<string>()
@@ -512,7 +515,7 @@ export async function listFlowTemplates(): Promise<FlowTemplate[]> {
 
     // Add workspace templates (per-workspace library)
     try {
-      const workspaceTemplates = await loadWorkspaceTemplates()
+      const workspaceTemplates = await loadWorkspaceTemplates(workspaceId)
       for (const [id, profile] of Object.entries(workspaceTemplates)) {
         if (seenIds.has(id)) continue
         templates.push({
