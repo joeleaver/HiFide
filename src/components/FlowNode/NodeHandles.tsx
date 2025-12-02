@@ -80,6 +80,8 @@ export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
   } else if (nodeType === 'portalOutput') {
     // Portal Output dynamically shows outputs based on what's connected to matching Portal Input
     const portalId = config?.id
+    let hasMatchingInput = false
+    
     if (portalId) {
       // Find the matching Portal Input node
       const matchingInputNode = feNodes.find(
@@ -87,6 +89,7 @@ export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
       )
 
       if (matchingInputNode) {
+        hasMatchingInput = true
         // Check which handles are connected to the Portal Input
         const inputNodeId = matchingInputNode.id
         const connectedHandles = new Set(
@@ -95,7 +98,7 @@ export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
             .map((e: any) => e.targetHandle || 'context')
         )
 
-        // Only show outputs for connected inputs
+        // Show outputs for connected inputs
         if (connectedHandles.has('context')) {
           outputs.push({ id: 'context', label: 'Context Out', color: contextColor })
         }
@@ -103,6 +106,12 @@ export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
           outputs.push({ id: 'data', label: 'Data Out', color: CONNECTION_COLORS.data })
         }
       }
+    }
+    
+    // Fallback: Always show at least Context Out if no matching input found
+    // This ensures edges remain visible and configurable even when Portal Input doesn't exist yet
+    if (!hasMatchingInput && outputs.length === 0) {
+      outputs.push({ id: 'context', label: 'Context Out', color: contextColor })
     }
   } else if (isIntentRouter && intentRoutes.length > 0) {
     // Each intent gets both Context Out and Data Out

@@ -21,6 +21,8 @@ export default function TokensCostsPanel() {
   } | null
   const costs = useSessionUi((s: any) => s.costs) as any
   const requestsLog = useSessionUi((s: any) => s.requestsLog) as any[]
+  
+  console.log('[TokensCostsPanel] Rendering with tokenUsage:', tokenUsage)
 
   const total = tokenUsage?.total || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
   const byProvider = tokenUsage?.byProvider ?? ({} as Record<string, TokenUsage>)

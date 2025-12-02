@@ -955,7 +955,7 @@ export class FlowScheduler {
 
       case 'usage':
         if (event.usage) {
-          try { emitFlowEvent(this.requestId, { type: 'tokenUsage', nodeId: event.nodeId, provider: event.provider, model: event.model, usage: { inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, totalTokens: event.usage.totalTokens }, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
+          try { emitFlowEvent(this.requestId, { type: 'tokenUsage', nodeId: event.nodeId, provider: event.provider, model: event.model, usage: { inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, totalTokens: event.usage.totalTokens, cachedTokens: event.usage.cachedTokens || 0 }, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
         }
         break
 

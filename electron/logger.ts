@@ -41,7 +41,8 @@ function redactObject<T>(input: T, depth = 0, maxDepth = 3): T {
   const out: Record<string, any> = Array.isArray(input) ? [] : {}
   for (const [k, v] of Object.entries(input)) {
     const key = String(k)
-    if (/(?:^|_|-)(?:api|x)?-?key$|authorization|bearer|token/i.test(key)) {
+    // Only redact keys that are actual secrets (API keys, auth tokens), not token counts
+    if (/(?:^|_|-)(?:api|x)?-?key$|authorization|bearer|^token$/i.test(key)) {
       out[key] = '***REDACTED***'
       continue
     }

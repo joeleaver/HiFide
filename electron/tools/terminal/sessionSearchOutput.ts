@@ -64,7 +64,7 @@ export const sessionSearchOutputTool: AgentTool = {
     if (where === 'all' || where === 'live') {
       findIn(st.ring, { type: 'live' })
     }
-    console.log('[terminal.session_search_output] Returning results:', { sessionId, hitCount: results.length })
+  
     return { ok: true, sessionId, hits: results }
   }
 }

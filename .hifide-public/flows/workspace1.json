@@ -46,22 +46,26 @@
     {
       "id": "portalOutput-1761933770202",
       "nodeType": "portalOutput",
-      "config": {},
-      "position": {
-        "x": -284.3598817835628,
-        "y": 89.33934792295487
+      "config": {
+        "id": "main"
       },
-      "expanded": false
+      "position": {
+        "x": -504.5007145739991,
+        "y": -42.96203927129751
+      },
+      "expanded": true
     },
     {
       "id": "portalInput-1761933773361",
       "nodeType": "portalInput",
-      "config": {},
+      "config": {
+        "id": "main"
+      },
       "position": {
         "x": 821.8316344169732,
         "y": 481.23896203168874
       },
-      "expanded": false
+      "expanded": true
     },
     {
       "id": "readFile-1763492308062",

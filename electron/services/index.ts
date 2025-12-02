@@ -61,13 +61,13 @@ export function initializeServices(): void {
   kanbanService = new KanbanService()
   knowledgeBaseService = new KnowledgeBaseService()
 
-  // Phase 3: Complex services
-  appService = new AppService()
-  terminalService = new TerminalService()
-
-  // Phase 4: Session services
+  // Phase 3: Session services (must come before terminal)
   sessionService = new SessionService()
   flowCacheService = new FlowCacheService()
+
+  // Phase 4: Complex services that depend on session
+  appService = new AppService()
+  terminalService = new TerminalService()
 
   // Phase 5: Flow services
   flowProfileService = new FlowProfileService()

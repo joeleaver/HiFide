@@ -65,48 +65,57 @@ export class TerminalService extends Service<TerminalState> {
    * Setup event listeners for session lifecycle events
    */
   private setupSessionEventListeners(): void {
-    // Wait for SessionService to be initialized
-    setTimeout(async () => {
-      const sessionService = getSessionService()
-      if (!sessionService) {
-        console.warn('[Terminal] SessionService not available for event listeners')
-        return
-      }
+    // SessionService is guaranteed to be initialized before TerminalService (Phase 3 vs Phase 4)
+    const sessionService = getSessionService()
+    if (!sessionService) {
+      console.error('[Terminal] SessionService not available - initialization order problem!')
+      return
+    }
 
-      // Listen for session creation
-      sessionService.on('session:created', async (data: { workspaceId: string; sessionId: string }) => {
-        console.log('[Terminal] Session created, ensuring PTY:', data.sessionId)
+    // Listen for session creation
+    sessionService.on('session:created', async (data: { workspaceId: string; sessionId: string }) => {
+      console.log('[Terminal] Session created, ensuring PTY:', data.sessionId)
+      try {
+        await agentPty.getOrCreateAgentPtyFor(data.sessionId)
+        console.log('[Terminal] PTY created for session:', data.sessionId)
+        
+        // Ensure at least one agent terminal tab exists for the UI
+        if (this.state.agentTerminalTabs.length === 0) {
+          const tabId = this.addTerminalTab('agent')
+          // Agent terminal tab created
+        }
+      } catch (error) {
+        console.error('[Terminal] Failed to create PTY for session:', error)
+      }
+    })
+
+    // Listen for session selection
+    sessionService.on(
+      'session:selected',
+      async (data: { workspaceId: string; sessionId: string; previousSessionId: string | null }) => {
+        console.log('[Terminal] Session selected, ensuring PTY:', data.sessionId)
         try {
           await agentPty.getOrCreateAgentPtyFor(data.sessionId)
-          console.log('[Terminal] PTY created for session:', data.sessionId)
-        } catch (error) {
-          console.error('[Terminal] Failed to create PTY for session:', error)
-        }
-      })
-
-      // Listen for session selection
-      sessionService.on(
-        'session:selected',
-        async (data: { workspaceId: string; sessionId: string; previousSessionId: string | null }) => {
-          console.log('[Terminal] Session selected, ensuring PTY:', data.sessionId)
-          try {
-            await agentPty.getOrCreateAgentPtyFor(data.sessionId)
-            console.log('[Terminal] PTY ensured for session:', data.sessionId)
-          } catch (error) {
-            console.error('[Terminal] Failed to ensure PTY for session:', error)
+          console.log('[Terminal] PTY ensured for session:', data.sessionId)
+          
+          // Ensure at least one agent terminal tab exists for the UI
+          if (this.state.agentTerminalTabs.length === 0) {
+            const tabId = this.addTerminalTab('agent')
+            console.log('[Terminal] Created agent terminal tab:', tabId)
           }
+        } catch (error) {
+          console.error('[Terminal] Failed to ensure PTY for session:', error)
         }
-      )
+      }
+    )
 
-      // Listen for session deletion
-      sessionService.on('session:deleted', (data: { workspaceId: string; sessionId: string }) => {
-        console.log('[Terminal] Session deleted, cleaning up PTY:', data.sessionId)
-        // PTY cleanup is handled by agentPty module
-        // We could add explicit cleanup here if needed
-      })
-    }, 100) // Small delay to ensure SessionService is registered
+    // Listen for session deletion
+    sessionService.on('session:deleted', (data: { workspaceId: string; sessionId: string }) => {
+      console.log('[Terminal] Session deleted, cleaning up PTY:', data.sessionId)
+      // PTY cleanup is handled by agentPty module
+      // We could add explicit cleanup here if needed
+    })
   }
-
   // Getters
   getAgentTerminalTabs(): string[] {
     return this.state.agentTerminalTabs

@@ -27,7 +27,7 @@ export const sessionRestartTool: AgentTool = {
       // Dispose existing PTY (if any), then recreate with same sessionId
       try { agentPty.dispose(sessionId) } catch {}
       await agentPty.createAgentPtySession({ sessionId, shell: args.shell, cwd: desiredCwd, cols: args.cols, rows: args.rows })
-      console.log('[terminal.session_restart] Restarted PTY for session:', sessionId)
+    
       return { ok: true, sessionId }
     } catch (e: any) {
       console.error('[terminal.session_restart] Failed to restart PTY:', e)

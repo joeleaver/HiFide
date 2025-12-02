@@ -32,7 +32,7 @@ export const terminalExecTool: AgentTool = {
       return { ok: false, error: 'no-session' }
     }
     const req = meta?.requestId
-    console.log('[terminal.exec] Called with:', { command: args.command, requestId: req, sessionId })
+  
 
     // Get or create session with optional cwd
     if (!(meta as any)?.workspaceId) {
@@ -40,20 +40,20 @@ export const terminalExecTool: AgentTool = {
     }
     const root = path.resolve((meta as any).workspaceId)
     const desiredCwd = args.cwd ? (path.isAbsolute(args.cwd) ? args.cwd : path.join(root, args.cwd)) : undefined
-    console.log('[terminal.exec] Getting or creating PTY session:', { sessionId, desiredCwd })
+  
 
     const sid = await agentPty.getOrCreateAgentPtyFor(sessionId, desiredCwd ? { cwd: desiredCwd } : undefined)
-    console.log('[terminal.exec] Got session ID:', sid)
+  
 
     const rec = agentPty.getSessionRecord(sid)
     if (!rec) {
       console.error('[terminal.exec] No session record found for sessionId:', sid)
       return { ok: false, error: 'no-session' }
     }
-    console.log('[terminal.exec] Got session record:', { sessionId: sid, shell: rec.shell, cwd: rec.cwd })
+  
 
     // Execute command
-    console.log('[terminal.exec] Executing command:', args.command)
+  
     await agentPty.beginCommand(rec.state, args.command)
     try {
       // On Windows/PSReadLine, wrap the command in Bracketed Paste markers to
@@ -77,7 +77,7 @@ export const terminalExecTool: AgentTool = {
       // the markers on exotic shells that might not have it enabled.
       const payload = isWin ? (BP_START + cmd + BP_END + ENTER) : (cmd + ENTER)
       agentPty.write(sid, payload)
-      console.log('[terminal.exec] Command written to PTY')
+    
 
       // Heuristic: if PSReadLine falls into continuation prompt (" >> ")
       // after our write (seen sometimes on Windows), send Ctrl+C to recover.
@@ -86,7 +86,7 @@ export const terminalExecTool: AgentTool = {
           await new Promise((r) => setTimeout(r, 60))
           const tail = String(rec.state.ring).slice(-200)
           if (/\n>> $/.test(tail) && !/\nPS [^\n]*> $/.test(tail)) {
-            console.log('[terminal.exec] Detected continuation prompt, sending Ctrl+C to recover')
+          
             agentPty.write(sid, '\x03') // Ctrl+C
           }
         } catch {}
@@ -153,7 +153,7 @@ export const terminalExecTool: AgentTool = {
         liveTail,
         captured: { text, bytes: lastBytes, truncated, durationMs, complete }
       }
-      console.log('[terminal.exec] Returning result:', { ok: result.ok, sessionId: result.sessionId, commandCount: result.commandCount, complete })
+    
       return result
     } catch (e: any) {
       console.error('[terminal.exec] Error executing command:', e)

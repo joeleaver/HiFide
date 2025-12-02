@@ -131,7 +131,11 @@ function createSessionUiStore() {
 
     __setSessions: (list, currentId) => set({ sessions: list.slice(), currentId, hasHydratedList: true }),
     __setSelected: (id) => set((s) => ({ currentId: id, hasHydratedList: s.hasHydratedList || !!id })),
-    __setUsage: (tokenUsage, costs, requestsLog) => set({ tokenUsage, costs, requestsLog }),
+    __setUsage: (tokenUsage, costs, requestsLog) => {
+      console.log('[sessionUi.__setUsage] Called with:', { tokenUsage, costs, requestsLog })
+      set({ tokenUsage, costs, requestsLog });
+      console.log('[sessionUi.__setUsage] State set. Current state:', get())
+    },
     __setMeta: (meta) => set((s) => ({ ...s, ...meta })),
     __setSettings: (providerValid, modelsByProvider) => {
       set({ providerValid, modelsByProvider })
@@ -170,6 +174,7 @@ const hotData: any = (import.meta as any).hot?.data || {}
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const __sessionUiStore: any = hotData.sessionUiStore || createSessionUiStore()
 export const useSessionUi = __sessionUiStore
+
 if ((import.meta as any).hot) {
   (import.meta as any).hot.dispose((data: any) => { data.sessionUiStore = __sessionUiStore })
 }
@@ -239,13 +244,18 @@ export function initSessionUiEvents(): void {
   })
 
   client.subscribe('session.usage.changed', (p: any) => {
-    try { useSessionUi.getState().__setUsage(p?.tokenUsage, p?.costs, Array.isArray(p?.requestsLog) ? p.requestsLog : []) } catch {}
+    console.log('[sessionUi] Received session.usage.changed event:', p)
+    try {
+      const st = useSessionUi.getState()
+      console.log('[sessionUi] Calling __setUsage with:', { tokenUsage: p.tokenUsage, costs: p.costs, requestsLog: p.requestsLog })
+      st.__setUsage(p.tokenUsage, p.costs, p.requestsLog)
+      console.log('[sessionUi] __setUsage completed successfully')
+    } catch (e) {
+      console.error('[sessionUi] Error in __setUsage:', e)
+    }
   })
 }
 
-// Explicit helper to hydrate provider/model settings and available flows without
-// coupling to session list hydration. Safe to call from renderer components like
-// SessionControlsBar; it uses the same backend RPCs as SettingsPane and FlowCanvasPanel.
 export async function hydrateSessionUiSettingsAndFlows(): Promise<void> {
   const client = getBackendClient()
   if (!client) {
@@ -375,5 +385,4 @@ export async function hydrateSessionUiSettingsAndFlows(): Promise<void> {
     console.error('[sessionUi] hydrateSessionUiSettingsAndFlows: error', e)
   }
 }
-
 

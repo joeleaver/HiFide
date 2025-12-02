@@ -32,7 +32,7 @@ import { encoding_for_model, get_encoding } from '@dqbd/tiktoken'
 
 import { UiPayloadCache } from '../core/uiPayloadCache'
 
-const DEBUG_USAGE = process.env.HF_DEBUG_USAGE === '1' || process.env.HF_DEBUG_TOKENS === '1'
+const DEBUG_USAGE = false
 
 // Lightweight token estimators used as a last-resort when a stream is cancelled
 // and the provider does not return final usage. This avoids adding heavyweight

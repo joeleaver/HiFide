@@ -1,0 +1,9 @@
+function example() {
+  try {
+useSessionUi.getState().__setUsage(p)
+console.log('[sessionUi] Event received')
+} catch (err) {
+console.error('[sessionUi] Error in usage update:', err)ch {
+    console.log('error')
+  }
+}

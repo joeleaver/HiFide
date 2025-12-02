@@ -31,7 +31,7 @@ export const sessionTailTool: AgentTool = {
     const tailRaw = rec.state.ring.slice(-n)
     const tailSanitized = sanitizeTerminalOutput(tailRaw)
     const { redacted } = redactOutput(tailSanitized)
-    console.log('[terminal.session_tail] Returning tail:', { sessionId, tailLength: redacted.length })
+  
     return { ok: true, sessionId, tail: redacted }
   }
 }

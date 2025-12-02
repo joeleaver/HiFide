@@ -155,11 +155,46 @@ function findReplaceOnce(hayLF: string, oldLF: string): null | { start: number; 
   const H = norm(hayLF), O = norm(oldLF)
   idx = H.indexOf(O)
   if (idx !== -1) {
-    // Map back roughly: use first occurrence of first non-empty line as anchor
+    // Find the actual match boundaries in the original haystack
+    // We know it matches when normalized, so find the corresponding range
+    let charCount = 0
+    let startIdx = -1
+    let endIdx = -1
+    for (let i = 0; i < hayLF.length; i++) {
+      if (charCount === idx && startIdx === -1) startIdx = i
+      if (norm(hayLF.slice(0, i + 1)).length > idx + O.length - 1) {
+        endIdx = i + 1
+        break
+      }
+    }
+    if (startIdx !== -1 && endIdx !== -1) {
+      return { start: startIdx, end: endIdx }
+    }
+    // Fallback: use first occurrence of first non-empty line as anchor
     const first = (oldLF.split('\n').find(l => l.trim().length) || '').trim()
     if (first) {
       const pos = hayLF.indexOf(first)
-      if (pos !== -1) return { start: pos, end: pos + (oldLF.length) }
+      if (pos !== -1) {
+        // Find how many lines oldLF spans
+        const oldLineCount = oldLF.split('\n').length
+        const hayLines = hayLF.split('\n')
+        let currentPos = 0
+        let lineIdx = 0
+        // Find which line contains pos
+        for (let i = 0; i < hayLines.length; i++) {
+          if (currentPos + hayLines[i].length >= pos) {
+            lineIdx = i
+            break
+          }
+          currentPos += hayLines[i].length + 1 // +1 for newline
+        }
+        // Calculate end based on actual line content
+        const matchedLines = hayLines.slice(lineIdx, lineIdx + oldLineCount)
+        const matchedContent = matchedLines.join('\n')
+        const start = pos
+        const end = start + matchedContent.length
+        return { start, end }
+      }
     }
   }
   // indent-insensitive: compare left-trimmed lines across window length
@@ -174,7 +209,9 @@ function findReplaceOnce(hayLF: string, oldLF: string): null | { start: number; 
     }
     if (ok) {
       const start = hayLines.slice(0, i).join('\n').length + (i > 0 ? 1 : 0)
-      const end = start + oldLF.length
+      // Calculate end based on actual matched content length in haystack
+      const matchedContent = hayLines.slice(i, i + olen).join('\n')
+      const end = start + matchedContent.length
       return { start, end }
     }
   }
@@ -186,7 +223,22 @@ function findReplaceOnce(hayLF: string, oldLF: string): null | { start: number; 
     while (pos !== -1) { candIdx.push(pos); pos = hayLF.indexOf(first, pos + 1) }
     if (candIdx.length === 1) {
       const start = candIdx[0]
-      const end = start + oldLF.length
+      // Find how many lines oldLF spans and calculate end based on actual content
+      const hayLines = hayLF.split('\n')
+      let currentPos = 0
+      let lineIdx = 0
+      // Find which line contains the match
+      for (let i = 0; i < hayLines.length; i++) {
+        if (currentPos + hayLines[i].length >= start) {
+          lineIdx = i
+          break
+        }
+        currentPos += hayLines[i].length + 1 // +1 for newline
+      }
+      // Calculate end based on actual matched lines in haystack
+      const matchedLines = hayLines.slice(lineIdx, lineIdx + oldLines.length)
+      const matchedContent = matchedLines.join('\n')
+      const end = start + matchedContent.length
       return { start, end }
     }
   }
