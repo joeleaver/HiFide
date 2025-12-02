@@ -275,97 +275,91 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
     if (type === 'tokenUsage') {
       console.log('[TimelineEventHandler] tokenUsage event RECEIVED:', ev)
 
+      const sessionService = ServiceRegistry.getInstance().get<any>('session')
+      const workspaceService = ServiceRegistry.getInstance().get<any>('workspace')
       if (!sessionService || !workspaceService) {
         console.log('[TimelineEventHandler] tokenUsage: MISSING SERVICES', {
-        hasSessionService: !!sessionService,
-        hasWorkspaceService: !!workspaceService
-      })
-      return
-    }
-    
-    const sessionService = ServiceRegistry.getInstance().get<any>('session')
-    const workspaceService = ServiceRegistry.getInstance().get<any>('workspace')'workspace')
-        if (!sessionService || !workspaceService) {
-          console.log('[TimelineEventHandler] tokenUsage: missing service')
-          return
-        }
-
-        const ws = workspaceService.getWorkspaceRoot()
-        console.log('[TimelineEventHandler] tokenUsage: workspace root:', ws)
-        if (!ws) {
-          console.log('[TimelineEventHandler] tokenUsage: no workspace root, returning')
-          return
-        }
-
-        const sessions = sessionService.getSessionsFor({ workspaceId: ws })
-        console.log('[TimelineEventHandler] tokenUsage: found sessions:', sessions.length, 'looking for:', sessionId)
-        const sessionIndex = sessions.findIndex((s: any) => s.id === sessionId)
-        console.log('[TimelineEventHandler] tokenUsage: sessionIndex:', sessionIndex)
-        if (sessionIndex === -1) {
-          console.log('[TimelineEventHandler] tokenUsage: session not found, returning')
-          return
-        }
-
-        const session = sessions[sessionIndex]
-        console.log('[TimelineEventHandler] Session tokenUsage BEFORE:', session.tokenUsage)
-        const tokenUsage = session.tokenUsage || {
-          total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 },
-          byProvider: {},
-          byProviderAndModel: {},
-        }
-
-        // Update totals
-        tokenUsage.total.inputTokens += ev.usage.inputTokens || 0
-        tokenUsage.total.outputTokens += ev.usage.outputTokens || 0
-        tokenUsage.total.totalTokens += ev.usage.totalTokens || 0
-        tokenUsage.total.cachedTokens += ev.usage.cachedTokens || 0
-
-        // Update by provider
-        const providerKey = ev.provider
-        if (!tokenUsage.byProvider[providerKey]) {
-          tokenUsage.byProvider[providerKey] = {
-            inputTokens: 0,
-            outputTokens: 0,
-            totalTokens: 0,
-            cachedTokens: 0,
-          }
-        }
-        tokenUsage.byProvider[providerKey].inputTokens += ev.usage.inputTokens || 0
-        tokenUsage.byProvider[providerKey].outputTokens += ev.usage.outputTokens || 0
-        tokenUsage.byProvider[providerKey].totalTokens += ev.usage.totalTokens || 0
-        tokenUsage.byProvider[providerKey].cachedTokens += ev.usage.cachedTokens || 0
-
-        // Update by provider and model
-        const modelKey = `${ev.provider}/${ev.model}`
-        if (!tokenUsage.byProviderAndModel[modelKey]) {
-          tokenUsage.byProviderAndModel[modelKey] = {
-            inputTokens: 0,
-            outputTokens: 0,
-            totalTokens: 0,
-            cachedTokens: 0,
-          }
-        }
-        tokenUsage.byProviderAndModel[modelKey].inputTokens += ev.usage.inputTokens || 0
-        tokenUsage.byProviderAndModel[modelKey].outputTokens += ev.usage.outputTokens || 0
-        tokenUsage.byProviderAndModel[modelKey].totalTokens += ev.usage.totalTokens || 0
-        tokenUsage.byProviderAndModel[modelKey].cachedTokens += ev.usage.cachedTokens || 0
-
-        // Save
-        const updatedSessions = [...sessions]
-        updatedSessions[sessionIndex] = {
-          ...session,
-          tokenUsage,
-          updatedAt: Date.now(),
-        }
-
-        console.log('[TimelineEventHandler] Session tokenUsage AFTER accumulation:', tokenUsage)
-        sessionService.setSessionsFor({ workspaceId: ws, sessions: updatedSessions })
-        sessionService.saveCurrentSession() // Debounced
-
-        // Broadcast usage update
-        console.log('[TimelineEventHandler] Calling broadcastUsage()')
-        broadcastUsage()
+          hasSessionService: !!sessionService,
+          hasWorkspaceService: !!workspaceService
+        })
+        return
       }
+
+      const ws = workspaceService.getWorkspaceRoot()
+      console.log('[TimelineEventHandler] tokenUsage: workspace root:', ws)
+      if (!ws) {
+        console.log('[TimelineEventHandler] tokenUsage: no workspace root, returning')
+        return
+      }
+
+      const sessions = sessionService.getSessionsFor({ workspaceId: ws })
+      console.log('[TimelineEventHandler] tokenUsage: found sessions:', sessions.length, 'looking for:', sessionId)
+      const sessionIndex = sessions.findIndex((s: any) => s.id === sessionId)
+      console.log('[TimelineEventHandler] tokenUsage: sessionIndex:', sessionIndex)
+      if (sessionIndex === -1) {
+        console.log('[TimelineEventHandler] tokenUsage: session not found, returning')
+        return
+      }
+
+      const session = sessions[sessionIndex]
+      console.log('[TimelineEventHandler] Session tokenUsage BEFORE:', session.tokenUsage)
+      const tokenUsage = session.tokenUsage || {
+        total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 },
+        byProvider: {},
+        byProviderAndModel: {},
+      }
+
+      // Update totals
+      tokenUsage.total.inputTokens += ev.usage.inputTokens || 0
+      tokenUsage.total.outputTokens += ev.usage.outputTokens || 0
+      tokenUsage.total.totalTokens += ev.usage.totalTokens || 0
+      tokenUsage.total.cachedTokens += ev.usage.cachedTokens || 0
+
+      // Update by provider
+      const providerKey = ev.provider
+      if (!tokenUsage.byProvider[providerKey]) {
+        tokenUsage.byProvider[providerKey] = {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          cachedTokens: 0,
+        }
+      }
+      tokenUsage.byProvider[providerKey].inputTokens += ev.usage.inputTokens || 0
+      tokenUsage.byProvider[providerKey].outputTokens += ev.usage.outputTokens || 0
+      tokenUsage.byProvider[providerKey].totalTokens += ev.usage.totalTokens || 0
+      tokenUsage.byProvider[providerKey].cachedTokens += ev.usage.cachedTokens || 0
+
+      // Update by provider and model
+      const modelKey = `${ev.provider}/${ev.model}`
+      if (!tokenUsage.byProviderAndModel[modelKey]) {
+        tokenUsage.byProviderAndModel[modelKey] = {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          cachedTokens: 0,
+        }
+      }
+      tokenUsage.byProviderAndModel[modelKey].inputTokens += ev.usage.inputTokens || 0
+      tokenUsage.byProviderAndModel[modelKey].outputTokens += ev.usage.outputTokens || 0
+      tokenUsage.byProviderAndModel[modelKey].totalTokens += ev.usage.totalTokens || 0
+      tokenUsage.byProviderAndModel[modelKey].cachedTokens += ev.usage.cachedTokens || 0
+
+      // Save
+      const updatedSessions = [...sessions]
+      updatedSessions[sessionIndex] = {
+        ...session,
+        tokenUsage,
+        updatedAt: Date.now(),
+      }
+
+      console.log('[TimelineEventHandler] Session tokenUsage AFTER accumulation:', tokenUsage)
+      sessionService.setSessionsFor({ workspaceId: ws, sessions: updatedSessions })
+      sessionService.saveCurrentSession() // Debounced
+
+      // Broadcast usage update
+      console.log('[TimelineEventHandler] Calling broadcastUsage()')
+      broadcastUsage()
       return
     }
 
