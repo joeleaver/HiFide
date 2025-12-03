@@ -112,7 +112,7 @@ dotenv -e .env.test pnpm test:record
 
 ```typescript
 import { myNode } from '../myNode'
-import { createTestContext, createTestConfig } from '../../../../__tests__/utils/testHelpers'
+import { createTestContext, createTestConfig } from '../../../__tests__/utils/testHelpers'
 
 describe('My Node', () => {
   it('should process input correctly', async () => {
@@ -130,7 +130,7 @@ describe('My Node', () => {
 ### Test with Real API (Record/Replay)
 
 ```typescript
-import { withFixture } from '../../../../__tests__/utils/fixtures'
+import { withFixture } from '../../../__tests__/utils/fixtures'
 
 it('should handle chat with Anthropic', async () => {
   const context = createTestContext({
@@ -153,7 +153,7 @@ it('should handle chat with Anthropic', async () => {
 ### Test with Mock Provider
 
 ```typescript
-import { createMockProvider } from '../../../../__tests__/utils/testHelpers'
+import { createMockProvider } from '../../../__tests__/utils/testHelpers'
 
 it('should handle streaming', async () => {
   const mockProvider = createMockProvider(['Mock response'])

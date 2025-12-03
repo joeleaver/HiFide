@@ -8,6 +8,7 @@ import type { WebContents } from 'electron'
 import { FlowScheduler } from './scheduler'
 import { emitFlowEvent } from './events'
 import type { FlowExecutionArgs } from './types'
+import type { Session, SessionMessage } from '../store/types.js'
 import { startTimelineListener } from './timeline-event-handler.js'
 
 // Active flow schedulers
@@ -83,8 +84,8 @@ export async function resumeFlow(
 
   try {
     // Add user message to session timeline
-    const sessionId = scheduler.sessionId
-    const workspaceId = scheduler.workspaceId
+    const sessionId = scheduler.getSessionId()
+    const workspaceId = scheduler.getWorkspaceId()
 
     console.log('[resumeFlow] Adding user message to timeline:', { sessionId, workspaceId, userInputLength: userInput.length })
 
@@ -97,16 +98,17 @@ export async function resumeFlow(
       console.log('[resumeFlow] Got sessionService:', !!sessionService)
 
       const sessions = sessionService.getSessionsFor({ workspaceId })
-      const session = sessions.find((s: any) => s.id === sessionId)
+      const sessionIndex = sessions.findIndex((s: Session) => s.id === sessionId)
+      const session: Session | undefined = sessionIndex >= 0 ? sessions[sessionIndex] : undefined
 
       console.log('[resumeFlow] Found session:', !!session, 'sessions count:', sessions.length)
 
       if (session) {
         // Create user message item
-        const userMessageItem = {
-          type: 'message' as const,
+        const userMessageItem: SessionMessage = {
+          type: 'message',
           id: `msg-${Date.now()}`,
-          role: 'user' as const,
+          role: 'user',
           content: userInput,
           timestamp: Date.now()
         }
@@ -114,12 +116,16 @@ export async function resumeFlow(
         console.log('[resumeFlow] Created user message item:', userMessageItem.id)
 
         // Add to session timeline
-        const updatedTimeline = [...(session.timeline || []), userMessageItem]
-        const updatedSessions = sessions.map((s: any) =>
-          s.id === sessionId
-            ? { ...s, timeline: updatedTimeline, updatedAt: Date.now() }
-            : s
-        )
+        const updatedItems = [...(session.items || []), userMessageItem]
+        const updatedSession: Session = {
+          ...session,
+          items: updatedItems,
+          updatedAt: Date.now(),
+          lastActivityAt: Date.now(),
+        }
+
+        const updatedSessions = [...sessions]
+        updatedSessions[sessionIndex] = updatedSession
 
         sessionService.setSessionsFor({ workspaceId, sessions: updatedSessions })
         sessionService.saveSessionFor({ workspaceId, sessionId }, false)
@@ -163,7 +169,7 @@ export function updateActiveFlowProviderModelForSession(sessionId: string, provi
     if (!sessionId) return
     // activeFlows is keyed by requestId, not sessionId, so we need to find the scheduler by session
     for (const scheduler of activeFlows.values()) {
-      if (scheduler.sessionId === sessionId) {
+      if (scheduler.getSessionId() === sessionId) {
         console.log('[updateActiveFlowProviderModelForSession] Updating scheduler for session:', sessionId, { provider, model })
         scheduler.updateProviderModel(provider, model)
         return

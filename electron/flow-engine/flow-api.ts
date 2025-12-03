@@ -6,8 +6,12 @@
  * a given execution, but may receive different contexts.
  */
 
-import type { ContextAPI } from './context-api'
+import type { ContextManager } from './contextManager'
 import type { EmitExecutionEvent } from './execution-events'
+import type { MainFlowContext } from './types'
+import type { CreateIsolatedContextOptions } from './context-options'
+
+export type { CreateIsolatedContextOptions } from './context-options'
 
 /**
  * Badge for conversation UI
@@ -94,10 +98,27 @@ export interface FlowAPI {
   // ===== Context Management =====
   
   /**
-   * Centralized, immutable context management API
-   * All context operations return new context objects
+   * Context management API for the active context (main or isolated).
+   * Nodes should treat the `context` argument as read-only and use this
+   * manager for mutations to guarantee single-writer semantics.
    */
-  context: ContextAPI
+  context: ContextManager
+
+  /**
+   * Helpers for working with multiple contexts registered to the scheduler.
+   */
+  contexts: {
+    /** Snapshot of the currently bound context */
+    active: () => MainFlowContext
+    /** All known contexts */
+    list: () => MainFlowContext[]
+    /** Lookup a context by ID */
+    get: (contextId: string) => MainFlowContext | undefined
+    /** Create a new isolated context managed by the scheduler */
+    createIsolated: (options: CreateIsolatedContextOptions) => MainFlowContext
+    /** Release an isolated context once it is no longer needed */
+    release: (contextId: string) => boolean
+  }
 
   // ===== Conversation Updates =====
   

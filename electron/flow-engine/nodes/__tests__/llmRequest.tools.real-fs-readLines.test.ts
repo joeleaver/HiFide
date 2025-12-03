@@ -9,7 +9,7 @@ import path from 'node:path'
 
 import type { ProviderAdapter, AgentTool } from '../../../../providers/provider'
 import { llmRequestNode } from '../llmRequest'
-import { createMainFlowContext, createMockFlowAPI, createMockNodeInputs, createTestConfig } from '../../../../__tests__/utils/testHelpers'
+import { createMainFlowContext, createMockFlowAPI, createMockNodeInputs, createTestConfig } from '../../../__tests__/utils/testHelpers'
 
 // Use store mock to control workspace root
 const { __setWorkspaceRoot } = require('../../../../__mocks__/store-index.js')

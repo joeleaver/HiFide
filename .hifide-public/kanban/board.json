@@ -1,6 +1,11 @@
 {
   "version": 1,
-  "columns": ["backlog", "todo", "inProgress", "done"],
+  "columns": [
+    "backlog",
+    "todo",
+    "inProgress",
+    "done"
+  ],
   "epics": [
     {
       "id": "epic-initial",
@@ -20,9 +25,408 @@
       "description": "Open the Kanban view and explore drag & drop between columns.",
       "epicId": "epic-initial",
       "assignees": [],
-      "tags": ["kanban"],
+      "tags": [
+        "kanban"
+      ],
       "createdAt": 0,
-      "updatedAt": 0
+      "updatedAt": 0,
+      "archived": false
+    },
+    {
+      "id": "task-c6955072-e0c0-4a56-ac37-bd6a48a0c13d",
+      "title": "Run tsc and fix all syntax errors",
+      "status": "inProgress",
+      "order": 0,
+      "description": "Execute TypeScript compiler (tsc) across the repo, identify all syntax/type errors, and apply code fixes until tsc completes without errors. Document findings and tests.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "build",
+        "typescript",
+        "lint"
+      ],
+      "createdAt": 1764791349409,
+      "updatedAt": 1764791351290,
+      "archived": false
+    },
+    {
+      "id": "task-f4fe2e92-89b7-4261-a460-90f332a0ccf0",
+      "title": "Fix await usage error in llm-service rate limit check",
+      "status": "inProgress",
+      "order": 1,
+      "description": "Build fails with: \"await can only be used inside an async function\" at llm-service.ts line 925 for rateLimitTracker.checkAndWait call. Update function signature/call site to be async-safe and ensure rate limiting works.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [
+        "bug",
+        "build",
+        "llm-service",
+        "rate-limit"
+      ],
+      "createdAt": 1764715212052,
+      "updatedAt": 1764715919028,
+      "archived": false
+    },
+    {
+      "id": "task-e016c447-caba-4ffd-9569-66f813b074df",
+      "title": "Fix usage badge not appearing in session timeline",
+      "status": "inProgress",
+      "order": 2,
+      "description": "usage_breakdown events are emitted with null nodeId/executionId; badges do not appear in session timeline. Fix LLMService emission and timeline-event-handler robustness.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [
+        "bug",
+        "usage_badge",
+        "llm",
+        "timeline"
+      ],
+      "createdAt": 1764707998495,
+      "updatedAt": 1764707998495,
+      "archived": false
+    },
+    {
+      "id": "task-3778f4eb-9063-490b-a51c-b92fce009abf",
+      "title": "Reduce setUsage emissions to avoid frontend rerender storms",
+      "status": "inProgress",
+      "order": 3,
+      "description": "Limit setUsage emissions to only when LLM usage information is received (usage_breakdown / final result), eliminating per-chunk updates that cause frontend rerender storms.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [
+        "bug",
+        "performance",
+        "usage",
+        "frontend"
+      ],
+      "createdAt": 1764709160121,
+      "updatedAt": 1764709265170,
+      "archived": false
+    },
+    {
+      "id": "task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4",
+      "title": "Refactor flow engine context architecture for single-writer ContextManager and multi-context support",
+      "status": "done",
+      "order": 0,
+      "description": "Implement single-writer ContextManager for the main flow context, refactor LMService/llmRequest to use it, and adapt manualInput/userInput/injectMessages/newContext nodes. Multi-context isolated flows are temporarily degraded and will be reintroduced with per-context managers in a follow-up task.\n\nProgress tracker:\n- [x] Single-writer ContextManager integration + node refactors\n- [x] Context registry + automatic context propagation/multi-context scheduling (dedicated ContextRegistry + tests)\n- [x] FlowAPI contexts helper + isolated context lifecycle utilities\n- [x] Renderer/websocket sync + portal/context-edge validation\n- [x] End-to-end & regression tests for multi-context flows",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [],
+      "createdAt": 1764780539568,
+      "updatedAt": 1764798616059,
+      "archived": false
+    },
+    {
+      "id": "task-54e42bbc-117c-4002-93eb-222b4daa6f75",
+      "title": "Fix Null Usage Badge Emission",
+      "status": "done",
+      "order": 1,
+      "description": "Investigate why LLMService is emitting usage_breakdown events with null nodeId and executionId, preventing badges from appearing.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [],
+      "createdAt": 1764706789939,
+      "updatedAt": 1764706881716,
+      "archived": false
+    },
+    {
+      "id": "task-9666f09e-facf-40b8-8c03-eb6593996940",
+      "title": "Fix 'Usage Badge' Missing Issue",
+      "status": "done",
+      "order": 2,
+      "description": "Investigate and fix the missing Usage badge issue related to 'usage_breakdown' event handling.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [],
+      "createdAt": 1764705316360,
+      "updatedAt": 1764706240240,
+      "archived": false
+    },
+    {
+      "id": "task-9b4b0a25-a2eb-4d4f-98e5-19cbc52113c6",
+      "title": "Fix LLM provider/model resolution from flow context and restore usage badges",
+      "status": "done",
+      "order": 3,
+      "description": "Fix LLM provider/model resolution from flow context and restore usage badges.\n\nClosed: provider/model resolution + usage badge fixes delivered in task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [],
+      "createdAt": 1764708771757,
+      "updatedAt": 1764798785572,
+      "archived": false
+    },
+    {
+      "id": "task-a33b1072-5d67-4551-b1f1-10b096a43289",
+      "title": "Fix LLM provider/model resolution and usage badge emission in flow engine",
+      "status": "done",
+      "order": 4,
+      "description": "Fix LLM provider/model resolution and usage badge emission in flow engine.\n\nClosed: redundant after task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4 shipped the consolidated fixes.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [],
+      "createdAt": 1764710186991,
+      "updatedAt": 1764798789065,
+      "archived": false
+    },
+    {
+      "id": "task-aa9b4c39-e52f-45ab-bd22-170692621163",
+      "title": "Investigate and resolve 'Usage badge' missing issue",
+      "status": "done",
+      "order": 5,
+      "description": "Debug why the 'Usage badge' does not appear after LLM execution. Current logs indicate that `LLMService` may not emit the `usage_breakdown` event properly. Check the flow and ensure that the badge is updated accordingly when `llmService.chat` completes without an error.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [
+        "bug",
+        "debug",
+        "llm",
+        "usage badge"
+      ],
+      "createdAt": 1764704648953,
+      "updatedAt": 1764706239830,
+      "archived": false
+    },
+    {
+      "id": "task-63886547-0ec5-4c1f-b164-bcad1f1df3b2",
+      "title": "Implement Usage Badge Display After LLM Execution",
+      "status": "done",
+      "order": 6,
+      "description": "Define and implement the logic for displaying usage badges in the session timeline after LLM execution by ensuring event emission and badge update mechanism.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [
+        "feature",
+        "usage badge",
+        "LLM"
+      ],
+      "createdAt": 1764705824956,
+      "updatedAt": 1764706239337,
+      "archived": false
+    },
+    {
+      "id": "task-7d5708f4-5e80-4933-8975-f80bef112f0d",
+      "title": "Fix message history being overwritten in LLMService chat context",
+      "status": "done",
+      "order": 7,
+      "description": "Investigate why messageHistory is no longer preserved across turns and is overwritten with only the latest user/agent pair. Ensure flow context merging/appending logic correctly accumulates history instead of replacing it.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "bug",
+        "llm",
+        "context",
+        "messageHistory"
+      ],
+      "createdAt": 1764717739033,
+      "updatedAt": 1764718474737,
+      "archived": false
+    },
+    {
+      "id": "task-6fbcf188-a238-4490-a649-a12901d0b5d0",
+      "title": "Refactor flow engine context architecture for single-writer context API",
+      "status": "done",
+      "order": 8,
+      "description": "Design and implement a clean architecture where FlowScheduler.mainContext is the single source of truth and only a dedicated Context API can mutate it. Nodes must treat context as immutable input and communicate state changes exclusively through the Context API. This includes redesigning LMService/chat, userInput, and scheduler-node integration so messageHistory and other context fields are never overwritten accidentally.\n\nClosed: solved comprehensively by task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4 (single-writer ContextManager + ContextRegistry refactor).",
+      "epicId": null,
+      "assignees": [],
+      "tags": [
+        "flow-engine",
+        "architecture",
+        "context",
+        "refactor"
+      ],
+      "createdAt": 1764721521832,
+      "updatedAt": 1764798778494,
+      "archived": false
+    },
+    {
+      "id": "task-52c64b28-deb8-4a7b-8210-08b88df22f45",
+      "title": "Fix LM node context overwrite of messageHistory",
+      "status": "done",
+      "order": 9,
+      "description": "Investigate and fix message history being overwritten when LM node executes. Ensure LMService.chat and flow/scheduler integration append to existing messageHistory rather than replacing it.\n\nClosed: redundant after the comprehensive refactor delivered in task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [],
+      "createdAt": 1764720263568,
+      "updatedAt": 1764798772834,
+      "archived": false
+    },
+    {
+      "id": "task-2797bfb3-b893-4a5c-a0f4-e15b18946c21",
+      "title": "Fix LM node context overwrite of messageHistory",
+      "status": "done",
+      "order": 10,
+      "description": "Investigate and fix where LM node execution overwrites MainFlowContext.messageHistory with only the latest user/assistant pair instead of appending. Ensure FlowScheduler adopts LLMService.chat updatedContext correctly and that flushToSession/updateContextFor persist full history.\n\nClosed: covered by task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4 deliverables (single-writer context + flush integration tests).",
+      "epicId": null,
+      "assignees": [],
+      "tags": [],
+      "createdAt": 1764720056544,
+      "updatedAt": 1764798767659,
+      "archived": false
+    },
+    {
+      "id": "task-66d19218-194c-476b-83f1-ce84b820ded1",
+      "title": "Fix message history overwrite when LM node executes",
+      "status": "done",
+      "order": 11,
+      "description": "Root-cause and fix the bug where message history is overwritten with only the latest user/assistant pair when the LLM node executes. Ensure LMService.chat and scheduler/context integration preserve full history. Add regression tests.\n\nClosed: requirements satisfied by task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4 (ContextManager + regression suite).",
+      "epicId": null,
+      "assignees": [],
+      "tags": [],
+      "createdAt": 1764719749340,
+      "updatedAt": 1764798764722,
+      "archived": false
+    },
+    {
+      "id": "task-fc6bdd50-82d0-4ab7-8501-d53e0e5d0bbc",
+      "title": "Investigate and fix messageHistory overwrite in llmRequest flow integration",
+      "status": "done",
+      "order": 12,
+      "description": "Investigate and fix messageHistory overwrite in llmRequest flow integration.\n\nClosed: refactor completed under task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [],
+      "createdAt": 1764719112460,
+      "updatedAt": 1764798761939,
+      "archived": false
+    },
+    {
+      "id": "task-72cd43fb-b242-42c4-bd77-e80ed22a0fe8",
+      "title": "Investigate and fix context messageHistory overwrite during LLM node execution",
+      "status": "done",
+      "order": 13,
+      "description": "Investigate and fix context messageHistory overwrite during LLM node execution.\n\nClosed: resolved by the consolidated context refactor (task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4).",
+      "epicId": null,
+      "assignees": [],
+      "tags": [],
+      "createdAt": 1764718962291,
+      "updatedAt": 1764798758725,
+      "archived": false
+    },
+    {
+      "id": "task-b0cbae5f-e154-4ffc-b626-61912a7ab252",
+      "title": "Investigate and fix message history overwrite when LLM node executes",
+      "status": "done",
+      "order": 14,
+      "description": "Investigate and fix message history overwrite when LLM node executes.\n\nClosed: covered by single-writer ContextManager + registry work in task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [],
+      "createdAt": 1764718904393,
+      "updatedAt": 1764798756460,
+      "archived": false
+    },
+    {
+      "id": "task-04d75cf2-6454-4cd3-b372-34ec52088a06",
+      "title": "Fix LMService syntax error and restore build",
+      "status": "done",
+      "order": 15,
+      "description": "Fix LMService syntax error and restore build.\n\nClosed: addressed while landing the consolidated context/LLM refactor (task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4).",
+      "epicId": null,
+      "assignees": [],
+      "tags": [],
+      "createdAt": 1764718721064,
+      "updatedAt": 1764798753772,
+      "archived": false
+    },
+    {
+      "id": "task-d6615ffe-7ffa-4a8f-8b64-80ea0d2f39b3",
+      "title": "Fix 'provider is not defined' error in LLMService.chat flow",
+      "status": "done",
+      "order": 16,
+      "description": "ReferenceError: provider is not defined in LLMService.chat during llmRequest node execution when submitting user input. Investigate provider/model resolution and ensure 'provider' is always defined before use.\n\nClosed: resolved via LLMService provider/model overhaul in task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "bug",
+        "llm",
+        "flow",
+        "provider",
+        "model"
+      ],
+      "createdAt": 1764716478921,
+      "updatedAt": 1764798750965,
+      "archived": false
+    },
+    {
+      "id": "task-db15a9c2-678d-4b4b-87b6-cb9494491497",
+      "title": "Fix await usage errors in electron/flow-engine/llm-service.ts",
+      "status": "done",
+      "order": 17,
+      "description": "Fix await usage errors in electron/flow-engine/llm-service.ts.\n\nClosed: async refactors landed as part of task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [],
+      "createdAt": 1764715972334,
+      "updatedAt": 1764798747688,
+      "archived": false
+    },
+    {
+      "id": "task-0401ca08-1dab-46c6-a51e-941d3f08c58b",
+      "title": "Fix llmRequest 'message is not defined' error and stabilize LLM request flow",
+      "status": "done",
+      "order": 18,
+      "description": "Fix llmRequest 'message is not defined' error and stabilize LLM request flow.\n\nClosed: handled during task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4 refactor (scheduler + FlowAPI cleanup).",
+      "epicId": null,
+      "assignees": [],
+      "tags": [],
+      "createdAt": 1764711794867,
+      "updatedAt": 1764798744976,
+      "archived": false
+    },
+    {
+      "id": "task-3eeca1d8-79bb-4ca0-802f-5f8d3e1d4aea",
+      "title": "Fix flow context handling and LLM usage badge issues",
+      "status": "done",
+      "order": 19,
+      "description": "Resolve provider/model resolution, context duplication, messageHistory non-iterable errors, and usage badge emission for llmRequest flows.\n\nClosed: superseded by consolidated refactor task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [],
+      "createdAt": 1764711578467,
+      "updatedAt": 1764798742613,
+      "archived": false
+    },
+    {
+      "id": "task-b9d8dc28-637b-434b-930f-daad3f4dd216",
+      "title": "Fix duplicated flow context and messageHistory not iterable error",
+      "status": "done",
+      "order": 20,
+      "description": "Refactor flow context handling to use a single source of truth, normalize messageHistory, and clean up front-end/backend context sync to be RPC-driven and one-way from engine to UI.\n\nClosed: work delivered under task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [],
+      "createdAt": 1764710796258,
+      "updatedAt": 1764798740286,
+      "archived": false
+    },
+    {
+      "id": "task-82749ed8-b33b-401c-a6ce-5efe417b60ce",
+      "title": "Fix duplicated flow context and messageHistory not iterable error",
+      "status": "done",
+      "order": 21,
+      "description": "FlowScheduler error: `context.messageHistory is not iterable`. Root cause likely due to keeping duplicate context objects (FlowScheduler context vs flowAPI.context) and syncing them in two directions. Need to refactor flow context handling so there is a single source of truth, or a clear, one-way sync, and ensure messageHistory is always an array when used.\n\nClosed: superseded by task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4 refactor.",
+      "epicId": null,
+      "assignees": [],
+      "tags": [
+        "bug",
+        "flow",
+        "context",
+        "llm",
+        "messageHistory"
+      ],
+      "createdAt": 1764710450823,
+      "updatedAt": 1764798737706,
+      "archived": false
     }
   ],
   "metadata": {

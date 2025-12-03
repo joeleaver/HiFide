@@ -132,9 +132,17 @@ function createSessionUiStore() {
     __setSessions: (list, currentId) => set({ sessions: list.slice(), currentId, hasHydratedList: true }),
     __setSelected: (id) => set((s) => ({ currentId: id, hasHydratedList: s.hasHydratedList || !!id })),
     __setUsage: (tokenUsage, costs, requestsLog) => {
-      console.log('[sessionUi.__setUsage] Called with:', { tokenUsage, costs, requestsLog })
-      set({ tokenUsage, costs, requestsLog });
-      console.log('[sessionUi.__setUsage] State set. Current state:', get())
+      // Lightweight guard to avoid rerender storms: only update when values actually change.
+      const prev = get()
+      const sameUsage = prev.tokenUsage === tokenUsage
+      const sameCosts = prev.costs === costs
+      const sameLog = prev.requestsLog === requestsLog
+
+      if (sameUsage && sameCosts && sameLog) {
+        return
+      }
+
+      set({ tokenUsage, costs, requestsLog })
     },
     __setMeta: (meta) => set((s) => ({ ...s, ...meta })),
     __setSettings: (providerValid, modelsByProvider) => {

@@ -20,7 +20,7 @@ Create a new test file: `electron/ipc/flows-v2/nodes/__tests__/myNode.test.ts`
 
 ```typescript
 import { myNode } from '../myNode'
-import { createTestContext, createTestConfig } from '../../../../__tests__/utils/testHelpers'
+import { createTestContext, createTestConfig } from '../../../__tests__/utils/testHelpers'
 
 describe('My Node', () => {
   it('should work correctly', async () => {
@@ -67,9 +67,9 @@ Now your tests will use the recorded responses automatically!
 ### Testing a Chat Node
 
 ```typescript
-import { withFixture } from '../../../../__tests__/utils/fixtures'
+import { withFixture } from '../../../__tests__/utils/fixtures'
 import { chatNode } from '../chat'
-import { createTestContext, createTestConfig } from '../../../../__tests__/utils/testHelpers'
+import { createTestContext, createTestConfig } from '../../../__tests__/utils/testHelpers'
 
 it('should chat with Anthropic', async () => {
   const context = createTestContext({
@@ -89,7 +89,7 @@ it('should chat with Anthropic', async () => {
 ### Testing with Tools
 
 ```typescript
-import { createTestTool } from '../../../../__tests__/utils/testHelpers'
+import { createTestTool } from '../../../__tests__/utils/testHelpers'
 
 it('should use tools', async () => {
   const tools = [createTestTool('calculator')]

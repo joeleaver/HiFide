@@ -22,11 +22,9 @@
  */
 
 import type { FlowExecutionArgs } from './types.js'
-import type { NodeExecutionBox } from '../store/types.js'
 import { flowEvents } from './events.js'
-import { broadcastWorkspaceNotification } from '../backend/ws/broadcast.js'
-import { getWorkspaceIdForSessionId } from '../utils/workspace-session.js'
-import { ServiceRegistry } from '../services/base/ServiceRegistry.js'
+import { UiPayloadCache } from '../core/uiPayloadCache.js'
+import { SessionTimelineWriter } from './session-timeline-writer.js'
 
 /**
  * Format tool name for display (e.g., "fs_read_file" → "fs.read.file")
@@ -72,6 +70,9 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
     }
   } catch {}
 
+  // Initialize writer
+  const writer = new SessionTimelineWriter(sessionId, nodeMeta)
+
   // Initialize buffers
   const buffers: ExecutionBuffers = {
     text: new Map(),
@@ -92,134 +93,16 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
       const reasoning = buffers.reasoning.get(key) || ''
       const toolCalls = buffers.toolCalls.get(key) || []
 
-      // Nothing to flush?
-      if (!text.trim() && !reasoning && toolCalls.length === 0) {
-        return
+      const boxId = writer.write(nodeId, executionId, {
+        text,
+        reasoning,
+        toolCalls,
+        boxId: buffers.openBoxIds.get(key),
+      })
+
+      if (boxId) {
+        buffers.openBoxIds.set(key, boxId)
       }
-
-      const sessionService = ServiceRegistry.getInstance().get<any>('session')
-      const workspaceService = ServiceRegistry.getInstance().get<any>('workspace')
-      if (!sessionService || !workspaceService) return
-
-      const ws = getWorkspaceIdForSessionId(sessionId) || workspaceService.getWorkspaceRoot()
-      if (!ws) return
-
-      const sessions = sessionService.getSessionsFor({ workspaceId: ws })
-      const sessionIndex = sessions.findIndex((s: any) => s.id === sessionId)
-      if (sessionIndex === -1) return
-
-    const session = sessions[sessionIndex]
-    const items = Array.isArray(session.items) ? [...session.items] : []
-
-    const meta = nodeMeta.get(nodeId) || { label: 'Node', kind: 'unknown' }
-    let boxId = buffers.openBoxIds.get(key)
-
-    if (!boxId) {
-      // Create new box
-      boxId = `box-${nodeId}-${executionId || Date.now()}`
-      buffers.openBoxIds.set(key, boxId)
-
-      const newBox: NodeExecutionBox = {
-        type: 'node-execution',
-        id: boxId,
-        nodeId,
-        nodeLabel: meta.label,
-        nodeKind: meta.kind,
-        timestamp: Date.now(),
-        content: [],
-      }
-
-      if (reasoning) newBox.content.push({ type: 'reasoning', text: reasoning })
-      if (text.trim()) newBox.content.push({ type: 'text', text })
-      for (const tool of toolCalls) {
-        newBox.content.push({ type: 'badge', badge: tool })
-      }
-
-      items.push(newBox)
-    } else {
-      // Update existing box
-      const boxIndex = items.findIndex((item: any) => item.id === boxId)
-      if (boxIndex >= 0) {
-        const box = { ...items[boxIndex] } as NodeExecutionBox
-        const content = [...box.content]
-
-        if (reasoning) content.push({ type: 'reasoning', text: reasoning })
-        if (text.trim()) content.push({ type: 'text', text })
-
-        // Update or append tool badges
-        for (const tool of toolCalls) {
-          // Find existing badge by callId
-          const existingIndex = content.findIndex(
-            (item: any) => item.type === 'badge' && item.badge?.callId === tool.callId
-          )
-
-          if (existingIndex >= 0) {
-            // Update existing badge
-            content[existingIndex] = { type: 'badge', badge: tool }
-          } else {
-            // Append new badge
-            content.push({ type: 'badge', badge: tool })
-          }
-        }
-
-        items[boxIndex] = { ...box, content }
-      }
-    }
-
-    // Save to session
-    const updatedSessions = [...sessions]
-    updatedSessions[sessionIndex] = {
-      ...session,
-      items,
-      updatedAt: Date.now(),
-    }
-
-    sessionService.setSessionsFor({ workspaceId: ws, sessions: updatedSessions })
-
-    // Persist to disk (debounced)
-    console.log('[TimelineEventHandler] Calling saveSessionFor:', { workspaceId: ws, sessionId, itemCount: items.length })
-    sessionService.saveSessionFor({ workspaceId: ws, sessionId }, false)
-
-    // Broadcast delta to renderer (incremental update, not full snapshot)
-    // For text and reasoning, use appendToBox
-    if (text || reasoning) {
-      const delta = {
-        op: 'appendToBox',
-        nodeId,
-        executionId,
-        append: {
-          text: text || undefined,
-          reasoning: reasoning || undefined,
-        },
-      }
-      broadcastWorkspaceNotification(ws, 'session.timeline.delta', delta)
-    }
-
-    // For badges, send individual updateBadge operations for each badge
-    for (const badge of toolCalls) {
-      const badgeDelta = {
-        op: badge.status === 'running' ? 'appendToBox' : 'updateBadge',
-        nodeId,
-        executionId,
-        callId: badge.callId,
-        append: badge.status === 'running' ? { badges: [badge] } : undefined,
-        updates: badge.status !== 'running' ? badge : undefined,
-      }
-      if (badge.status !== 'running') {
-        console.log('[TimelineEventHandler] Broadcasting updateBadge:', {
-          callId: badge.callId,
-          label: badge.label,
-          hasInteractive: !!badge.interactive,
-          interactiveType: badge.interactive?.type,
-          interactiveKey: badge.interactive?.data?.key,
-          badgeKeys: Object.keys(badge),
-          updatesHasInteractive: !!(badgeDelta.updates as any)?.interactive,
-          fullInteractive: JSON.stringify(badge.interactive),
-          fullBadge: JSON.stringify(badge)
-        })
-      }
-      broadcastWorkspaceNotification(ws, 'session.timeline.delta', badgeDelta)
-    }
 
       // Clear text and reasoning buffers (but keep toolCalls until they complete)
       buffers.text.delete(key)
@@ -230,43 +113,6 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
     }
   }
 
-  // Helper: Broadcast usage update
-  const broadcastUsage = () => {
-    try {
-      const sessionService = ServiceRegistry.getInstance().get<any>('session')
-      const workspaceService = ServiceRegistry.getInstance().get<any>('workspace')
-      if (!sessionService || !workspaceService) return
-
-      const ws = getWorkspaceIdForSessionId(sessionId) || workspaceService.getWorkspaceRoot()
-      if (!ws) return
-
-      const sessions = sessionService.getSessionsFor({ workspaceId: ws })
-      const session = sessions.find((s: any) => s.id === sessionId)
-      if (!session) return
-
-      const tokenUsage = session.tokenUsage || {
-        total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 },
-        byProvider: {},
-        byProviderAndModel: {},
-      }
-      const costs = session.costs || {
-        byProviderAndModel: {},
-        totalCost: 0,
-        currency: 'USD',
-      }
-      const requestsLog = Array.isArray(session.requestsLog) ? session.requestsLog : []
-
-      console.log('[TimelineEventHandler.broadcastUsage] Broadcasting:', { tokenUsage, costs, requestsLog })
-      broadcastWorkspaceNotification(ws, 'session.usage.changed', {
-        tokenUsage,
-        costs,
-        requestsLog,
-      })
-    } catch (e) {
-      console.warn('[TimelineEventHandler] broadcastUsage failed:', e)
-    }
-  }
-
   // Event listener
   const unsubscribe = flowEvents.onFlowEvent(requestId, (ev: any) => {
     const { type, nodeId, executionId } = ev
@@ -274,99 +120,29 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
     // Handle tokenUsage events (which don't have nodeId) separately
     if (type === 'tokenUsage') {
       console.log('[TimelineEventHandler] tokenUsage event RECEIVED:', ev)
-
-      const sessionService = ServiceRegistry.getInstance().get<any>('session')
-      const workspaceService = ServiceRegistry.getInstance().get<any>('workspace')
-      if (!sessionService || !workspaceService) {
-        console.log('[TimelineEventHandler] tokenUsage: MISSING SERVICES', {
-          hasSessionService: !!sessionService,
-          hasWorkspaceService: !!workspaceService
-        })
-        return
-      }
-
-      const ws = workspaceService.getWorkspaceRoot()
-      console.log('[TimelineEventHandler] tokenUsage: workspace root:', ws)
-      if (!ws) {
-        console.log('[TimelineEventHandler] tokenUsage: no workspace root, returning')
-        return
-      }
-
-      const sessions = sessionService.getSessionsFor({ workspaceId: ws })
-      console.log('[TimelineEventHandler] tokenUsage: found sessions:', sessions.length, 'looking for:', sessionId)
-      const sessionIndex = sessions.findIndex((s: any) => s.id === sessionId)
-      console.log('[TimelineEventHandler] tokenUsage: sessionIndex:', sessionIndex)
-      if (sessionIndex === -1) {
-        console.log('[TimelineEventHandler] tokenUsage: session not found, returning')
-        return
-      }
-
-      const session = sessions[sessionIndex]
-      console.log('[TimelineEventHandler] Session tokenUsage BEFORE:', session.tokenUsage)
-      const tokenUsage = session.tokenUsage || {
-        total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 },
-        byProvider: {},
-        byProviderAndModel: {},
-      }
-
-      // Update totals
-      tokenUsage.total.inputTokens += ev.usage.inputTokens || 0
-      tokenUsage.total.outputTokens += ev.usage.outputTokens || 0
-      tokenUsage.total.totalTokens += ev.usage.totalTokens || 0
-      tokenUsage.total.cachedTokens += ev.usage.cachedTokens || 0
-
-      // Update by provider
-      const providerKey = ev.provider
-      if (!tokenUsage.byProvider[providerKey]) {
-        tokenUsage.byProvider[providerKey] = {
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-          cachedTokens: 0,
-        }
-      }
-      tokenUsage.byProvider[providerKey].inputTokens += ev.usage.inputTokens || 0
-      tokenUsage.byProvider[providerKey].outputTokens += ev.usage.outputTokens || 0
-      tokenUsage.byProvider[providerKey].totalTokens += ev.usage.totalTokens || 0
-      tokenUsage.byProvider[providerKey].cachedTokens += ev.usage.cachedTokens || 0
-
-      // Update by provider and model
-      const modelKey = `${ev.provider}/${ev.model}`
-      if (!tokenUsage.byProviderAndModel[modelKey]) {
-        tokenUsage.byProviderAndModel[modelKey] = {
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-          cachedTokens: 0,
-        }
-      }
-      tokenUsage.byProviderAndModel[modelKey].inputTokens += ev.usage.inputTokens || 0
-      tokenUsage.byProviderAndModel[modelKey].outputTokens += ev.usage.outputTokens || 0
-      tokenUsage.byProviderAndModel[modelKey].totalTokens += ev.usage.totalTokens || 0
-      tokenUsage.byProviderAndModel[modelKey].cachedTokens += ev.usage.cachedTokens || 0
-
-      // Save
-      const updatedSessions = [...sessions]
-      updatedSessions[sessionIndex] = {
-        ...session,
-        tokenUsage,
-        updatedAt: Date.now(),
-      }
-
-      console.log('[TimelineEventHandler] Session tokenUsage AFTER accumulation:', tokenUsage)
-      sessionService.setSessionsFor({ workspaceId: ws, sessions: updatedSessions })
-      sessionService.saveCurrentSession() // Debounced
-
-      // Broadcast usage update
-      console.log('[TimelineEventHandler] Calling broadcastUsage()')
-      broadcastUsage()
+      writer.updateUsage(ev)
       return
     }
 
     // Other events require nodeId
     if (!nodeId) return
 
-    const key = getKey(nodeId, executionId)
+    let key = getKey(nodeId, executionId)
+
+    // Fallback: If executionId is missing, try to find active execution for this node
+    if (!executionId && !buffers.openBoxIds.has(key)) {
+      for (const k of buffers.openBoxIds.keys()) {
+        if (k.startsWith(nodeId + '::')) {
+          key = k
+          // Extract executionId from key for consistency
+          const parts = k.split('::')
+          if (parts.length > 1) {
+            ev.executionId = parts[1]
+          }
+          break
+        }
+      }
+    }
 
     switch (type) {
       case 'chunk':
@@ -390,7 +166,9 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
       case 'toolStart':
         // Store raw tool call data (renderer will format)
         {
-          const toolCalls = buffers.toolCalls.get(key) || []
+          // Recompute key with potentially recovered identifiers
+          const usageKeyForBuffer = `${ev.nodeId || 'global'}::${ev.executionId || 'global'}`
+          const toolCalls = buffers.toolCalls.get(usageKeyForBuffer) || []
           const toolName = ev.toolName || 'unknown'
           const label = formatToolName(toolName)
 
@@ -421,7 +199,8 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
       case 'toolEnd':
         // Update tool call with result and enrich with interactive data
         {
-          const toolCalls = buffers.toolCalls.get(key) || []
+          const usageKeyForBuffer = `${ev.nodeId || 'global'}::${ev.executionId || 'global'}`
+          const toolCalls = buffers.toolCalls.get(usageKeyForBuffer) || []
           console.log('[TimelineEventHandler] toolEnd:', {
             callId: ev.callId,
             toolName: ev.toolName,
@@ -462,7 +241,8 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
       case 'toolError':
         // Update tool call with error
         {
-          const toolCalls = buffers.toolCalls.get(key) || []
+          const usageKeyForBuffer = `${ev.nodeId || 'global'}::${ev.executionId || 'global'}`
+          const toolCalls = buffers.toolCalls.get(usageKeyForBuffer) || []
           const tool = toolCalls.find((t) => t.callId === ev.callId)
           if (tool) {
             tool.status = 'error'
@@ -481,6 +261,81 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
         }
         break
 
+
+      case 'usage_breakdown':
+        // Handle usage breakdown event - create a badge
+        {
+          // Best-effort recovery of missing identifiers so the badge can still attach to
+          // the correct box in the timeline.
+
+          // 1) If executionId is missing but we know the node, infer it from open boxes
+          if (!ev.executionId && ev.nodeId) {
+            const found = Array.from(buffers.openBoxIds.entries()).find(([k]) => k.startsWith(ev.nodeId!))
+            if (found) {
+              // found[0] is the key (nodeId::executionId)
+              const parts = found[0].split('::')
+              if (parts.length > 1) {
+                ev.executionId = parts[1]
+              }
+            }
+          }
+
+          // 2) If nodeId and/or executionId are still missing, try to borrow them from any open box
+          if (!ev.nodeId || !ev.executionId) {
+            const anyKey = Array.from(buffers.openBoxIds.keys())[0]
+            if (anyKey) {
+              const [maybeNodeId, maybeExecId] = anyKey.split('::')
+              if (!ev.nodeId && maybeNodeId) ev.nodeId = maybeNodeId
+              if (!ev.executionId && maybeExecId) ev.executionId = maybeExecId
+            }
+          }
+
+          const usageKey = `usage-${ev.executionId || Date.now()}`
+
+          // Store breakdown data in cache for viewer
+          if (ev.usageBreakdown) {
+            UiPayloadCache.put(usageKey, ev.usageBreakdown)
+          }
+
+          const usageKeyForBuffer = `${ev.nodeId || 'global'}::${ev.executionId || 'global'}`
+          const toolCalls = buffers.toolCalls.get(usageKeyForBuffer) || []
+
+          // Create a badge for the usage breakdown
+          const usageBadge = {
+            id: `badge-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+            type: 'tool' as const, // Treat as tool for consistency in renderer
+            toolName: 'usageBreakdown',
+            label: 'Token Usage',
+            callId: `usage-${ev.executionId}`,
+            status: 'success' as const,
+            timestamp: Date.now(),
+            expandable: true,
+            contentType: 'usage-breakdown' as const,
+            interactive: {
+              type: 'usage-breakdown',
+              data: { key: usageKey }
+            },
+            metadata: {
+              inputTokens: ev.usageBreakdown?.totals?.inputTokens,
+              outputTokens: ev.usageBreakdown?.totals?.outputTokens,
+              totalTokens: ev.usageBreakdown?.totals?.totalTokens
+            }
+          }
+
+          toolCalls.push(usageBadge)
+          buffers.toolCalls.set(usageKeyForBuffer, toolCalls)
+
+          flush(usageKeyForBuffer)
+
+          // Remove from buffer so we don't process it again (it's persisted in the box now)
+          const updatedToolCalls = toolCalls.filter((t) => t.callId !== usageBadge.callId)
+          if (updatedToolCalls.length > 0) {
+            buffers.toolCalls.set(usageKeyForBuffer, updatedToolCalls)
+          } else {
+            buffers.toolCalls.delete(usageKeyForBuffer)
+          }
+        }
+        break
 
       case 'done':
         // Flush any remaining content

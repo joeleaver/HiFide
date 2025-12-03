@@ -301,6 +301,9 @@ export class SessionService extends Service<SessionState> {
   }): void {
     const { workspaceId, sessionId, messageHistory, provider, model, systemInstructions } = params
 
+    // Normalize messageHistory defensively before writing into session state
+    const safeHistory = Array.isArray(messageHistory) ? messageHistory : []
+
     const sessions = this.getSessionsFor({ workspaceId })
     const updated = sessions.map((s) =>
       s.id === sessionId
@@ -308,7 +311,7 @@ export class SessionService extends Service<SessionState> {
             ...s,
             currentContext: {
               ...s.currentContext,
-              messageHistory,
+              messageHistory: safeHistory,
               ...(provider !== undefined ? { provider } : {}),
               ...(model !== undefined ? { model } : {}),
               ...(systemInstructions !== undefined ? { systemInstructions } : {}),

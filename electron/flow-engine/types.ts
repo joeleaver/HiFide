@@ -46,6 +46,10 @@ export interface MainFlowContext {
    */
   systemInstructions?: string
 
+  /**
+   * Optional label/description surfaced in inspectors/UI for this context
+   */
+  label?: string
 
   /**
    * Optional sampling temperature for this context
@@ -106,6 +110,21 @@ export interface MainFlowContext {
       priority?: number
     }
   }>
+
+  /**
+   * Optional reference to the parent context this one forked from
+   */
+  parentContextId?: string
+
+  /**
+   * Node that created this context (useful for debugging/visualization)
+   */
+  createdByNodeId?: string
+
+  /**
+   * ISO timestamp recording when the context was created
+   */
+  createdAt?: string
 }
 
 /**

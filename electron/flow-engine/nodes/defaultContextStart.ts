@@ -99,36 +99,8 @@ export const metadata = {
  * Node implementation
  */
 export const defaultContextStartNode: NodeFunction = async (flow, context, _dataIn, inputs, config) => {
-  // This is an entry node that creates the main context
-  // It uses the global provider/model from the store
-
-  // Get context - use pushed context from scheduler (which includes session message history),
-  // or pull if edge connected, or create new from store
-  let executionContext = context ?? (inputs.has('context') ? await inputs.pull('context') : null)
-
-  if (!executionContext) {
-    // No context provided - create from store's current provider/model
-    // This should rarely happen since scheduler now passes mainContext
-    const provider = flow.store.selectedProvider || 'openai'
-    const model = flow.store.selectedModel || 'gpt-4o'
-
-    executionContext = flow.context.create({
-      provider,
-      model,
-      systemInstructions: ''
-    })
-
-    flow.log.debug('Created new main context', {
-      provider: executionContext.provider,
-      model: executionContext.model
-    })
-  } else {
-    flow.log.debug('Using context from scheduler', {
-      provider: executionContext.provider,
-      model: executionContext.model,
-      messageHistoryLength: executionContext.messageHistory.length
-    })
-  }
+  const manager = flow.context
+  const snapshot = context ?? manager.get()
 
   const systemInstructionsFromConfig = (config as any)?.systemInstructions
   const temperature = (config as any)?.temperature as number | undefined
@@ -143,7 +115,6 @@ export const defaultContextStartNode: NodeFunction = async (flow, context, _data
     thinkingBudget?: number
   }> | undefined
 
-  // Prefer dynamic input if connected, otherwise fall back to config
   let systemInstructions = systemInstructionsFromConfig
   if (inputs.has('systemInstructionsIn')) {
     try {
@@ -152,60 +123,44 @@ export const defaultContextStartNode: NodeFunction = async (flow, context, _data
     } catch {}
   }
 
-  // Respect provider/model from the incoming context when present.
-  // Fall back to global selection only if either is missing so flows still
-  // behave sensibly when no session context exists.
-  const provider = executionContext.provider || flow.store?.selectedProvider || 'openai'
-  const model = executionContext.model || flow.store?.selectedModel || 'gpt-4o'
-  const withProviderModel = flow.context.update(executionContext, { provider, model })
+  const provider = snapshot?.provider || flow.store?.selectedProvider || 'openai'
+  const model = snapshot?.model || flow.store?.selectedModel || 'gpt-4o'
+  manager.setProviderModel(provider, model)
 
-  flow.log.debug('Input context', {
-    provider: withProviderModel.provider,
-    model: withProviderModel.model,
-    systemInstructions: withProviderModel.systemInstructions?.substring(0, 50),
-    messageHistoryLength: withProviderModel.messageHistory.length
-  })
-
-  // Apply optional system/temperature/reasoning settings (immutable)
   const updates: Partial<MainFlowContext> = {}
   if (systemInstructions) updates.systemInstructions = systemInstructions
   if (typeof temperature === 'number') (updates as any).temperature = temperature
   if (reasoningEffort) (updates as any).reasoningEffort = reasoningEffort
-  // Thinking controls (passed through; provider adapter will gate)
   if (includeThoughts === true) (updates as any).includeThoughts = true
   if (typeof thinkingBudget === 'number') (updates as any).thinkingBudget = thinkingBudget
-  // Model-specific overrides
   if (modelOverrides?.length) (updates as any).modelOverrides = modelOverrides
+  if (Object.keys(updates).length) {
+    manager.update(updates)
+  }
 
-  const baseContext = Object.keys(updates).length
-    ? flow.context.update(withProviderModel, updates)
-    : withProviderModel
-
-  // Sanity-check message history for exact user/assistant pairs at the tail
-  const { history: cleanedHistory, removed } = sanitizeMessageHistory(baseContext.messageHistory)
-  const sanitizedContext = removed > 0
-    ? flow.context.update(baseContext, { messageHistory: cleanedHistory })
-    : baseContext
+  const withUpdates = manager.get()
+  const { history: cleanedHistory, removed } = sanitizeMessageHistory(withUpdates.messageHistory)
   if (removed > 0) {
+    manager.replaceHistory(cleanedHistory)
     flow.log.warn('Sanitized messageHistory in defaultContextStart', {
       removed,
-      before: baseContext.messageHistory.length,
+      before: withUpdates.messageHistory.length,
       after: cleanedHistory.length
     })
   }
 
-  // Ensure main context is explicitly labeled
-  const outputContext = flow.context.update(sanitizedContext, { contextType: 'main' as const } as any)
+  manager.update({ contextType: 'main' })
+  const output = manager.get()
 
-  flow.log.debug('Output context', {
-    provider: outputContext.provider,
-    model: outputContext.model,
-    systemInstructions: outputContext.systemInstructions?.substring(0, 50),
-    messageHistoryLength: outputContext.messageHistory.length
+  flow.log.debug('defaultContextStart: output context', {
+    provider: output.provider,
+    model: output.model,
+    systemInstructions: output.systemInstructions?.substring(0, 50),
+    messageHistoryLength: output.messageHistory.length
   })
 
   return {
-    context: outputContext,
+    context: output,
     status: 'success'
   }
 }

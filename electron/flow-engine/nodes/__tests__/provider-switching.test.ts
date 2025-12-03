@@ -6,8 +6,9 @@
 
 import { llmRequestNode } from '../llmRequest'
 import type { ExecutionContext } from '../../types'
-import { createTestContext, createTestConfig, getTestApiKey } from '../../../../__tests__/utils/testHelpers'
-import { withFixture, getTestMode } from '../../../../__tests__/utils/fixtures'
+import { createTestContext, createTestConfig, getTestApiKey } from '../../../__tests__/utils/testHelpers'
+import { withFixture, getTestMode } from '../../../__tests__/utils/fixtures'
+
 
 // Mock the state module to provide API keys
 jest.mock('../../../../core/state', () => ({

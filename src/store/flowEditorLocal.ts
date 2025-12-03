@@ -24,7 +24,7 @@ interface FlowEditorLocalState {
 }
 
 
-export const useFlowEditorLocal = create<FlowEditorLocalState>((set, get) => ({
+export const useFlowEditorLocal = create<FlowEditorLocalState>((set) => ({
   nodes: [],
   edges: [],
   isHydrated: false,
@@ -82,8 +82,7 @@ export async function initFlowEditorLocalEvents(): Promise<void> {
     return
   }
 
-  // Subscribe to graph changes from main process
-  client.subscribe('flowEditor.graph.changed', async () => {
+  const hydrateFromBackend = async (): Promise<void> => {
     console.log('[flowEditorLocal] Graph changed event received, fetching from main')
 
     // Temporarily disable saves during hydration
@@ -122,10 +121,15 @@ export async function initFlowEditorLocalEvents(): Promise<void> {
       // Re-enable saves after a short delay
       setTimeout(() => { savesEnabled = true }, 750)
     }
+  }
+
+  // Subscribe to graph changes from main process
+  client.subscribe('flowEditor.graph.changed', () => {
+    void hydrateFromBackend()
   })
 
   // Initial hydration on startup
   console.log('[flowEditorLocal] Triggering initial hydration')
-  client.publish('flowEditor.graph.changed', {})
+  await hydrateFromBackend()
 }
 

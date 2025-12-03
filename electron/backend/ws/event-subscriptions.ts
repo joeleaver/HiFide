@@ -15,6 +15,7 @@ import {
   getAppService,
   getFlowGraphService,
   getProviderService,
+  getFlowContextsService,
 } from '../../services/index.js'
 
 /**
@@ -203,25 +204,23 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
   subscriptions.push({ service: sessionService, event: 'sessions:updated', handler: sessionListHandler, workspaceScoped: true })
 
   // Flow contexts changes
+  const flowContextsService = getFlowContextsService()
   const flowContextsHandler = async (data: any) => {
     try {
       if (!(await isActiveWorkspace())) return
       const curRoot = await getConnectionWorkspaceId(connection)
       if (data.workspaceId !== curRoot) return
 
-      const sid = sessionService.getCurrentIdFor({ workspaceId: data.workspaceId })
-      if (!sid) return
-
-      const sess = Array.isArray(data.sessions) ? data.sessions.find((it: any) => it.id === sid) : null
-      const payload = {
-        mainContext: sess?.currentContext || null,
-        isolatedContexts: {} // Isolated contexts are flow-editor specific, removed
-      }
-      connection.sendNotification('flow.contexts.changed', payload)
+      connection.sendNotification('flow.contexts.changed', {
+        requestId: data.requestId || null,
+        updatedAt: typeof data.updatedAt === 'number' ? data.updatedAt : Date.now(),
+        mainContext: data.mainContext || null,
+        isolatedContexts: data.isolatedContexts || {},
+      })
     } catch { }
   }
-  sessionService.on('sessions:updated', flowContextsHandler)
-  subscriptions.push({ service: sessionService, event: 'sessions:updated', handler: flowContextsHandler, workspaceScoped: true })
+  flowContextsService.on('contexts:changed', flowContextsHandler)
+  subscriptions.push({ service: flowContextsService, event: 'contexts:changed', handler: flowContextsHandler, workspaceScoped: true })
 
   // Return cleanup function
   return () => {

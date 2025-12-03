@@ -112,7 +112,6 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   const availableTemplates = useFlowEditor((s) => s.availableTemplates)
   const templatesLoaded = useFlowEditor((s) => s.templatesLoaded)
   const selectedTemplate = useFlowEditor((s) => s.selectedTemplate)
-  const graphVersion = useFlowEditor((s) => s.graphVersion)
 
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false)
 

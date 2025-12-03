@@ -81,7 +81,7 @@ export class TerminalService extends Service<TerminalState> {
         
         // Ensure at least one agent terminal tab exists for the UI
         if (this.state.agentTerminalTabs.length === 0) {
-          const tabId = this.addTerminalTab('agent')
+          this.addTerminalTab('agent')
           // Agent terminal tab created
         }
       } catch (error) {

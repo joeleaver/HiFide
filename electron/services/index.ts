@@ -21,6 +21,7 @@ import { FlowProfileService } from './FlowProfileService'
 import { FlowConfigService } from './FlowConfigService'
 import { FlowGraphService } from './FlowGraphService'
 import { FlowCacheService } from './FlowCacheService'
+import { FlowContextsService } from './FlowContextsService'
 
 // Singleton registry instance
 const registry = ServiceRegistry.getInstance()
@@ -41,6 +42,7 @@ let flowProfileService: FlowProfileService | null = null
 let flowConfigService: FlowConfigService | null = null
 let flowGraphService: FlowGraphService | null = null
 let flowCacheService: FlowCacheService | null = null
+let flowContextsService: FlowContextsService | null = null
 
 /**
  * Initialize all services
@@ -73,6 +75,7 @@ export function initializeServices(): void {
   flowProfileService = new FlowProfileService()
   flowConfigService = new FlowConfigService()
   flowGraphService = new FlowGraphService()
+  flowContextsService = new FlowContextsService()
 
   // Register all services
   registry.register('debug', debugService)
@@ -90,6 +93,8 @@ export function initializeServices(): void {
   registry.register('flowProfile', flowProfileService)
   registry.register('flowConfig', flowConfigService)
   registry.register('flowGraph', flowGraphService)
+  registry.register('flowContexts', flowContextsService)
+
 
   console.log('[Services] Initialized:', registry.getServiceNames().join(', '))
 }
@@ -186,6 +191,13 @@ export function getFlowCacheService(): FlowCacheService {
   return flowCacheService
 }
 
+export function getFlowContextsService(): FlowContextsService {
+  if (!flowContextsService) throw new Error('[Services] FlowContextsService not initialized')
+  return flowContextsService
+}
+
+
+export { FlowContextsService } from './FlowContextsService'
 /**
  * Export service classes for type imports
  */

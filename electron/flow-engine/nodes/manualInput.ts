@@ -1,47 +1,42 @@
 /**
  * manualInput node
  *
- * Outputs a pre-configured message. If context is provided, adds the message to history.
- *
- * Inputs:
- * - context: Optional execution context from predecessor
- * - data: Not used
- *
- * Outputs:
- * - context: Updated context with message added to history (if context provided)
- * - data: The configured message
+ * Emits a configured user message and appends it to the active context history.
  */
 
 import type { NodeFunction, NodeExecutionPolicy } from '../types'
 
-/**
- * Node metadata
- */
 export const metadata = {
-  executionPolicy: 'any' as NodeExecutionPolicy, // No inputs needed
-  description: 'Outputs a pre-configured message. If context is provided, adds the message to history.'
+  executionPolicy: 'any' as NodeExecutionPolicy,
+  description: 'Outputs a configured message and appends it to the current context history.'
 }
 
-/**
- * Node implementation
- */
-export const manualInputNode: NodeFunction = async (flow, context, _dataIn, inputs, config) => {
-  // Get context - use pushed context, or pull if edge connected (optional)
-  const executionContext = context ?? (inputs.has('context') ? await inputs.pull('context') : null)
+export const manualInputNode: NodeFunction = async (flow, _context, dataIn, inputs, config) => {
+  let message = typeof config.message === 'string' ? config.message : ''
 
-  const message = config.message || ''
+  if (!message && typeof dataIn === 'string') {
+    message = dataIn
+  } else if (!message && inputs?.has?.('data')) {
+    const pulled = await inputs.pull('data')
+    if (typeof pulled === 'string') {
+      message = pulled
+    }
+  }
 
-  flow.log.debug('Manual input', { message })
+  const trimmed = message?.trim()
+  if (!trimmed) {
+    return {
+      status: 'error',
+      error: 'manualInput requires a non-empty message',
+      context: flow.context.get(),
+    }
+  }
 
-  // If context provided, add message to history
-  const newContext = executionContext && message
-    ? flow.context.addMessage(executionContext, 'user', message)
-    : executionContext
+  flow.context.addMessage({ role: 'user', content: trimmed })
 
   return {
-    context: newContext,
-    data: message,
-    status: 'success'
+    context: flow.context.get(),
+    data: trimmed,
+    status: 'success' as const,
   }
 }
-

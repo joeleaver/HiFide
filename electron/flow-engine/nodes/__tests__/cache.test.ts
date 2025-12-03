@@ -10,7 +10,7 @@ import {
   createTestConfig,
   createMockFlowAPI,
   createMockNodeInputs
-} from '../../../../__tests__/utils/testHelpers'
+} from '../../../__tests__/utils/testHelpers'
 
 describe('Cache Node', () => {
   // Note: Badge emission is tested separately in integration tests

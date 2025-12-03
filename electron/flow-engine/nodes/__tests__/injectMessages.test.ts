@@ -8,7 +8,7 @@ import {
   createTestConfig,
   createMockFlowAPI,
   createMockNodeInputs
-} from '../../../../__tests__/utils/testHelpers'
+} from '../../../__tests__/utils/testHelpers'
 
 describe('injectMessages Node', () => {
   describe('Append mode', () => {

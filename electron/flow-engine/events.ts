@@ -17,7 +17,7 @@ export type FlowEvent = (
   | { type: 'toolEnd'; nodeId: string; toolName: string; callId?: string; result?: any; executionId: string }
   | { type: 'toolError'; nodeId: string; toolName: string; error: string; callId?: string; executionId: string }
   | { type: 'intentDetected'; nodeId: string; intent: string; executionId: string }
-  | { type: 'tokenUsage'; nodeId: string; provider: string; model: string; usage: { inputTokens: number; outputTokens: number; totalTokens: number }; executionId: string }
+  | { type: 'tokenUsage'; nodeId: string; provider: string; model: string; usage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number }; executionId: string }
   | { type: 'usageBreakdown'; nodeId: string; provider: string; model: string; breakdown: any; executionId: string }
 ) & { sessionId?: string }
 

@@ -49,7 +49,7 @@ All WebSocket subscriptions go through Zustand stores via `init*Events()` functi
 |-------|------|------------------|---------|
 | chatTimeline | `src/store/chatTimeline.ts` | `session.timeline.delta`, `session.timeline.snapshot`, `session.selected` | Timeline items and deltas |
 | sessionUi | `src/store/sessionUi.ts` | `session.selected`, `session.list.changed`, `settings.models.changed`, `workspace.ready` | Session list and selection |
-| flowContexts | `src/store/flowContexts.ts` | `flow.contexts.changed` | Flow execution contexts |
+| flowContexts | `src/store/flowContexts.ts` | `flow.contexts.changed` | Flow execution contexts + request metadata |
 | flowRuntime | `src/store/flowRuntime.ts` | Via FlowService.onEvent() | Flow execution state |
 | workspaceUi | `src/store/workspaceUi.ts` | `workspace.bound`, `workspace.ready` | Workspace state |
 | knowledgeBase | `src/store/knowledgeBase.ts` | `kb.items.changed`, `kb.files.changed` | KB items and files |

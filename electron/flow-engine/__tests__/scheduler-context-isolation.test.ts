@@ -9,27 +9,83 @@
 import { FlowScheduler } from '../scheduler'
 import type { FlowDefinition } from '../types'
 
-import { waitFor } from '../../../__tests__/utils/testHelpers'
 
+const mockSessionService = {
+  getCurrentIdFor: jest.fn().mockReturnValue('test-session'),
+  updateContextFor: jest.fn(),
+}
 
-// Mock llm-service to avoid real network calls and API keys
+const mockFlowGraphService = {
+  getNodes: jest.fn().mockReturnValue([]),
+}
+
+const mockFlowContextsService = {
+  setContextsFor: jest.fn(),
+  clearContextsFor: jest.fn(),
+  getContextsFor: jest.fn().mockReturnValue({
+    requestId: null,
+    mainContext: null,
+    isolatedContexts: {},
+    updatedAt: 0,
+  }),
+}
+
+jest.mock(
+  '../../services/index.js',
+  () => ({
+    getSessionService: () => mockSessionService,
+    getFlowGraphService: () => mockFlowGraphService,
+    getFlowContextsService: () => mockFlowContextsService,
+  }),
+  { virtual: true }
+ )
+ 
+jest.mock(
+  '../../utils/workspace.js',
+  () => ({
+    resolveWithinWorkspace: jest.fn((_root: string, filePath: string) => filePath),
+  }),
+  { virtual: true }
+ )
+ 
 jest.mock('../llm-service', () => {
   return {
     llmService: {
       chat: async ({ message, context, flowAPI }: any) => {
         // Emit a small chunk and usage, then succeed
-        try { flowAPI.emitExecutionEvent({ type: 'chunk', provider: context.provider, model: context.model, text: 'ok' }) } catch {}
+        const safeContext = context || { messageHistory: [] }
+        try {
+          flowAPI.emitExecutionEvent({ type: 'chunk', provider: safeContext.provider, model: safeContext.model, text: 'ok' })
+        } catch {}
         return {
           text: 'ok',
           updatedContext: {
-            ...context,
-            messageHistory: [...(context.messageHistory || []), { role: 'assistant', content: 'ok' }]
+            ...safeContext,
+            messageHistory: [...(safeContext.messageHistory || []), { role: 'assistant', content: 'ok' }]
           }
         }
       }
     }
   }
 })
+
+beforeEach(() => {
+  jest.clearAllMocks()
+})
+
+async function waitFor(predicate: () => any, timeoutMs = 1000, intervalMs = 25): Promise<void> {
+  const start = Date.now()
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    if (await predicate()) {
+      return
+    }
+    if (Date.now() - start >= timeoutMs) {
+      throw new Error('waitFor timeout')
+    }
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+  }
+}
 
 describe('Scheduler Context Isolation', () => {
   describe('Isolated Context Preservation', () => {
@@ -289,6 +345,65 @@ describe('Scheduler Context Isolation', () => {
       expect(capturedContext).toBeDefined()
       expect(capturedContext.provider).toBe('openai')
       expect(capturedContext.model).toBe('gpt-4o')
+    })
+  })
+
+  describe('FlowContextsService lifecycle', () => {
+    const baseFlowDef: FlowDefinition = {
+      nodes: [
+        {
+          id: 'defaultContextStart-1',
+          nodeType: 'defaultContextStart',
+          config: {},
+          position: { x: 0, y: 0 }
+        }
+      ],
+      edges: []
+    }
+
+    const baseArgs = {
+      requestId: 'request-lifecycle',
+      flowDef: baseFlowDef,
+      sessionId: 'test-session',
+      workspaceId: '/tmp/workspace',
+      initialContext: {
+        provider: 'openai',
+        model: 'gpt-4o',
+        messageHistory: []
+      }
+    }
+
+    it('publishes an initial context snapshot during construction', () => {
+      new FlowScheduler(undefined, 'request-lifecycle', baseFlowDef, baseArgs)
+
+      expect(mockFlowContextsService.setContextsFor).toHaveBeenCalledTimes(1)
+      expect(mockFlowContextsService.setContextsFor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceId: '/tmp/workspace',
+          requestId: 'request-lifecycle',
+        })
+      )
+    })
+
+    it('clears the context snapshot when cancelled', async () => {
+      const scheduler = new FlowScheduler(undefined, 'request-cancel', baseFlowDef, {
+        ...baseArgs,
+        requestId: 'request-cancel'
+      })
+
+      const flushSpy = jest.spyOn(scheduler, 'flushToSession').mockResolvedValue()
+
+      scheduler.cancel()
+
+      await waitFor(() => mockFlowContextsService.clearContextsFor.mock.calls.length > 0, 1000)
+      expect(mockFlowContextsService.clearContextsFor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceId: '/tmp/workspace',
+          requestId: 'request-cancel',
+        })
+      )
+
+      flushSpy.mockRestore()
     })
   })
 })

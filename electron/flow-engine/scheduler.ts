@@ -25,15 +25,15 @@ import type {
   NodeInputs,
 } from './types'
 import type { FlowAPI, Badge, UsageReport } from './flow-api'
+import type { CreateIsolatedContextOptions } from './context-options'
 import type { ExecutionEvent } from './execution-events'
 import { getNodeFunction } from './nodes'
-import { createContextAPI } from './context-api'
+import { ContextRegistry, type ContextBinding } from './contextRegistry'
 import { createEventEmitter } from './execution-events'
-import { getSessionService, getFlowGraphService } from '../services/index.js'
-
+import { getSessionService, getFlowGraphService, getFlowContextsService } from '../services/index.js'
 import { emitFlowEvent } from './events'
-
 import util from 'node:util'
+import crypto from 'node:crypto'
 
 
 // Treat cooperative cancellation as a non-error (stop/terminate/abort/cancel)
@@ -45,6 +45,7 @@ function isCancellationError(e: any): boolean {
     /\b(cancel|canceled|cancelled|abort|aborted|terminate|terminated|stop|stopped)\b/i.test(String(msg))
   )
 }
+
 
 export class FlowScheduler {
   // Graph structure
@@ -77,7 +78,9 @@ export class FlowScheduler {
 
   // Multi-context tracking: main context + isolated contexts
   private mainContext: MainFlowContext
-  private isolatedContexts = new Map<string, MainFlowContext>()
+  private mainBinding!: ContextBinding
+  private contextRegistry!: ContextRegistry
+  private flowContextsService = getFlowContextsService()
 
   // Track in-flight node executions to avoid duplicate work during pulls
   private inFlightExecutions = new Map<string, Promise<NodeOutput>>()
@@ -120,25 +123,30 @@ export class FlowScheduler {
     // Initialize main context from session context (single source of truth)
     // Use requestId as contextId so terminal tools bind to the session's PTY
     // If no session context provided, create default
+    let initialContext: MainFlowContext
     if (args.initialContext) {
-      this.mainContext = {
-        contextId: requestId,  // Use requestId (session ID) as contextId for terminal binding
+      const safeHistory = Array.isArray(args.initialContext.messageHistory)
+        ? args.initialContext.messageHistory
+        : []
+
+      initialContext = {
+        contextId: requestId,
         contextType: 'main',
         provider: args.initialContext.provider,
         model: args.initialContext.model,
         systemInstructions: args.initialContext.systemInstructions,
-        messageHistory: args.initialContext.messageHistory || []
+        messageHistory: safeHistory
       }
       console.log('[Scheduler] Initialized from session context:', {
-        contextId: this.mainContext.contextId,
-        provider: this.mainContext.provider,
-        model: this.mainContext.model,
-        messageCount: this.mainContext.messageHistory.length
+        contextId: initialContext.contextId,
+        provider: initialContext.provider,
+        model: initialContext.model,
+        messageCount: initialContext.messageHistory.length
       })
     } else {
       // Fallback: create default context (should rarely happen)
-      this.mainContext = {
-        contextId: requestId,  // Use requestId as contextId for terminal binding
+      initialContext = {
+        contextId: requestId,
         contextType: 'main',
         provider: 'openai',
         model: 'gpt-4o',
@@ -148,10 +156,24 @@ export class FlowScheduler {
       console.warn('[Scheduler] No session context provided, using defaults')
     }
 
+    this.mainContext = initialContext
+    this.contextRegistry = new ContextRegistry(initialContext)
+    this.mainBinding = this.contextRegistry.getMainBinding()
+    this.mainContext = this.mainBinding.ref.current
+    this.publishContextState()
+
     this.buildGraphStructure()
     // Mark private helpers as referenced to satisfy noUnusedPrivateMembers while keeping them available
     void this.waitForNodeInput
 
+  }
+
+  public getSessionId(): string | undefined {
+    return this.sessionId
+  }
+
+  public getWorkspaceId(): string | undefined {
+    return this.workspaceId
   }
 
   /**
@@ -220,9 +242,11 @@ export class FlowScheduler {
       this.userInputResolvers.clear()
     } catch {}
 
-    // Flush final state to session before stopping
+    // Flush final state to session before stopping and then clear context state
     // Fire and forget - don't block cancellation
-    void this.flushToSession()
+    void this.flushToSession().finally(() => {
+      this.clearContextState()
+    })
   }
 
   /**
@@ -419,7 +443,7 @@ export class FlowScheduler {
       // and may be updated mid-flow via updateProviderModel. We intentionally do NOT
       // override them here from the global provider slice so that the per-session
       // model selector is the single source of truth for main flows.
-      await this.executeNode(entryNode.id, { context: this.mainContext }, null)
+      await this.executeNode(entryNode.id, { context: this.mainBinding.ref.current }, null)
 
       // Don't return - wait indefinitely for user input
       // The flow should only complete if explicitly cancelled or if an error occurs
@@ -433,12 +457,14 @@ export class FlowScheduler {
         console.log('[FlowScheduler] Cancelled')
         // Flush already called in cancel(), but call again to be safe
         await this.flushToSession()
+        this.clearContextState()
         return { ok: true }
       }
       console.error('[FlowScheduler] Error:', error)
       try { emitFlowEvent(this.requestId, { type: 'error', error, sessionId: this.sessionId }) } catch {}
       // Flush on error to preserve conversation state
       await this.flushToSession()
+      this.clearContextState()
       return { ok: false, error }
     }
   }
@@ -512,24 +538,24 @@ export class FlowScheduler {
       const nodeConfig = this.flowDef.nodes.find(n => n.id === nodeId)
       const config = await this.getNodeConfig(nodeId)
 
-      // Extract context and data from pushed inputs
-      // Context follows the same rules as other inputs - it's either pushed or needs to be pulled
-      const contextIn = pushedInputs.context
+      // Determine which context this node should run against. When a
+      // context handle is pushed, prefer that binding; otherwise fall
+      // back to the main context binding.
+      const activeBinding = this.resolveActiveBinding(pushedInputs)
+      const contextIn = activeBinding.ref.current
       const dataIn = pushedInputs.data
 
-      if (contextIn) {
-        console.log(`[Scheduler] ${nodeId} - Using context from edge:`, {
-          contextId: contextIn.contextId,
-          contextType: contextIn.contextType,
-          provider: contextIn.provider,
-          model: contextIn.model
-        })
-      } else {
-        console.log(`[Scheduler] ${nodeId} - No context pushed (node may pull or create its own)`)
-      }
+      console.log(`[Scheduler] ${nodeId} - Using context snapshot:`, {
+        contextId: contextIn.contextId,
+        contextType: contextIn.contextType,
+        provider: contextIn.provider,
+        model: contextIn.model
+      })
 
-      // Create FlowAPI instance for this node execution
-      const flowAPI = this.createFlowAPI(nodeId, executionId)
+      // Create FlowAPI instance for this node execution. This binds
+      // flow.context to the context-specific ContextManager so that
+      // mutations stay isolated per contextId.
+      const flowAPI = this.createFlowAPI(nodeId, executionId, activeBinding)
 
       // Create NodeInputs with simple pull/has (no cross-input correlation)
       const inputs: NodeInputs = {
@@ -541,38 +567,15 @@ export class FlowScheduler {
       const nodeFunction = getNodeFunction(nodeConfig!)
       const result = await nodeFunction(flowAPI, contextIn, dataIn, inputs, config)
 
-      // Update context tracking based on result
-      if (result.context) {
-        const resultContext = result.context
-        const nodeType = (nodeConfig as any)?.nodeType || (nodeConfig as any)?.data?.nodeType || (nodeConfig as any)?.type
-        const isPortalNode = nodeType === 'portalInput' || nodeType === 'portalOutput'
+      // Ensure the scheduler tracks whichever context this node
+      // emitted (or default to the active binding if omitted).
+      const outputBinding = this.ensureContextOutput(result, activeBinding)
 
-        if (!isPortalNode) {
-          if (resultContext.contextType === 'main' || !resultContext.contextType) {
-            // Update main context
-            this.mainContext = resultContext
-            console.log(`[Scheduler] ${nodeId} - Updated main context:`, {
-              contextId: this.mainContext.contextId,
-              messageHistoryLength: this.mainContext.messageHistory.length
-            })
-
-            // Flush messageHistory to session after each node that updates context
-            // This ensures conversation history is persisted incrementally during execution
-            await this.flushToSession()
-          } else if (resultContext.contextType === 'isolated') {
-            // Update isolated context
-            this.isolatedContexts.set(resultContext.contextId, resultContext)
-            console.log(`[Scheduler] ${nodeId} - Updated isolated context:`, {
-              contextId: resultContext.contextId,
-              messageHistoryLength: resultContext.messageHistory.length,
-              totalIsolatedContexts: this.isolatedContexts.size
-            })
-          }
-        } else {
-          // Portal nodes are transparent; do not sync context to store to avoid noise
-          // We also skip internal main/isolated context updates as they should not change here
-        }
-      }
+      // After node execution, snapshot the canonical main context and flush
+      // it to the session so the UI sees the latest state.
+      this.mainContext = this.mainBinding.ref.current
+      await this.flushToSession()
+      this.publishContextState()
 
       const durationMs = Date.now() - startTime
       // Reduced logging
@@ -624,11 +627,15 @@ export class FlowScheduler {
           // Collect all outputs going to this successor
           const pushedData: Record<string, any> = {}
           const considered: Array<{sourceOutput: string, targetInput: string, inResult: boolean}> = []
+          let needsContext = false
 
           for (const edge of pushEdges) {
             if (edge.target === successorId) {
               const sourceOutput = edge.sourceOutput
               const targetInput = edge.targetInput
+              if (targetInput === 'context') {
+                needsContext = true
+              }
 
               const inResult = sourceOutput in result
               considered.push({ sourceOutput, targetInput, inResult })
@@ -640,6 +647,9 @@ export class FlowScheduler {
             }
           }
 
+          if (needsContext && !('context' in pushedData)) {
+            pushedData.context = outputBinding.ref.current
+          }
 
           try {
             console.log(`[Scheduler] ${nodeId} - collect for ${successorId}:`, considered)
@@ -771,8 +781,7 @@ export class FlowScheduler {
   /**
    * Create FlowAPI instance for a node execution
    */
-  private createFlowAPI(nodeId: string, executionId: string): FlowAPI {
-    // Create event emitter for this execution
+  private createFlowAPI(nodeId: string, executionId: string, binding: ContextBinding): FlowAPI {
     const emit = createEventEmitter(executionId, nodeId, (event: ExecutionEvent) => {
       this.handleExecutionEvent(event)
     })
@@ -790,97 +799,181 @@ export class FlowScheduler {
       },
       emitExecutionEvent: emit,
       store: {},
-      context: createContextAPI(),
+      context: binding.manager,
+      contexts: this.buildContextsHelper(binding, nodeId),
       conversation: {
-        streamChunk: (_chunk: string) => {
-          // No-op: streaming is handled by execution events
-        },
-        addBadge: (_badge: Badge) => {
-          // No-op: badges are handled by execution events
-          return `badge-${Date.now()}`
-        },
-        updateBadge: (_badgeId: string, _updates: Partial<Badge>) => {
-          // No-op: badge updates are handled by execution events
-        }
+        streamChunk: (_chunk: string) => {},
+        addBadge: (_badge: Badge) => `badge-${Date.now()}`,
+        updateBadge: (_badgeId: string, _updates: Partial<Badge>) => {}
       },
       log: {
-        debug: (message: string, data?: any) => {
-          console.log(`[Flow Debug] ${nodeId}:`, message, data)
-        },
-        info: (message: string, data?: any) => {
-          console.log(`[Flow Info] ${nodeId}:`, message, data)
-        },
-        warn: (message: string, data?: any) => {
-          console.warn(`[Flow Warn] ${nodeId}:`, message, data)
-        },
-        error: (message: string, data?: any) => {
-          console.error(`[Flow Error] ${nodeId}:`, message, data)
-        }
+        debug: (message: string, data?: any) => console.log(`[Flow Debug] ${nodeId}:`, message, data),
+        info: (message: string, data?: any) => console.log(`[Flow Info] ${nodeId}:`, message, data),
+        warn: (message: string, data?: any) => console.warn(`[Flow Warn] ${nodeId}:`, message, data),
+        error: (message: string, data?: any) => console.error(`[Flow Error] ${nodeId}:`, message, data)
       },
       tools: {
         execute: async (toolName: string, args: any) => {
-          // TODO: Implement tool execution
           console.log(`[Tool] ${nodeId}: ${toolName}`, args)
           return {}
         },
-        list: () => {
-          // Return agent tools from global registry
-          return (globalThis as any).__agentTools || []
-        }
+        list: () => (globalThis as any).__agentTools || []
       },
       usage: {
         report: (usage: UsageReport) => {
-          // TODO: Implement usage reporting and cost calculation
           console.log(`[Usage] ${nodeId}:`, usage)
         }
       },
       waitForUserInput: async () => {
         console.log('[FlowAPI.waitForUserInput] Waiting for input, nodeId:', nodeId)
+        try { emitFlowEvent(this.requestId, { type: 'waitingforinput', nodeId, sessionId: this.sessionId }) } catch {}
+        try { this.pausedNodeId = nodeId } catch {}
 
-        // Notify renderer that we're waiting for input
-    try { emitFlowEvent(this.requestId, { type: 'waitingforinput', nodeId, sessionId: this.sessionId }) } catch {}
-    // Record paused state for snapshot/status queries
-    try { this.pausedNodeId = nodeId } catch {}
-
-        // Create a promise that will be resolved when resumeWithInput is called
         const userInput = await new Promise<string>((resolve, reject) => {
-          console.log('[FlowAPI.waitForUserInput] Storing resolver for nodeId:', nodeId)
           this.userInputResolvers.set(nodeId, resolve)
-
-          // If already aborted, reject immediately
           if (this.abortController.signal.aborted) {
             reject(new Error('Flow execution cancelled'))
             return
           }
-
-          // Listen for abort signal
           this.abortController.signal.addEventListener('abort', () => {
             reject(new Error('Flow execution cancelled'))
           }, { once: true })
         })
 
-        console.log('[FlowAPI.waitForUserInput] Received input:', userInput.substring(0, 50))
         this.userInputResolvers.delete(nodeId)
         return userInput
       },
       triggerPortalOutputs: async (portalId: string) => {
-        console.log(`[FlowAPI.triggerPortalOutputs] Triggering portal outputs for ID: ${portalId}`)
         await this.triggerPortalOutputs(portalId)
       },
       setPortalData: (portalId: string, context?: MainFlowContext, data?: any) => {
-        console.log(`[FlowAPI.setPortalData] Storing portal data for ID: ${portalId}`)
         this.portalRegistry.set(portalId, { context, data })
       },
       getPortalData: (portalId: string) => {
-        const data = this.portalRegistry.get(portalId)
-        console.log(`[FlowAPI.getPortalData] Retrieved portal data for ID: ${portalId}`, { hasData: !!data })
-        return data
+        return this.portalRegistry.get(portalId)
       }
     }
   }
 
-  /**
-   * Handle execution events from providers and nodes
+  private buildContextsHelper(activeBinding: ContextBinding, nodeId: string): FlowAPI['contexts'] {
+    return {
+      active: () => this.contextRegistry.cloneContext(activeBinding.ref.current),
+      list: () => this.contextRegistry.listSnapshots(),
+      get: (contextId: string) => this.contextRegistry.getContextSnapshot(contextId),
+      createIsolated: (options) => this.createIsolatedContext({ ...options, createdByNodeId: nodeId }, activeBinding),
+      release: (contextId: string) => this.releaseContext(contextId),
+    }
+  }
+
+  private releaseContext(contextId: string): boolean {
+    if (!contextId) return false
+    const released = this.contextRegistry.releaseContext(contextId)
+    if (released) {
+      this.publishContextState()
+    }
+    return released
+  }
+
+  private createIsolatedContext(options: CreateIsolatedContextOptions, activeBinding: ContextBinding): MainFlowContext {
+    const binding = this.contextRegistry.createIsolatedContext(options, activeBinding)
+    this.publishContextState()
+    return this.contextRegistry.cloneContext(binding.ref.current)
+  }
+
+  private resolveActiveBinding(pushedInputs: Record<string, any>): ContextBinding {
+    if (!this.mainBinding) {
+      this.mainBinding = this.contextRegistry.getMainBinding()
+    }
+
+    const pushed = pushedInputs?.context as MainFlowContext | undefined
+    if (!pushed) {
+      if (pushedInputs) {
+        pushedInputs.context = this.mainBinding.ref.current
+      }
+      return this.mainBinding
+    }
+
+    if (pushed === this.mainBinding.ref.current) {
+      if (pushedInputs) {
+        pushedInputs.context = this.mainBinding.ref.current
+      }
+      return this.mainBinding
+    }
+
+    const fallbackType = pushed.contextType === 'isolated' ? 'isolated' : 'main'
+    const binding = this.contextRegistry.resolveFromSnapshot(pushed, fallbackType, { preferExisting: true })
+
+    if (binding.contextType === 'main') {
+      this.mainBinding = binding
+      this.mainContext = binding.ref.current
+    }
+
+    if (pushedInputs) {
+      pushedInputs.context = binding.ref.current
+    }
+    return binding
+  }
+
+  private ensureContextOutput(result: NodeOutput, activeBinding: ContextBinding): ContextBinding {
+    if (!result.context) {
+      result.context = activeBinding.ref.current
+      return activeBinding
+    }
+
+    if (result.context === activeBinding.ref.current) {
+      return activeBinding
+    }
+
+    const binding = this.contextRegistry.ensureBindingForOutput(
+      result.context,
+      result.context.contextType === 'isolated' ? 'isolated' : activeBinding.contextType
+    )
+
+    if (binding.contextType === 'main') {
+      this.mainBinding = binding
+      this.mainContext = binding.ref.current
+    }
+
+    result.context = binding.ref.current
+    return binding
+  }
+
+
+  private captureContextState(): { mainContext: MainFlowContext | null; isolatedContexts: Record<string, MainFlowContext> } {
+    if (!this.contextRegistry) {
+      return { mainContext: null, isolatedContexts: {} }
+    }
+    return this.contextRegistry.captureState()
+  }
+
+  private publishContextState(): void {
+    if (!this.workspaceId) return
+    try {
+      const snapshot = this.captureContextState()
+      this.flowContextsService.setContextsFor({
+        workspaceId: this.workspaceId,
+        requestId: this.requestId,
+        mainContext: snapshot.mainContext,
+        isolatedContexts: snapshot.isolatedContexts,
+      })
+    } catch (error) {
+      console.warn('[FlowScheduler] Failed to publish context state:', error)
+    }
+  }
+  private clearContextState(): void {
+    if (!this.workspaceId) return
+    try {
+      this.flowContextsService.clearContextsFor({
+        workspaceId: this.workspaceId,
+        requestId: this.requestId,
+      })
+    } catch (error) {
+      console.warn('[FlowScheduler] Failed to clear context state:', error)
+    }
+  }
+ 
+   /**
+    * Handle execution events from providers and nodes
    * Routes events to appropriate store handlers based on event type
    */
   private async handleExecutionEvent(event: ExecutionEvent): Promise<void> {

@@ -20,9 +20,10 @@
 
 import type { MainFlowContext } from './types'
 import type { FlowAPI } from './flow-api'
-import type { AgentTool, ChatMessage } from '../providers/provider'
-import { providers } from '../core/state'
-import { getProviderKey } from '../core/state'
+import type { ContextManager } from './contextManager'
+import type { AgentTool, ChatMessage, ProviderAdapter } from '../providers/provider'
+
+import { getProviderKey, providers } from '../core/state'
 import { createCallbackEventEmitters } from './execution-events'
 import { rateLimitTracker } from '../providers/rate-limit-tracker'
 import { parseRateLimitError, sleep, withRetries } from '../providers/retry'
@@ -387,9 +388,6 @@ export interface LLMServiceRequest {
   /** Optional tools for agent mode */
   tools?: AgentTool[]
 
-  /** Main flow context (contains provider, model, history, etc.) */
-  context: MainFlowContext
-
   /** FlowAPI instance for emitting execution events */
   flowAPI: FlowAPI
 
@@ -404,6 +402,9 @@ export interface LLMServiceRequest {
 
   /** Skip adding message to context history (for stateless calls like intentRouter) */
   skipHistory?: boolean
+
+  /** Optional reasoning effort override (for reasoning-capable models) */
+  reasoningEffort?: 'low' | 'medium' | 'high'
 }
 
 /**
@@ -416,9 +417,6 @@ export interface LLMServiceResponse {
   /** Optional reasoning/thinking from the model (Gemini 2.5, Fireworks reasoning models) */
   reasoning?: string
 
-  /** Updated context with new messages */
-  updatedContext: MainFlowContext
-
   /** Error message if request failed */
   error?: string
 }
@@ -430,13 +428,16 @@ export interface LLMServiceResponse {
 function formatMessagesForOpenAI(context: MainFlowContext): ChatMessage[] {
   const messages: ChatMessage[] = []
 
+  // Normalize history defensively – messageHistory must always be an array here
+  const history = Array.isArray(context.messageHistory) ? context.messageHistory : []
+
   // Add system instructions if present
   if (context.systemInstructions) {
     messages.push({ role: 'system', content: context.systemInstructions })
   }
 
   // Add all message history (strip metadata - OpenAI doesn't accept extra fields)
-  messages.push(...context.messageHistory.map(m => ({
+  messages.push(...history.map(m => ({
     role: m.role,
     content: m.content
   })))
@@ -460,8 +461,11 @@ function formatMessagesForAnthropic(context: MainFlowContext): {
     ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }]
     : undefined
 
+  // Normalize history defensively – messageHistory must always be an array here
+  const history = Array.isArray(context.messageHistory) ? context.messageHistory : []
+
   // Convert message history (exclude system messages, only user/assistant)
-  const messages = context.messageHistory
+  const messages = history
     .filter(m => m.role !== 'system')
     .map(m => ({
       role: m.role as 'user' | 'assistant',
@@ -482,8 +486,11 @@ function formatMessagesForGemini(context: MainFlowContext): {
   // Extract system instructions
   const systemInstruction = context.systemInstructions || ''
 
+  // Normalize history defensively – messageHistory must always be an array here
+  const history = Array.isArray(context.messageHistory) ? context.messageHistory : []
+
   // Convert message history to Gemini format
-  const contents = context.messageHistory
+  const contents = history
     .filter(m => m.role !== 'system')
     .map(msg => ({
       role: msg.role === 'assistant' ? 'model' : msg.role,
@@ -510,63 +517,88 @@ class LLMService {
    * event emission, and error handling.
    */
   async chat(request: LLMServiceRequest): Promise<LLMServiceResponse> {
-    const { message, tools, context, flowAPI, responseSchema, overrideProvider, overrideModel, skipHistory } = request
+    const {
+      overrideProvider: requestProvider,
+      overrideModel: requestModel,
+      message,
+      tools,
+      responseSchema,
+      skipHistory,
+      reasoningEffort: requestReasoningEffort,
+      flowAPI,
+    } = request
 
-    // Use override provider/model if specified (for nodes like intentRouter)
-    const provider = overrideProvider || context.provider
-    const model = overrideModel || context.model
+    const currentNodeId = flowAPI.nodeId
+    const currentExecutionId = flowAPI.executionId
 
+    // 1. Prepare context (history, system prompt) via ContextManager.
+    // The scheduler is the single source of truth for context; flowAPI.context
+    // is a ContextManager that owns that state. We read via get() and mutate
+    // via addMessage(s), never by constructing whole contexts here.
+    const contextManager = flowAPI.context as unknown as ContextManager
+    const context: MainFlowContext = contextManager.get()
+    let workingContext = context
 
+    // Resolve effective provider/model using explicit request fields first,
+    // then falling back to the execution context. This ensures that when
+    // llmRequest.ts passes only a context (the common case), we still pick
+    // up provider/model from that context instead of ending up `undefined`.
+    const effectiveProvider = requestProvider || context.provider
+    const effectiveModel = requestModel || context.model
+
+    // TEMP: log what we actually see so we can verify context wiring
     try {
-      flowAPI.log.debug('llmService.chat start', {
-        provider,
-        model,
-        hasTools: Array.isArray(tools) ? tools.length : (tools ? 'non-array' : 0),
-        messageLength: typeof message === 'string' ? message.length : undefined
+      flowAPI.log?.debug?.('LLMService.chat provider/model resolution', {
+        requestProvider,
+        requestModel,
+        contextProvider: context?.provider,
+        contextModel: context?.model,
+        effectiveProvider,
+        effectiveModel,
       })
-    } catch { }
+    } catch {}
 
-    // 1. Get provider adapter
-    const providerAdapter = providers[provider]
+    if (!effectiveProvider) {
+      return {
+        text: '',
+        error: 'Unknown provider: undefined (no provider on request or context)',
+      }
+    }
+
+    const providerAdapter: ProviderAdapter | undefined = providers[effectiveProvider]
     if (!providerAdapter) {
       return {
         text: '',
-        updatedContext: context,
-        error: `Unknown provider: ${provider}`
+        error: `Unsupported provider: ${effectiveProvider}`,
       }
     }
 
+    // 1. Get provider adapter
+    // providerAdapter already resolved above
+
     // 2. Get API key
-    const apiKey = await getProviderKey(provider)
+    const apiKey = await getProviderKey(effectiveProvider)
     if (!apiKey) {
       return {
         text: '',
-        updatedContext: context,
-        error: `Missing API key for provider: ${provider}`
+        error: `Missing API key for provider: ${effectiveProvider}`,
       }
     }
 
-    // 3. Clone context and optionally add user message
-    let updatedContext: MainFlowContext
-    if (skipHistory) {
-      // For stateless calls (like intentRouter), don't modify history
-      updatedContext = context
-    } else {
-      // Normal case: add user message to history
-      updatedContext = {
-        ...context,
-        messageHistory: [...context.messageHistory, { role: 'user', content: message }]
-      }
+    // 3. Append user message via ContextManager (for non-skipHistory)
+    if (!skipHistory) {
+      contextManager.addMessage({ role: 'user', content: message })
+      workingContext = contextManager.get()
     }
 
     // 4. Format messages for the specific provider
     // llm-service is responsible for converting MainFlowContext to provider-specific format
     let formattedMessages: any
 
-    if (skipHistory) {
-      // For stateless calls (like intentRouter), just send the message directly
+	if (skipHistory) {
+	  // For stateless calls (like intentRouter), just send the message directly
       // Format it appropriately for each provider
-      if (provider === 'anthropic') {
+      if (effectiveProvider === 'anthropic') {
         // Include system instructions even in stateless mode (skipHistory)
         const systemText = context.systemInstructions || ''
         const system = systemText
@@ -576,7 +608,7 @@ class LLMService {
           system,
           messages: [{ role: 'user' as const, content: message }]
         }
-      } else if (provider === 'gemini') {
+      } else if (effectiveProvider === 'gemini') {
         // Include systemInstruction even in stateless mode (skipHistory)
         formattedMessages = {
           systemInstruction: context.systemInstructions || '',
@@ -589,22 +621,19 @@ class LLMService {
           { role: 'user' as const, content: message }
         ]
       }
-    } else {
-      // Normal case: format full conversation history for the provider
-
-
-      if (provider === 'anthropic') {
-        formattedMessages = formatMessagesForAnthropic(updatedContext)
-
-      } else if (provider === 'gemini') {
-        formattedMessages = formatMessagesForGemini(updatedContext)
-
-      } else {
-        // OpenAI and others
-        formattedMessages = formatMessagesForOpenAI(updatedContext)
-
-      }
-    }
+	} else {
+	  // Normal case: format full conversation history for the provider.
+	  // At this point the user message has already been appended to
+	  // the canonical context via ContextManager.
+	  const latestContext = workingContext
+	  if (effectiveProvider === 'anthropic') {
+	    formattedMessages = formatMessagesForAnthropic(latestContext)
+	  } else if (effectiveProvider === 'gemini') {
+	    formattedMessages = formatMessagesForGemini(latestContext)
+	  } else {
+	    formattedMessages = formatMessagesForOpenAI(latestContext)
+	  }
+	}
 
     // 5. Set up event handlers using the new execution event system
     // Convert execution events to legacy callbacks for now (migration adapter)
@@ -629,7 +658,8 @@ class LLMService {
       }
       : flowAPI.emitExecutionEvent
 
-    const eventHandlers = createCallbackEventEmitters(emit, provider, model)
+    // Bind callback event emitters using the resolved provider/model
+    const eventHandlers = createCallbackEventEmitters(emit, effectiveProvider, effectiveModel)
 
 
     // Track tool I/O sizes for usage breakdown (estimated tokens)
@@ -659,28 +689,19 @@ class LLMService {
       return __openaiEncoder
     }
 
-    function openaiCountTokens(text: string | undefined | null): number {
-      if (!text) return 0
-      try {
-        const enc = getOpenAIEncoderForModel(model)
-        if (!enc) return estimateTokensFromText(text)
-        return enc.encode(typeof text === 'string' ? text : String(text)).length
-      } catch {
-        return estimateTokensFromText(text)
-      }
-    }
 
     // Generalized token counter: precise for OpenAI (tiktoken), estimated otherwise
-    function getTokenCounter(provider: string, model: string) {
-      if (provider === 'openai') {
-        const hasEnc = !!getOpenAIEncoderForModel(model)
-        return { count: openaiCountTokens, precise: hasEnc }
+    function getTokenCounter(p: string, m: string) {
+      if (p === 'openai') {
+        const hasEnc = !!getOpenAIEncoderForModel(m)
+        if (hasEnc) {
+          return { count: (t: string) => getOpenAIEncoderForModel(m)!.encode(t).length, precise: true }
+        }
       }
       return { count: estimateTokensFromText, precise: false }
     }
 
-
-    const __tokenCounter = getTokenCounter(provider, model)
+    const __tokenCounter = getTokenCounter(effectiveProvider, effectiveModel)
 
 
     let __bdSystemText: string | undefined
@@ -797,7 +818,7 @@ class LLMService {
     }
 
     // Pre-compute an approximate input token count as a fallback
-    const approxInputTokens = estimateInputTokens(provider, formattedMessages)
+    const approxInputTokens = estimateInputTokens(effectiveProvider, formattedMessages)
 
     // 6. Call provider with formatted messages
 
@@ -809,22 +830,22 @@ class LLMService {
       reasoningEffort?: 'low' | 'medium' | 'high'
       includeThoughts?: boolean
       thinkingBudget?: number
-    }> = (updatedContext as any)?.modelOverrides || []
+    }> = ((workingContext as any)?.modelOverrides || [])
 
     // Find override for current model (exact match)
-    const modelOverride = modelOverrides.find(o => o.model === model)
+    const modelOverride = modelOverrides.find(o => o.model === effectiveModel)
 
     // Temperature: model override → mapped normalized value → raw context value
     let effectiveTemperature: number | undefined
     if (modelOverride?.temperature !== undefined) {
       // Model-specific override (raw value)
       effectiveTemperature = modelOverride.temperature
-    } else if (typeof (updatedContext as any)?.temperature === 'number') {
-      const normalizedTemp = (updatedContext as any).temperature
+    } else if (typeof (workingContext as any)?.temperature === 'number') {
+      const normalizedTemp = (workingContext as any).temperature
       // Map normalized (0-1) to provider range:
       // - OpenAI/Gemini/Fireworks/xAI: 0-2
       // - Anthropic: 0-1 (already normalized)
-      if (provider === 'anthropic') {
+      if (effectiveProvider === 'anthropic') {
         effectiveTemperature = Math.min(normalizedTemp, 1) // Clamp to 0-1
       } else {
         effectiveTemperature = normalizedTemp * 2 // Scale to 0-2
@@ -832,29 +853,32 @@ class LLMService {
     }
 
     // Reasoning effort: model override → default
-    const effectiveReasoningEffort = modelOverride?.reasoningEffort ?? (updatedContext as any)?.reasoningEffort
+    const effectiveReasoningEffort =
+      requestReasoningEffort ??
+      modelOverride?.reasoningEffort ??
+      (workingContext as any)?.reasoningEffort
 
     // Auto-enable thinking for models that support it:
     // - Gemini 2.5+ (2.5, 3-pro, 3.0, 3.5, etc.): /(2\.5|[^0-9]3[.-])/i
     // - Anthropic Claude 3.5+ Sonnet, 3.7+, 4+
-    const isGeminiWithThinking = provider === 'gemini' && /(2\.5|[^0-9]3[.-])/i.test(model)
-    const isAnthropicWithThinking = provider === 'anthropic' && (
-      /claude-4/i.test(model) || /claude-opus-4/i.test(model) || /claude-sonnet-4/i.test(model) || /claude-haiku-4/i.test(model) ||
-      /claude-3-7-sonnet/i.test(model) || /claude-3\.7/i.test(model) ||
-      /claude-3-5-sonnet/i.test(model) || /claude-3\.5-sonnet/i.test(model)
+    const isGeminiWithThinking = effectiveProvider === 'gemini' && /(2\.5|[^0-9]3[.-])/i.test(effectiveModel)
+    const isAnthropicWithThinking = effectiveProvider === 'anthropic' && (
+      /claude-4/i.test(effectiveModel) || /claude-opus-4/i.test(effectiveModel) || /claude-sonnet-4/i.test(effectiveModel) || /claude-haiku-4/i.test(effectiveModel) ||
+      /claude-3-7-sonnet/i.test(effectiveModel) || /claude-3\.7/i.test(effectiveModel) ||
+      /claude-3-5-sonnet/i.test(effectiveModel) || /claude-3\.5-sonnet/i.test(effectiveModel)
     )
     const modelSupportsThinking = isGeminiWithThinking || isAnthropicWithThinking
 
     // Include thoughts: model override → default (with auto-enable for supported models)
     const includeThoughtsOverride = modelOverride?.includeThoughts
-    const includeThoughtsDefault = updatedContext?.includeThoughts
+    const includeThoughtsDefault = workingContext?.includeThoughts
     const shouldIncludeThoughts = includeThoughtsOverride === true ||
       (includeThoughtsOverride !== false && includeThoughtsDefault === true) ||
       (includeThoughtsOverride === undefined && includeThoughtsDefault !== false && modelSupportsThinking)
 
     // Thinking budget: model override → default
     const thinkingBudgetOverride = modelOverride?.thinkingBudget
-    const thinkingBudgetDefault = (updatedContext as any)?.thinkingBudget
+    const thinkingBudgetDefault = (workingContext as any)?.thinkingBudget
     const effectiveThinkingBudget = typeof thinkingBudgetOverride === 'number'
       ? thinkingBudgetOverride
       : (typeof thinkingBudgetDefault === 'number'
@@ -864,29 +888,32 @@ class LLMService {
     let response = ''
     let reasoning = '' // Accumulate reasoning/thinking from provider
 
+    // NOTE: This entire block must live inside an async function so that
+    // we can legally use `await` for proactive rate limiting and streaming.
+    // Ensure the containing method (`chat`) is declared `async`.
     try {
-      // PROACTIVE RATE LIMIT CHECK - Wait before making request if needed
-      const waitMs = await rateLimitTracker.checkAndWait(provider as any, model)
+      // PROACTIVE RATE LIMIT CHECK - Wait before making request if needed.
+      // This must remain async-aware so we can pause before issuing the
+      // underlying provider call when we are near rate limits.
+      const waitMs = await rateLimitTracker.checkAndWait(effectiveProvider as any, effectiveModel)
       if (waitMs > 0) {
-
-
-        // Emit event to UI
+        // Emit event to UI so the user understands why their request is delayed.
         flowAPI.emitExecutionEvent({
           type: 'rate_limit_wait',
-          provider,
-          model,
+          provider: effectiveProvider,
+          model: effectiveModel,
           rateLimitWait: {
             attempt: 0, // 0 = proactive wait (not a retry)
             waitMs,
-            reason: 'Proactive rate limit enforcement'
-          }
+            reason: 'Proactive rate limit enforcement',
+          },
         })
 
         await sleep(waitMs)
       }
 
-      // Record this request (optimistic tracking)
-      rateLimitTracker.recordRequest(provider as any, model)
+      // Record this request (optimistic tracking) after any proactive wait.
+      rateLimitTracker.recordRequest(effectiveProvider as any, effectiveModel)
 
       await new Promise<void>(async (resolve, reject) => {
         let streamHandle: { cancel: () => void } | null = null
@@ -916,7 +943,7 @@ class LLMService {
           // Base stream options (common to all providers)
           const baseStreamOpts = {
             apiKey,
-            model,
+            model: effectiveModel,
             // Wrap emit to capture reasoning for persistence
             emit: (event: any) => {
               // Capture reasoning events for later persistence
@@ -936,7 +963,7 @@ class LLMService {
             onChunk: (text: string) => {
               if (!text) return
               if (process.env.HF_FLOW_DEBUG === '1') {
-                try { console.log(`[llm-service] onChunk node=${flowAPI.nodeId} provider=${provider}/${model} len=${text?.length}`) } catch { }
+                try { console.log(`[llm-service] onChunk node=${flowAPI.nodeId} provider=${effectiveProvider}/${effectiveModel} len=${text?.length}`) } catch { }
               }
 
               // Robust de-dup/overlap handling for providers that resend accumulated text
@@ -993,13 +1020,13 @@ class LLMService {
 
           // Provider-specific options
           let streamOpts: any
-          if (provider === 'anthropic') {
+          if (effectiveProvider === 'anthropic') {
             streamOpts = {
               ...baseStreamOpts,
               system: formattedMessages.system,
               messages: formattedMessages.messages
             }
-          } else if (provider === 'gemini') {
+          } else if (effectiveProvider === 'gemini') {
             streamOpts = {
               ...baseStreamOpts,
               systemInstruction: formattedMessages.systemInstruction,
@@ -1018,7 +1045,7 @@ class LLMService {
               if (sysParts.length) systemText = sysParts.join('\n\n')
             }
 
-            try { flowAPI.log.debug('llmService.chat building stream options', { provider, model }) } catch { }
+	    try { flowAPI.log.debug('llmService.chat building stream options', { provider: effectiveProvider, model: effectiveModel }) } catch { }
 
             streamOpts = {
               ...baseStreamOpts,
@@ -1033,8 +1060,8 @@ class LLMService {
           // Single streaming path: agentStream (tools may be empty)
           // Detailed one-time payload log (sanitized)
           logLLMRequestPayload({
-            provider,
-            model,
+            provider: effectiveProvider,
+            model: effectiveModel,
             streamType: 'agent',
             streamOpts,
             responseSchema,
@@ -1063,7 +1090,7 @@ class LLMService {
                 onToolError: eventHandlers.onToolError
               })
 
-              try { flowAPI.log.debug('llmService.chat agentStream started', { provider, model }) } catch { }
+              try { flowAPI.log.debug('llmService.chat agentStream started', { provider: effectiveProvider, model: effectiveModel }) } catch { }
 
             },
             {
@@ -1075,8 +1102,8 @@ class LLMService {
                 // Emit event to UI
                 flowAPI.emitExecutionEvent({
                   type: 'rate_limit_wait',
-                  provider,
-                  model,
+                  provider: effectiveProvider,
+                  model: effectiveModel,
                   rateLimitWait: {
                     attempt,
                     waitMs,
@@ -1086,12 +1113,12 @@ class LLMService {
               }
             }
           )
-        } catch (e: any) {
+	    } catch (e: any) {
           // Check if this was a rate limit error and update tracker
           const rateLimitInfo = parseRateLimitError(e)
           if (rateLimitInfo.isRateLimit) {
 
-            rateLimitTracker.updateFromError(provider as any, model, e, rateLimitInfo)
+            rateLimitTracker.updateFromError(effectiveProvider as any, effectiveModel, e, rateLimitInfo)
           }
 
           try { flowAPI.signal?.removeEventListener('abort', onAbort as any) } catch { }
@@ -1112,11 +1139,10 @@ class LLMService {
       }
 
 
-      return {
-        text: '',
-        updatedContext,
-        error: errorMessage
-      }
+	      return {
+	        text: '',
+	        error: errorMessage
+	      }
     }
 
     // Emit usage breakdown (general; precise when tokenizer available)
@@ -1124,7 +1150,7 @@ class LLMService {
       const __count = __tokenCounter.count
       const __precise = !!__tokenCounter.precise
 
-      const instructionsTokens = __count(__bdSystemText)
+      const instructionsTokens = __count(__bdSystemText || '')
       let userMsgTokens = 0
       let assistantMsgTokens = 0
       if (Array.isArray(__bdMessages)) {
@@ -1167,8 +1193,8 @@ class LLMService {
       // Cost estimate (provider-aware; cached tokens are separate from input tokens)
       let costEstimate: number | undefined
       try {
-        const rateTable: any = (DEFAULT_PRICING as any)[provider] || {}
-        const rate = rateTable?.[model]
+      const rateTable: any = (DEFAULT_PRICING as any)[effectiveProvider] || {}
+      const rate = rateTable?.[effectiveModel]
         if (rate) {
           const cachedTokens = Math.max(0, Number((totals as any).cachedInputTokens || 0))
           const totalInputTokens = Math.max(0, Number((totals as any).inputTokens || 0))
@@ -1182,10 +1208,35 @@ class LLMService {
       } catch { }
 
       const thoughtsTokens = Math.max(0, Number(totals.outputTokens || 0) - (assistantTextTokens + toolCallsTokens))
+
+      // Defensive: ensure we have stable node/execution identifiers for the badge keying
+      let usageNodeId = currentNodeId
+      let usageExecutionId = currentExecutionId
+      try {
+        // Prefer explicit properties if available, but fall back to context
+        const flowNodeId = (flowAPI as any)?.nodeId ?? (flowAPI as any)?.context?.nodeId
+        const flowExecutionId = (flowAPI as any)?.executionId ?? (flowAPI as any)?.context?.executionId
+
+        if (!usageNodeId && flowNodeId) usageNodeId = flowNodeId
+        if (!usageExecutionId && flowExecutionId) usageExecutionId = flowExecutionId
+      } catch { /* best-effort only */ }
+
+      if (!usageNodeId || !usageExecutionId) {
+        console.warn('[LLM] usage_breakdown missing nodeId/executionId', {
+          nodeId: usageNodeId,
+          executionId: usageExecutionId,
+        })
+      } else {
+        console.debug('[LLM] emitting usage_breakdown', {
+          nodeId: usageNodeId,
+          executionId: usageExecutionId,
+        })
+      }
+
       flowAPI.emitExecutionEvent({
         type: 'usage_breakdown',
-        provider,
-        model,
+        provider: effectiveProvider,
+        model: effectiveModel,
         usageBreakdown: {
           input: {
             instructions: instructionsTokens,
@@ -1227,32 +1278,20 @@ class LLMService {
     }
 
     // 7. Add assistant response to context (unless skipHistory)
-    let finalContext: MainFlowContext
-    if (skipHistory) {
-      // For stateless calls, don't modify context
-      finalContext = updatedContext
-    } else {
-      // Normal case: add assistant response to history
-      // Include reasoning if captured (from Gemini thinking or Fireworks <think> tags)
+    if (!skipHistory) {
       const assistantMessage: { role: 'assistant'; content: string; reasoning?: string } = {
         role: 'assistant',
-        content: response
+        content: response,
       }
       if (reasoning.trim()) {
         assistantMessage.reasoning = reasoning
       }
-      finalContext = {
-        ...updatedContext,
-        messageHistory: [...updatedContext.messageHistory, assistantMessage]
-      }
+      contextManager.addMessage(assistantMessage)
     }
-
-
 
     return {
       text: response,
       reasoning: reasoning.trim() || undefined,
-      updatedContext: finalContext
     }
   }
 }

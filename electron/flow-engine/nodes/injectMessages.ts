@@ -1,109 +1,107 @@
 /**
  * injectMessages node
  *
- * Injects a user/assistant message pair into the conversation history.
- * Supports both static configuration and dynamic inputs.
- * All injections are idempotent - re-running updates messages in place.
- *
- * Inputs:
- * - context: Execution context from predecessor (REQUIRED)
- * - userMessage: Dynamic user message content (OPTIONAL - overrides static config)
- * - assistantMessage: Dynamic assistant message content (OPTIONAL - overrides static config)
- *
- * Outputs:
- * - context: Updated context with injected messages
- * - data: The injected message pair (for debugging)
- *
- * Config:
- * - staticUserMessage: Static user message (used if no dynamic input)
- * - staticAssistantMessage: Static assistant message (used if no dynamic input)
- * - injectionMode: 'append' | 'prepend' (default: 'prepend')
- * - pinned: Whether to pin messages to top during context windowing (default: false)
- * - priority: Priority for pinned messages (default: 50, only used if pinned=true)
+ * Injects a user/assistant pair into the active context history. Useful for
+ * bootstrapping flows with canned instructions or exemplars.
  */
 
-import type { NodeFunction, NodeExecutionPolicy } from '../types'
+import crypto from 'node:crypto'
+import type { NodeFunction, NodeExecutionPolicy, MainFlowContext } from '../types'
 
-/**
- * Node metadata
- */
 export const metadata = {
   executionPolicy: 'any' as NodeExecutionPolicy,
-  description: 'Injects a user/assistant message pair into conversation history. Idempotent - re-running updates in place.'
+  description: 'Injects a user/assistant pair into the context history.'
 }
 
-/**
- * Node implementation
- */
-export const injectMessagesNode: NodeFunction = async (flow, context, _dataIn, inputs, config) => {
-  // Get context - use pushed context, or pull if edge connected
-  const executionContext = context ?? (inputs.has('context') ? await inputs.pull('context') : null)
+export const injectMessagesNode: NodeFunction = async (flow, _context, _dataIn, inputs, config) => {
+  const contextManager = flow.context
+  const userMessage = await resolveMessage(inputs, config.staticUserMessage, 'userMessage')
+  const assistantMessage = await resolveMessage(inputs, config.staticAssistantMessage, 'assistantMessage')
 
-  if (!executionContext) {
-    flow.log.error('Context is required')
-    return {
-      context: executionContext!,
-      status: 'error',
-      error: 'injectMessages node requires a context input'
-    }
+  if (!userMessage) {
+    return { status: 'error', error: 'User message is required for injectMessages', context: contextManager.get() }
+  }
+  if (!assistantMessage) {
+    return { status: 'error', error: 'Assistant message is required for injectMessages', context: contextManager.get() }
   }
 
-  // Get message content (dynamic inputs override static config)
-  const userMessage = inputs.has('userMessage')
-    ? await inputs.pull('userMessage')
-    : config.staticUserMessage
+  const pinned = Boolean(config.pinned)
+  const priority = typeof config.priority === 'number' ? config.priority : 50
+  const mode = config.injectionMode === 'append' ? 'append' : 'prepend'
 
-  const assistantMessage = inputs.has('assistantMessage')
-    ? await inputs.pull('assistantMessage')
-    : config.staticAssistantMessage
+  const idPrefix = String(config.id || flow.nodeId || crypto.randomUUID())
+  const pair = buildMessages(userMessage, assistantMessage, pinned, priority, idPrefix)
 
-  // Debug logging
-  flow.log.debug('Inputs', {
-    userMessage: typeof userMessage === 'string' ? userMessage.substring(0, 50) : userMessage,
-    assistantMessage: typeof assistantMessage === 'string' ? assistantMessage.substring(0, 50) : assistantMessage,
-    hasUserInput: inputs.has('userMessage'),
-    hasAssistantInput: inputs.has('assistantMessage'),
-    hasStaticUser: !!config.staticUserMessage,
-    hasStaticAssistant: !!config.staticAssistantMessage
-  })
-
-  // Validation: both required and non-empty
-  if (!userMessage?.trim() || !assistantMessage?.trim()) {
-    const errorMsg = !userMessage?.trim()
-      ? 'User message is required and must be non-empty'
-      : 'Assistant message is required and must be non-empty'
-
-    flow.log.error('Validation failed', { errorMsg })
-
-    return {
-      context: executionContext,
-      status: 'error',
-      error: errorMsg
-    }
-  }
-
-  // Use ContextAPI to inject the pair (immutable, idempotent)
-  const newContext = flow.context.injectPair(
-    executionContext,
-    userMessage.trim(),
-    assistantMessage.trim(),
-    {
-      mode: (config.injectionMode as 'prepend' | 'append') || 'prepend',
-      pinned: config.pinned || false,
-      priority: config.priority || 50,
-      idPrefix: flow.nodeId // For idempotency
-    }
-  )
-
-  flow.log.debug('Injected message pair', {
-    mode: config.injectionMode || 'prepend',
-    pinned: config.pinned || false
-  })
+  const current = contextManager.get()
+  const nextHistory = upsertPair(current.messageHistory || [], pair, mode)
+  contextManager.replaceHistory(nextHistory)
 
   return {
-    context: newContext,
-    data: { userMessage: userMessage.trim(), assistantMessage: assistantMessage.trim() },
-    status: 'success'
+    context: contextManager.get(),
+    data: { userMessage, assistantMessage },
+    status: 'success' as const,
   }
 }
 
+async function resolveMessage(inputs: any, fallback: any, handle: string): Promise<string> {
+  if (inputs?.has?.(handle)) {
+    const value = await inputs.pull(handle)
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim()
+    }
+  }
+  if (typeof fallback === 'string' && fallback.trim()) {
+    return fallback.trim()
+  }
+  return ''
+}
+
+function buildMessages(
+  userMessage: string,
+  assistantMessage: string,
+  pinned: boolean,
+  priority: number,
+  idPrefix: string
+): [MainFlowContext['messageHistory'][number], MainFlowContext['messageHistory'][number]] {
+  const baseMeta = pinned ? { pinned: true, priority } : undefined
+  return [
+    {
+      role: 'user',
+      content: userMessage,
+      metadata: {
+        id: `${idPrefix}-user`,
+        ...(baseMeta || {}),
+      }
+    },
+    {
+      role: 'assistant',
+      content: assistantMessage,
+      metadata: {
+        id: `${idPrefix}-assistant`,
+        ...(baseMeta || {}),
+      }
+    }
+  ]
+}
+
+function upsertPair(
+  history: MainFlowContext['messageHistory'],
+  pair: ReturnType<typeof buildMessages>,
+  mode: 'append' | 'prepend'
+): MainFlowContext['messageHistory'] {
+  const [userMsg, assistantMsg] = pair
+  const userIdx = history.findIndex(m => m.metadata?.id === userMsg.metadata?.id)
+  const assistantIdx = history.findIndex(m => m.metadata?.id === assistantMsg.metadata?.id)
+
+  if (userIdx >= 0 && assistantIdx >= 0) {
+    const clone = [...history]
+    clone[userIdx] = userMsg
+    clone[assistantIdx] = assistantMsg
+    return clone
+  }
+
+  if (mode === 'append') {
+    return [...history, userMsg, assistantMsg]
+  }
+  return [userMsg, assistantMsg, ...history]
+}

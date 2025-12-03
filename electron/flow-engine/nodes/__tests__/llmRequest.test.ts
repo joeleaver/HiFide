@@ -8,8 +8,8 @@
  */
 
 import { llmRequestNode } from '../llmRequest'
-import { createTestContext, createTestConfig, createTestTool, getTestApiKey, createMockFlowAPI, createMockNodeInputs } from '../../../../__tests__/utils/testHelpers'
-import { withFixture, getTestMode } from '../../../../__tests__/utils/fixtures'
+import { createTestContext, createTestConfig, createTestTool, getTestApiKey, createMockFlowAPI, createMockNodeInputs } from '../../../__tests__/utils/testHelpers'
+import { withFixture, getTestMode } from '../../../__tests__/utils/fixtures'
 import { providers } from '../../../../core/state'
 import type { ExecutionContext } from '../../types'
 

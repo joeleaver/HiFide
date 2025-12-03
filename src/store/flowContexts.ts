@@ -1,17 +1,41 @@
 import { create } from 'zustand'
 import { getBackendClient } from '../lib/backend/bootstrap'
 
-interface FlowContextsState {
+export interface FlowContextsSnapshot {
+  requestId: string | null
+  updatedAt: number
   mainContext: any | null
   isolatedContexts: Record<string, any>
-  setContexts: (main: any | null, iso: Record<string, any>) => void
+}
+
+interface FlowContextsState extends FlowContextsSnapshot {
+  setContexts: (payload?: Partial<FlowContextsSnapshot> | null) => void
+}
+
+const initialSnapshot: FlowContextsSnapshot = {
+  requestId: null,
+  updatedAt: 0,
+  mainContext: null,
+  isolatedContexts: {},
+}
+
+function normalizePayload(payload?: Partial<FlowContextsSnapshot> | null): FlowContextsSnapshot {
+  if (!payload) {
+    return { ...initialSnapshot, updatedAt: 0 }
+  }
+
+  return {
+    requestId: payload.requestId ?? null,
+    updatedAt: typeof payload.updatedAt === 'number' ? payload.updatedAt : Date.now(),
+    mainContext: payload.mainContext ?? null,
+    isolatedContexts: payload.isolatedContexts ?? {},
+  }
 }
 
 function createFlowContextsStore() {
   return create<FlowContextsState>((set) => ({
-    mainContext: null,
-    isolatedContexts: {},
-    setContexts: (main, iso) => set({ mainContext: main || null, isolatedContexts: iso || {} }),
+    ...initialSnapshot,
+    setContexts: (payload) => set(normalizePayload(payload)),
   }))
 }
 
@@ -29,12 +53,8 @@ export function initFlowContextsEvents(): void {
   const client = getBackendClient()
   if (!client) return
 
-  // Context updates (incremental changes after initial hydration)
-  client.subscribe('flow.contexts.changed', (p: any) => {
-    useFlowContexts.getState().setContexts(p?.mainContext || null, p?.isolatedContexts || {})
+  client.subscribe('flow.contexts.changed', (payload: Partial<FlowContextsSnapshot> | null) => {
+    useFlowContexts.getState().setContexts(payload)
   })
-
-  // Initial hydration happens via workspace snapshot in hydration.ts
-  // No RPC call needed here
 }
 

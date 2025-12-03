@@ -12,8 +12,8 @@ import {
   getTestApiKey,
   createMockFlowAPI,
   createMockNodeInputs
-} from '../../../../__tests__/utils/testHelpers'
-import { withFixture, getTestMode } from '../../../../__tests__/utils/fixtures'
+} from '../../../__tests__/utils/testHelpers'
+import { withFixture, getTestMode } from '../../../__tests__/utils/fixtures'
 
 // Mock the state module to provide API keys
 jest.mock('../../../../core/state', () => ({

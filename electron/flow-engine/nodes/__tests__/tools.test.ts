@@ -9,7 +9,7 @@ import {
   createTestTool,
   createMockFlowAPI,
   createMockNodeInputs
-} from '../../../../__tests__/utils/testHelpers'
+} from '../../../__tests__/utils/testHelpers'
 
 describe('Tools Node', () => {
   const mockTools = [

@@ -14,7 +14,7 @@ import {
   createMockFlowAPI,
   createMockNodeInputs,
   createTestConfig
-} from '../../../../__tests__/utils/testHelpers'
+} from '../../../__tests__/utils/testHelpers'
 
 // Mock sendFlowEvent since we don't have WebContents in tests
 jest.mock('../../events', () => ({

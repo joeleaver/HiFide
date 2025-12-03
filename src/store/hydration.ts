@@ -180,7 +180,12 @@ async function hydrateStoresFromSnapshot(snapshot: WorkspaceSnapshot): Promise<v
     // Also hydrate the current graph
     const nodes = Array.isArray(snapshot.flowEditor.nodes) ? snapshot.flowEditor.nodes : []
     const edges = Array.isArray(snapshot.flowEditor.edges) ? snapshot.flowEditor.edges : []
-    useFlowEditor.setState({ currentGraph: { nodes, edges }, isHydratingGraph: false })
+    try {
+      const { useFlowEditorLocal } = await import('./flowEditorLocal')
+      useFlowEditorLocal.setState({ nodes, edges, isHydrated: true })
+    } catch (innerErr) {
+      console.warn('[hydration] Failed to hydrate flowEditorLocal graph snapshot:', innerErr)
+    }
   } catch (e) {
     console.warn('[hydration] Failed to hydrate flowEditor:', e)
   }
@@ -188,10 +193,7 @@ async function hydrateStoresFromSnapshot(snapshot: WorkspaceSnapshot): Promise<v
   try {
     // Flow contexts store
     const { useFlowContexts } = await import('./flowContexts')
-    useFlowContexts.getState().setContexts(
-      snapshot.flowContexts.mainContext || null,
-      snapshot.flowContexts.isolatedContexts || {}
-    )
+    useFlowContexts.getState().setContexts(snapshot.flowContexts)
   } catch (e) {
     console.warn('[hydration] Failed to hydrate flowContexts:', e)
   }

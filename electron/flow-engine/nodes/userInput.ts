@@ -25,30 +25,25 @@ export const metadata = {
 /**
  * Node implementation
  */
-export const userInputNode: NodeFunction = async (flow, context, _dataIn, inputs, _config) => {
-  // Get context - use pushed context, or pull if edge connected
-  const executionContext = context ?? (inputs.has('context') ? await inputs.pull('context') : null)
-
-  if (!executionContext) {
-    flow.log.error('Context is required')
-    return {
-      context: executionContext!,
-      status: 'error',
-      error: 'userInput node requires a context input'
-    }
-  }
-
+export const userInputNode: NodeFunction = async (flow, _context, _dataIn, _inputs, _config) => {
   flow.log.info('Waiting for user input...')
 
   // Wait for user input via FlowAPI
   // This creates a promise that will be resolved when the user submits
   const userInput = await flow.waitForUserInput()
+  const message = typeof userInput === 'string' ? userInput : ''
+  const trimmed = message.trim()
 
-  flow.log.debug('Received user input', { length: userInput.length })
+  if (trimmed.length > 0) {
+    flow.context.addMessage({ role: 'user', content: trimmed })
+    flow.log.debug('Appended user input to context history', { length: trimmed.length })
+  } else {
+    flow.log.warn('Received empty user input; skipping context mutation')
+  }
 
   return {
-    context: executionContext, // Pass through the context
-    data: userInput, // User's message
+    context: flow.context.get(),
+    data: message,
     status: 'success'
   }
 }

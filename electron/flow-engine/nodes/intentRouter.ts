@@ -106,16 +106,9 @@ Choose the intent that best matches the user's message.`
     }
   }
 
-  // For classification, do not inherit sampling knobs from conversation context
-  // (router often uses a different provider/model; keep classification deterministic)
-  const sanitizedContext = { ...executionContext } as any
-  delete sanitizedContext.temperature
-  delete sanitizedContext.reasoningEffort
-
   // Call LLM service for classification
   const llmResult = await llmService.chat({
     message: classificationPrompt,
-    context: sanitizedContext,
     flowAPI: flow,
     responseSchema,
     overrideProvider: provider,

@@ -6,10 +6,9 @@ import { newContextNode } from '../newContext'
 import type { MainFlowContext } from '../../types'
 import {
   createMainFlowContext,
-  createTestConfig,
   createMockFlowAPI,
   createMockNodeInputs
-} from '../../../../__tests__/utils/testHelpers'
+} from '../../../__tests__/utils/testHelpers'
 
 describe('New Context Node', () => {
   const createNodeConfig = (overrides?: any) => ({
@@ -48,20 +47,22 @@ describe('New Context Node', () => {
       expect(result.context.messageHistory).toEqual([])
     })
 
-    it('should generate context ID based on node ID', async () => {
-      const flow1 = createMockFlowAPI({ nodeId: 'test-newContext-1' })
-      const flow2 = createMockFlowAPI({ nodeId: 'test-newContext-2' })
+    it('should generate unique isolated context IDs per invocation', async () => {
+      const flow = createMockFlowAPI({ nodeId: 'test-newContext' })
       const context = createMainFlowContext()
       const config = createNodeConfig()
       const inputs = createMockNodeInputs()
 
-      const result1 = await newContextNode(flow1, context, undefined, inputs, config)
-      const result2 = await newContextNode(flow2, context, undefined, inputs, config)
+      const result1 = await newContextNode(flow, context, undefined, inputs, config)
+      const result2 = await newContextNode(flow, context, undefined, inputs, config)
 
-      // Different node IDs should produce different context IDs
-      expect(result1.context.contextId).toBe('context-test-newContext-1')
-      expect(result2.context.contextId).toBe('context-test-newContext-2')
+      expect(result1.context).toBeDefined()
+      expect(result2.context).toBeDefined()
+      expect(result1.context.contextId).toBeDefined()
+      expect(result2.context.contextId).toBeDefined()
       expect(result1.context.contextId).not.toBe(result2.context.contextId)
+      expect(result1.context.contextType).toBe('isolated')
+      expect(result2.context.contextType).toBe('isolated')
     })
 
     it('should pass through data input', async () => {

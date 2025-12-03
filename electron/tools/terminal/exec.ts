@@ -31,8 +31,7 @@ export const terminalExecTool: AgentTool = {
       console.error('[terminal.exec] No active sessionId')
       return { ok: false, error: 'no-session' }
     }
-    const req = meta?.requestId
-  
+
 
     // Get or create session with optional cwd
     if (!(meta as any)?.workspaceId) {

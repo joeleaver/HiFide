@@ -104,6 +104,8 @@ export interface WorkspaceSnapshot {
 
   // Flow contexts
   flowContexts: {
+    requestId: string | null
+    updatedAt: number
     mainContext: any | null
     isolatedContexts: Record<string, any>
   }

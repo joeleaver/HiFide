@@ -12,7 +12,8 @@ import {
   getFlowProfileService,
   getFlowGraphService,
   getKanbanService,
-  getKnowledgeBaseService
+  getKnowledgeBaseService,
+  getFlowContextsService,
 } from '../../services/index.js'
 
 /**
@@ -22,6 +23,7 @@ import {
 export async function buildWorkspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot | null> {
   try {
     const sessionService = getSessionService()
+    const flowContextsService = getFlowContextsService()
     const providerService = getProviderService()
     const flowProfileService = getFlowProfileService()
     const flowGraphService = getFlowGraphService()
@@ -101,10 +103,13 @@ export async function buildWorkspaceSnapshot(workspaceId: string): Promise<Works
       edges,
     }
 
-    // Get flow contexts from current session
+    // Get flow contexts from service (fall back to session state if scheduler hasn't published yet)
+    const contextsEntry = flowContextsService.getContextsFor({ workspaceId })
     const flowContexts = {
-      mainContext: currentSession?.currentContext || null,
-      isolatedContexts: {} // Isolated contexts removed from architecture
+      requestId: contextsEntry.requestId || null,
+      updatedAt: contextsEntry.updatedAt || Date.now(),
+      mainContext: contextsEntry.mainContext || currentSession?.currentContext || null,
+      isolatedContexts: contextsEntry.isolatedContexts || {},
     }
 
     // Get kanban board for this workspace

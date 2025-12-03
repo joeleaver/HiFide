@@ -2,11 +2,12 @@
  * Test helper utilities for creating test contexts, configs, and mocks
  */
 
-import type { ExecutionContext, MainFlowContext, NodeInputs } from '../../ipc/flows-v2flow-engine/types'
-import type { FlowAPI, Badge, Tool, UsageReport } from '../../ipc/flows-v2flow-engine/flow-api'
-import type { ProviderAdapter, ChatMessage, AgentTool } from '../../providers/provider'
+import crypto from 'node:crypto'
+import type { ExecutionContext, MainFlowContext, NodeInputs } from '../../flow-engine/types'
+import type { FlowAPI, Badge, UsageReport, CreateIsolatedContextOptions } from '../../flow-engine/flow-api'
+import { createContextManager, type ContextManager } from '../../flow-engine/contextManager'
+import type { ProviderAdapter, AgentTool } from '../../providers/provider'
 import { withFixture, getTestMode } from './fixtures'
-import { createContextAPI } from '../../ipc/flows-v2flow-engine/context-api'
 
 /**
  * Create a test execution context with sensible defaults
@@ -161,11 +162,21 @@ export async function collectStreamChunks(
 /**
  * Create a mock FlowAPI for testing nodes
  */
-export function createMockFlowAPI(overrides?: Partial<FlowAPI>): FlowAPI {
+export function createMockFlowAPI(overrides?: Partial<FlowAPI>): FlowAPI & {
+  _testHelpers: {
+    logs: Array<{ level: string; message: string; data?: any }>
+    badges: Map<string, Badge>
+    streamChunks: string[]
+    usageReports: UsageReport[]
+    emittedEvents: any[]
+  }
+} {
   const logs: Array<{ level: string; message: string; data?: any }> = []
   const badges: Map<string, Badge> = new Map()
   const streamChunks: string[] = []
   const usageReports: UsageReport[] = []
+  const emittedEvents: any[] = []
+  const portalRegistry = new Map<string, { context?: MainFlowContext; data?: any }>()
 
   const mockStore: any = {
     getNodeCache: jest.fn(() => null),
@@ -177,16 +188,53 @@ export function createMockFlowAPI(overrides?: Partial<FlowAPI>): FlowAPI {
     feWaitForUserInput: jest.fn(() => Promise.resolve('mock user input'))
   }
 
-  const emittedEvents: any[] = []
+  const contextRef = { current: createMainFlowContext() }
+  const contextManager = createContextManager(contextRef)
+  const isolatedContexts: MainFlowContext[] = []
 
-  const mockFlowAPI: FlowAPI = {
+  const contextsHelper: FlowAPI['contexts'] = {
+    active: () => cloneContext(contextManager.get()),
+    list: () => [cloneContext(contextManager.get()), ...isolatedContexts.map(cloneContext)],
+    get: (contextId: string) => {
+      if (!contextId) return undefined
+      const active = contextManager.get()
+      if (active.contextId === contextId) {
+        return cloneContext(active)
+      }
+      const found = isolatedContexts.find(ctx => ctx.contextId === contextId)
+      return found ? cloneContext(found) : undefined
+    },
+    createIsolated: (options: CreateIsolatedContextOptions) => {
+      const snapshot = createIsolatedContextSnapshot(contextManager, options, isolatedContexts)
+      isolatedContexts.push(snapshot)
+      return cloneContext(snapshot)
+    },
+    release: (contextId: string) => {
+      const index = isolatedContexts.findIndex(ctx => ctx.contextId === contextId)
+      if (index >= 0) {
+        isolatedContexts.splice(index, 1)
+        return true
+      }
+      return false
+    },
+  }
+
+  const triggerPortalOutputs = jest.fn(async (_portalId: string) => {})
+  const setPortalData = jest.fn((portalId: string, context?: MainFlowContext, data?: any) => {
+    portalRegistry.set(portalId, { context, data })
+  })
+  const getPortalData = jest.fn((portalId: string) => portalRegistry.get(portalId))
+
+  const base: FlowAPI = {
     nodeId: 'test-node',
     requestId: 'test-request',
     executionId: 'test-exec',
+    workspaceId: 'test-workspace',
     signal: new AbortController().signal,
     checkCancelled: jest.fn(),
     store: mockStore,
-    context: createContextAPI(),
+    context: contextManager,
+    contexts: contextsHelper,
     conversation: {
       streamChunk: jest.fn((chunk: string) => {
         streamChunks.push(chunk)
@@ -218,7 +266,7 @@ export function createMockFlowAPI(overrides?: Partial<FlowAPI>): FlowAPI {
       })
     },
     tools: {
-      execute: jest.fn(async (toolName: string, args: any) => {
+      execute: jest.fn(async (toolName: string) => {
         return { result: `Mock execution of ${toolName}` }
       }),
       list: jest.fn(() => [])
@@ -229,24 +277,33 @@ export function createMockFlowAPI(overrides?: Partial<FlowAPI>): FlowAPI {
       })
     },
     waitForUserInput: jest.fn(() => mockStore.feWaitForUserInput()),
-
+    triggerPortalOutputs,
+    setPortalData,
+    getPortalData,
     emitExecutionEvent: jest.fn((event) => {
       emittedEvents.push(event)
-    }),
-
-    // Expose test helpers
-    _testHelpers: {
-      logs,
-      badges,
-      streamChunks,
-      usageReports,
-      emittedEvents
-    },
-
-    ...overrides
+    })
   }
 
-  return mockFlowAPI
+  const merged = { ...base, ...overrides } as FlowAPI & {
+    _testHelpers: {
+      logs: Array<{ level: string; message: string; data?: any }>
+      badges: Map<string, Badge>
+      streamChunks: string[]
+      usageReports: UsageReport[]
+      emittedEvents: any[]
+    }
+  }
+
+  merged._testHelpers = {
+    logs,
+    badges,
+    streamChunks,
+    usageReports,
+    emittedEvents
+  }
+
+  return merged
 }
 
 /**
@@ -278,5 +335,82 @@ export function createMainFlowContext(overrides?: Partial<MainFlowContext>): Mai
     messageHistory: [],
     ...overrides
   }
+}
+
+function cloneContext(context: MainFlowContext): MainFlowContext {
+  return {
+    ...context,
+    messageHistory: Array.isArray(context.messageHistory)
+      ? context.messageHistory.map(msg => ({ ...msg }))
+      : []
+  }
+}
+
+function createIsolatedContextSnapshot(
+  manager: ContextManager,
+  options: CreateIsolatedContextOptions,
+  isolatedContexts: MainFlowContext[],
+): MainFlowContext {
+  const active = manager.get()
+  const base = options.baseContextId
+    ? isolatedContexts.find(ctx => ctx.contextId === options.baseContextId) || active
+    : active
+
+  const inheritedHistory = options.inheritHistory ? cloneHistory(base.messageHistory) : []
+  const seededHistory = options.initialMessages?.length ? sanitizeMessages(options.initialMessages) : []
+  const systemInstructions =
+    options.systemInstructions !== undefined
+      ? options.systemInstructions
+      : options.inheritSystemInstructions
+        ? base.systemInstructions
+        : ''
+
+  return {
+    contextId: crypto.randomUUID(),
+    contextType: 'isolated',
+    provider: options.provider || base.provider,
+    model: options.model || base.model,
+    systemInstructions,
+    ...(options.label ? { label: options.label } : {}),
+    ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+    ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+    ...(options.includeThoughts !== undefined ? { includeThoughts: options.includeThoughts } : {}),
+    ...(options.thinkingBudget !== undefined ? { thinkingBudget: options.thinkingBudget } : {}),
+    ...(options.modelOverrides?.length ? { modelOverrides: options.modelOverrides } : {}),
+    parentContextId: base.contextId,
+    createdByNodeId: options.createdByNodeId,
+    createdAt: new Date().toISOString(),
+    messageHistory: [...inheritedHistory, ...seededHistory],
+  }
+}
+
+function cloneHistory(history?: MainFlowContext['messageHistory']): MainFlowContext['messageHistory'] {
+  if (!Array.isArray(history)) return []
+  return history.map(msg => ({
+    ...msg,
+    metadata: msg.metadata ? { ...msg.metadata } : undefined,
+  }))
+}
+
+const VALID_ROLES: Array<MainFlowContext['messageHistory'][number]['role']> = ['system', 'user', 'assistant']
+
+function sanitizeMessages(
+  messages?: MainFlowContext['messageHistory']
+): MainFlowContext['messageHistory'] {
+  if (!Array.isArray(messages)) return []
+  const sanitized: MainFlowContext['messageHistory'] = []
+  for (const msg of messages) {
+    if (!msg || typeof msg.content !== 'string') {
+      continue
+    }
+    const role = VALID_ROLES.includes(msg.role) ? msg.role : 'assistant'
+    sanitized.push({
+      ...msg,
+      role,
+      content: String(msg.content),
+      metadata: msg.metadata ? { ...msg.metadata } : undefined,
+    })
+  }
+  return sanitized
 }
 

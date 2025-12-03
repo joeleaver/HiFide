@@ -7,7 +7,7 @@ import {
   createMainFlowContext,
   createMockFlowAPI,
   createMockNodeInputs
-} from '../../../../__tests__/utils/testHelpers'
+} from '../../../__tests__/utils/testHelpers'
 
 describe('defaultContextStart Node', () => {
   it('should set system instructions from config', async () => {

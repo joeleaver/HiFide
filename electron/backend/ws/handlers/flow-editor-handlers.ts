@@ -6,7 +6,7 @@
 
 import { dialog } from 'electron'
 import fs from 'node:fs/promises'
-import { getFlowProfileService, getFlowGraphService, getFlowCacheService, getSessionService } from '../../../services/index.js'
+import { getFlowProfileService, getFlowGraphService, getFlowCacheService, getSessionService, getFlowContextsService } from '../../../services/index.js'
 import { getConnectionWorkspaceId, type RpcConnection } from '../broadcast.js'
 
 /**
@@ -88,17 +88,17 @@ export function createFlowEditorHandlers(
 
       const sessionService = getSessionService()
       const sessionId = sessionService.getCurrentIdFor({ workspaceId })
-      if (!sessionId) {
-        return { ok: true, mainContext: null, isolatedContexts: {} }
-      }
-
       const sessions = sessionService.getSessionsFor({ workspaceId })
-      const session = sessions.find((s) => s.id === sessionId)
+      const session = sessionId ? sessions.find((s) => s.id === sessionId) : null
 
+      const flowContextsService = getFlowContextsService()
+      const entry = flowContextsService.getContextsFor({ workspaceId })
       return {
         ok: true,
-        mainContext: session?.currentContext || null,
-        isolatedContexts: {} // Isolated contexts removed from architecture
+        requestId: entry.requestId || null,
+        updatedAt: entry.updatedAt || Date.now(),
+        mainContext: entry.mainContext || session?.currentContext || null,
+        isolatedContexts: entry.isolatedContexts || {},
       }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
