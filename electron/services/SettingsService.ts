@@ -39,6 +39,51 @@ export class SettingsService extends Service<SettingsState> {
       },
       'settings'
     )
+
+    // Force default pricing config to match the current codebase, ignoring any stale persistence
+    this.state.defaultPricingConfig = DEFAULT_PRICING
+
+    // Merge missing defaults into active pricing config (e.g. new models)
+    this.mergeDefaultsIntoActivePricing()
+  }
+
+  private mergeDefaultsIntoActivePricing(): void {
+    let changed = false
+    const active = { ...this.state.pricingConfig }
+
+    for (const provider of Object.keys(DEFAULT_PRICING)) {
+      const defaultModels = DEFAULT_PRICING[provider as keyof PricingConfig]
+      const activeModels = active[provider as keyof PricingConfig]
+
+      // If provider missing in active, add it
+      if (activeModels === undefined) {
+        (active as any)[provider] = defaultModels
+        changed = true
+        continue
+      }
+
+      // If both are objects (model maps), merge missing models
+      if (
+        typeof activeModels === 'object' &&
+        activeModels !== null &&
+        typeof defaultModels === 'object' &&
+        defaultModels !== null
+      ) {
+        for (const model of Object.keys(defaultModels)) {
+          if (!(activeModels as any)[model]) {
+            // New model found in defaults, add to active
+            ;(activeModels as any)[model] = (defaultModels as any)[model]
+            changed = true
+          }
+        }
+      }
+    }
+
+    if (changed) {
+      console.log('[SettingsService] Merged new default pricing models into active configuration')
+      this.state.pricingConfig = active
+      this.persistState()
+    }
   }
 
   protected onStateChange(updates: Partial<SettingsState>): void {
@@ -48,6 +93,13 @@ export class SettingsService extends Service<SettingsState> {
     // Emit events
     if (updates.settingsApiKeys !== undefined) {
       this.events.emit('apiKeys:changed', this.state.settingsApiKeys)
+    }
+
+    if (updates.pricingConfig !== undefined || updates.defaultPricingConfig !== undefined) {
+      this.events.emit('settings:pricing:changed', {
+        pricingConfig: this.state.pricingConfig,
+        defaultPricingConfig: this.state.defaultPricingConfig,
+      })
     }
   }
 

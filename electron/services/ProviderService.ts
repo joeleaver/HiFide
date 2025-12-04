@@ -112,10 +112,17 @@ export class ProviderService extends Service<ProviderState> {
     }
 
     // Emit events when models or provider validity changes
-    if (updates.modelsByProvider !== undefined || updates.providerValid !== undefined) {
+    if (
+      updates.modelsByProvider !== undefined ||
+      updates.providerValid !== undefined ||
+      updates.fireworksAllowedModels !== undefined ||
+      updates.defaultModels !== undefined
+    ) {
       this.events.emit('provider:models:changed', {
         providerValid: this.state.providerValid,
         modelsByProvider: this.state.modelsByProvider,
+        fireworksAllowedModels: this.state.fireworksAllowedModels,
+        defaultModels: this.state.defaultModels,
       })
     }
   }
@@ -262,35 +269,29 @@ export class ProviderService extends Service<ProviderState> {
   }
 
   // Fireworks allowlist
-  setFireworksAllowedModels(models: string[]): void {
-    const uniq = Array.from(new Set((models || []).filter(Boolean)))
-    this.setState({ fireworksAllowedModels: uniq })
-    // Refresh the provider list and ensure selection is valid
-    this.refreshModels('fireworks').catch((e) => console.warn('[provider] refresh fireworks failed', e))
-    this.ensureProviderModelConsistency()
+  async setFireworksAllowedModels(models: string[]): Promise<void> {
+    this.setState({ fireworksAllowedModels: models })
+    await this.refreshFireworksModelsSafely()
   }
 
-  addFireworksModel(model: string): void {
-    const trimmed = (model || '').trim()
+  async addFireworksModel(model: string): Promise<void> {
+    const trimmed = model.trim()
     if (!trimmed) return
-    if (this.state.fireworksAllowedModels.includes(trimmed)) return
-
-    this.setState({
-      fireworksAllowedModels: [...this.state.fireworksAllowedModels, trimmed],
-    })
-    this.refreshModels('fireworks').catch((e) => console.warn('[provider] refresh fireworks failed', e))
-    this.ensureProviderModelConsistency()
+    const current = this.state.fireworksAllowedModels
+    if (!current.includes(trimmed)) {
+      this.setState({ fireworksAllowedModels: [...current, trimmed] })
+      await this.refreshFireworksModelsSafely()
+    }
   }
 
-  removeFireworksModel(model: string): void {
+  async removeFireworksModel(model: string): Promise<void> {
     this.setState({
       fireworksAllowedModels: this.state.fireworksAllowedModels.filter((m) => m !== model),
     })
-    this.refreshModels('fireworks').catch((e) => console.warn('[provider] refresh fireworks failed', e))
-    this.ensureProviderModelConsistency()
+    await this.refreshFireworksModelsSafely()
   }
 
-  loadFireworksRecommendedDefaults(): void {
+  async loadFireworksRecommendedDefaults(): Promise<void> {
     const defaults = [
       'accounts/fireworks/models/qwen3-coder-480b-a35b-instruct',
       'accounts/fireworks/models/glm-4p6',
@@ -299,7 +300,15 @@ export class ProviderService extends Service<ProviderState> {
       'accounts/fireworks/models/minimax-m2',
     ]
     this.setState({ fireworksAllowedModels: defaults })
-    this.refreshModels('fireworks').catch((e) => console.warn('[provider] refresh fireworks failed', e))
+    await this.refreshFireworksModelsSafely()
+  }
+
+  private async refreshFireworksModelsSafely(): Promise<void> {
+    try {
+      await this.refreshModels('fireworks')
+    } catch (e) {
+      console.warn('[provider] refresh fireworks failed', e)
+    }
     this.ensureProviderModelConsistency()
   }
 

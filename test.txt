@@ -1,3 +1,0 @@
-Hello, this is a test file.
-This SUCCESSFULLY demonstrates the applyEdits tool.
-Have a great day!

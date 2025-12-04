@@ -225,13 +225,16 @@ export function createSessionHandlers(
       const sess = sessions.find((s) => s.id === currentId)
       if (!sess) return { ok: true, meta: null }
 
+      const executedFlowId = sess.executedFlow || sess.lastUsedFlow || ''
       return {
         ok: true,
         meta: {
           id: sess.id,
           title: sess.title,
-          provider: sess.currentContext?.provider || null,
-          model: sess.currentContext?.model || null,
+          executedFlowId,
+          lastUsedFlowId: sess.lastUsedFlow || '',
+          providerId: sess.currentContext?.provider || '',
+          modelId: sess.currentContext?.model || '',
         },
       }
     } catch (e: any) {

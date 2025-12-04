@@ -191,12 +191,26 @@ export default function KnowledgeBaseView() {
     const client = getBackendClient()
     if (!client) return
     client.rpc('kb.getItemBody', { id: selectedId }).then((res: any) => {
-      if (res && res.ok) {
-        const body = res.body || ''
-        const safe = sanitizeMarkdownForEditor(body)
-        setDescription(safe)
-        setEditFiles(Array.isArray(res.files) ? res.files : [])
-        try { editorRef.current?.setMarkdown(safe) } catch {}
+      if (!res || !res.ok) return
+      const item = res.item || {}
+      const meta = item?.meta || {}
+      const body = typeof item.body === 'string'
+        ? item.body
+        : typeof item.description === 'string'
+          ? item.description
+          : ''
+      const files = Array.isArray(meta?.files)
+        ? meta.files
+        : Array.isArray(item.files)
+          ? item.files
+          : []
+      const safe = sanitizeMarkdownForEditor(body)
+      setDescription(safe)
+      setEditFiles(files)
+      try {
+        editorRef.current?.setMarkdown(safe)
+      } catch (error) {
+        console.error('Error updating editor:', error)
       }
     }).catch(() => {})
   }, [selectedId, selected])

@@ -1,54 +1,38 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Card, Stack, Group, Text, Button, Accordion, Table, NumberInput, Badge } from '@mantine/core'
-import { getBackendClient } from '../lib/backend/bootstrap'
+import type { PricingConfig, ModelPricing, ModelOption } from '../../electron/store/types'
 
-type ModelPricing = { inputCostPer1M: number; outputCostPer1M: number; cachedInputCostPer1M?: number }
+type ProviderName = 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai'
 
+interface PricingSettingsProps {
+  modelsByProvider: Record<string, ModelOption[]>
+  providerValid: Record<string, boolean>
+  pricingConfig: PricingConfig | null
+  defaultPricingConfig: PricingConfig | null
+  onResetAll: () => void
+  onResetProvider: (provider: ProviderName) => void
+  onSetPrice: (provider: ProviderName, model: string, pricing: ModelPricing) => void
+}
 
-export default function PricingSettings({ modelsByProvider, providerValid }: { modelsByProvider: Record<string, any>, providerValid: Record<string, boolean> }) {
-  const [pricingConfig, setPricingConfig] = useState<any>({ customRates: false, openai: {}, anthropic: {}, gemini: {}, fireworks: {}, xai: {} })
-  const [defaultPricingConfig, setDefaultPricingConfig] = useState<any>({ customRates: false, openai: {}, anthropic: {}, gemini: {}, fireworks: {}, xai: {} })
+export default function PricingSettings({
+  modelsByProvider,
+  providerValid,
+  pricingConfig,
+  defaultPricingConfig,
+  onResetAll,
+  onResetProvider,
+  onSetPrice,
+}: PricingSettingsProps) {
   const [expanded, setExpanded] = useState<string | null>(null)
+  const hasCustomRates = Boolean(pricingConfig?.customRates)
 
-  useEffect(() => {
-    const client = getBackendClient(); if (!client) return
-    client.rpc<any>('settings.get', {}).then((snap) => {
-      if (!snap?.ok) return
-      setPricingConfig(snap.pricingConfig || {})
-      setDefaultPricingConfig(snap.defaultPricingConfig || {})
-    }).catch(() => { })
-  }, [])
+  const getPricingFor = (provider: ProviderName) =>
+    ((pricingConfig?.[provider] as Record<string, ModelPricing>) || {})
 
-  const resetAll = async () => {
-    const client = getBackendClient(); if (!client) return
-    try {
-      const res: any = await client.rpc('settings.resetPricingToDefaults', {})
-      if (res?.ok) {
-        setPricingConfig(res.pricingConfig || {})
-        setDefaultPricingConfig(res.defaultPricingConfig || {})
-      }
-    } catch { }
-  }
+  const getDefaultPricingFor = (provider: ProviderName) =>
+    ((defaultPricingConfig?.[provider] as Record<string, ModelPricing>) || {})
 
-  const resetProvider = async (provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai') => {
-    const client = getBackendClient(); if (!client) return
-    try {
-      const res: any = await client.rpc('settings.resetProviderPricing', { provider })
-      if (res?.ok) {
-        setPricingConfig(res.pricingConfig || {})
-      }
-    } catch { }
-  }
-
-  const setPrice = async (provider: string, model: string, pricing: ModelPricing) => {
-    const client = getBackendClient(); if (!client) return
-    try {
-      const res: any = await client.rpc('settings.setPricingForModel', { provider, model, pricing })
-      if (res?.ok) {
-        setPricingConfig(res.pricingConfig || {})
-      }
-    } catch { }
-  }
+  const getModelsFor = (provider: ProviderName) => modelsByProvider[provider] || []
 
   return (
     <Card withBorder style={{ backgroundColor: '#1e1e1e', borderColor: '#3e3e42' }}>
@@ -58,7 +42,7 @@ export default function PricingSettings({ modelsByProvider, providerValid }: { m
             <Text size="sm" fw={600} c="#cccccc">Cost Estimation</Text>
             <Text size="xs" c="dimmed">
               Configure pricing per model for cost tracking
-              {pricingConfig.customRates && (
+              {hasCustomRates && (
                 <Badge size="xs" color="blue" ml="xs">Custom Rates</Badge>
               )}
             </Text>
@@ -67,8 +51,8 @@ export default function PricingSettings({ modelsByProvider, providerValid }: { m
             size="xs"
             variant="light"
             color="red"
-            onClick={() => resetAll()}
-            disabled={!pricingConfig.customRates}
+            onClick={onResetAll}
+            disabled={!hasCustomRates}
           >
             Reset All to Defaults
           </Button>
@@ -94,151 +78,57 @@ export default function PricingSettings({ modelsByProvider, providerValid }: { m
             },
           }}
         >
-          {/* OpenAI */}
-          <Accordion.Item value="openai">
-            <Accordion.Control>
-              <Group justify="space-between" style={{ width: '100%', paddingRight: '16px' }}>
-                <Text size="sm" c="#cccccc">OpenAI Models</Text>
-                <Text
-                  size="xs"
-                  c="dimmed"
-                  style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    resetProvider('openai')
-                  }}
-                >
-                  Reset
-                </Text>
-              </Group>
-            </Accordion.Control>
-            <Accordion.Panel>
-              <PricingTable
-                provider="openai"
-                models={modelsByProvider.openai || []}
-                pricing={pricingConfig.openai}
-                defaultPricing={defaultPricingConfig.openai}
-                onUpdate={(model, pricing) => setPrice('openai', model, pricing)}
-              />
-            </Accordion.Panel>
-          </Accordion.Item>
+          <PricingSection
+            value="openai"
+            label="OpenAI Models"
+            models={getModelsFor('openai')}
+            pricing={getPricingFor('openai')}
+            defaultPricing={getDefaultPricingFor('openai')}
+            onReset={() => onResetProvider('openai')}
+            onUpdate={(model, pricing) => onSetPrice('openai', model, pricing)}
+          />
 
-          {/* Anthropic */}
-          <Accordion.Item value="anthropic">
-            <Accordion.Control>
-              <Group justify="space-between" style={{ width: '100%', paddingRight: '16px' }}>
-                <Text size="sm" c="#cccccc">Anthropic Models</Text>
-                <Text
-                  size="xs"
-                  c="dimmed"
-                  style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    resetProvider('anthropic')
-                  }}
-                >
-                  Reset
-                </Text>
-              </Group>
-            </Accordion.Control>
-            <Accordion.Panel>
-              <PricingTable
-                provider="anthropic"
-                models={modelsByProvider.anthropic || []}
-                pricing={pricingConfig.anthropic}
-                defaultPricing={defaultPricingConfig.anthropic}
-                onUpdate={(model, pricing) => setPrice('anthropic', model, pricing)}
-              />
-            </Accordion.Panel>
-          </Accordion.Item>
+          <PricingSection
+            value="anthropic"
+            label="Anthropic Models"
+            models={getModelsFor('anthropic')}
+            pricing={getPricingFor('anthropic')}
+            defaultPricing={getDefaultPricingFor('anthropic')}
+            onReset={() => onResetProvider('anthropic')}
+            onUpdate={(model, pricing) => onSetPrice('anthropic', model, pricing)}
+          />
 
-          {/* Gemini */}
-          <Accordion.Item value="gemini">
-            <Accordion.Control>
-              <Group justify="space-between" style={{ width: '100%', paddingRight: '16px' }}>
-                <Text size="sm" c="#cccccc">Google Gemini Models</Text>
-                <Text
-                  size="xs"
-                  c="dimmed"
-                  style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    resetProvider('gemini')
-                  }}
-                >
-                  Reset
-                </Text>
-              </Group>
-            </Accordion.Control>
-            <Accordion.Panel>
-              <PricingTable
-                provider="gemini"
-                models={modelsByProvider.gemini || []}
-                pricing={pricingConfig.gemini}
-                defaultPricing={defaultPricingConfig.gemini}
-                onUpdate={(model, pricing) => setPrice('gemini', model, pricing)}
-              />
-            </Accordion.Panel>
-          </Accordion.Item>
-          {/* Fireworks (only when Fireworks key is valid) */}
+          <PricingSection
+            value="gemini"
+            label="Google Gemini Models"
+            models={getModelsFor('gemini')}
+            pricing={getPricingFor('gemini')}
+            defaultPricing={getDefaultPricingFor('gemini')}
+            onReset={() => onResetProvider('gemini')}
+            onUpdate={(model, pricing) => onSetPrice('gemini', model, pricing)}
+          />
+
           {providerValid.fireworks && (
-            <Accordion.Item value="fireworks">
-              <Accordion.Control>
-                <Group justify="space-between" style={{ width: '100%', paddingRight: '16px' }}>
-                  <Text size="sm" c="#cccccc">Fireworks Models</Text>
-                  <Text
-                    size="xs"
-                    c="dimmed"
-                    style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      resetProvider('fireworks')
-                    }}
-                  >
-                    Reset
-                  </Text>
-                </Group>
-              </Accordion.Control>
-              <Accordion.Panel>
-                <PricingTable
-                  provider="fireworks"
-                  models={(modelsByProvider as any).fireworks || []}
-                  pricing={(pricingConfig as any).fireworks}
-                  defaultPricing={(defaultPricingConfig as any).fireworks}
-                  onUpdate={(model, pricing) => setPrice('fireworks', model, pricing)}
-                />
-              </Accordion.Panel>
-            </Accordion.Item>
+            <PricingSection
+              value="fireworks"
+              label="Fireworks Models"
+              models={getModelsFor('fireworks')}
+              pricing={getPricingFor('fireworks')}
+              defaultPricing={getDefaultPricingFor('fireworks')}
+              onReset={() => onResetProvider('fireworks')}
+              onUpdate={(model, pricing) => onSetPrice('fireworks', model, pricing)}
+            />
           )}
 
-          {/* xAI */}
-          <Accordion.Item value="xai">
-            <Accordion.Control>
-              <Group justify="space-between" style={{ width: '100%', paddingRight: '16px' }}>
-                <Text size="sm" c="#cccccc">xAI Models</Text>
-                <Text
-                  size="xs"
-                  c="dimmed"
-                  style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    resetProvider('xai')
-                  }}
-                >
-                  Reset
-                </Text>
-              </Group>
-            </Accordion.Control>
-            <Accordion.Panel>
-              <PricingTable
-                provider="xai"
-                models={(modelsByProvider as any).xai || []}
-                pricing={(pricingConfig as any).xai}
-                defaultPricing={(defaultPricingConfig as any).xai}
-                onUpdate={(model, pricing) => setPrice('xai', model, pricing)}
-              />
-            </Accordion.Panel>
-          </Accordion.Item>
+          <PricingSection
+            value="xai"
+            label="xAI Models"
+            models={getModelsFor('xai')}
+            pricing={getPricingFor('xai')}
+            defaultPricing={getDefaultPricingFor('xai')}
+            onReset={() => onResetProvider('xai')}
+            onUpdate={(model, pricing) => onSetPrice('xai', model, pricing)}
+          />
         </Accordion>
 
         <Stack gap="xs">
@@ -256,19 +146,69 @@ export default function PricingSettings({ modelsByProvider, providerValid }: { m
   )
 }
 
+interface PricingSectionProps {
+  value: string
+  label: string
+  models: ModelOption[]
+  pricing: Record<string, ModelPricing>
+  defaultPricing: Record<string, ModelPricing>
+  onReset: () => void
+  onUpdate: (model: string, pricing: ModelPricing) => void
+}
+
+function PricingSection({ value, label, models, pricing, defaultPricing, onReset, onUpdate }: PricingSectionProps) {
+  // Merge models from provider API with models that have pricing config
+  const pricingKeys = Object.keys(pricing || {})
+  const defaultPricingKeys = Object.keys(defaultPricing || {})
+  const allPricedIds = new Set([...pricingKeys, ...defaultPricingKeys])
+
+  const knownModelIds = new Set(models.map((m) => m.value))
+
+  const additionalModels = Array.from(allPricedIds)
+    .filter((id) => !knownModelIds.has(id))
+    .map((id) => ({ value: id, label: id }))
+
+  const allModels = [...models, ...additionalModels].sort((a, b) => a.label.localeCompare(b.label))
+
+  return (
+    <Accordion.Item value={value}>
+      <Accordion.Control>
+        <Group justify="space-between" style={{ width: '100%', paddingRight: '16px' }}>
+          <Text size="sm" c="#cccccc">{label}</Text>
+          <Text
+            size="xs"
+            c="dimmed"
+            style={{ cursor: 'pointer', textDecoration: 'underline' }}
+            onClick={(e) => {
+              e.stopPropagation()
+              onReset()
+            }}
+          >
+            Reset
+          </Text>
+        </Group>
+      </Accordion.Control>
+      <Accordion.Panel>
+        <PricingTable
+          models={allModels}
+          pricing={pricing}
+          defaultPricing={defaultPricing}
+          onUpdate={onUpdate}
+        />
+      </Accordion.Panel>
+    </Accordion.Item>
+  )
+}
+
 type PricingTableProps = {
-  provider: string
-  models: Array<{ value: string; label: string }>
+  models: ModelOption[]
   pricing: Record<string, ModelPricing>
   defaultPricing: Record<string, ModelPricing>
   onUpdate: (model: string, pricing: ModelPricing) => void
 }
 
 function PricingTable({ models, pricing, defaultPricing, onUpdate }: PricingTableProps) {
-  // Show all available models, even if they don't have default pricing
-  const availableModels = models
-
-  if (availableModels.length === 0) {
+  if (models.length === 0) {
     return (
       <Text size="sm" c="dimmed" ta="center" py="md">
         No models available. Add an API key for this provider to see available models.
@@ -303,18 +243,16 @@ function PricingTable({ models, pricing, defaultPricing, onUpdate }: PricingTabl
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
-        {availableModels.map((model) => {
+        {models.map((model) => {
           const modelPricing = pricing[model.value] || { inputCostPer1M: 0, outputCostPer1M: 0 }
           const modelDefaultPricing = defaultPricing[model.value]
 
-          // A model is at default if it has default pricing and matches it, or if it has no default pricing and is at 0/0
           const isDefault = modelDefaultPricing
             ? (modelPricing.inputCostPer1M === modelDefaultPricing.inputCostPer1M &&
               modelPricing.outputCostPer1M === modelDefaultPricing.outputCostPer1M &&
               modelPricing.cachedInputCostPer1M === modelDefaultPricing.cachedInputCostPer1M)
             : (modelPricing.inputCostPer1M === 0 && modelPricing.outputCostPer1M === 0)
 
-          // Check if this model supports caching (has cachedInputCostPer1M in defaults)
           const supportsCaching = modelDefaultPricing?.cachedInputCostPer1M !== undefined
 
           return (
@@ -328,7 +266,7 @@ function PricingTable({ models, pricing, defaultPricing, onUpdate }: PricingTabl
                   value={modelPricing.inputCostPer1M}
                   onChange={(val) => onUpdate(model.value, {
                     ...modelPricing,
-                    inputCostPer1M: typeof val === 'number' ? val : 0
+                    inputCostPer1M: typeof val === 'number' ? val : 0,
                   })}
                   decimalScale={3}
                   step={0.1}
@@ -350,7 +288,7 @@ function PricingTable({ models, pricing, defaultPricing, onUpdate }: PricingTabl
                     value={modelPricing.cachedInputCostPer1M ?? 0}
                     onChange={(val) => onUpdate(model.value, {
                       ...modelPricing,
-                      cachedInputCostPer1M: typeof val === 'number' ? val : 0
+                      cachedInputCostPer1M: typeof val === 'number' ? val : 0,
                     })}
                     decimalScale={4}
                     step={0.01}
@@ -374,7 +312,7 @@ function PricingTable({ models, pricing, defaultPricing, onUpdate }: PricingTabl
                   value={modelPricing.outputCostPer1M}
                   onChange={(val) => onUpdate(model.value, {
                     ...modelPricing,
-                    outputCostPer1M: typeof val === 'number' ? val : 0
+                    outputCostPer1M: typeof val === 'number' ? val : 0,
                   })}
                   decimalScale={3}
                   step={0.1}
@@ -390,9 +328,7 @@ function PricingTable({ models, pricing, defaultPricing, onUpdate }: PricingTabl
                 />
               </Table.Td>
               <Table.Td>
-                {!isDefault && (
-                  <Badge size="xs" color="blue">Custom</Badge>
-                )}
+                {!isDefault && <Badge size="xs" color="blue">Custom</Badge>}
               </Table.Td>
             </Table.Tr>
           )
@@ -401,4 +337,3 @@ function PricingTable({ models, pricing, defaultPricing, onUpdate }: PricingTabl
     </Table>
   )
 }
-

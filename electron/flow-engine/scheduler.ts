@@ -782,6 +782,9 @@ export class FlowScheduler {
    * Create FlowAPI instance for a node execution
    */
   private createFlowAPI(nodeId: string, executionId: string, binding: ContextBinding): FlowAPI {
+    if (!nodeId) {
+      console.error('[FlowScheduler] createFlowAPI called with missing nodeId!', { executionId })
+    }
     const emit = createEventEmitter(executionId, nodeId, (event: ExecutionEvent) => {
       this.handleExecutionEvent(event)
     })
@@ -1048,7 +1051,7 @@ export class FlowScheduler {
 
       case 'usage':
         if (event.usage) {
-          try { emitFlowEvent(this.requestId, { type: 'tokenUsage', nodeId: event.nodeId, provider: event.provider, model: event.model, usage: { inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, totalTokens: event.usage.totalTokens, cachedTokens: event.usage.cachedTokens || 0 }, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
+          try { emitFlowEvent(this.requestId, { type: 'tokenUsage', nodeId: event.nodeId, provider: event.provider, model: event.model, usage: { inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, totalTokens: event.usage.totalTokens, cachedTokens: event.usage.cachedTokens || 0 }, cost: event.usage.cost, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
         }
         break
 

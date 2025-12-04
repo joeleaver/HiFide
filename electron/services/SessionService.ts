@@ -16,7 +16,7 @@
 import { Service } from './base/Service.js'
 import type { Session, ActivityEvent, TokenUsage } from '../store/types.js'
 import { loadAllSessions, sessionSaver, deleteSessionFromDisk } from '../store/utils/session-persistence.js'
-import { getProviderService, getSettingsService } from './index.js'
+import { getProviderService } from './index.js'
 
 const DEBUG_USAGE = process.env.HF_DEBUG_USAGE === '1' || process.env.HF_DEBUG_TOKENS === '1'
 const MAX_SESSIONS = 100
@@ -163,14 +163,44 @@ export class SessionService extends Service<SessionState> {
   /**
    * Create a new session for a workspace
    */
-  async newSessionFor(params: { workspaceId: string; title?: string }): Promise<string> {
-    const { workspaceId, title } = params
+  async newSessionFor(params: {
+    workspaceId: string
+    title?: string
+    initialContext?: Partial<Session['currentContext']>
+    executedFlowId?: string
+    lastUsedFlowId?: string
+  }): Promise<string> {
+    const { workspaceId, title, initialContext, executedFlowId, lastUsedFlowId } = params
     const sessions = this.getSessionsFor({ workspaceId })
+    const currentId = this.getCurrentIdFor({ workspaceId })
+    const referenceSession = currentId ? sessions.find((s) => s.id === currentId) : sessions[0]
 
     // Get default provider/model from ProviderService
     const providerService = getProviderService()
     const defaultProvider = providerService.getSelectedProvider() || 'openai'
     const defaultModel = providerService.getSelectedModel() || 'gpt-4o'
+
+    const inheritedProvider = initialContext?.provider ?? referenceSession?.currentContext?.provider
+    const inheritedModel = initialContext?.model ?? referenceSession?.currentContext?.model
+    const inheritedSystemInstructions =
+      initialContext?.systemInstructions ?? referenceSession?.currentContext?.systemInstructions
+    const inheritedTemperature = initialContext?.temperature ?? referenceSession?.currentContext?.temperature
+    const messageHistory = Array.isArray(initialContext?.messageHistory)
+      ? initialContext.messageHistory.map((entry) => ({ ...entry }))
+      : []
+
+    const provider = inheritedProvider || defaultProvider
+    const model = inheritedModel || defaultModel
+    const context: Session['currentContext'] = {
+      provider,
+      model,
+      messageHistory,
+    }
+    if (inheritedSystemInstructions !== undefined) context.systemInstructions = inheritedSystemInstructions
+    if (inheritedTemperature !== undefined) context.temperature = inheritedTemperature
+
+    const flowSeed = executedFlowId ?? referenceSession?.executedFlow ?? referenceSession?.lastUsedFlow
+    const lastUsedFlowSeed = lastUsedFlowId ?? referenceSession?.lastUsedFlow ?? flowSeed
 
     // Generate new session
     const newSession: Session = {
@@ -180,11 +210,7 @@ export class SessionService extends Service<SessionState> {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       lastActivityAt: Date.now(),
-      currentContext: {
-        provider: defaultProvider,
-        model: defaultModel,
-        messageHistory: [],
-      },
+      currentContext: context,
       tokenUsage: {
         total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 },
         byProvider: {},
@@ -197,6 +223,8 @@ export class SessionService extends Service<SessionState> {
       },
       requestsLog: [],
     }
+    if (flowSeed) newSession.executedFlow = flowSeed
+    if (lastUsedFlowSeed) newSession.lastUsedFlow = lastUsedFlowSeed
 
     // Limit to MAX_SESSIONS
     const updated = [newSession, ...sessions].slice(0, MAX_SESSIONS)
@@ -488,219 +516,7 @@ export class SessionService extends Service<SessionState> {
     await this.saveSessionFor({ workspaceId, sessionId }, true)
   }
 
-  // ============================================================================
-  // Token Usage Tracking
-  // ============================================================================
 
-  /**
-   * Record token usage during streaming (cumulative)
-   * All providers report cumulative usage per-step, so we calculate deltas
-   */
-  recordTokenUsage(params: {
-    sessionId?: string
-    requestId: string
-    nodeId: string
-    executionId: string
-    provider: string
-    model: string
-    usage: TokenUsage
-  }): void {
-    const { requestId, nodeId, executionId, provider, model, usage } = params
-
-    const key = `${requestId}:${nodeId}:${executionId}`
-    const prev = this.state.inFlightUsageByKey[key]?.usage || {
-      inputTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
-      cachedTokens: 0,
-    }
-
-    // All providers report CUMULATIVE usage per-step
-    // Calculate delta by subtracting previous from current
-    const delta: TokenUsage = {
-      inputTokens: Math.max(0, (usage.inputTokens || 0) - (prev.inputTokens || 0)),
-      outputTokens: Math.max(0, (usage.outputTokens || 0) - (prev.outputTokens || 0)),
-      totalTokens: Math.max(0, (usage.totalTokens || 0) - (prev.totalTokens || 0)),
-      cachedTokens: Math.max(0, (usage.cachedTokens || 0) - (prev.cachedTokens || 0)),
-    }
-
-    const cumUsage: TokenUsage = {
-      inputTokens: (prev.inputTokens || 0) + (delta.inputTokens || 0),
-      outputTokens: (prev.outputTokens || 0) + (delta.outputTokens || 0),
-      totalTokens: (prev.totalTokens || 0) + (delta.totalTokens || 0),
-      cachedTokens: (prev.cachedTokens || 0) + (delta.cachedTokens || 0),
-    }
-
-    // Calculate cost
-    const settingsService = getSettingsService()
-    const cost = settingsService.calculateCost(provider, model, cumUsage) || null
-
-    if (DEBUG_USAGE) {
-      console.log('[usage:recordTokenUsage]', {
-        requestId,
-        nodeId,
-        executionId,
-        provider,
-        model,
-        received: usage,
-        delta,
-        cumulative: cumUsage,
-        cost,
-      })
-    }
-
-    // Update in-flight usage
-    this.setState({
-      inFlightUsageByKey: {
-        ...this.state.inFlightUsageByKey,
-        [key]: { requestId, nodeId, executionId, provider, model, usage: cumUsage },
-      },
-    })
-
-    // Note: No save here - in-flight usage is ephemeral and will be persisted when finalized
-  }
-
-  /**
-   * Finalize node usage - add to session totals and remove from in-flight
-   */
-  async finalizeNodeUsageFor(params: {
-    workspaceId: string
-    sessionId: string
-    requestId: string
-    nodeId: string
-    executionId: string
-  }): Promise<void> {
-    const { workspaceId, sessionId, requestId, nodeId, executionId } = params
-
-    const key = `${requestId}:${nodeId}:${executionId}`
-    const acc = this.state.inFlightUsageByKey[key]
-    if (!acc) return
-
-    const { provider, model, usage } = acc
-
-    // Calculate cost
-    const settingsService = getSettingsService()
-    const cost = settingsService.calculateCost(provider, model, usage) || null
-
-    if (DEBUG_USAGE) {
-      console.log('[usage:finalizeNodeUsage]', {
-        requestId,
-        nodeId,
-        executionId,
-        provider,
-        model,
-        final: usage,
-        cost,
-      })
-    }
-
-    // Update session totals
-    const sessions = this.getSessionsFor({ workspaceId })
-    const updated = sessions.map((sess: Session) => {
-      if (sess.id !== sessionId) return sess
-
-      // Update tokenUsage structure
-      const byProvider = sess.tokenUsage?.byProvider || {}
-      const byProviderAndModel = sess.tokenUsage?.byProviderAndModel || {}
-      const total = sess.tokenUsage?.total || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
-
-      const providerUsage = byProvider[provider] || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
-      const newProviderUsage = {
-        inputTokens: providerUsage.inputTokens + (usage.inputTokens || 0),
-        outputTokens: providerUsage.outputTokens + (usage.outputTokens || 0),
-        totalTokens: providerUsage.totalTokens + (usage.totalTokens || 0),
-        cachedTokens: (providerUsage.cachedTokens || 0) + (usage.cachedTokens || 0),
-      }
-
-      const providerModels = byProviderAndModel[provider] || {}
-      const modelUsage = providerModels[model] || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }
-      const newModelUsage = {
-        inputTokens: modelUsage.inputTokens + (usage.inputTokens || 0),
-        outputTokens: modelUsage.outputTokens + (usage.outputTokens || 0),
-        totalTokens: modelUsage.totalTokens + (usage.totalTokens || 0),
-        cachedTokens: (modelUsage.cachedTokens || 0) + (usage.cachedTokens || 0),
-      }
-
-      const newTotal = {
-        inputTokens: total.inputTokens + (usage.inputTokens || 0),
-        outputTokens: total.outputTokens + (usage.outputTokens || 0),
-        totalTokens: total.totalTokens + (usage.totalTokens || 0),
-        cachedTokens: (total.cachedTokens || 0) + (usage.cachedTokens || 0),
-      }
-
-
-      // Update costs structure
-      const costsByProviderAndModel = sess.costs?.byProviderAndModel || {}
-      const providerCosts = costsByProviderAndModel[provider] || {}
-      const modelCost = providerCosts[model] || { inputCost: 0, outputCost: 0, totalCost: 0, currency: 'USD' }
-      const newModelCost = cost
-        ? {
-            inputCost: modelCost.inputCost + (cost.inputCost || 0),
-            outputCost: modelCost.outputCost + (cost.outputCost || 0),
-            totalCost: modelCost.totalCost + (cost.totalCost || 0),
-            currency: 'USD' as const,
-          }
-        : modelCost
-
-      const totalCost = (sess.costs?.totalCost || 0) + (cost?.totalCost || 0)
-
-      // Add to requestsLog
-      const requestsLog = sess.requestsLog || []
-      const newRequestsLog = [
-        ...requestsLog,
-        {
-          timestamp: Date.now(),
-          requestId,
-          nodeId,
-          executionId,
-          provider,
-          model,
-          usage,
-          cost: cost || { inputCost: 0, outputCost: 0, totalCost: 0, currency: 'USD' as const },
-        },
-      ]
-
-      return {
-        ...sess,
-        tokenUsage: {
-          byProvider: {
-            ...byProvider,
-            [provider]: newProviderUsage,
-          },
-          byProviderAndModel: {
-            ...byProviderAndModel,
-            [provider]: {
-              ...providerModels,
-              [model]: newModelUsage,
-            },
-          },
-          total: newTotal,
-        },
-        costs: {
-          byProviderAndModel: {
-            ...costsByProviderAndModel,
-            [provider]: {
-              ...providerCosts,
-              [model]: newModelCost,
-            },
-          },
-          totalCost,
-          currency: 'USD',
-        },
-        requestsLog: newRequestsLog,
-        updatedAt: Date.now(),
-      }
-    })
-
-    this.setSessionsFor({ workspaceId, sessions: updated })
-
-    // Remove from in-flight
-    const { [key]: _, ...rest } = this.state.inFlightUsageByKey
-    this.setState({ inFlightUsageByKey: rest })
-
-    // Persist (debounced)
-    await this.saveSessionFor({ workspaceId, sessionId }, false)
-  }
 
 }
 

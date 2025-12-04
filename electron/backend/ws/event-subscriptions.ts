@@ -16,6 +16,7 @@ import {
   getFlowGraphService,
   getProviderService,
   getFlowContextsService,
+  getSettingsService,
 } from '../../services/index.js'
 
 /**
@@ -138,6 +139,18 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
   addWorkspaceSubscription(providerService, 'provider:models:changed', 'settings.models.changed', (data) => ({
     providerValid: data.providerValid || {},
     modelsByProvider: data.modelsByProvider || {},
+    fireworksAllowedModels: Array.isArray(data.fireworksAllowedModels) ? data.fireworksAllowedModels : [],
+    defaultModels: data.defaultModels || {},
+  }))
+
+  const settingsService = getSettingsService()
+  addGlobalSubscription(settingsService, 'settings:pricing:changed', 'settings.pricing.changed', (data) => ({
+    pricingConfig: data.pricingConfig || {},
+    defaultPricingConfig: data.defaultPricingConfig || {},
+  }))
+
+  addGlobalSubscription(settingsService, 'apiKeys:changed', 'settings.keys.changed', (apiKeys) => ({
+    settingsApiKeys: apiKeys || {},
   }))
 
   // View is now derived from workspace attachment state in renderer

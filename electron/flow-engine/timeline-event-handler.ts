@@ -124,10 +124,10 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
       return
     }
 
-    // Other events require nodeId
-    if (!nodeId) return
+    // Other events require nodeId (except usageBreakdown which has recovery logic)
+    if (!nodeId && type !== 'usageBreakdown') return
 
-    let key = getKey(nodeId, executionId)
+    let key = nodeId ? getKey(nodeId, executionId) : ''
 
     // Fallback: If executionId is missing, try to find active execution for this node
     if (!executionId && !buffers.openBoxIds.has(key)) {
@@ -145,6 +145,12 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
     }
 
     switch (type) {
+      case 'nodeStart':
+        // Ensure box is created immediately so subsequent events (like usage) 
+        // can find the active execution even if they lack IDs
+        flush(key)
+        break
+
       case 'chunk':
         // Buffer streaming text and flush immediately
         if (ev.text) {
@@ -262,9 +268,16 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
         break
 
 
-      case 'usage_breakdown':
+      case 'usageBreakdown':
         // Handle usage breakdown event - create a badge
         {
+          // Normalize payload property (scheduler emits 'breakdown', but internal logic expects 'usageBreakdown')
+          const usageData = ev.breakdown || ev.usageBreakdown
+          if (!usageData) {
+            console.warn('[TimelineEventHandler] usageBreakdown event missing payload', ev)
+            break
+          }
+
           // Best-effort recovery of missing identifiers so the badge can still attach to
           // the correct box in the timeline.
 
@@ -281,7 +294,14 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
           }
 
           // 2) If nodeId and/or executionId are still missing, try to borrow them from any open box
+          // This indicates a scheduler/upstream bug where the event lost its context.
           if (!ev.nodeId || !ev.executionId) {
+            console.warn('[TimelineEventHandler] usageBreakdown missing IDs - performing fallback recovery', { 
+              nodeId: ev.nodeId, 
+              executionId: ev.executionId,
+              openBoxKeys: Array.from(buffers.openBoxIds.keys())
+            })
+            
             const anyKey = Array.from(buffers.openBoxIds.keys())[0]
             if (anyKey) {
               const [maybeNodeId, maybeExecId] = anyKey.split('::')
@@ -293,8 +313,27 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
           const usageKey = `usage-${ev.executionId || Date.now()}`
 
           // Store breakdown data in cache for viewer
-          if (ev.usageBreakdown) {
-            UiPayloadCache.put(usageKey, ev.usageBreakdown)
+          UiPayloadCache.put(usageKey, usageData)
+          
+          // Also update session totals from the breakdown (since we suppress intermediate usage events)
+          if (usageData.totals) {
+            try {
+              console.log('[TimelineEventHandler] Updating usage totals from breakdown:', {
+                totals: usageData.totals,
+                nodeId: ev.nodeId,
+                executionId: ev.executionId
+              })
+              writer.updateUsage({
+                usage: usageData.totals,
+                provider: ev.provider,
+                model: ev.model,
+                requestId,
+                nodeId: ev.nodeId || 'unknown',
+                executionId: ev.executionId || 'unknown'
+              })
+            } catch (err) {
+              console.error('[TimelineEventHandler] Failed to update usage totals:', err)
+            }
           }
 
           const usageKeyForBuffer = `${ev.nodeId || 'global'}::${ev.executionId || 'global'}`

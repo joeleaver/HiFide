@@ -37,6 +37,7 @@ export interface UsageEventData {
   outputTokens: number
   totalTokens: number
   cachedTokens?: number
+  cost?: number
 }
 
 /**
@@ -211,7 +212,7 @@ export function createCallbackEventEmitters(
       })
     },
 
-    onTokenUsage: (usage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number }) => {
+    onTokenUsage: (usage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number; cost?: number }) => {
       emit({
         type: 'usage',
         provider,

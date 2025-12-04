@@ -9,6 +9,7 @@ import { DiffViewer } from './viewers/DiffViewer'
 import { CodeViewer } from './viewers/CodeViewer'
 import { SearchResultsViewer } from './viewers/SearchResultsViewer'
 import { WorkspaceSearchViewer } from './viewers/WorkspaceSearchViewer'
+import { WorkspaceMapViewer } from './viewers/WorkspaceMapViewer'
 import { KBSearchViewer } from './viewers/KBSearchViewer'
 import { KBStoreViewer } from './viewers/KBStoreViewer'
 import { AgentAssessViewer } from './viewers/AgentAssessViewer'
@@ -47,8 +48,10 @@ export function BadgeContent({ badge }: BadgeContentProps) {
     
     case 'workspace-search':
     case 'workspace-jump':
-    case 'workspace-map':
       return <WorkspaceSearchViewer badge={badge} />
+    
+    case 'workspace-map':
+      return <WorkspaceMapViewer badge={badge} />
     
     case 'kb-search':
       return <KBSearchViewer badge={badge} />

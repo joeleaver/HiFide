@@ -3,6 +3,7 @@ import { ServiceRegistry } from '../services/base/ServiceRegistry.js'
 import { getWorkspaceIdForSessionId } from '../utils/workspace-session.js'
 import type { NodeExecutionBox } from '../store/types.js'
 import { broadcastWorkspaceNotification } from '../backend/ws/broadcast.js'
+import { getSettingsService } from '../services/index.js'
 
 /**
  * Handles the "dirty work" of finding a session, updating its timeline items,
@@ -181,8 +182,19 @@ export class SessionTimelineWriter {
       byProviderAndModel: {}
     }
 
-    if (ev.cost) {
-      costs.totalCost += ev.cost.totalCost || 0
+    // Calculate cost if not provided (centralized cost calculation)
+    let cost = ev.cost
+    if (!cost) {
+      try {
+        const settingsService = getSettingsService()
+        cost = settingsService.calculateCost(providerKey, modelKey, ev.usage) || undefined
+      } catch (e) {
+        console.warn('[SessionTimelineWriter] Failed to calculate cost:', e)
+      }
+    }
+
+    if (cost) {
+      costs.totalCost += cost.totalCost || 0
       
       if (!costs.byProviderAndModel) costs.byProviderAndModel = {}
       if (!costs.byProviderAndModel[providerKey]) costs.byProviderAndModel[providerKey] = {}
@@ -196,9 +208,9 @@ export class SessionTimelineWriter {
         }
       }
       
-      costs.byProviderAndModel[providerKey][modelKey].inputCost += ev.cost.inputCost || 0
-      costs.byProviderAndModel[providerKey][modelKey].outputCost += ev.cost.outputCost || 0
-      costs.byProviderAndModel[providerKey][modelKey].totalCost += ev.cost.totalCost || 0
+      costs.byProviderAndModel[providerKey][modelKey].inputCost += cost.inputCost || 0
+      costs.byProviderAndModel[providerKey][modelKey].outputCost += cost.outputCost || 0
+      costs.byProviderAndModel[providerKey][modelKey].totalCost += cost.totalCost || 0
     }
 
     // Append to requestsLog
@@ -211,7 +223,7 @@ export class SessionTimelineWriter {
       model: ev.model,
       timestamp: Date.now(),
       usage: ev.usage,
-      cost: ev.cost // Might be undefined, but we pass it through if available
+      cost: cost // Use the calculated cost (or ev.cost if provided)
     })
 
     // Save updated usage/costs/requests to the session only when we have actual usage
@@ -231,6 +243,16 @@ export class SessionTimelineWriter {
     // Broadcast consolidated usage snapshot to all renderers.
     // This should only be invoked when we have real usage data (after the LLM
     // returns usage / usage_breakdown), not on every streaming chunk.
+    // Debug: Ensure costs are structured correctly before broadcast
+    if (costs.totalCost > 0 && (!costs.byProviderAndModel || Object.keys(costs.byProviderAndModel).length === 0)) {
+      console.warn('[SessionTimelineWriter] totalCost > 0 but byProviderAndModel is empty!', {
+        totalCost: costs.totalCost,
+        tokenUsageKeys: Object.keys(tokenUsage.byProvider || {}),
+        providerKey: ev.provider,
+        modelKey: ev.model
+      })
+    }
+
     broadcastWorkspaceNotification(ws, 'session.usage.changed', {
       tokenUsage,
       costs,

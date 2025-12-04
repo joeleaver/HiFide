@@ -56,7 +56,12 @@ export const BadgeKnowledgeBaseSearchContent = memo(function BadgeKnowledgeBaseS
   const handleLoadBody = useCallback((id: string) => {
     const client = getBackendClient(); if (!client) return
     client.rpc('kb.getItemBody', { id }).then((res: any) => {
-      const body = res && typeof res === 'object' && 'body' in res ? (res as any).body : undefined
+      const item = res && typeof res === 'object' ? (res as any).item : undefined
+      const body = item && typeof item.body === 'string'
+        ? item.body
+        : typeof item?.description === 'string'
+          ? item.description
+          : undefined
       if (typeof body === 'string') setKbBodies((prev) => ({ ...prev, [id]: body }))
     }).catch(() => {})
   }, [])
@@ -76,7 +81,12 @@ export const BadgeKnowledgeBaseSearchContent = memo(function BadgeKnowledgeBaseS
     idsToLoad.forEach((id) => {
       if (!kbBodies[id]) {
         client.rpc('kb.getItemBody', { id }).then((res: any) => {
-          const body = res && typeof res === 'object' && 'body' in res ? (res as any).body : undefined
+          const item = res && typeof res === 'object' ? (res as any).item : undefined
+          const body = item && typeof item.body === 'string'
+            ? item.body
+            : typeof item?.description === 'string'
+              ? item.description
+              : undefined
           if (typeof body === 'string') setKbBodies((prev) => ({ ...prev, [id]: body }))
         }).catch(() => {})
       }

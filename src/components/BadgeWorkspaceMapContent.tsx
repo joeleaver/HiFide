@@ -1,114 +1,238 @@
 import { memo, useEffect, useState } from 'react'
-import { Stack, Text, Group, Badge, Divider, Code } from '@mantine/core'
+import { Stack, Text, Group, Badge, Code, Card, Loader, Divider } from '@mantine/core'
 import { getBackendClient } from '../lib/backend/bootstrap'
 
 interface BadgeWorkspaceMapContentProps {
   badgeId: string
-  searchKey: string
-  fullParams?: any
+  mapKey: string
 }
 
-export const BadgeWorkspaceMapContent = memo(function BadgeWorkspaceMapContent({
-  badgeId,
-  searchKey,
-  fullParams,
-}: BadgeWorkspaceMapContentProps) {
-  void badgeId
+interface SectionItem {
+  path: string
+  handle?: string
+  score?: number
+  details?: string
+  stats?: Record<string, number | string>
+}
 
-  const [data, setData] = useState<any>(null)
+interface Section {
+  title: string
+  items: SectionItem[]
+}
 
-  useEffect(() => {
-    const client = getBackendClient(); if (!client) return
-    client.rpc('tool.getResult', { key: searchKey }).then((res: any) => {
-      // tool.getResult returns { ok: true, result: <data> }
-      const val = res?.result ?? res?.data ?? res
-      setData(val)
-    }).catch(() => {})
-  }, [searchKey])
+interface WorkspaceMapMeta {
+  elapsedMs: number
+  totalFiles: number
+  totalBytes: number
+  maxFileBytes: number
+  detectedLanguages?: string[]
+}
 
-  const p = fullParams || {}
-  const maxPerSection = typeof p?.maxPerSection === 'number' ? p.maxPerSection : undefined
+interface WorkspaceMapResult {
+  root: string
+  sections: Section[]
+  meta?: WorkspaceMapMeta
+}
 
-  if (!data) {
+const numberFormatter = new Intl.NumberFormat('en-US')
+
+const formatBytes = (bytes: number) => {
+  if (!Number.isFinite(bytes)) return `${bytes}`
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let val = bytes / 1024
+  let unitIndex = 0
+  while (val >= 1024 && unitIndex < units.length - 1) {
+    val /= 1024
+    unitIndex += 1
+  }
+  return `${val.toFixed(val >= 10 ? 0 : 1)} ${units[unitIndex]}`
+}
+
+function formatStatValue(key: string, value: number | string) {
+  if (typeof value === 'number') {
+    if (key.toLowerCase().includes('byte')) {
+      return formatBytes(value)
+    }
+    return numberFormatter.format(value)
+  }
+  return String(value)
+}
+
+function renderDetails(details: string) {
+  const trimmed = details.trim()
+  const isCodeBlock = trimmed.startsWith('```') && trimmed.endsWith('```')
+  const content = isCodeBlock ? trimmed.replace(/^```/, '').replace(/```$/, '').trim() : trimmed
+  if (isCodeBlock || trimmed.includes('\n')) {
     return (
-      <Text size="sm" c="dimmed">No map available</Text>
+      <Code
+        block
+        style={{
+          fontSize: 11,
+          lineHeight: 1.4,
+          background: '#0d0d0d',
+          border: '1px solid #2d2d2d',
+          padding: '6px 8px'
+        }}
+      >
+        {content}
+      </Code>
     )
   }
 
-  const sections = Array.isArray(data.sections) ? data.sections : []
-  const exampleQueries: string[] = Array.isArray(data.exampleQueries) ? data.exampleQueries : []
+  return (
+    <Text size="xs" c="gray.3">
+      {content}
+    </Text>
+  )
+}
+
+const MetaBadge = ({ label, value }: { label: string; value: string }) => (
+  <Badge size="xs" variant="light" color="gray">
+    <Text size="xs" fw={500}>
+      {label}: {value}
+    </Text>
+  </Badge>
+)
+
+export const BadgeWorkspaceMapContent = memo(function BadgeWorkspaceMapContent({
+  badgeId,
+  mapKey
+}: BadgeWorkspaceMapContentProps) {
+  void badgeId
+  const [data, setData] = useState<WorkspaceMapResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const client = getBackendClient()
+    if (!client) return
+    client
+      .rpc('tool.getResult', { key: mapKey })
+      .then((res: any) => {
+        const payload = (res?.result ?? res?.data ?? res) as WorkspaceMapResult
+        setData(payload)
+      })
+      .catch(() => {
+        setError('Failed to load workspace map results')
+      })
+  }, [mapKey])
+
+  if (error) {
+    return (
+      <Text size="sm" c="red.4">
+        {error}
+      </Text>
+    )
+  }
+
+  if (!data) {
+    return (
+      <Group gap={8}>
+        <Loader size="xs" />
+        <Text size="sm" c="dimmed">
+          Loading workspace map...
+        </Text>
+      </Group>
+    )
+  }
+
+  const meta = data.meta || {} as WorkspaceMapMeta
 
   return (
-    <Stack gap={12}>
-      {/* Input Parameters */}
+    <Stack gap={14}>
       <div>
-        <Text size="xs" fw={600} c="dimmed" mb={6}>Map Parameters</Text>
-        <Group gap={6}>
-          <Text size="xs" c="dimmed" fw={500}>maxPerSection:</Text>
-          <Text size="xs" c="gray.3">{typeof maxPerSection === 'number' ? maxPerSection : 'default'}</Text>
-        </Group>
+        <Text size="xs" fw={600} c="dimmed" mb={4}>
+          Workspace root
+        </Text>
+        <Code
+          block
+          style={{
+            fontSize: 11,
+            lineHeight: 1.4,
+            background: '#0d0d0d',
+            border: '1px solid #2d2d2d',
+            padding: '6px 8px'
+          }}
+        >
+          {data.root || '.'}
+        </Code>
       </div>
 
-      <Divider color="#3d3d3d" />
+      <Group gap={8} wrap="wrap">
+        {Number.isFinite(meta.elapsedMs) && (
+          <MetaBadge label="Elapsed" value={`${Math.round(meta.elapsedMs)} ms`} />
+        )}
+        {Number.isFinite(meta.totalFiles) && (
+          <MetaBadge label="Files" value={numberFormatter.format(meta.totalFiles)} />
+        )}
+        {Number.isFinite(meta.totalBytes) && (
+          <MetaBadge label="Bytes" value={formatBytes(meta.totalBytes)} />
+        )}
+        {Number.isFinite(meta.maxFileBytes) && (
+          <MetaBadge label="Largest file" value={formatBytes(meta.maxFileBytes)} />
+        )}
+        {meta.detectedLanguages?.length ? (
+          <MetaBadge label="Languages" value={meta.detectedLanguages.join(', ')} />
+        ) : null}
+      </Group>
 
-      {/* Sections */}
-      <div>
-        <Group gap={8} mb={6}>
-          <Text size="xs" fw={600} c="dimmed">Sections</Text>
-          <Badge size="xs" variant="light" color="green">{sections.length}</Badge>
-        </Group>
+      <Divider color="#2d2d2d" />
 
-        <Stack gap={10}>
-          {sections.slice(0, 6).map((sec: any, idx: number) => (
-            <div key={idx}>
-              <Group gap={8} mb={4}>
-                <Text size="xs" fw={600} c="gray.2" style={{ flex: 1 }}>{sec.title}</Text>
-                <Badge size="xs" variant="light" color="gray">{Array.isArray(sec.items) ? sec.items.length : 0}</Badge>
-              </Group>
-              {(Array.isArray(sec.items) ? sec.items.slice(0, 8) : []).map((it: any, i: number) => (
-                <Group key={i} gap={6}>
-                  <Text size="xs" c="gray.3" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {it.path}
-                  </Text>
-                  {it?.lines && (
-                    <Badge size="xs" variant="light" color="gray">L{it.lines.start}-{it.lines.end}</Badge>
-                  )}
-                  {it?.handle && (
-                    <Badge size="xs" variant="light" color="indigo">handle</Badge>
-                  )}
-                </Group>
-              ))}
-              {Array.isArray(sec.items) && sec.items.length > 8 && (
-                <Text size="xs" c="dimmed" mt={2}>and {sec.items.length - 8} more…</Text>
-              )}
-            </div>
-          ))}
-          {sections.length > 6 && (
-            <Text size="xs" c="dimmed">Showing first 6 sections of {sections.length}</Text>
+      {data.sections?.map((section, sectionIdx) => (
+        <Stack key={`${section.title}-${sectionIdx}`} gap={8}>
+          <Group gap={8}>
+            <Text size="xs" fw={600} c="dimmed">
+              {section.title}
+            </Text>
+            <Badge size="xs" variant="light" color="blue">
+              {section.items?.length || 0} item{section.items?.length === 1 ? '' : 's'}
+            </Badge>
+          </Group>
+
+          {!section.items?.length ? (
+            <Text size="sm" c="dimmed">
+              No data found for this section
+            </Text>
+          ) : (
+            <Stack gap={10}>
+              {section.items.map((item, itemIdx) => {
+                const statsEntries = [
+                  ...(item.score !== undefined ? [['score', item.score] as const] : []),
+                  ...Object.entries(item.stats ?? {})
+                ]
+
+                return (
+                  <Card
+                    key={`${item.path}-${itemIdx}`}
+                    withBorder
+                    padding="sm"
+                    radius="sm"
+                    style={{ background: '#141414', borderColor: '#2d2d2d' }}
+                  >
+                    <Stack gap={6}>
+                      <Text size="sm" fw={500} c="gray.1" style={{ fontFamily: 'var(--monospace-font, "JetBrains Mono", monospace)' }}>
+                        {item.path}
+                      </Text>
+
+                      {statsEntries.length > 0 && (
+                        <Group gap={6} wrap="wrap">
+                          {statsEntries.map(([key, value]) => (
+                            <Badge key={key} size="xs" variant="light" color="gray">
+                              {key}: {formatStatValue(key, value)}
+                            </Badge>
+                          ))}
+                        </Group>
+                      )}
+
+                      {item.details && renderDetails(item.details)}
+                    </Stack>
+                  </Card>
+                )
+              })}
+            </Stack>
           )}
         </Stack>
-      </div>
-
-      {/* Example Queries */}
-      {exampleQueries.length > 0 && (
-        <div>
-          <Text size="xs" fw={600} c="dimmed" mb={6}>Example Queries</Text>
-          <Group gap={6}>
-            {exampleQueries.slice(0, 10).map((q, i) => (
-              <Badge key={i} size="xs" variant="light" color="blue">{q}</Badge>
-            ))}
-          </Group>
-        </div>
-      )}
-
-      {/* Root */}
-      {data.root && (
-        <Group gap={6}>
-          <Text size="xs" c="dimmed" fw={500}>Root:</Text>
-          <Code style={{ fontSize: 11, background: '#1a1a1a', border: '1px solid #2d2d2d' }}>{String(data.root)}</Code>
-        </Group>
-      )}
+      ))}
     </Stack>
   )
 })
-

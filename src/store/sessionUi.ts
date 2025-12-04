@@ -81,6 +81,7 @@ function createSessionUiStore() {
         await client.rpc('session.select', { id })
         // Backend will emit session.selected, session.meta.changed, session.usage.changed, and session.timeline.snapshot events
         // Seed the flow runtime status shortly after switch
+        try { await fetchAndApplyCurrentSessionMeta('session.select') } catch {}
         try { await refreshFlowRuntimeStatusWithRetry([150, 300, 600]) } catch {}
       } catch (e) {
         // Roll back selection on failure
@@ -109,6 +110,7 @@ function createSessionUiStore() {
             // Seed runtime status shortly after new session creation
             try { await refreshFlowRuntimeStatusWithRetry([150, 300, 600]) } catch {}
           }
+          try { await fetchAndApplyCurrentSessionMeta('session.new') } catch {}
         }
       } catch {}
     },
@@ -187,6 +189,32 @@ if ((import.meta as any).hot) {
   (import.meta as any).hot.dispose((data: any) => { data.sessionUiStore = __sessionUiStore })
 }
 
+async function fetchAndApplyCurrentSessionMeta(reason = 'unknown'): Promise<void> {
+  const client = getBackendClient()
+  if (!client) {
+    console.warn('[sessionUi] fetchCurrentSessionMeta skipped (no client):', reason)
+    return
+  }
+  try {
+    const res = await client.rpc('session.getCurrentMeta', {})
+    if (!res?.ok) {
+      console.warn('[sessionUi] fetchCurrentSessionMeta failed:', res?.error)
+      return
+    }
+    const meta = res.meta
+    if (!meta) {
+      useSessionUi.getState().__setMeta({ executedFlowId: '', providerId: '', modelId: '' })
+      return
+    }
+    const executedFlowId = meta.executedFlowId || meta.lastUsedFlowId || ''
+    const providerId = meta.providerId || meta.provider || ''
+    const modelId = meta.modelId || meta.model || ''
+    useSessionUi.getState().__setMeta({ executedFlowId, providerId, modelId })
+  } catch (e) {
+    console.warn('[sessionUi] fetchCurrentSessionMeta threw:', e)
+  }
+}
+
 export function initSessionUiEvents(): void {
   const client = getBackendClient()
   if (!client) return
@@ -199,6 +227,7 @@ export function initSessionUiEvents(): void {
     useSessionUi.getState().__setSelected(id)
     useFlowRuntime.getState().reset()
     useFlowRuntime.getState().setSessionScope(id)
+    void fetchAndApplyCurrentSessionMeta('session.selected event')
     void refreshFlowRuntimeStatusWithRetry([150, 300, 600])
   })
 

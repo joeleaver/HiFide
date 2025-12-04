@@ -1,4 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useRef, useCallback } from 'react'
+
+const logSessionBarError = (label: string, err: unknown) => {
+  console.warn(`[SessionControlsBar] ${label}`, err)
+}
 import { Group, Text, Menu, Button, TextInput, Card, ActionIcon, Tooltip, Loader } from '@mantine/core'
 import { IconPlayerPlay, IconPlayerStop, IconChevronDown, IconChevronRight, IconAlertTriangle, IconX } from '@tabler/icons-react'
 import { FlowService } from '../services/flow'
@@ -21,6 +25,28 @@ export default function SessionControlsBar() {
 
   const [filter, setFilter] = useState('')
   const [flowError, setFlowError] = useState<string | null>(null)
+  const [metaPending, setMetaPending] = useState(false)
+  const [actionInFlight, setActionInFlight] = useState<'start' | 'stop' | null>(null)
+  const pendingMetaPromises = useRef<Array<Promise<unknown>>>([])
+
+  const trackMetaPromise = useCallback(<T,>(promise?: Promise<T>) => {
+    if (!promise || typeof promise.then !== 'function') return promise
+    const tracked = promise.finally(() => {
+      pendingMetaPromises.current = pendingMetaPromises.current.filter((p) => p !== tracked)
+      if (pendingMetaPromises.current.length === 0) {
+        setMetaPending(false)
+      }
+    })
+    pendingMetaPromises.current.push(tracked)
+    setMetaPending(true)
+    return tracked
+  }, [])
+
+  const waitForPendingMeta = useCallback(async () => {
+    if (pendingMetaPromises.current.length === 0) return
+    const pending = [...pendingMetaPromises.current]
+    await Promise.allSettled(pending)
+  }, [])
 
 
   const maybeRefreshModels = async (pid: string) => {
@@ -36,7 +62,9 @@ export default function SessionControlsBar() {
         const nextMap = { ...(cur.modelsByProvider || {}), [pid]: models }
         useSessionUi.getState().__setSettings(cur.providerValid || {}, nextMap)
       }
-    } catch {}
+    } catch (err) {
+      logSessionBarError('provider.refreshModels failed', err)
+    }
   }
 
   const feStatus = useFlowRuntime((s: any) => s.status)
@@ -89,18 +117,33 @@ export default function SessionControlsBar() {
     return 'Provider / Model'
   }, [providerOptions, modelsForProvider, providerId, modelId])
 
-  const handleFlowChange = async (flowId: string) => {
+  const handleFlowChange = useCallback(async (flowId: string) => {
     if (!flowId || !currentSessionId) return
-    await setExecutedFlow(flowId)
-  }
-
-  const handleProviderModelChange = async (pid: string, mid: string) => {
-    if (!currentSessionId) return
-    await setProviderModel(pid, mid)
-  }
-
-  const start = async () => {
+    const update = trackMetaPromise(setExecutedFlow(flowId))
+    if (!update || typeof update.then !== 'function') return
     try {
+      await update
+    } catch (err) {
+      console.warn('[SessionControlsBar] setExecutedFlow failed', err)
+    }
+  }, [currentSessionId, setExecutedFlow, trackMetaPromise])
+
+  const handleProviderModelChange = useCallback(async (pid: string, mid: string) => {
+    if (!currentSessionId) return
+    const update = trackMetaPromise(setProviderModel(pid, mid))
+    if (!update || typeof update.then !== 'function') return
+    try {
+      await update
+    } catch (err) {
+      console.warn('[SessionControlsBar] setProviderModel failed', err)
+    }
+  }, [currentSessionId, setProviderModel, trackMetaPromise])
+
+  const start = useCallback(async () => {
+    if (actionInFlight) return
+    setActionInFlight('start')
+    try {
+      await waitForPendingMeta()
       const res = await FlowService.start({})
       if (!res?.ok) {
         const code = (res as any)?.code
@@ -123,7 +166,9 @@ export default function SessionControlsBar() {
       console.log('[SessionControlsBar] flow.start succeeded, requestId:', rid)
       if (rid) {
         console.log('[SessionControlsBar] Setting requestId in flowRuntime store:', rid)
-        try { useFlowRuntime.getState().setRequestId(rid) } catch {}
+        try { useFlowRuntime.getState().setRequestId(rid) } catch (err) {
+          logSessionBarError('setRequestId failed', err)
+        }
         // Do not force status="running" here; let runtime events / snapshots drive it
         setTimeout(async () => {
           try {
@@ -131,12 +176,18 @@ export default function SessionControlsBar() {
             if (snap && !Array.isArray(snap)) {
               const rt = useFlowRuntime.getState()
               if (snap.status === 'waitingForInput') {
-                try { rt.setStatus('waitingForInput') } catch {}
+                try { rt.setStatus('waitingForInput') } catch (err) {
+                  logSessionBarError('setStatus(waitingForInput) failed', err)
+                }
               } else if (snap.status === 'running') {
-                try { rt.setStatus('running') } catch {}
+                try { rt.setStatus('running') } catch (err) {
+                  logSessionBarError('setStatus(running) failed', err)
+                }
               }
             }
-          } catch {}
+          } catch (err) {
+            logSessionBarError('flow status snapshot fetch failed', err)
+          }
         }, 200)
       } else {
         // Fallback: look for any active flow and hydrate from snapshot
@@ -147,32 +198,59 @@ export default function SessionControlsBar() {
               const id = act[0]
               const snap: any = await FlowService.getStatus(id)
               const rt = useFlowRuntime.getState()
-              try { rt.setRequestId(id) } catch {}
+              try {
+                rt.setRequestId(id)
+              } catch (err) {
+                logSessionBarError('setRequestId fallback failed', err)
+              }
+
               if (snap && !Array.isArray(snap)) {
                 if (snap.status === 'waitingForInput') {
-                  try { rt.setStatus('waitingForInput') } catch {}
+                  try {
+                    rt.setStatus('waitingForInput')
+                  } catch (err) {
+                    logSessionBarError('fallback setStatus(waitingForInput) failed', err)
+                  }
                 } else if (snap.status === 'running') {
-                  try { rt.setStatus('running') } catch {}
+                  try {
+                    rt.setStatus('running')
+                  } catch (err) {
+                    logSessionBarError('fallback setStatus(running) failed', err)
+                  }
                 }
               }
             }
-          } catch {}
+          } catch (err) {
+            logSessionBarError('flow active status fetch failed', err)
+          }
         }, 150)
       }
     } catch (e) {
       console.warn('[SessionControlsBar] start failed', e)
       setFlowError('Flow could not be started. Check your connection and try again.')
-    }
-  }
-
-  const stop = async () => {
-    try {
-      await FlowService.cancel(requestId)
     } finally {
-      // Instead of forcing status, resync from backend truth
-      try { await refreshFlowRuntimeStatus() } catch {}
+      setActionInFlight(null)
     }
-  }
+  }, [actionInFlight, waitForPendingMeta])
+
+  const stop = useCallback(async () => {
+    if (actionInFlight) return
+    setActionInFlight('stop')
+    try {
+      await waitForPendingMeta()
+      await FlowService.cancel(requestId)
+    } catch (err) {
+      console.warn('[SessionControlsBar] stop failed', err)
+    } finally {
+      setActionInFlight(null)
+      // Instead of forcing status, resync from backend truth
+      try {
+        await refreshFlowRuntimeStatus()
+      } catch (err) {
+        logSessionBarError('refreshFlowRuntimeStatus failed', err)
+      }
+    }
+  }, [actionInFlight, requestId, waitForPendingMeta])
 
   return (
     <div style={{ borderTop: '1px solid #2a2a2a', backgroundColor: '#111', padding: '4px 8px', position: 'sticky', bottom: 0, zIndex: 5, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -216,6 +294,11 @@ export default function SessionControlsBar() {
             <Loader size="xs" color="gray" />
             <Text size="xs" c="dimmed">Hydrating…</Text>
           </div>
+        ) : metaPending ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 6px', borderRadius: 6, background: '#161616', border: '1px solid #2a2a2a' }}>
+            <Loader size="xs" color="gray" />
+            <Text size="xs" c="dimmed">Updating flow settings…</Text>
+          </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 6px', borderRadius: 6, background: '#161616', border: '1px solid #2a2a2a' }}>
             <span style={{ width: 6, height: 6, borderRadius: 6, backgroundColor: statusDotColor, display: 'inline-block' }} />
@@ -225,14 +308,26 @@ export default function SessionControlsBar() {
 
         <div style={{ flex: 1 }} />
         {feStatus === 'stopped' ? (
-          <Tooltip label="Start">
-            <ActionIcon variant="subtle" size="sm" color="teal" onClick={start}>
+          <Tooltip label={metaPending ? 'Applying changes…' : actionInFlight === 'start' ? 'Starting…' : 'Start'}>
+            <ActionIcon
+              variant="subtle"
+              size="sm"
+              color="teal"
+              onClick={start}
+              disabled={metaPending || actionInFlight !== null || isHydrating}
+            >
               <IconPlayerPlay size={14} />
             </ActionIcon>
           </Tooltip>
         ) : (
-          <Tooltip label="Stop">
-            <ActionIcon variant="subtle" size="sm" color="red" onClick={stop}>
+          <Tooltip label={actionInFlight === 'stop' ? 'Stopping…' : 'Stop'}>
+            <ActionIcon
+              variant="subtle"
+              size="sm"
+              color="red"
+              onClick={stop}
+              disabled={actionInFlight !== null}
+            >
               <IconPlayerStop size={14} />
             </ActionIcon>
           </Tooltip>

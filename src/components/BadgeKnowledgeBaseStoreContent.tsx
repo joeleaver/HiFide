@@ -36,7 +36,12 @@ export const BadgeKnowledgeBaseStoreContent = memo(function BadgeKnowledgeBaseSt
   const handleLoadBody = useCallback((itemId: string) => {
     const client = getBackendClient(); if (!client) return
     client.rpc('kb.getItemBody', { id: itemId }).then((res: any) => {
-      const body = res && typeof res === 'object' && 'body' in res ? (res as any).body : undefined
+      const item = res && typeof res === 'object' ? (res as any).item : undefined
+      const body = item && typeof item.body === 'string'
+        ? item.body
+        : typeof item?.description === 'string'
+          ? item.description
+          : undefined
       if (typeof body === 'string') setKbBodies((prev) => ({ ...prev, [itemId]: body }))
     }).catch(() => {})
   }, [])

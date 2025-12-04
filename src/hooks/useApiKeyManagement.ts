@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { getBackendClient } from '../lib/backend/bootstrap'
 import { notifications } from '@mantine/notifications'
+import type { BackendClient } from '../lib/backend/client'
+import type { SettingsSnapshotResponse } from '../../electron/types/settings'
 
 interface ApiKeyManagementState {
   apiKeys: Record<string, string>
@@ -13,6 +15,18 @@ interface ApiKeyManagementState {
 interface SaveResult {
   ok: boolean
   failures: string[]
+}
+
+interface ValidateKeysResult {
+  ok: boolean
+  failures?: string[]
+}
+
+
+async function waitForBackendReady(client: BackendClient | null): Promise<void> {
+  if (!client) return
+  const readyClient = client as ReadyAwareClient
+  await readyClient.whenReady?.(5000).catch(() => {})
 }
 
 export function useApiKeyManagement(autoHydrate = true) {
@@ -28,14 +42,18 @@ export function useApiKeyManagement(autoHydrate = true) {
     setState((prev) => ({ ...prev, apiKeys }))
   }
 
+  const setProviderValid = (providerValid: Record<string, boolean>) => {
+    setState((prev) => ({ ...prev, providerValid }))
+  }
+
   const hydrate = async () => {
     const client = getBackendClient()
     if (!client) return
 
     setState((prev) => ({ ...prev, loading: true }))
     try {
-      await (client as any).whenReady?.(5000).catch(() => {})
-      const res: any = await client.rpc('settings.get', {})
+      await waitForBackendReady(client)
+      const res = await client.rpc<SettingsSnapshotResponse>('settings.get', {})
       if (res?.ok) {
         setState((prev) => ({
           ...prev,
@@ -63,14 +81,11 @@ export function useApiKeyManagement(autoHydrate = true) {
 
     setState((prev) => ({ ...prev, saving: true, validating: true }))
     try {
-      await (client as any).whenReady?.(5000).catch(() => {})
-
-      // Save keys
+      await waitForBackendReady(client)
       await client.rpc('settings.setApiKeys', { apiKeys: state.apiKeys })
       await client.rpc('settings.saveKeys', {})
 
-      // Validate keys
-      const res: any = await client.rpc('settings.validateKeys', {})
+      const res = await client.rpc<ValidateKeysResult>('settings.validateKeys', {})
 
       // Refresh to get updated providerValid
       await hydrate()
@@ -125,8 +140,8 @@ export function useApiKeyManagement(autoHydrate = true) {
 
     setState((prev) => ({ ...prev, validating: true }))
     try {
-      await (client as any).whenReady?.(5000).catch(() => {})
-      const res: any = await client.rpc('settings.validateKeys', {})
+      await waitForBackendReady(client)
+      const res = await client.rpc<ValidateKeysResult>('settings.validateKeys', {})
 
       // Refresh to get updated providerValid
       await hydrate()
@@ -177,9 +192,9 @@ export function useApiKeyManagement(autoHydrate = true) {
   return {
     ...state,
     setApiKeys,
+    setProviderValid,
     hydrate,
     saveAndValidate,
     validateOnly,
   }
 }
-

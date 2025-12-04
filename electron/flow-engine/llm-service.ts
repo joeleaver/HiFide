@@ -28,13 +28,11 @@ import { createCallbackEventEmitters } from './execution-events'
 import { rateLimitTracker } from '../providers/rate-limit-tracker'
 import { parseRateLimitError, sleep, withRetries } from '../providers/retry'
 
-import { DEFAULT_PRICING } from '../data/defaultPricing'
 import { encoding_for_model, get_encoding } from '@dqbd/tiktoken'
 
 import { UiPayloadCache } from '../core/uiPayloadCache'
 
 const DEBUG_USAGE = false
-
 // Lightweight token estimators used as a last-resort when a stream is cancelled
 // and the provider does not return final usage. This avoids adding heavyweight
 // tokenizer deps and keeps cancellation graceful with best-effort stats.
@@ -528,9 +526,6 @@ class LLMService {
       flowAPI,
     } = request
 
-    const currentNodeId = flowAPI.nodeId
-    const currentExecutionId = flowAPI.executionId
-
     // 1. Prepare context (history, system prompt) via ContextManager.
     // The scheduler is the single source of truth for context; flowAPI.context
     // is a ContextManager that owns that state. We read via get() and mutate
@@ -813,7 +808,7 @@ class LLMService {
         (delta.reasoningTokens || 0) > 0
       ) {
         usageEmitted = true
-        emitUsage(delta)
+        // emitUsage(delta) // Disabled to prevent frontend rerender storms. usage_breakdown is used instead.
       }
     }
 
@@ -917,17 +912,20 @@ class LLMService {
 
       await new Promise<void>(async (resolve, reject) => {
         let streamHandle: { cancel: () => void } | null = null
-        const onAbort = () => {
+          const onAbort = () => {
           try { streamHandle?.cancel() } catch { }
           try {
             // Best-effort usage on cancel: prefer provider-reported usage; otherwise estimate
             if (!usageEmitted && lastReportedUsage) {
               usageEmitted = true
-              emitUsage(lastReportedUsage)
+              // Just emit usage; SessionTimelineWriter handles cost calculation
+              emitUsage({ ...lastReportedUsage })
             } else if (!usageEmitted) {
               const approxOutput = __tokenCounter.count(response)
               usageEmitted = true
-              emitUsage({ inputTokens: approxInputTokens, outputTokens: approxOutput, totalTokens: approxInputTokens + approxOutput })
+              const usage = { inputTokens: approxInputTokens, outputTokens: approxOutput, totalTokens: approxInputTokens + approxOutput }
+              // Just emit usage; SessionTimelineWriter handles cost calculation
+              emitUsage({ ...usage })
             }
           } catch { }
           reject(new Error('Flow cancelled'))
@@ -1174,64 +1172,36 @@ class LLMService {
       const reported = lastReportedUsage as any
       const acc = accumulatedUsage
       const hasAccum = (acc && ((acc.inputTokens || 0) > 0 || (acc.outputTokens || 0) > 0 || (acc.totalTokens || 0) > 0))
+      
+      // Fix: Normalize cachedTokens key for SessionTimelineWriter (expects 'cachedTokens', not 'cachedInputTokens')
       const totals = hasAccum
         ? {
           inputTokens: (acc.inputTokens ?? calcInput),
           outputTokens: (acc.outputTokens ?? calcOutput),
           totalTokens: (acc.totalTokens ?? ((acc.inputTokens ?? calcInput) + (acc.outputTokens ?? calcOutput))),
-          cachedInputTokens: Math.max(0, acc.cachedTokens || 0)
+          cachedTokens: Math.max(0, acc.cachedTokens || 0)
         }
         : (reported
           ? {
             inputTokens: (reported.inputTokens ?? calcInput),
             outputTokens: (reported.outputTokens ?? calcOutput),
             totalTokens: (reported.totalTokens ?? ((reported.inputTokens ?? calcInput) + (reported.outputTokens ?? calcOutput))),
-            cachedInputTokens: Math.max(0, reported.cachedTokens || reported.cachedInputTokens || 0)
+            cachedTokens: Math.max(0, reported.cachedTokens || reported.cachedInputTokens || 0)
           }
-          : { inputTokens: calcInput, outputTokens: calcOutput, totalTokens: calcInput + calcOutput, cachedInputTokens: 0 })
-
-      // Cost estimate (provider-aware; cached tokens are separate from input tokens)
-      let costEstimate: number | undefined
-      try {
-      const rateTable: any = (DEFAULT_PRICING as any)[effectiveProvider] || {}
-      const rate = rateTable?.[effectiveModel]
-        if (rate) {
-          const cachedTokens = Math.max(0, Number((totals as any).cachedInputTokens || 0))
-          const totalInputTokens = Math.max(0, Number((totals as any).inputTokens || 0))
-          const normalInputTokens = Math.max(0, totalInputTokens - cachedTokens)
-          const cachedPer1M = (rate as any).cachedInputCostPer1M ?? rate.inputCostPer1M
-
-          costEstimate = (normalInputTokens / 1_000_000) * rate.inputCostPer1M
-            + (cachedTokens / 1_000_000) * cachedPer1M
-            + (Number((totals as any).outputTokens || 0) / 1_000_000) * rate.outputCostPer1M
-        }
-      } catch { }
+          : { inputTokens: calcInput, outputTokens: calcOutput, totalTokens: calcInput + calcOutput, cachedTokens: 0 })
 
       const thoughtsTokens = Math.max(0, Number(totals.outputTokens || 0) - (assistantTextTokens + toolCallsTokens))
-
-      // Defensive: ensure we have stable node/execution identifiers for the badge keying
-      let usageNodeId = currentNodeId
-      let usageExecutionId = currentExecutionId
+      
       try {
-        // Prefer explicit properties if available, but fall back to context
-        const flowNodeId = (flowAPI as any)?.nodeId ?? (flowAPI as any)?.context?.nodeId
-        const flowExecutionId = (flowAPI as any)?.executionId ?? (flowAPI as any)?.context?.executionId
-
-        if (!usageNodeId && flowNodeId) usageNodeId = flowNodeId
-        if (!usageExecutionId && flowExecutionId) usageExecutionId = flowExecutionId
-      } catch { /* best-effort only */ }
-
-      if (!usageNodeId || !usageExecutionId) {
-        console.warn('[LLM] usage_breakdown missing nodeId/executionId', {
-          nodeId: usageNodeId,
-          executionId: usageExecutionId,
+        flowAPI.log?.debug?.('LLMService.chat emitting usage_breakdown', {
+          provider: effectiveProvider,
+          model: effectiveModel,
+          totals,
+          hasAccum,
+          calcInput,
+          calcOutput
         })
-      } else {
-        console.debug('[LLM] emitting usage_breakdown', {
-          nodeId: usageNodeId,
-          executionId: usageExecutionId,
-        })
-      }
+      } catch {}
 
       flowAPI.emitExecutionEvent({
         type: 'usage_breakdown',
@@ -1251,7 +1221,7 @@ class LLMService {
             thoughts: thoughtsTokens,
             toolCalls: toolCallsTokens
           },
-          totals: { ...totals, costEstimate },
+          totals: { ...totals },
           estimated: !__precise,
           tools: Object.fromEntries(
             Array.from(

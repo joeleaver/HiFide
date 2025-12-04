@@ -25,6 +25,8 @@ export type PricingConfig = {
 export const DEFAULT_PRICING: PricingConfig = {
   openai: {
     // GPT-5 models (90% discount on cached tokens)
+    'gpt-5.1': { inputCostPer1M: 1.25, outputCostPer1M: 10.00, cachedInputCostPer1M: 0.125 },
+    'gpt-5.1-codex': { inputCostPer1M: 1.25, outputCostPer1M: 10.00, cachedInputCostPer1M: 0.125 },
     'gpt-5': { inputCostPer1M: 1.25, outputCostPer1M: 10.00, cachedInputCostPer1M: 0.125 },
     'gpt-5-mini': { inputCostPer1M: 0.25, outputCostPer1M: 2.00, cachedInputCostPer1M: 0.025 },
     'gpt-5-nano': { inputCostPer1M: 0.05, outputCostPer1M: 0.40, cachedInputCostPer1M: 0.005 },
@@ -214,6 +216,7 @@ export const DEFAULT_PRICING: PricingConfig = {
     // Default pricing per 1M tokens
     'grok-code-fast-1': { inputCostPer1M: 0.20, outputCostPer1M: 1.50, cachedInputCostPer1M: 0.02 },
     'grok-4-fast-reasoning': { inputCostPer1M: 0.20, outputCostPer1M: 0.50, cachedInputCostPer1M: 0.02 },
+    'grok-4-1-fast-reasoning': { inputCostPer1M: 0.20, outputCostPer1M: 0.50, cachedInputCostPer1M: 0.02 },
     'grok-4-fast-non-reasoning': { inputCostPer1M: 0.20, outputCostPer1M: 0.50, cachedInputCostPer1M: 0.02 },
     'grok-4-0709': { inputCostPer1M: 3.00, outputCostPer1M: 15.00, cachedInputCostPer1M: 0.30 },
   },

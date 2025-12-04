@@ -3,7 +3,54 @@
  */
 
 import type { ModelOption } from '../../../store/types.js'
-import { getSettingsService, getProviderService } from '../../../services/index.js'
+import type { SettingsSnapshot, SettingsSnapshotResponse } from '../../../types/settings.js'
+import { getSettingsService, getProviderService, getAppService } from '../../../services/index.js'
+
+function buildSettingsSnapshot(): SettingsSnapshot {
+  const settingsService = getSettingsService()
+  const providerService = getProviderService()
+  const appService = getAppService()
+
+  const providerValid: Record<string, boolean> = {
+    openai: providerService.getProviderValid('openai'),
+    anthropic: providerService.getProviderValid('anthropic'),
+    gemini: providerService.getProviderValid('gemini'),
+    fireworks: providerService.getProviderValid('fireworks'),
+    xai: providerService.getProviderValid('xai'),
+  }
+
+  const modelsByProvider: Record<string, ModelOption[]> = {
+    openai: providerService.getModelsForProvider('openai'),
+    anthropic: providerService.getModelsForProvider('anthropic'),
+    gemini: providerService.getModelsForProvider('gemini'),
+    fireworks: providerService.getModelsForProvider('fireworks'),
+    xai: providerService.getModelsForProvider('xai'),
+  }
+
+  const defaultModels: Record<string, string | undefined> = {
+    openai: providerService.getDefaultModel('openai'),
+    anthropic: providerService.getDefaultModel('anthropic'),
+    gemini: providerService.getDefaultModel('gemini'),
+    fireworks: providerService.getDefaultModel('fireworks'),
+    xai: providerService.getDefaultModel('xai'),
+  }
+
+  return {
+    settingsApiKeys: settingsService.getApiKeys(),
+    settingsSaving: false,
+    settingsSaved: false,
+    providerValid,
+    modelsByProvider,
+    defaultModels,
+    selectedProvider: providerService.getSelectedProvider(),
+    selectedModel: providerService.getSelectedModel(),
+    autoRetry: providerService.getAutoRetry(),
+    fireworksAllowedModels: providerService.getFireworksAllowedModels(),
+    startupMessage: appService.getStartupMessage(),
+    pricingConfig: settingsService.getPricingConfig(),
+    defaultPricingConfig: settingsService.getDefaultPricingConfig(),
+  }
+}
 
 /**
  * Create settings and provider RPC handlers
@@ -12,54 +59,10 @@ export function createSettingsHandlers(
   addMethod: (method: string, handler: (params: any) => any) => void
 ) {
   // Settings handlers
-  addMethod('settings.get', async () => {
-    const settingsService = getSettingsService()
-    const providerService = getProviderService()
-
-    // Build providerValid object from individual provider checks
-    const providerValid: Record<string, boolean> = {
-      openai: providerService.getProviderValid('openai'),
-      anthropic: providerService.getProviderValid('anthropic'),
-      gemini: providerService.getProviderValid('gemini'),
-      fireworks: providerService.getProviderValid('fireworks'),
-      xai: providerService.getProviderValid('xai'),
-    }
-
-    // Build modelsByProvider object
-    const modelsByProvider: Record<string, ModelOption[]> = {
-      openai: providerService.getModelsForProvider('openai'),
-      anthropic: providerService.getModelsForProvider('anthropic'),
-      gemini: providerService.getModelsForProvider('gemini'),
-      fireworks: providerService.getModelsForProvider('fireworks'),
-      xai: providerService.getModelsForProvider('xai'),
-    }
-
-    // Build defaultModels object
-    const defaultModels: Record<string, string | undefined> = {
-      openai: providerService.getDefaultModel('openai'),
-      anthropic: providerService.getDefaultModel('anthropic'),
-      gemini: providerService.getDefaultModel('gemini'),
-      fireworks: providerService.getDefaultModel('fireworks'),
-      xai: providerService.getDefaultModel('xai'),
-    }
-
-    return {
-      ok: true,
-      settingsApiKeys: settingsService.getApiKeys(),
-      settingsSaving: false,
-      settingsSaved: false,
-      providerValid,
-      modelsByProvider,
-      defaultModels,
-      selectedProvider: providerService.getSelectedProvider(),
-      selectedModel: providerService.getSelectedModel(),
-      autoRetry: providerService.getAutoRetry(),
-      fireworksAllowedModels: providerService.getFireworksAllowedModels(),
-      startupMessage: null, // AppService handles this
-      pricingConfig: settingsService.getPricingConfig(),
-      defaultPricingConfig: settingsService.getDefaultPricingConfig(),
-    }
-  })
+  addMethod('settings.get', async (): Promise<SettingsSnapshotResponse> => ({
+    ok: true,
+    ...buildSettingsSnapshot(),
+  }))
 
   addMethod('settings.setApiKeys', async ({ apiKeys }: { apiKeys: Partial<any> }) => {    const settingsService = getSettingsService()
     
@@ -153,14 +156,24 @@ export function createSettingsHandlers(
     return { ok: true }
   })
 
-  addMethod('provider.addFireworksModel', async ({ model }: { model: string }) => {    const providerService = getProviderService()
-    providerService.addFireworksModel(model)
-    return { ok: true }
+  addMethod('provider.addFireworksModel', async ({ model }: { model: string }) => {
+    const providerService = getProviderService()
+    await providerService.addFireworksModel(model)
+    return {
+      ok: true,
+      fireworksAllowedModels: providerService.getFireworksAllowedModels(),
+      models: providerService.getModelsForProvider('fireworks'),
+    }
   })
 
-  addMethod('provider.removeFireworksModel', async ({ model }: { model: string }) => {    const providerService = getProviderService()
-    providerService.removeFireworksModel(model)
-    return { ok: true }
+  addMethod('provider.removeFireworksModel', async ({ model }: { model: string }) => {
+    const providerService = getProviderService()
+    await providerService.removeFireworksModel(model)
+    return {
+      ok: true,
+      fireworksAllowedModels: providerService.getFireworksAllowedModels(),
+      models: providerService.getModelsForProvider('fireworks'),
+    }
   })
 
   addMethod('provider.setSelectedProvider', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {    const providerService = getProviderService()
@@ -178,7 +191,12 @@ export function createSettingsHandlers(
   })
 
   addMethod('provider.fireworks.loadDefaults', async () => {
-    // This method was removed - Fireworks defaults are now set in ProviderService constructor
-    return { ok: true }
+    const providerService = getProviderService()
+    await providerService.loadFireworksRecommendedDefaults()
+    return {
+      ok: true,
+      fireworksAllowedModels: providerService.getFireworksAllowedModels(),
+      models: providerService.getModelsForProvider('fireworks'),
+    }
   })
 }

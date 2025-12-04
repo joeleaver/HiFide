@@ -66,13 +66,17 @@ export const sessionHandlers = {
     const sess = sessions.find((s) => s.id === currentId)
     if (!sess) return { ok: false, error: 'no-session' }
 
+    const executedFlowId = sess.executedFlow || sess.lastUsedFlow || ''
     return {
       ok: true,
-      id: sess.id,
-      title: sess.title,
-      lastUsedFlow: sess.lastUsedFlow || '',
-      providerId: sess.currentContext?.provider || '',
-      modelId: sess.currentContext?.model || '',
+      meta: {
+        id: sess.id,
+        title: sess.title,
+        executedFlowId,
+        lastUsedFlowId: sess.lastUsedFlow || '',
+        providerId: sess.currentContext?.provider || '',
+        modelId: sess.currentContext?.model || '',
+      },
     }
   },
 
@@ -218,10 +222,18 @@ export const providerHandlers = {
 
   async addFireworksModel(model: string) {
     const providerService = getProviderService()
-    providerService.addFireworksModel(model)
-    return { ok: true }
-  },
-
+    await providerService.addFireworksModel(model)
+    return {
+      ok: true,
+      fireworksAllowedModels: providerService.getFireworksAllowedModels(),
+      models: providerService.getModelsForProvider('fireworks'),
+    }
+    await providerService.removeFireworksModel(model)
+    return {
+      ok: true,
+      fireworksAllowedModels: providerService.getFireworksAllowedModels(),
+      models: providerService.getModelsForProvider('fireworks'),
+    }
   async removeFireworksModel(model: string) {
     const providerService = getProviderService()
     providerService.removeFireworksModel(model)
@@ -246,8 +258,12 @@ export const providerHandlers = {
 
   async loadFireworksDefaults() {
     const providerService = getProviderService()
-    providerService.loadFireworksRecommendedDefaults()
-    return { ok: true }
+    await providerService.loadFireworksRecommendedDefaults()
+    return {
+      ok: true,
+      fireworksAllowedModels: providerService.getFireworksAllowedModels(),
+      models: providerService.getModelsForProvider('fireworks'),
+    }
   },
 }
 

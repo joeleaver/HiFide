@@ -19,9 +19,11 @@ export function createKbHandlers(
   addMethod('kb.getItemBody', async ({ id }: { id: string }) => {
     try {
       const baseDir = await getConnectionWorkspaceId(connection)
+console.log('Base Directory:', baseDir);
       if (!baseDir) return { ok: false, error: 'no-workspace' }
 
       const item = await readById(baseDir, id)
+console.log('Retrieved Item:', item);
       if (!item) return { ok: false, error: 'not-found' }
       return { ok: true, item }
     } catch (e: any) {
