@@ -237,8 +237,9 @@ export class SessionTimelineWriter {
       updatedAt: Date.now(),
     }
 
-    this.sessionService.setSessionsFor({ workspaceId: ws, sessions: allSessions })
-    this.sessionService.saveCurrentSession() // Debounced
+	    this.sessionService.setSessionsFor({ workspaceId: ws, sessions: allSessions })
+	    // Persist the updated session to disk (debounced), scoped to this workspace/session
+	    this.sessionService.saveSessionFor({ workspaceId: ws, sessionId: this.sessionId }, false)
     
     // Broadcast consolidated usage snapshot to all renderers.
     // This should only be invoked when we have real usage data (after the LLM

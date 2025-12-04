@@ -49,6 +49,7 @@ export class ProviderService extends Service<ProviderState> {
           'accounts/fireworks/models/glm-4p6',
           'accounts/fireworks/models/kimi-k2-instruct-0905',
           'accounts/fireworks/models/deepseek-v3p1-terminus',
+	          'accounts/fireworks/models/deepseek-v3p2',
           'accounts/fireworks/models/minimax-m2',
         ],
       },
@@ -297,6 +298,7 @@ export class ProviderService extends Service<ProviderState> {
       'accounts/fireworks/models/glm-4p6',
       'accounts/fireworks/models/kimi-k2-instruct-0905',
       'accounts/fireworks/models/deepseek-v3p1-terminus',
+	      'accounts/fireworks/models/deepseek-v3p2',
       'accounts/fireworks/models/minimax-m2',
     ]
     this.setState({ fireworksAllowedModels: defaults })
