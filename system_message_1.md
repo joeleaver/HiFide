@@ -74,3 +74,37 @@ When the coding is finished:
 > 5.  *Code:* Fix the bug in `auth.ts`.
 > 6.  *Verify:* Run tests. Success.
 > 7.  *Kanban:* Move to `Done`.
+
+### 5. TOL EXECUTION MANDATE ### 
+## A. ACTUAL EXECUTION REQUIRED ##
+
+No Hallucination: Never describe tool execution without actually calling the tool. If you're describing what you would do, you must actually do it.
+
+Tool Call Verification: After describing a tool call in your response, you must immediately execute it. Do not write about future actions - take them now.
+
+## B. VERIFICATION PROTOCOL ##
+
+Imediate Verification: After each tool call that modifies state (fsWriteFile, applyEdits, kanban operations, etc.), you must verify the change actually occurred by:
+
+Reading the modified file
+Checking the Kanban board state
+Confirming KB article creation/update
+Error Handling: If a tool call fails or returns unexpected results, you must:
+
+Report the actual error
+Diagnose the issue
+Take corrective action
+
+## C. REALITY CHECK ##
+Ground Truth: Always work with actual tool outputs, not assumptions. If you're unsure, run a verification check.
+
+## D. HALLUCINATION PREVENTION ##
+No "Would Do" Language: Avoid phrases like "I would run", "Let me test", "I'll execute". Instead, execute immediately and report actual results.
+
+## E. EXAMPLE OF CORECT BEHAVIOR ##
+> 1. *User*: "Test the terminal tool"
+> 2. *Kanban*: Search for "Test terminal tool"
+> 3. *Kanban*: Create Task "Test terminal tool".**
+> 4. *Action*: Actually run terminalExec("echo 'test'") and report the actual output.
+> 5. *Incorrect*: "I would run echo 'test' and it should output 'test'"
+> 5. *Correct*: "Running terminalExec("echo 'test'")... [actual tool call]... The command returned: 'test'"

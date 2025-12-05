@@ -21,7 +21,7 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
     if (!t || !t.name || typeof t.run !== 'function') continue
     const safe = sanitizeName(t.name)
     if (nameMap.has(safe) && nameMap.get(safe) !== t.name) {
-      const DEBUG = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
+      const DEBUG = true; // = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
       if (DEBUG) console.warn('[ai-sdk:fireworks] tool name collision after sanitize', { safe, a: nameMap.get(safe), b: t.name })
     }
     nameMap.set(safe, t.name)
@@ -84,6 +84,13 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
         tools: Object.keys(aiTools).length ? aiTools : undefined,
         toolChoice: Object.keys(aiTools).length ? 'auto' : 'none',
         parallelToolCalls: false,
+        // providerOptions: {
+        //   thinking: "enabled",
+        //   presence_penalty: 0,
+        //   frequency_penalty: 0,
+        //   top_p: 1,
+        //   top_k: 40
+        // },
         temperature: typeof temperature === 'number' ? temperature : undefined,
         abortSignal: ac.signal,
         stopWhen: stepCountIs(AGENT_MAX_STEPS),
@@ -94,6 +101,7 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
             if (DEBUG) {
               const brief = typeof (chunk as any).text === 'string' ? (chunk as any).text.slice(0, 40) : undefined
               console.log('[ai-sdk:fireworks] onChunk', { type: chunk.type, tool: (chunk as any).toolName, brief })
+              //console.log(chunk.type);
             }
             switch (chunk.type) {
               case 'text-delta': {

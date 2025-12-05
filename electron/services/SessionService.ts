@@ -18,7 +18,6 @@ import type { Session, ActivityEvent, TokenUsage } from '../store/types.js'
 import { loadAllSessions, sessionSaver, deleteSessionFromDisk } from '../store/utils/session-persistence.js'
 import { getProviderService } from './index.js'
 
-const DEBUG_USAGE = process.env.HF_DEBUG_USAGE === '1' || process.env.HF_DEBUG_TOKENS === '1'
 const MAX_SESSIONS = 100
 
 // Helper function to generate initial session title
@@ -191,10 +190,20 @@ export class SessionService extends Service<SessionState> {
 
     const provider = inheritedProvider || defaultProvider
     const model = inheritedModel || defaultModel
+
+    const inheritedIncludeThoughts = initialContext?.includeThoughts ?? referenceSession?.currentContext?.includeThoughts
+    const includeThoughts = inheritedIncludeThoughts !== undefined ? inheritedIncludeThoughts : true
+    const inheritedThinkingBudget = initialContext?.thinkingBudget ?? referenceSession?.currentContext?.thinkingBudget
+    const thinkingBudget = inheritedThinkingBudget !== undefined
+      ? inheritedThinkingBudget
+      : (includeThoughts ? 2048 : undefined)
+
     const context: Session['currentContext'] = {
       provider,
       model,
       messageHistory,
+      includeThoughts,
+      ...(thinkingBudget !== undefined ? { thinkingBudget } : {}),
     }
     if (inheritedSystemInstructions !== undefined) context.systemInstructions = inheritedSystemInstructions
     if (inheritedTemperature !== undefined) context.temperature = inheritedTemperature
@@ -212,7 +221,7 @@ export class SessionService extends Service<SessionState> {
       lastActivityAt: Date.now(),
       currentContext: context,
       tokenUsage: {
-        total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 },
+        total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0, reasoningTokens: 0 },
         byProvider: {},
         byProviderAndModel: {},
       },
@@ -220,6 +229,9 @@ export class SessionService extends Service<SessionState> {
         byProviderAndModel: {},
         totalCost: 0,
         currency: 'USD',
+        cachedInputCostTotal: 0,
+        normalInputCostTotal: 0,
+        totalSavings: 0,
       },
       requestsLog: [],
     }
@@ -444,7 +456,7 @@ export class SessionService extends Service<SessionState> {
       return
     }
 
-    console.log('[SessionService] saveSessionFor:', { sessionId, workspaceId, immediate, itemCount: session.items?.length })
+    // console.log('[SessionService] saveSessionFor:', { sessionId, workspaceId, immediate, itemCount: session.items?.length })
     if (immediate) {
       await sessionSaver.save(session, true, workspaceId)
     } else {

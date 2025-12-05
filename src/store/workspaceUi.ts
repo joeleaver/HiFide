@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { getBackendClient } from '../lib/backend/bootstrap'
 import { useUiStore } from './ui'
 
-interface WorkspaceUiState {
+export interface WorkspaceUiState {
   root: string | null
   __setRoot: (root: string | null) => void
 }

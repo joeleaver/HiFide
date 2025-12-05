@@ -188,7 +188,14 @@ export async function loadWorkspace(options: WorkspaceLoadOptions): Promise<{ ok
               const flowEdges = reactFlowEdgesToFlowEdges(graph.edges)
 
               // Start flow execution (don't await - it runs indefinitely)
+              const includeThoughts = session.currentContext.includeThoughts ?? true
+              const thinkingBudget = session.currentContext.thinkingBudget !== undefined
+                ? session.currentContext.thinkingBudget
+                : (includeThoughts ? 2048 : undefined)
+
               executeFlow(wc, {
+                  includeThoughts,
+                  ...(thinkingBudget !== undefined ? { thinkingBudget } : {}),
                 requestId,
                 flowDef: { nodes: graph.nodes, edges: flowEdges },
                 sessionId: curId,

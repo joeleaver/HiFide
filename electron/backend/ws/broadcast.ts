@@ -168,6 +168,6 @@ export async function broadcastWorkspaceNotification(workspaceId: string, method
     })
     console.warn(`[broadcast] No connections matched workspace ${workspaceId} (resolved: ${resolvedTarget}) for ${method}. Total connections: ${totalConnections}, connection workspaces:`, connWorkspaces)
   } else if (sentCount > 0) {
-    console.log(`[broadcast] Sent ${method} to ${sentCount}/${totalConnections} connections for workspace ${workspaceId}`)
+    //console.log(`[broadcast] Sent ${method} to ${sentCount}/${totalConnections} connections for workspace ${workspaceId}`)
   }
 }

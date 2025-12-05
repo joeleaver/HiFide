@@ -158,6 +158,16 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
 
   // Session subscriptions (all workspace-scoped with additional workspaceId check)
   const sessionService = getSessionService()
+  const lastUsageSnapshotBySession = new Map<string, string>()
+
+  const fingerprintUsagePayload = (payload: unknown): string | null => {
+    try {
+      return JSON.stringify(payload)
+    } catch (error) {
+      console.warn('[EventSubscriptions] Failed to fingerprint session usage payload', error)
+      return null
+    }
+  }
 
   // Session usage/costs
   const sessionUsageHandler = async (data: any) => {
@@ -176,7 +186,19 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
       const costs = sess.costs || { byProviderAndModel: {}, totalCost: 0, currency: 'USD' }
       const requestsLog = Array.isArray(sess.requestsLog) ? sess.requestsLog : []
 
-      connection.sendNotification('session.usage.changed', { tokenUsage, costs, requestsLog })
+      const payload = { tokenUsage, costs, requestsLog }
+      const sessionKey = `${data.workspaceId || 'global'}::${sid}`
+      const fingerprint = fingerprintUsagePayload(payload)
+      if (fingerprint && lastUsageSnapshotBySession.get(sessionKey) === fingerprint) {
+        return
+      }
+
+      connection.sendNotification('session.usage.changed', payload)
+      if (fingerprint) {
+        lastUsageSnapshotBySession.set(sessionKey, fingerprint)
+      } else {
+        lastUsageSnapshotBySession.delete(sessionKey)
+      }
     } catch { }
   }
   sessionService.on('sessions:updated', sessionUsageHandler)

@@ -59,10 +59,30 @@ function looksUnifiedDiff(s: string): boolean {
   return /^(diff --git |---\s|\+\+\+\s|@@\s)/m.test(s)
 }
 function looksOpenAiPatch(s: string): boolean {
-  return /\*\*\*\s*Begin Patch[\s\S]*\*\*\*\s*End Patch/.test(s) && /\*\*\*\s*(Update|Add|New|Delete) File:/i.test(s)
+  return /\*\*\*\s*Begin Patch/i.test(s) && /\*\*\*\s*(Update|Add|New|Delete) File:/i.test(s)
 }
 function looksSearchReplace(s: string): boolean {
   return /^<<<<<<<\s*SEARCH/m.test(s)
+}
+
+const ZERO_WIDTH_CHARS = new Set(['\u200b', '\u200c', '\u200d', '\ufeff'])
+
+function normalizeForLooseMatch(input: string): { text: string; map: number[] } {
+  const map: number[] = []
+  if (!input) return { text: '', map }
+  const out: string[] = []
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]
+    if (ZERO_WIDTH_CHARS.has(ch)) continue
+    if (ch === '\u00a0') {
+      out.push(' ')
+      map.push(i)
+    } else {
+      out.push(ch)
+      map.push(i)
+    }
+  }
+  return { text: out.join(''), map }
 }
 
 // --- OpenAI Patch parsing/apply ---
@@ -76,7 +96,6 @@ function parseOpenAiPatch(raw: string): OAIOp[] {
   const lines = body.split(/\r?\n/)
   const ops: OAIOp[] = []
   let cur: { type: 'update'|'create'|'delete'; path: string; buf: string[] } | null = null
-  let inHunk = false
   let curMinus: string[] = []
   let curPlus: string[] = []
 
@@ -98,7 +117,7 @@ function parseOpenAiPatch(raw: string): OAIOp[] {
     } else if (cur.type === 'delete') {
       ops.push({ kind: 'delete', path: cur.path })
     }
-    cur = null; inHunk = false; curMinus = []; curPlus = []
+    cur = null; curMinus = []; curPlus = []
   }
 
   for (let i = 0; i < lines.length; i++) {
@@ -118,13 +137,19 @@ function parseOpenAiPatch(raw: string): OAIOp[] {
 
     if (cur.type === 'create') { cur.buf.push(L); continue }
 
-    if (/^@@/.test(L)) { inHunk = true; flushGroup(); continue }
-    if (!inHunk) continue
-    if (L.startsWith('+')) { curPlus.push(L.slice(1)) }
-    else if (L.startsWith('-')) { curMinus.push(L.slice(1)) }
-    else if (L.startsWith(' ')) { /* ignore context for now */ }
-    else if (L.trim() === '') { /* allow blank context lines */ }
-    else { /* unknown line inside hunk: ignore */ }
+    if (/^@@/.test(L)) { flushGroup(); continue }
+    if (L.startsWith('+')) { curPlus.push(L.slice(1)); continue }
+    if (L.startsWith('-')) { curMinus.push(L.slice(1)); continue }
+
+    const trimmed = L.trim()
+    const isNoNewlineMarker = /^\\ No newline at end of file/.test(trimmed)
+    const isContextLine =
+      L.startsWith(' ') ||
+      trimmed.length === 0 ||
+      isNoNewlineMarker ||
+      (!L.startsWith('+') && !L.startsWith('-'))
+
+    if (isContextLine) { flushGroup(); continue }
   }
   flushGroup(); flushOp()
   return ops
@@ -242,39 +267,79 @@ function findReplaceOnce(hayLF: string, oldLF: string): null | { start: number; 
       return { start, end }
     }
   }
+
+  const normNeedle = normalizeForLooseMatch(oldLF)
+  const normHaystack = normalizeForLooseMatch(hayLF)
+  if (normNeedle.text && normHaystack.text) {
+    const idxNorm = normHaystack.text.indexOf(normNeedle.text)
+    if (idxNorm !== -1) {
+      const start = normHaystack.map[idxNorm]
+      const lastIdx = idxNorm + normNeedle.text.length - 1
+      const endIdx = normHaystack.map[lastIdx]
+      if (typeof start === 'number' && typeof endIdx === 'number') {
+        return { start, end: endIdx + 1 }
+      }
+    }
+  }
   return null
 }
 
 // --- Search/Replace blocks ---
 type SRBlock = { path?: string; search: string; replace: string }
-function parseSearchReplace(raw: string): SRBlock[] {
+type SRParseError = { path?: string; line: number; reason: string }
+type SRParseResult = { blocks: SRBlock[]; errors: SRParseError[] }
+
+function parseSearchReplace(raw: string): SRParseResult {
   const lines = raw.split(/\r?\n/)
   const blocks: SRBlock[] = []
+  const errors: SRParseError[] = []
   let curPath: string | undefined
+
   const isPathLike = (s: string) => {
     const t = s.trim()
     if (!t || /^File:\s*/.test(t) || /^<<<<<<<\s*SEARCH/.test(t) || /^=======/.test(t) || /^>>>>>>>\s*REPLACE/.test(t) || /^```/.test(t)) return false
     return ((t.includes('/') || t.includes('\\') || /\.[A-Za-z0-9_-]+$/.test(t)) && !/\s/.test(t))
   }
+
   for (let i = 0; i < lines.length; i++) {
     const L = lines[i]
     const mFile = /^File:\s*(.+)$/.exec(L)
     if (mFile) { curPath = mFile[1].trim(); continue }
+
     if (/^<<<<<<<\s*SEARCH/.test(L)) {
+      const blockStart = i
+
       // Diff-fenced variant: filename on the line just above the SEARCH block
       const prev = i > 0 ? lines[i - 1] : ''
       if (prev && isPathLike(prev)) curPath = prev.trim()
+
+      const blockPath = curPath
+
       const sBuf: string[] = []
       i++
       while (i < lines.length && !/^=======/.test(lines[i])) { sBuf.push(lines[i]); i++ }
-      if (i >= lines.length) break
-      i++
+      if (i >= lines.length) {
+        errors.push({ path: blockPath, line: blockStart + 1, reason: 'missing ======= separator' })
+        break
+      }
+
+      i++ // skip =======
       const rBuf: string[] = []
-      while (i < lines.length && !/^>>>>>>>\s*REPLACE/.test(lines[i])) { rBuf.push(lines[i]); i++ }
+      let closed = false
+      while (i < lines.length) {
+        if (/^>>>>>>>\s*REPLACE/.test(lines[i])) { closed = true; break }
+        rBuf.push(lines[i]); i++
+      }
+      if (!closed) {
+        errors.push({ path: blockPath, line: blockStart + 1, reason: 'missing >>>>>>> REPLACE terminator' })
+        break
+      }
+
       blocks.push({ path: curPath, search: sBuf.join('\n'), replace: rBuf.join('\n') })
     }
   }
-  return blocks
+
+  return { blocks, errors }
 }
 
 // --- Main entry ---
@@ -360,7 +425,13 @@ export async function applyEditsPayload(rawPayload: string, workspaceId?: string
 
   // Search/Replace blocks
   if (looksSearchReplace(payload)) {
-    const blocks = parseSearchReplace(payload)
+    const { blocks, errors } = parseSearchReplace(payload)
+    if (errors.length) {
+      const detail = errors
+        .map((e) => `${e.reason}${e.path ? ` [${e.path}]` : ''} @ line ${e.line}`)
+        .join('; ')
+      return { ok: false, applied: 0, results: [], error: `malformed-search-replace: ${detail}` }
+    }
     for (const b of blocks) {
       let rel = b.path ? path.normalize(b.path) : undefined
       if (!rel) {

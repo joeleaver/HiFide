@@ -27,7 +27,9 @@ module.exports = {
     '^electron-store$': '<rootDir>/electron/__mocks__/electron-store.ts',
     // Map relative import from refactors/ts.ts and tools/utils.ts to a lightweight mock
     '^\.\./store/index\.js$': '<rootDir>/electron/__mocks__/store-index.js',
-    '^\.\./store/index$': '<rootDir>/electron/__mocks__/store-index.js'
+    '^\.\./store/index$': '<rootDir>/electron/__mocks__/store-index.js',
+    '^\.\./\.\./store/utils/kanban\.js$': '<rootDir>/electron/store/utils/kanban.ts',
+    '^\.\./store/utils/kanban\.js$': '<rootDir>/electron/store/utils/kanban.ts'
   },
   setupFilesAfterEnv: ['<rootDir>/electron/__tests__/setup.ts'],
   collectCoverageFrom: [

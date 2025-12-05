@@ -117,14 +117,23 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
   const unsubscribe = flowEvents.onFlowEvent(requestId, (ev: any) => {
     const { type, nodeId, executionId } = ev
 
-    // Handle tokenUsage events (which don't have nodeId) separately
+    // Handle tokenUsage events (which may fire multiple times per stream) without
+    // triggering session usage broadcasts. We'll rely on the final
+    // usageBreakdown event (which we emit once per completed LLM call) to update
+    // the session/renderer, so intermediate tokenUsage events are ignored to
+    // prevent rerender storms.
     if (type === 'tokenUsage') {
-      console.log('[TimelineEventHandler] tokenUsage event RECEIVED:', ev)
-      writer.updateUsage(ev)
+      if (process.env.HF_FLOW_DEBUG === '1') {
+        console.log('[TimelineEventHandler] tokenUsage event (ignored for UI)', {
+          provider: ev.provider,
+          model: ev.model,
+          usage: ev.usage,
+        })
+      }
       return
     }
-
     // Other events require nodeId (except usageBreakdown which has recovery logic)
+    if (!nodeId && type !== 'usageBreakdown') return
     if (!nodeId && type !== 'usageBreakdown') return
 
     let key = nodeId ? getKey(nodeId, executionId) : ''

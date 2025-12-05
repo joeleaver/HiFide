@@ -15,6 +15,29 @@ export function createSessionHandlers(
   addMethod: (method: string, handler: (params: any) => any) => void,
   connection: RpcConnection
 ) {
+  const buildInitialContextPayload = (ctx: {
+    provider: string
+    model: string
+    systemInstructions?: string
+    messageHistory?: Array<any>
+    includeThoughts?: boolean
+    thinkingBudget?: number
+  }) => {
+    const includeThoughts = ctx.includeThoughts ?? true
+    const thinkingBudget = ctx.thinkingBudget !== undefined
+      ? ctx.thinkingBudget
+      : (includeThoughts ? 2048 : undefined)
+
+    return {
+      provider: ctx.provider,
+      model: ctx.model,
+      systemInstructions: ctx.systemInstructions,
+      messageHistory: ctx.messageHistory || [],
+      includeThoughts,
+      ...(thinkingBudget !== undefined ? { thinkingBudget } : {}),
+    }
+  }
+
   // Get current session
   addMethod('session.getCurrent', async () => {
     try {
@@ -110,12 +133,7 @@ export function createSessionHandlers(
               flowDef: { nodes: graph.nodes, edges: flowEdges },
               sessionId: id,
               workspaceId,
-              initialContext: {
-                provider: session.currentContext.provider,
-                model: session.currentContext.model,
-                systemInstructions: session.currentContext.systemInstructions,
-                messageHistory: session.currentContext.messageHistory || [],
-              },
+              initialContext: buildInitialContextPayload(session.currentContext),
             }).catch((err) => {
               console.error('[session.select] Flow execution error:', err)
             })
@@ -185,18 +203,13 @@ export function createSessionHandlers(
             const flowEdges = reactFlowEdgesToFlowEdges(graph.edges)
 
             // Start flow execution (don't await - it runs indefinitely)
-            executeFlow(wc, {
-              requestId,
-              flowDef: { nodes: graph.nodes, edges: flowEdges },
-              sessionId: id,
-              workspaceId,
-              initialContext: {
-                provider: session.currentContext.provider,
-                model: session.currentContext.model,
-                systemInstructions: session.currentContext.systemInstructions,
-                messageHistory: session.currentContext.messageHistory || [],
-              },
-            }).catch((err) => {
+      executeFlow(wc, {
+        requestId,
+        flowDef: { nodes: graph.nodes, edges: flowEdges },
+        sessionId: id,
+        workspaceId,
+        initialContext: buildInitialContextPayload(session.currentContext),
+      }).catch((err) => {
               console.error('[session.new] Flow execution error:', err)
             })
           }
@@ -348,12 +361,7 @@ export function createSessionHandlers(
         flowDef: { nodes, edges: flowEdges },
         sessionId,
         workspaceId,
-        initialContext: {
-          provider: session.currentContext.provider,
-          model: session.currentContext.model,
-          systemInstructions: session.currentContext.systemInstructions,
-          messageHistory: session.currentContext.messageHistory || [],
-        },
+        initialContext: buildInitialContextPayload(session.currentContext),
       })
 
       console.log('[session.setExecutedFlow] Started new flow:', flowId, 'requestId:', requestId)

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { getBackendClient } from '../lib/backend/bootstrap'
 import type { BackendClient } from '../lib/backend/client'
 import type { SettingsSnapshot, SettingsSnapshotResponse } from '../../electron/types/settings'
-import type { ModelOption, PricingConfig } from '../../electron/store/types'
+import type { ApiKeys, ModelOption, PricingConfig } from '../../electron/store/types'
 
 type ReadyAwareClient = BackendClient & { whenReady?: (timeout?: number) => Promise<void> }
 
@@ -23,7 +23,7 @@ type AppBootPayload = {
 }
 
 type KeysChangedPayload = {
-  settingsApiKeys?: Record<string, string>
+  settingsApiKeys?: ApiKeys
 }
 
 function stripOk({ ok: _unused, ...rest }: SettingsSnapshotResponse): SettingsSnapshot {

@@ -21,359 +21,26 @@
 import type { MainFlowContext } from './types'
 import type { FlowAPI } from './flow-api'
 import type { ContextManager } from './contextManager'
-import type { AgentTool, ChatMessage, ProviderAdapter } from '../providers/provider'
+import type { AgentTool, ProviderAdapter } from '../providers/provider'
 
 import { getProviderKey, providers } from '../core/state'
 import { createCallbackEventEmitters } from './execution-events'
 import { rateLimitTracker } from '../providers/rate-limit-tracker'
 import { parseRateLimitError, sleep, withRetries } from '../providers/retry'
+import {
+  estimateInputTokens,
+  formatMessagesForAnthropic,
+  formatMessagesForGemini,
+  formatMessagesForOpenAI,
+  logLLMRequestPayload,
+} from './llm/payloads'
+import { createTokenCounter, ToolUsageTracker, UsageAccumulator } from './llm/usage-tracker'
+import { resolveSamplingControls } from './llm/stream-options'
+import { wrapToolsWithPolicy } from './llm/tool-policy'
 
-import { encoding_for_model, get_encoding } from '@dqbd/tiktoken'
-
-import { UiPayloadCache } from '../core/uiPayloadCache'
-
-const DEBUG_USAGE = false
-// Lightweight token estimators used as a last-resort when a stream is cancelled
-// and the provider does not return final usage. This avoids adding heavyweight
-// tokenizer deps and keeps cancellation graceful with best-effort stats.
-function estimateTokensFromText(s: string | undefined | null): number {
-  if (!s) return 0
-  // Rough heuristic: ~4 chars per token for LLM English text
-  const asciiWeightedLen = String(s).replace(/[^\x00-\x7F]/g, 'xx').length
-  return Math.ceil(asciiWeightedLen / 4)
-}
-
-function estimateInputTokens(provider: string, formattedMessages: any): number {
-  try {
-    if (provider === 'anthropic') {
-      const systemBlocks = formattedMessages?.system as Array<{ type: string; text?: string }> | undefined
-      const msgArr = formattedMessages?.messages as Array<{ content: string }> | undefined
-      let total = 0
-      if (Array.isArray(systemBlocks)) {
-        for (const b of systemBlocks) total += estimateTokensFromText((b as any)?.text)
-      }
-      if (Array.isArray(msgArr)) {
-        for (const m of msgArr) total += estimateTokensFromText(m?.content)
-      }
-      return total
-    }
-    if (provider === 'gemini') {
-      const sys = formattedMessages?.systemInstruction as string | undefined
-      const contents = formattedMessages?.contents as Array<{ parts: Array<{ text: string }> }> | undefined
-      let total = estimateTokensFromText(sys)
-      if (Array.isArray(contents)) {
-        for (const c of contents) {
-          if (Array.isArray(c?.parts)) {
-            for (const p of c.parts) total += estimateTokensFromText(p?.text)
-          }
-        }
-      }
-      return total
-    }
-    // Default/OpenAI-style ChatMessage[]
-    const arr = formattedMessages as Array<{ content: string }> | undefined
-    let total = 0
-    if (Array.isArray(arr)) {
-      for (const m of arr) total += estimateTokensFromText(m?.content)
-    }
-    return total
-  } catch {
-    return 0
-  }
-}
-
-// --- Logging helpers (sanitized payload preview) ---
-function previewText(val: any, max = 400): string {
-  try {
-    const s = typeof val === 'string' ? val : JSON.stringify(val)
-    return s.length > max ? s.slice(0, max) + '…' : s
-  } catch {
-    return ''
-  }
-}
-
-function buildLoggablePayload(provider: string, streamOpts: any, extras?: { responseSchema?: any; tools?: AgentTool[] }) {
-  const { apiKey: _omitApiKey, messages, system, systemInstruction, contents, ...rest } = (streamOpts || {})
-  const out: any = { provider, ...rest }
-
-  if (provider === 'anthropic') {
-    out.systemBlocks = Array.isArray(system) ? system.length : 0
-    out.messages = Array.isArray(messages)
-      ? messages.map((m: any, i: number) => ({ idx: i, role: m?.role, preview: previewText(m?.content, 200) }))
-      : undefined
-  } else if (provider === 'gemini') {
-    out.systemInstructionPreview = previewText(systemInstruction, 200)
-    out.contents = Array.isArray(contents)
-      ? contents.map((c: any, i: number) => ({ idx: i, parts: Array.isArray(c?.parts) ? c.parts.length : 0, preview: previewText((c?.parts || []).map((p: any) => p?.text).join(' '), 200) }))
-      : undefined
-  } else {
-    // OpenAI and default ChatMessage[]
-    if (typeof system === 'string' && system) {
-      out.systemPreview = previewText(system, 200)
-    }
-    out.messages = Array.isArray(messages)
-      ? messages.map((m: any, i: number) => ({ idx: i, role: m?.role, preview: previewText(m?.content, 200) }))
-      : undefined
-  }
-
-  if (extras?.responseSchema) {
-    out.responseSchema = {
-      name: extras.responseSchema.name,
-      strict: !!extras.responseSchema.strict,
-      keys: Object.keys(extras.responseSchema.schema?.properties || {})
-    }
-  }
-  if (extras?.tools) {
-    out.tools = (extras.tools || []).map((t) => t?.name).filter(Boolean)
-  }
-  return out
-}
-
-function logLLMRequestPayload(args: {
-  provider: string
-  model?: string
-  streamType: 'chat' | 'agent'
-  streamOpts: any
-  responseSchema?: any
-  tools?: AgentTool[]
-}) {
-  try {
-    const payload = buildLoggablePayload(args.provider, args.streamOpts, { responseSchema: args.responseSchema, tools: args.tools })
-    console.log('[LLMRequest] Payload', {
-      provider: args.provider,
-      model: args.model,
-      streamType: args.streamType,
-      payload
-    })
-  } catch { }
-}
-
-/**
-// --- Logging helpers (sanitized payload preview) ---
-function previewText(val: any, max = 400): string {
-  try {
-    const s = typeof val === 'string' ? val : JSON.stringify(val)
-    return s.length > max ? s.slice(0, max) + '…' : s
-  } catch {
-    return ''
-  }
-}
-
-function buildLoggablePayload(provider: string, streamOpts: any, extras?: { responseSchema?: any; tools?: AgentTool[] }) {
-  const { apiKey: _omitApiKey, messages, system, systemInstruction, contents, instructions, ...rest } = (streamOpts || {})
-  const out: any = { provider, ...rest }
-
-  if (provider === 'anthropic') {
-    out.systemBlocks = Array.isArray(system) ? system.length : 0
-    out.messages = Array.isArray(messages)
-      ? messages.map((m: any, i: number) => ({ idx: i, role: m?.role, preview: previewText(m?.content, 200) }))
-      : undefined
-  } else if (provider === 'gemini') {
-    out.systemInstructionPreview = previewText(systemInstruction, 200)
-    out.contents = Array.isArray(contents)
-      ? contents.map((c: any, i: number) => ({ idx: i, parts: Array.isArray(c?.parts) ? c.parts.length : 0, preview: previewText((c?.parts || []).map((p: any) => p?.text).join(' '), 200) }))
-      : undefined
-  } else {
-    // OpenAI and default ChatMessage[]
-    if (typeof instructions === 'string' && instructions) {
-      out.instructions = previewText(instructions, 200)
-    } else if (typeof system === 'string' && system) {
-      out.instructions = previewText(system, 200)
-    }
-    out.messages = Array.isArray(messages)
-      ? messages.map((m: any, i: number) => ({ idx: i, role: m?.role, preview: previewText(m?.content, 200) }))
-      : undefined
-  }
-
-  if (extras?.responseSchema) {
-    out.responseSchema = {
-      name: extras.responseSchema.name,
-      strict: !!extras.responseSchema.strict,
-      keys: Object.keys(extras.responseSchema.schema?.properties || {})
-    }
-  }
-  if (extras?.tools) {
-    out.tools = (extras.tools || []).map((t) => t?.name).filter(Boolean)
-  }
-  return out
-}
-
-function logLLMRequestPayload(args: {
-  provider: string
-  model?: string
-  streamType: 'chat' | 'agent'
-  streamOpts: any
-  responseSchema?: any
-  tools?: AgentTool[]
-}) {
-  try {
-    const payload = buildLoggablePayload(args.provider, args.streamOpts, { responseSchema: args.responseSchema, tools: args.tools })
-    console.log('[LLMRequest] Payload', {
-      provider: args.provider,
-      model: args.model,
-      streamType: args.streamType,
-      payload
-    })
-  } catch {}
-}
-
- * Wrap tools with per-request policy to enforce low-discovery, edit-first behavior.
- * - Limit workspace.search calls (discovery lock)
- * - Force compact results and searchOnce behavior
- * - Dedupe fs.read_lines calls and cap per-file reads
- */
-function wrapToolsWithPolicy(tools: AgentTool[], policy?: {
-  maxWorkspaceSearch?: number
-  dedupeReadLines?: boolean
-  maxReadLinesPerFile?: number
-  dedupeReadFile?: boolean
-  maxReadFilePerFile?: number
-  forceSearchOnce?: boolean
-}): AgentTool[] {
-  const wsSearchSeen = new Map<string, any>()
-  const readLinesSeen = new Set<string>()
-  const readLinesPerFile = new Map<string, number>()
-  const readFileSeen = new Set<string>()
-  const readFilePerFile = new Map<string, number>()
-  const readLinesCache = new Map<string, string>()
-  const readFileCache = new Map<string, string>()
+const DEBUG_USAGE = process.env.HF_DEBUG_USAGE === '1' || process.env.HF_DEBUG_TOKENS === '1'
 
 
-  const parseHandle = (h?: string): { p?: string; s?: number; e?: number } | null => {
-    if (!h) return null
-    try { return JSON.parse(Buffer.from(String(h), 'base64').toString('utf-8')) } catch { return null }
-  }
-
-  return (tools || []).map((t) => {
-    if (!t || !t.name || typeof t.run !== 'function') return t
-
-    if ((t.name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === 'workspacesearch') {
-      const orig = t.run.bind(t)
-      const wrapped: AgentTool = {
-        ...t,
-        run: async (input: any, meta?: any) => {
-          const args = { ...(input || {}) }
-          // Request-level dedupe: identical args → return cached result
-          const key = JSON.stringify(args)
-          if (wsSearchSeen.has(key)) {
-            return wsSearchSeen.get(key)
-          }
-          const out = await orig(args, meta)
-          try { wsSearchSeen.set(key, out) } catch { }
-          return out
-        }
-      }
-      return wrapped
-    }
-
-    if ((t.name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === 'fsreadlines') {
-      const orig = t.run.bind(t)
-      const wrapped: AgentTool = {
-        ...t,
-        run: async (input: any, meta?: any) => {
-          const args = input || {}
-          const h = parseHandle(args.handle)
-          const rel = (args.path as string) || (h && h.p) || ''
-          // Build a signature key that captures the specific range/window requested
-          const sigKey = JSON.stringify({
-            tool: t.name,
-            path: rel,
-            handle: !!args.handle,
-            mode: args.mode || 'range',
-            start: args.startLine,
-            end: args.endLine,
-            focus: args.focusLine,
-            window: args.window,
-            before: args.beforeLines,
-            after: args.afterLines
-          })
-
-          // Cap applies to identical range signatures, not the entire file
-          if (typeof policy?.maxReadLinesPerFile === 'number') {
-            const c = readLinesPerFile.get(sigKey) || 0
-            if (c >= policy.maxReadLinesPerFile) {
-              return `Error: read_locked: read limit reached for this range`
-            }
-          }
-
-          // Dedupe identical reads — return cached raw text
-          if (policy?.dedupeReadLines) {
-            const key = JSON.stringify({ tool: t.name, path: rel, handle: !!args.handle, mode: args.mode || 'range', start: args.startLine, end: args.endLine, focus: args.focusLine, window: args.window, before: args.beforeLines, after: args.afterLines })
-            if (readLinesSeen.has(key)) {
-              if (readLinesCache.has(key)) return readLinesCache.get(key) as string
-              return ''
-            }
-            readLinesSeen.add(key)
-          }
-
-          const out = await orig(args, meta)
-
-          if (typeof policy?.maxReadLinesPerFile === 'number') {
-            const c = readLinesPerFile.get(sigKey) || 0
-            readLinesPerFile.set(sigKey, c + 1)
-          }
-
-          // Cache raw text for dedupe
-          try {
-            if (typeof out === 'string') {
-              const key = JSON.stringify({ tool: t.name, path: rel, handle: !!args.handle, mode: args.mode || 'range', start: args.startLine, end: args.endLine, focus: args.focusLine, window: args.window, before: args.beforeLines, after: args.afterLines })
-              readLinesCache.set(key, out)
-            }
-          } catch { }
-
-          return out
-        }
-      }
-      return wrapped
-    }
-
-    if ((t.name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === 'fsreadfile') {
-      const orig = t.run.bind(t)
-      const wrapped: AgentTool = {
-        ...t,
-        run: async (input: any, meta?: any) => {
-          const args = input || {}
-          const rel = (args.path as string) || ''
-
-          // Per-file cap
-          if (typeof policy?.maxReadFilePerFile === 'number' && rel) {
-            const c = readFilePerFile.get(rel) || 0
-            if (c >= policy.maxReadFilePerFile) {
-              return `Error: read_locked: fsReadFile per-file read limit reached`
-            }
-          }
-
-          // Dedupe identical reads
-          if (policy?.dedupeReadFile) {
-            const key = JSON.stringify({ tool: t.name, path: rel })
-            if (readFileSeen.has(key)) {
-              if (readFileCache.has(key)) return readFileCache.get(key) as string
-              return ''
-            }
-            readFileSeen.add(key)
-          }
-
-          const out = await orig(args, meta)
-
-          if (typeof policy?.maxReadFilePerFile === 'number' && rel) {
-            const c = readFilePerFile.get(rel) || 0
-            readFilePerFile.set(rel, c + 1)
-          }
-          try {
-            if (typeof out === 'string') {
-              const key = JSON.stringify({ tool: t.name, path: rel })
-              readFileCache.set(key, out)
-            }
-          } catch { }
-          return out
-        }
-      }
-      return wrapped
-    }
-
-    return t
-  })
-}
 
 
 /**
@@ -419,84 +86,7 @@ export interface LLMServiceResponse {
   error?: string
 }
 
-/**
- * Format messages for OpenAI
- * OpenAI accepts our ChatMessage format directly (but we strip metadata)
- */
-function formatMessagesForOpenAI(context: MainFlowContext): ChatMessage[] {
-  const messages: ChatMessage[] = []
 
-  // Normalize history defensively – messageHistory must always be an array here
-  const history = Array.isArray(context.messageHistory) ? context.messageHistory : []
-
-  // Add system instructions if present
-  if (context.systemInstructions) {
-    messages.push({ role: 'system', content: context.systemInstructions })
-  }
-
-  // Add all message history (strip metadata - OpenAI doesn't accept extra fields)
-  messages.push(...history.map(m => ({
-    role: m.role,
-    content: m.content
-  })))
-
-  return messages
-}
-
-/**
- * Format messages for Anthropic
- * Anthropic separates system messages and uses prompt caching
- */
-function formatMessagesForAnthropic(context: MainFlowContext): {
-  system: any
-  messages: Array<{ role: 'user' | 'assistant'; content: string }>
-} {
-  // Extract system instructions
-  const systemText = context.systemInstructions || ''
-
-  // Use prompt caching for system prompt when available
-  const system: any = systemText
-    ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }]
-    : undefined
-
-  // Normalize history defensively – messageHistory must always be an array here
-  const history = Array.isArray(context.messageHistory) ? context.messageHistory : []
-
-  // Convert message history (exclude system messages, only user/assistant)
-  const messages = history
-    .filter(m => m.role !== 'system')
-    .map(m => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content
-    }))
-
-  return { system, messages }
-}
-
-/**
- * Format messages for Gemini
- * Gemini uses 'model' instead of 'assistant' and a different structure
- */
-function formatMessagesForGemini(context: MainFlowContext): {
-  systemInstruction: string
-  contents: Array<{ role: string; parts: Array<{ text: string }> }>
-} {
-  // Extract system instructions
-  const systemInstruction = context.systemInstructions || ''
-
-  // Normalize history defensively – messageHistory must always be an array here
-  const history = Array.isArray(context.messageHistory) ? context.messageHistory : []
-
-  // Convert message history to Gemini format
-  const contents = history
-    .filter(m => m.role !== 'system')
-    .map(msg => ({
-      role: msg.role === 'assistant' ? 'model' : msg.role,
-      parts: [{ text: msg.content }]
-    }))
-
-  return { systemInstruction, contents }
-}
 
 /**
  * LLM Service - main service class
@@ -626,7 +216,7 @@ class LLMService {
 	  } else if (effectiveProvider === 'gemini') {
 	    formattedMessages = formatMessagesForGemini(latestContext)
 	  } else {
-	    formattedMessages = formatMessagesForOpenAI(latestContext)
+        formattedMessages = formatMessagesForOpenAI(latestContext, { provider: effectiveProvider })
 	  }
 	}
 
@@ -657,236 +247,71 @@ class LLMService {
     const eventHandlers = createCallbackEventEmitters(emit, effectiveProvider, effectiveModel)
 
 
-    // Track tool I/O sizes for usage breakdown (estimated tokens)
-    let __toolArgsTokensOut = 0
-    let __toolResultsTokensIn = 0
-    let __toolCallsOutCount = 0
-    let __toolArgsTokensByTool: Record<string, number> = {}
-    let __toolResultsTokensByTool: Record<string, number> = {}
-    let __toolCallsByTool: Record<string, number> = {}
-
-    const toolKey = (name?: string) => String(name || '').trim()
-
-    // Usage breakdown capture (OpenAI path)
-    // Reusable OpenAI tokenizer for this request (freed after breakdown emission)
-    let __openaiEncoder: any | null = null
-
-    function getOpenAIEncoderForModel(m: string) {
-      if (__openaiEncoder) return __openaiEncoder
-      try {
-        __openaiEncoder = encoding_for_model(m as any)
-      } catch {
-        try {
-          const useO200k = /(^o\d|o\d|gpt-4o|gpt-4\.1)/i.test(m)
-          __openaiEncoder = get_encoding(useO200k ? 'o200k_base' : 'cl100k_base')
-        } catch { }
-      }
-      return __openaiEncoder
-    }
-
-
-    // Generalized token counter: precise for OpenAI (tiktoken), estimated otherwise
-    function getTokenCounter(p: string, m: string) {
-      if (p === 'openai') {
-        const hasEnc = !!getOpenAIEncoderForModel(m)
-        if (hasEnc) {
-          return { count: (t: string) => getOpenAIEncoderForModel(m)!.encode(t).length, precise: true }
-        }
-      }
-      return { count: estimateTokensFromText, precise: false }
-    }
-
-    const __tokenCounter = getTokenCounter(effectiveProvider, effectiveModel)
-
-
     let __bdSystemText: string | undefined
     let __bdMessages: any[] | undefined
 
+    const registerToolResult = (payload: { key: string; data: unknown }) => {
+      try {
+        flowAPI.store?.getState?.().registerToolResult?.(payload)
+      } catch {}
+    }
+
+    const tokenCounter = createTokenCounter(effectiveProvider, effectiveModel)
+    const usageAccumulator = new UsageAccumulator()
+    const toolUsageTracker = new ToolUsageTracker(tokenCounter, registerToolResult)
+    const emitUsage = eventHandlers.onTokenUsage
 
     const onToolStartWrapped = (ev: { callId?: string; name: string; arguments?: any }) => {
-      try {
-        __toolCallsOutCount++
-        const key = toolKey(ev?.name)
-        __toolCallsByTool[key] = (__toolCallsByTool[key] || 0) + 1
-        if (ev && ev.arguments != null) {
-          const s = typeof ev.arguments === 'string' ? ev.arguments : JSON.stringify(ev.arguments)
-          const t = __tokenCounter.count(s)
-          __toolArgsTokensOut += t
-          __toolArgsTokensByTool[key] = (__toolArgsTokensByTool[key] || 0) + t
-        }
-      } catch { }
+      try { toolUsageTracker.handleToolStart(ev) } catch {}
       eventHandlers.onToolStart(ev)
     }
     const onToolEndWrapped = (ev: { callId?: string; name: string; result?: any }) => {
-      try {
-        const key = toolKey(ev?.name)
-        if (ev && (ev as any).result != null) {
-          const s = typeof (ev as any).result === 'string' ? (ev as any).result : JSON.stringify((ev as any).result)
-          const t = __tokenCounter.count(s)
-          __toolResultsTokensIn += t
-          __toolResultsTokensByTool[key] = (__toolResultsTokensByTool[key] || 0) + t
-
-          // Resolve heavy UI payload via previewKey and register for UI rendering
-          const callId = ev?.callId
-          const pk = (ev as any)?.result?.previewKey
-          if (callId && pk) {
-            // First try non-destructive read in case multiple consumers race
-            const data = UiPayloadCache.peek(pk)
-            if (typeof data !== 'undefined') {
-              try { flowAPI.store.getState().registerToolResult({ key: callId, data }) } catch { }
-            } else {
-              // Schedule a microtask to try again after providers finish caching
-              setTimeout(() => {
-                const later = UiPayloadCache.peek(pk)
-                if (typeof later !== 'undefined') {
-                  try { flowAPI.store.getState().registerToolResult({ key: callId, data: later }) } catch { }
-                }
-              }, 0)
-            }
-          }
-        }
-      } catch { }
+      try { toolUsageTracker.handleToolEnd(ev) } catch {}
       eventHandlers.onToolEnd(ev as any)
     }
 
-    // Track latest usage (if provider reports it) and maintain a best-effort fallback
-    let lastReportedUsage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number; reasoningTokens?: number } | null = null
-    // Accumulate deltas across all steps so we can report accurate totals in usage_breakdown
-    let accumulatedUsage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number; reasoningTokens?: number } = { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0, reasoningTokens: 0 }
-    let usageEmitted = false
-    const emitUsage = eventHandlers.onTokenUsage
-    const onTokenUsageWrapped = (u: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number; reasoningTokens?: number }) => {
-      const prev = lastReportedUsage
-      // Determine cumulative by totalTokens only; providers may report non-monotonic input/output per step
-      const currTotal = (u?.totalTokens ?? ((u?.inputTokens || 0) + (u?.outputTokens || 0)))
-      const prevTotal = (prev?.totalTokens ?? ((prev?.inputTokens || 0) + (prev?.outputTokens || 0)))
-      const isCumulative = !!prev && currTotal >= prevTotal
+    const onTokenUsageWrapped = (usage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number; reasoningTokens?: number }) => {
+      usageAccumulator.recordProviderUsage(
+        usage,
+        DEBUG_USAGE
+          ? (details: any) => {
+            try {
+              console.log('[usage:onTokenUsageWrapped]', details)
+            } catch {}
+          }
+          : undefined
+      )
 
-      let delta = u
-      if (prev && isCumulative) {
-        const dTotal = Math.max(0, currTotal - prevTotal)
-        const dIn = Math.max(0, (u.inputTokens || 0) - (prev.inputTokens || 0))
-        // Assign remainder to output; clamp to non-negative
-        const dOut = Math.max(0, dTotal - dIn)
-        delta = {
-          inputTokens: dIn,
-          outputTokens: dOut,
-          totalTokens: Math.max(0, dIn + dOut),
-          cachedTokens: Math.max(0, (u.cachedTokens || 0) - (prev.cachedTokens || 0)),
-          reasoningTokens: Math.max(0, (u.reasoningTokens || 0) - (prev.reasoningTokens || 0))
-        }
-      }
-
-      if (DEBUG_USAGE) {
-        try {
-          console.log('[usage:onTokenUsageWrapped]', {
-            mode: isCumulative ? 'cumulative->delta' : 'per-step',
-            raw: u,
-            prev,
-            delta
-          })
-        } catch { }
-      }
-
-      // Accumulate deltas so we can compute accurate totals later
-      accumulatedUsage = {
-        inputTokens: (accumulatedUsage.inputTokens || 0) + (delta.inputTokens || 0),
-        outputTokens: (accumulatedUsage.outputTokens || 0) + (delta.outputTokens || 0),
-        totalTokens: (accumulatedUsage.totalTokens || 0) + (delta.totalTokens || 0),
-        cachedTokens: (accumulatedUsage.cachedTokens || 0) + (delta.cachedTokens || 0),
-        reasoningTokens: (accumulatedUsage.reasoningTokens || 0) + (delta.reasoningTokens || 0)
-      }
-
-      lastReportedUsage = u
-
-      // Only emit non-zero deltas to avoid double-counting
-      if (
-        (delta.inputTokens || 0) > 0 ||
-        (delta.outputTokens || 0) > 0 ||
-        (delta.totalTokens || 0) > 0 ||
-        (delta.cachedTokens || 0) > 0 ||
-        (delta.reasoningTokens || 0) > 0
-      ) {
-        usageEmitted = true
-        // emitUsage(delta) // Disabled to prevent frontend rerender storms. usage_breakdown is used instead.
-      }
+      try {
+        console.log('[LLMService] provider usage event', {
+          provider: effectiveProvider,
+          model: effectiveModel,
+          usage,
+        })
+      } catch {}
     }
 
-    // Pre-compute an approximate input token count as a fallback
     const approxInputTokens = estimateInputTokens(effectiveProvider, formattedMessages)
 
-    // 6. Call provider with formatted messages
-
-    // --- Resolve effective sampling parameters with model-specific overrides ---
-    // Model overrides take precedence over defaults
-    const modelOverrides: Array<{
-      model: string
-      temperature?: number
-      reasoningEffort?: 'low' | 'medium' | 'high'
-      includeThoughts?: boolean
-      thinkingBudget?: number
-    }> = ((workingContext as any)?.modelOverrides || [])
-
-    // Find override for current model (exact match)
-    const modelOverride = modelOverrides.find(o => o.model === effectiveModel)
-
-    // Temperature: model override → mapped normalized value → raw context value
-    let effectiveTemperature: number | undefined
-    if (modelOverride?.temperature !== undefined) {
-      // Model-specific override (raw value)
-      effectiveTemperature = modelOverride.temperature
-    } else if (typeof (workingContext as any)?.temperature === 'number') {
-      const normalizedTemp = (workingContext as any).temperature
-      // Map normalized (0-1) to provider range:
-      // - OpenAI/Gemini/Fireworks/xAI: 0-2
-      // - Anthropic: 0-1 (already normalized)
-      if (effectiveProvider === 'anthropic') {
-        effectiveTemperature = Math.min(normalizedTemp, 1) // Clamp to 0-1
-      } else {
-        effectiveTemperature = normalizedTemp * 2 // Scale to 0-2
-      }
-    }
-
-    // Reasoning effort: model override → default
-    const effectiveReasoningEffort =
-      requestReasoningEffort ??
-      modelOverride?.reasoningEffort ??
-      (workingContext as any)?.reasoningEffort
-
-    // Auto-enable thinking for models that support it:
-    // - Gemini 2.5+ (2.5, 3-pro, 3.0, 3.5, etc.): /(2\.5|[^0-9]3[.-])/i
-    // - Anthropic Claude 3.5+ Sonnet, 3.7+, 4+
-    const isGeminiWithThinking = effectiveProvider === 'gemini' && /(2\.5|[^0-9]3[.-])/i.test(effectiveModel)
-    const isAnthropicWithThinking = effectiveProvider === 'anthropic' && (
-      /claude-4/i.test(effectiveModel) || /claude-opus-4/i.test(effectiveModel) || /claude-sonnet-4/i.test(effectiveModel) || /claude-haiku-4/i.test(effectiveModel) ||
-      /claude-3-7-sonnet/i.test(effectiveModel) || /claude-3\.7/i.test(effectiveModel) ||
-      /claude-3-5-sonnet/i.test(effectiveModel) || /claude-3\.5-sonnet/i.test(effectiveModel)
-    )
-    const modelSupportsThinking = isGeminiWithThinking || isAnthropicWithThinking
-
-    // Include thoughts: model override → default (with auto-enable for supported models)
-    const includeThoughtsOverride = modelOverride?.includeThoughts
-    const includeThoughtsDefault = workingContext?.includeThoughts
-    const shouldIncludeThoughts = includeThoughtsOverride === true ||
-      (includeThoughtsOverride !== false && includeThoughtsDefault === true) ||
-      (includeThoughtsOverride === undefined && includeThoughtsDefault !== false && modelSupportsThinking)
-
-    // Thinking budget: model override → default
-    const thinkingBudgetOverride = modelOverride?.thinkingBudget
-    const thinkingBudgetDefault = (workingContext as any)?.thinkingBudget
-    const effectiveThinkingBudget = typeof thinkingBudgetOverride === 'number'
-      ? thinkingBudgetOverride
-      : (typeof thinkingBudgetDefault === 'number'
-        ? thinkingBudgetDefault
-        : (shouldIncludeThoughts && modelSupportsThinking ? 2048 : undefined))
+    const {
+      temperature: effectiveTemperature,
+      reasoningEffort: effectiveReasoningEffort,
+      includeThoughts,
+      thinkingBudget: effectiveThinkingBudget
+    } = resolveSamplingControls({
+      provider: effectiveProvider,
+      model: effectiveModel,
+      workingContext,
+      requestReasoningEffort,
+    })
 
     let response = ''
     let reasoning = '' // Accumulate reasoning/thinking from provider
 
-    // NOTE: This entire block must live inside an async function so that
-    // we can legally use `await` for proactive rate limiting and streaming.
-    // Ensure the containing method (`chat`) is declared `async`.
     try {
+      // NOTE: This entire block must live inside an async function so that
+      // we can legally use `await` for proactive rate limiting and streaming.
+      // Ensure the containing method (`chat`) is declared `async`.
       // PROACTIVE RATE LIMIT CHECK - Wait before making request if needed.
       // This must remain async-aware so we can pause before issuing the
       // underlying provider call when we are near rate limits.
@@ -912,22 +337,12 @@ class LLMService {
 
       await new Promise<void>(async (resolve, reject) => {
         let streamHandle: { cancel: () => void } | null = null
-          const onAbort = () => {
+        const onAbort = () => {
           try { streamHandle?.cancel() } catch { }
           try {
-            // Best-effort usage on cancel: prefer provider-reported usage; otherwise estimate
-            if (!usageEmitted && lastReportedUsage) {
-              usageEmitted = true
-              // Just emit usage; SessionTimelineWriter handles cost calculation
-              emitUsage({ ...lastReportedUsage })
-            } else if (!usageEmitted) {
-              const approxOutput = __tokenCounter.count(response)
-              usageEmitted = true
-              const usage = { inputTokens: approxInputTokens, outputTokens: approxOutput, totalTokens: approxInputTokens + approxOutput }
-              // Just emit usage; SessionTimelineWriter handles cost calculation
-              emitUsage({ ...usage })
-            }
-          } catch { }
+            const approxOutput = tokenCounter.count(response)
+            usageAccumulator.emitBestEffortUsage(emitUsage, approxInputTokens, approxOutput)
+          } catch {}
           reject(new Error('Flow cancelled'))
         }
         try {
@@ -954,8 +369,7 @@ class LLMService {
             // Sampling + reasoning controls (using effective values with model overrides applied)
             ...(typeof effectiveTemperature === 'number' ? { temperature: effectiveTemperature } : {}),
             ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
-            // Thinking controls - auto-enabled for supported models
-            ...(shouldIncludeThoughts ? { includeThoughts: true } : {}),
+            ...(includeThoughts ? { includeThoughts: true } : {}),
             ...(effectiveThinkingBudget !== undefined ? { thinkingBudget: effectiveThinkingBudget } : {}),
             // Callbacks that providers call - these are wrapped to emit ExecutionEvents
             onChunk: (text: string) => {
@@ -1078,7 +492,8 @@ class LLMService {
                   dedupeReadFile: false,
                 })
                 : []
-              streamHandle = await providerAdapter.agentStream({
+
+              const agentStreamConfig = {
                 ...streamOpts,
                 tools: policyTools,
                 responseSchema,
@@ -1086,7 +501,18 @@ class LLMService {
                 onToolStart: onToolStartWrapped,
                 onToolEnd: onToolEndWrapped,
                 onToolError: eventHandlers.onToolError
-              })
+              }
+
+              try {
+                const { apiKey: _apiKey, ...loggableConfig } = agentStreamConfig as any
+                console.log('[llm-service] agentStream config', {
+                  provider: effectiveProvider,
+                  model: effectiveModel,
+                  config: loggableConfig
+                })
+              } catch {}
+
+              streamHandle = await providerAdapter.agentStream(agentStreamConfig)
 
               try { flowAPI.log.debug('llmService.chat agentStream started', { provider: effectiveProvider, model: effectiveModel }) } catch { }
 
@@ -1123,75 +549,70 @@ class LLMService {
           reject(e)
         }
       })
-    } catch (e: any) {
-      const errorMessage = e.message || String(e)
 
-
-      // Treat cancellations/terminations as non-errors for UI event emission
-      const isCancellation = /\b(cancel|canceled|cancelled|abort|aborted|terminate|terminated|stop|stopped)\b/i.test(errorMessage)
-      if (!isCancellation) {
-        // Send error event to UI only for real errors
-        eventHandlers.onError(errorMessage)
-      } else {
-
-      }
-
-
-	      return {
-	        text: '',
-	        error: errorMessage
-	      }
-    }
-
-    // Emit usage breakdown (general; precise when tokenizer available)
-    try {
-      const __count = __tokenCounter.count
-      const __precise = !!__tokenCounter.precise
-
-      const instructionsTokens = __count(__bdSystemText || '')
+      // Emit usage breakdown (general; precise when tokenizer available)
+      const instructionsTokens = tokenCounter.count(__bdSystemText || '')
       let userMsgTokens = 0
       let assistantMsgTokens = 0
       if (Array.isArray(__bdMessages)) {
-        for (const m of __bdMessages) {
-          const role = (m && (m as any).role) || ''
-          const content = (m && (m as any).content) ?? ''
-          const t = __count(typeof content === 'string' ? content : String(content))
-          if (role === 'user') userMsgTokens += t
-          else if (role === 'assistant') assistantMsgTokens += t
+        for (const entry of __bdMessages) {
+          const role = (entry && (entry as any).role) || ''
+          const content = (entry && (entry as any).content) ?? ''
+          const tokens = tokenCounter.count(typeof content === 'string' ? content : String(content))
+          if (role === 'user') userMsgTokens += tokens
+          else if (role === 'assistant') assistantMsgTokens += tokens
         }
       }
-      const toolDefinitionsTokens = __count(JSON.stringify(tools || []))
-      const responseFormatTokens = __count(JSON.stringify(responseSchema || null))
-      const toolCallResultsTokens = __toolResultsTokensIn
-      const assistantTextTokens = __count(response)
-      const toolCallsTokens = __toolArgsTokensOut
+
+      const toolSnapshot = toolUsageTracker.getSnapshot()
+      const toolDefinitionsTokens = tokenCounter.count(JSON.stringify(tools || []))
+      const responseFormatTokens = tokenCounter.count(JSON.stringify(responseSchema || null))
+      const toolCallResultsTokens = toolSnapshot.resultsTokensIn
+      const assistantTextTokens = tokenCounter.count(response)
+      const toolCallsTokens = toolSnapshot.argsTokensOut
 
       const calcInput = instructionsTokens + userMsgTokens + assistantMsgTokens + toolDefinitionsTokens + responseFormatTokens + toolCallResultsTokens
       const calcOutput = assistantTextTokens + toolCallsTokens
 
-      const reported = lastReportedUsage as any
-      const acc = accumulatedUsage
-      const hasAccum = (acc && ((acc.inputTokens || 0) > 0 || (acc.outputTokens || 0) > 0 || (acc.totalTokens || 0) > 0))
-      
-      // Fix: Normalize cachedTokens key for SessionTimelineWriter (expects 'cachedTokens', not 'cachedInputTokens')
+      const accumulatedTotals = usageAccumulator.getAccumulatedTotals()
+      const hasAccum = (accumulatedTotals.inputTokens || 0) > 0 ||
+        (accumulatedTotals.outputTokens || 0) > 0 ||
+        (accumulatedTotals.totalTokens || 0) > 0
+      const lastReported = usageAccumulator.getLastReportedUsage()
+
       const totals = hasAccum
         ? {
-          inputTokens: (acc.inputTokens ?? calcInput),
-          outputTokens: (acc.outputTokens ?? calcOutput),
-          totalTokens: (acc.totalTokens ?? ((acc.inputTokens ?? calcInput) + (acc.outputTokens ?? calcOutput))),
-          cachedTokens: Math.max(0, acc.cachedTokens || 0)
+          inputTokens: accumulatedTotals.inputTokens ?? calcInput,
+          outputTokens: accumulatedTotals.outputTokens ?? calcOutput,
+          totalTokens: accumulatedTotals.totalTokens ?? ((accumulatedTotals.inputTokens ?? calcInput) + (accumulatedTotals.outputTokens ?? calcOutput)),
+          cachedTokens: Math.max(0, accumulatedTotals.cachedTokens || 0)
         }
-        : (reported
+        : (lastReported
           ? {
-            inputTokens: (reported.inputTokens ?? calcInput),
-            outputTokens: (reported.outputTokens ?? calcOutput),
-            totalTokens: (reported.totalTokens ?? ((reported.inputTokens ?? calcInput) + (reported.outputTokens ?? calcOutput))),
-            cachedTokens: Math.max(0, reported.cachedTokens || reported.cachedInputTokens || 0)
+            inputTokens: lastReported.inputTokens ?? calcInput,
+            outputTokens: lastReported.outputTokens ?? calcOutput,
+            totalTokens: lastReported.totalTokens ?? ((lastReported.inputTokens ?? calcInput) + (lastReported.outputTokens ?? calcOutput)),
+            cachedTokens: Math.max(0, lastReported.cachedTokens || (lastReported as any).cachedInputTokens || 0)
           }
           : { inputTokens: calcInput, outputTokens: calcOutput, totalTokens: calcInput + calcOutput, cachedTokens: 0 })
 
       const thoughtsTokens = Math.max(0, Number(totals.outputTokens || 0) - (assistantTextTokens + toolCallsTokens))
-      
+
+      const toolKeys = new Set([
+        ...Object.keys(toolSnapshot.argsTokensByTool || {}),
+        ...Object.keys(toolSnapshot.resultsTokensByTool || {})
+      ])
+      const toolsBreakdown = Object.fromEntries(
+        Array.from(toolKeys).map((key) => [
+          key,
+          {
+            calls: toolSnapshot.callsByTool[key] || 0,
+            inputResults: toolSnapshot.resultsTokensByTool[key] || 0,
+            outputArgs: toolSnapshot.argsTokensByTool[key] || 0
+          }
+        ])
+      )
+
       try {
         flowAPI.log?.debug?.('LLMService.chat emitting usage_breakdown', {
           provider: effectiveProvider,
@@ -1203,65 +624,68 @@ class LLMService {
         })
       } catch {}
 
-      flowAPI.emitExecutionEvent({
-        type: 'usage_breakdown',
-        provider: effectiveProvider,
-        model: effectiveModel,
-        usageBreakdown: {
-          input: {
-            instructions: instructionsTokens,
-            userMessages: userMsgTokens,
-            assistantMessages: assistantMsgTokens,
-            toolDefinitions: toolDefinitionsTokens,
-            responseFormat: responseFormatTokens,
-            toolCallResults: toolCallResultsTokens
-          },
-          output: {
-            assistantText: assistantTextTokens,
-            thoughts: thoughtsTokens,
-            toolCalls: toolCallsTokens
-          },
-          totals: { ...totals },
-          estimated: !__precise,
-          tools: Object.fromEntries(
-            Array.from(
-              new Set([
-                ...Object.keys(__toolArgsTokensByTool || {}),
-                ...Object.keys(__toolResultsTokensByTool || {})
-              ])
-            ).map((k) => [
-              k,
-              {
-                calls: __toolCallsByTool[k] || 0,
-                inputResults: __toolResultsTokensByTool[k] || 0,
-                outputArgs: __toolArgsTokensByTool[k] || 0
-              }
-            ])
-          )
+      try {
+        flowAPI.emitExecutionEvent({
+          type: 'usage_breakdown',
+          provider: effectiveProvider,
+          model: effectiveModel,
+          usageBreakdown: {
+            input: {
+              instructions: instructionsTokens,
+              userMessages: userMsgTokens,
+              assistantMessages: assistantMsgTokens,
+              toolDefinitions: toolDefinitionsTokens,
+              responseFormat: responseFormatTokens,
+              toolCallResults: toolCallResultsTokens
+            },
+            output: {
+              assistantText: assistantTextTokens,
+              thoughts: thoughtsTokens,
+              toolCalls: toolCallsTokens
+            },
+            totals: { ...totals },
+            estimated: !tokenCounter.precise,
+            tools: toolsBreakdown
+          }
+        })
+      } catch (e) {
+        console.warn('[LLM] failed to emit usage_breakdown', e)
+      }
+
+      // 7. Add assistant response to context (unless skipHistory)
+      if (!skipHistory) {
+        const assistantMessage: { role: 'assistant'; content: string; reasoning?: string } = {
+          role: 'assistant',
+          content: response,
         }
-      })
-
-      // Free encoder if allocated (OpenAI)
-      if (__openaiEncoder) { try { __openaiEncoder.free() } catch { } __openaiEncoder = null }
-    } catch (e) {
-      console.warn('[LLM] failed to emit usage_breakdown', e)
-    }
-
-    // 7. Add assistant response to context (unless skipHistory)
-    if (!skipHistory) {
-      const assistantMessage: { role: 'assistant'; content: string; reasoning?: string } = {
-        role: 'assistant',
-        content: response,
+        if (reasoning.trim()) {
+          assistantMessage.reasoning = reasoning
+        }
+        contextManager.addMessage(assistantMessage)
       }
-      if (reasoning.trim()) {
-        assistantMessage.reasoning = reasoning
-      }
-      contextManager.addMessage(assistantMessage)
-    }
 
-    return {
-      text: response,
-      reasoning: reasoning.trim() || undefined,
+      return {
+        text: response,
+        reasoning: reasoning.trim() || undefined,
+      }
+    } catch (e: any) {
+      const errorMessage = e.message || String(e)
+
+      // Treat cancellations/terminations as non-errors for UI event emission
+      const isCancellation = /\b(cancel|canceled|cancelled|abort|aborted|terminate|terminated|stop|stopped)\b/i.test(errorMessage)
+      if (!isCancellation) {
+        // Send error event to UI only for real errors
+        eventHandlers.onError(errorMessage)
+      }
+
+      return {
+        text: '',
+        error: errorMessage
+      }
+    } finally {
+      try {
+        tokenCounter.dispose()
+      } catch {}
     }
   }
 }

@@ -1,5 +1,4 @@
-/**
- * Flow Scheduler - Node-Controlled Execution
+/** * Flow Scheduler - Node-Controlled Execution
  *
  * Architecture:
  * - Nodes are autonomous functions that control their own execution
@@ -22,36 +21,25 @@ import type {
   Edge,
   NodeOutput,
   FlowExecutionArgs,
-  NodeInputs,
 } from './types'
-import type { FlowAPI, Badge, UsageReport } from './flow-api'
-import type { CreateIsolatedContextOptions } from './context-options'
-import type { ExecutionEvent } from './execution-events'
-import { getNodeFunction } from './nodes'
-import { ContextRegistry, type ContextBinding } from './contextRegistry'
-import { createEventEmitter } from './execution-events'
-import { getSessionService, getFlowGraphService, getFlowContextsService } from '../services/index.js'
+import type { ContextBinding } from './contextRegistry'
+import { buildFlowGraph } from './flow-graph'
+import { FlowNodeIoCoordinator } from './node-io-coordinator'
+import { createExecutionEventRouter, type ExecutionEventRouter } from './execution-event-router'
+import { createFlowApiFactory, type FlowApiFactory } from './flow-api-factory'
 import { emitFlowEvent } from './events'
-import util from 'node:util'
-import crypto from 'node:crypto'
-
-
-// Treat cooperative cancellation as a non-error (stop/terminate/abort/cancel)
-function isCancellationError(e: any): boolean {
-  const msg = (e && (e.message || (e.toString && e.toString()))) || ''
-  // Match common cancellation words: cancel/canceled/cancelled, abort/aborted, terminate/terminated, stop/stopped
-  return (
-    (e && e.name === 'AbortError') ||
-    /\b(cancel|canceled|cancelled|abort|aborted|terminate|terminated|stop|stopped)\b/i.test(String(msg))
-  )
-}
+import { ContextLifecycleManager } from './context-lifecycle-manager'
+import { FlowNodeRunner } from './flow-node-runner'
+import { isCancellationError } from './cancellation'
+import { getFlowContextsService, getFlowGraphService, getSessionService } from '../services/index.js'
 
 
 export class FlowScheduler {
   // Graph structure
   private flowDef: FlowDefinition
-  private incomingEdges = new Map<string, Edge[]>()
-  private outgoingEdges = new Map<string, Edge[]>()
+
+  private incomingEdges: Map<string, Edge[]>
+  private outgoingEdges: Map<string, Edge[]>
 
   // Workspace scoping (absolute path)
   private workspaceId: string | undefined
@@ -73,27 +61,13 @@ export class FlowScheduler {
   // User input promises: for nodes waiting for external input
   private userInputResolvers = new Map<string, (value: string) => void>()
 
-  // Input waiters (for gating starts on required inputs like 'context')
-  private inputWaiters = new Map<string, Map<string, Array<() => void>>>()
-
   // Multi-context tracking: main context + isolated contexts
-  private mainContext: MainFlowContext
-  private mainBinding!: ContextBinding
-  private contextRegistry!: ContextRegistry
-  private flowContextsService = getFlowContextsService()
+  private contextLifecycle: ContextLifecycleManager
+  private nodeRunner!: FlowNodeRunner
 
-  // Track in-flight node executions to avoid duplicate work during pulls
-  private inFlightExecutions = new Map<string, Promise<NodeOutput>>()
-
-  // Live pushed inputs for the current execution of each node (mutable during execution)
-  private pushedInputsByNode = new Map<string, Record<string, any>>()
-
-  // Pending pushed inputs for nodes not yet started (coalesced until safe to start)
-  private pendingPushesByNode = new Map<string, Record<string, any>>()
-
-  // Output memoization - cache node outputs to prevent duplicate execution
-  // private nodeOutputCache = new Map<string, NodeOutput>()
-
+  private ioCoordinator!: FlowNodeIoCoordinator
+  private executionEventRouter!: ExecutionEventRouter
+  private flowApiFactory!: FlowApiFactory
 
   // Track active/executing nodes and paused state for status snapshots
   private activeNodeIds = new Set<string>()
@@ -111,6 +85,10 @@ export class FlowScheduler {
     this._wc = wc
     this.requestId = requestId
     this.flowDef = flowDef
+
+    const graph = buildFlowGraph(flowDef)
+    this.incomingEdges = graph.incomingEdges
+    this.outgoingEdges = graph.outgoingEdges
 
     // Workspace scoping for tools/events
 
@@ -156,15 +134,58 @@ export class FlowScheduler {
       console.warn('[Scheduler] No session context provided, using defaults')
     }
 
-    this.mainContext = initialContext
-    this.contextRegistry = new ContextRegistry(initialContext)
-    this.mainBinding = this.contextRegistry.getMainBinding()
-    this.mainContext = this.mainBinding.ref.current
-    this.publishContextState()
+    this.contextLifecycle = new ContextLifecycleManager({
+      initialContext,
+      requestId: this.requestId,
+      workspaceId: this.workspaceId,
+      flowContextsService: getFlowContextsService(),
+    })
 
-    this.buildGraphStructure()
-    // Mark private helpers as referenced to satisfy noUnusedPrivateMembers while keeping them available
-    void this.waitForNodeInput
+    this.executionEventRouter = createExecutionEventRouter({
+      requestId: this.requestId,
+      sessionId: this.sessionId,
+      abortSignal: this.abortController.signal
+    })
+
+    this.ioCoordinator = new FlowNodeIoCoordinator(
+      (nodeId) => this.incomingEdges.get(nodeId) || [],
+      (nodeId, inputs, callerId, isPull) => this.executeNode(nodeId, inputs, callerId, isPull)
+    )
+
+    this.flowApiFactory = createFlowApiFactory({
+      requestId: this.requestId,
+      workspaceId: this.workspaceId,
+      sessionId: this.sessionId,
+      abortController: this.abortController,
+      contextRegistry: this.contextLifecycle.getContextRegistry(),
+      portalRegistry: this.portalRegistry,
+      userInputResolvers: this.userInputResolvers,
+      executionEventRouter: this.executionEventRouter,
+      triggerPortalOutputs: (portalId) => this.triggerPortalOutputs(portalId),
+      setPausedNodeId: (nodeId) => { this.pausedNodeId = nodeId },
+      createIsolatedContext: (options, activeBinding) =>
+        this.contextLifecycle.createIsolatedContext(options, activeBinding),
+      releaseContext: (contextId) => this.contextLifecycle.releaseContext(contextId)
+    })
+
+    this.nodeRunner = new FlowNodeRunner({
+      flowDefinition: this.flowDef,
+      flowApiFactory: this.flowApiFactory,
+      ioCoordinator: this.ioCoordinator,
+      contextLifecycle: this.contextLifecycle,
+      abortSignal: this.abortController.signal,
+      requestId: this.requestId,
+      sessionId: this.sessionId,
+      getNodeConfig: (nodeId) => this.getNodeConfig(nodeId),
+      flushToSession: () => this.flushToSession(),
+      onNodeStart: (nodeId) => {
+        try { this.activeNodeIds.add(nodeId) } catch {}
+      },
+      onNodeEnd: (nodeId) => {
+        try { this.activeNodeIds.delete(nodeId) } catch {}
+      },
+    })
+
 
   }
 
@@ -181,17 +202,17 @@ export class FlowScheduler {
    * This ensures the session persists the conversation state when the scheduler stops
    */
   public async flushToSession(): Promise<void> {
-    try {      const sessionService = getSessionService()
+    try {
+      const sessionService = getSessionService()
+      const workspaceId = this.workspaceId
+      const mainContext = this.mainContext
 
-      // Defensive: only flush if we're still the active session
-      const ws = this.workspaceId
-      if (!ws) {
+      if (!workspaceId) {
         console.warn('[Scheduler.flushToSession] No workspaceId, skipping flush')
         return
       }
 
-      const currentSessionId = sessionService.getCurrentIdFor({ workspaceId: ws })
-
+      const currentSessionId = sessionService.getCurrentIdFor({ workspaceId })
       if (currentSessionId !== this.sessionId) {
         console.warn('[Scheduler.flushToSession] Session changed, skipping flush', {
           schedulerSessionId: this.sessionId,
@@ -200,23 +221,21 @@ export class FlowScheduler {
         return
       }
 
-      // Write mainContext back to session - this ensures session.currentContext matches scheduler's mainContext
-      // This is the single sync point that keeps UI (context inspector) aligned with what LLM receives
       console.log('[Scheduler.flushToSession] Flushing context to session', {
         sessionId: this.sessionId,
-        messageCount: this.mainContext.messageHistory.length,
-        provider: this.mainContext.provider,
-        model: this.mainContext.model
+        messageCount: mainContext.messageHistory.length,
+        provider: mainContext.provider,
+        model: mainContext.model
       })
 
-      if (this.workspaceId && this.sessionId) {
+      if (workspaceId && this.sessionId) {
         sessionService.updateContextFor({
-          workspaceId: this.workspaceId,
+          workspaceId,
           sessionId: this.sessionId,
-          messageHistory: this.mainContext.messageHistory,
-          provider: this.mainContext.provider,
-          model: this.mainContext.model,
-          systemInstructions: this.mainContext.systemInstructions
+          messageHistory: mainContext.messageHistory,
+          provider: mainContext.provider,
+          model: mainContext.model,
+          systemInstructions: mainContext.systemInstructions
         })
       } else {
         console.warn('[Scheduler.flushToSession] Missing workspaceId or sessionId, cannot flush')
@@ -245,165 +264,11 @@ export class FlowScheduler {
     // Flush final state to session before stopping and then clear context state
     // Fire and forget - don't block cancellation
     void this.flushToSession().finally(() => {
-      this.clearContextState()
+      this.contextLifecycle.clearContextState()
     })
   }
 
-  /**
-   * Canonicalize handle names to core outputs/inputs used by the scheduler
-   * We accept common variants from the editor (e.g., contextIn/contextOut, dataOut/value)
-   */
-  private canonicalizeHandleName(name?: string | null): 'context' | 'data' | 'tools' | string {
-    if (!name) return 'context'
-    const raw = String(name).trim().toLowerCase()
-    // remove separators for easy matching
-    const n = raw.replace(/\s+|[-_]/g, '')
 
-    // context synonyms
-    if (n === 'context' || n === 'contextin' || n === 'contextout' || n === 'ctx' || n === 'ctxin' || n === 'ctxout') {
-      return 'context'
-    }
-
-    // data/value synonyms
-    if (n === 'data' || n === 'datain' || n === 'dataout' || n === 'value' || n === 'output') {
-      return 'data'
-    }
-
-    // tools synonyms
-    if (n === 'tools' || n === 'toolsin' || n === 'toolsout') {
-      return 'tools'
-    }
-
-    // Unknown: keep original to avoid over-normalizing
-    return name
-  }
-
-  /**
-   * Build graph structure for efficient edge lookups
-   *
-   * Portals are treated as invisible wiring. We rewrite edges so that
-   * portalInput -> portalOutput connections are bridged directly between
-   * the original source and the final target, matching by handle name.
-   */
-  private buildGraphStructure(): void {
-    // Clear any previous maps (defensive if called more than once)
-    this.incomingEdges.clear()
-    this.outgoingEdges.clear()
-
-
-    const nodesById = new Map<string, any>()
-    for (const n of this.flowDef.nodes) {
-      nodesById.set(n.id, n)
-    }
-
-    // Canonicalize all declared edges first
-    const baseEdges: Edge[] = []
-    for (const edge of this.flowDef.edges) {
-      const mapped: Edge = {
-        ...edge,
-        sourceOutput: this.canonicalizeHandleName(edge.sourceHandle),
-        targetInput: this.canonicalizeHandleName(edge.targetHandle),
-      }
-      baseEdges.push(mapped)
-    }
-
-    // Build portal index by portal id (config.id)
-    const portalInputsByKey = new Map<string, string[]>() // portalId -> nodeIds
-    const portalOutputsByKey = new Map<string, string[]>()
-
-    for (const n of this.flowDef.nodes) {
-      const nodeType = (n as any).nodeType || (n as any).data?.nodeType || (n as any).type
-      if (nodeType !== 'portalInput' && nodeType !== 'portalOutput') continue
-      const pid = (n as any)?.config?.id || (n as any)?.data?.config?.id
-      if (!pid) continue
-      if (nodeType === 'portalInput') {
-        const arr = portalInputsByKey.get(pid) || []
-        arr.push(n.id)
-        portalInputsByKey.set(pid, arr)
-      } else {
-        const arr = portalOutputsByKey.get(pid) || []
-        arr.push(n.id)
-        portalOutputsByKey.set(pid, arr)
-      }
-    }
-
-    // Helper to check whether an edge touches a portal node
-    const isPortalNodeId = (id: string) => {
-      const node = nodesById.get(id)
-      if (!node) return false
-      const t = (node as any).nodeType || (node as any).data?.nodeType || (node as any).type
-      return t === 'portalInput' || t === 'portalOutput'
-    }
-
-    // Collect edges that do NOT touch portals
-    const nonPortalEdges: Edge[] = baseEdges.filter(e => !isPortalNodeId(e.source) && !isPortalNodeId(e.target))
-
-    // For each portal key, create bridged edges from incoming-to-portalInput to outgoing-from-portalOutput
-    const bridgedEdges: Edge[] = []
-    for (const [portalKey, inputNodeIds] of portalInputsByKey.entries()) {
-      const outputNodeIds = portalOutputsByKey.get(portalKey) || []
-      if (outputNodeIds.length === 0) continue // no outputs => nothing to bridge
-
-      // Incoming edges to any portalInput with this key
-      const incomingToPortal: Edge[] = baseEdges.filter(e => inputNodeIds.includes(e.target))
-      // Outgoing edges from any portalOutput with this key
-      const outgoingFromPortal: Edge[] = baseEdges.filter(e => outputNodeIds.includes(e.source))
-
-      // Bridge by matching handle names: sourceOutput (incoming) -> targetInput (outgoing)
-      for (const out of outgoingFromPortal) {
-        for (const inn of incomingToPortal) {
-          if (out.targetInput !== inn.sourceOutput) continue // only bridge like-for-like handles
-
-          const newEdge: Edge = {
-            id: `bridge:${inn.id}=>${out.id}`,
-            source: inn.source,
-            sourceOutput: inn.sourceOutput,
-            sourceHandle: inn.sourceOutput, // keep for compatibility
-            target: out.target,
-            targetInput: out.targetInput,
-            targetHandle: out.targetInput,
-            metadata: {
-              ...(inn.metadata || {}),
-              // Preserve explicit context flag if either side marked it
-              isContextEdge: (inn.metadata?.isContextEdge ?? false) || (out.metadata?.isContextEdge ?? false)
-            }
-          }
-          bridgedEdges.push(newEdge)
-        }
-      }
-    }
-
-    // Combine and de-duplicate edges
-    const dedup = new Map<string, Edge>()
-    const pushUnique = (e: Edge) => {
-      const key = `${e.source}|${e.sourceOutput}|${e.target}|${e.targetInput}`
-      if (!dedup.has(key)) dedup.set(key, e)
-    }
-
-    for (const e of nonPortalEdges) pushUnique(e)
-    for (const e of bridgedEdges) pushUnique(e)
-
-    const finalEdges = Array.from(dedup.values())
-
-    // Populate incoming/outgoing maps
-    for (const e of finalEdges) {
-      const incoming = this.incomingEdges.get(e.target) || []
-      incoming.push(e)
-      this.incomingEdges.set(e.target, incoming)
-
-      const outgoing = this.outgoingEdges.get(e.source) || []
-      outgoing.push(e)
-      this.outgoingEdges.set(e.source, outgoing)
-    }
-
-    // Debug: show bridged wiring summary
-    try {
-      const bridgedCount = bridgedEdges.length
-      if (bridgedCount > 0) {
-        console.log(`[Scheduler] Portal bridging created ${bridgedCount} virtual edge(s) (portals invisible).`)
-      }
-    } catch {}
-  }
 
   /**
    * Execute the flow starting from entry nodes
@@ -455,16 +320,14 @@ export class FlowScheduler {
       const error = e?.message || String(e)
       if (isCancellationError(e)) {
         console.log('[FlowScheduler] Cancelled')
-        // Flush already called in cancel(), but call again to be safe
         await this.flushToSession()
-        this.clearContextState()
+        this.contextLifecycle.clearContextState()
         return { ok: true }
       }
       console.error('[FlowScheduler] Error:', error)
       try { emitFlowEvent(this.requestId, { type: 'error', error, sessionId: this.sessionId }) } catch {}
-      // Flush on error to preserve conversation state
       await this.flushToSession()
-      this.clearContextState()
+      this.contextLifecycle.clearContextState()
       return { ok: false, error }
     }
   }
@@ -483,758 +346,137 @@ export class FlowScheduler {
     callerId: string | null,
     isPull: boolean = false
   ): Promise<NodeOutput> {
-    // In the new architecture, nodes handle their own caching and cycle prevention
-    // The scheduler just executes the node
     console.log(`[Scheduler] ${nodeId} - Executing node`, {
       pushedInputs: Object.keys(pushedInputs),
       callerId,
       isPull
     })
 
-    // Register initial pushed inputs for this execution (mutable during execution)
-    this.pushedInputsByNode.set(nodeId, { ...(pushedInputs || {}) })
+    const promise = this.nodeRunner.run({ nodeId, pushedInputs, callerId, isPull })
+    this.ioCoordinator.registerExecution(nodeId, pushedInputs, promise)
 
-    // Register in-flight execution so pulls can await instead of re-executing
-    const promise = this.doExecuteNode(nodeId, pushedInputs, callerId, isPull)
-    this.inFlightExecutions.set(nodeId, promise)
-    // Clean up when done
-    promise.finally(() => {
-      this.inFlightExecutions.delete(nodeId)
-      this.pushedInputsByNode.delete(nodeId)
-    })
-    return promise
-  }
-
-  /**
-   * Actually execute the node
-   * In the new architecture, nodes control their own pulling via the inputs.pull() function
-   */
-  private async doExecuteNode(
-    nodeId: string,
-    pushedInputs: Record<string, any>,
-    callerId: string | null,
-    isPull: boolean = false
-  ): Promise<NodeOutput> {
-    const startTime = Date.now()
-    // Cooperative cancellation: bail out early if already aborted
-    if (this.abortController.signal.aborted) {
-      throw new Error('Flow execution cancelled')
+    if (isPull) {
+      return promise
     }
 
-
-    // Generate unique execution ID for this node execution
-    const executionId = crypto.randomUUID()
-    console.log(`[Scheduler] ${nodeId} - Starting execution ${executionId}, isPull: ${isPull}, callerId: ${callerId}, pushedInputs:`, Object.keys(pushedInputs))
-
-    try { emitFlowEvent(this.requestId, { type: 'nodeStart', nodeId, executionId, sessionId: this.sessionId }) } catch {}
-    // Track running node for snapshot/status queries
-    try { this.activeNodeIds.add(nodeId) } catch {}
-
-    try {
-      // Do NOT refresh from store here. The scheduler is the source of truth during execution.
-      // The UI should reflect the scheduler's ExecutionContext, not the other way around.
-
-      // Get node configuration from renderer (fresh on every execution)
-      const nodeConfig = this.flowDef.nodes.find(n => n.id === nodeId)
-      const config = await this.getNodeConfig(nodeId)
-
-      // Determine which context this node should run against. When a
-      // context handle is pushed, prefer that binding; otherwise fall
-      // back to the main context binding.
-      const activeBinding = this.resolveActiveBinding(pushedInputs)
-      const contextIn = activeBinding.ref.current
-      const dataIn = pushedInputs.data
-
-      console.log(`[Scheduler] ${nodeId} - Using context snapshot:`, {
-        contextId: contextIn.contextId,
-        contextType: contextIn.contextType,
-        provider: contextIn.provider,
-        model: contextIn.model
-      })
-
-      // Create FlowAPI instance for this node execution. This binds
-      // flow.context to the context-specific ContextManager so that
-      // mutations stay isolated per contextId.
-      const flowAPI = this.createFlowAPI(nodeId, executionId, activeBinding)
-
-      // Create NodeInputs with simple pull/has (no cross-input correlation)
-      const inputs: NodeInputs = {
-        pull: this.createPullFunction(nodeId),
-        has: this.createHasFunction(nodeId)
-      }
-
-      // Execute the node function with new signature
-      const nodeFunction = getNodeFunction(nodeConfig!)
-      const result = await nodeFunction(flowAPI, contextIn, dataIn, inputs, config)
-
-      // Ensure the scheduler tracks whichever context this node
-      // emitted (or default to the active binding if omitted).
-      const outputBinding = this.ensureContextOutput(result, activeBinding)
-
-      // After node execution, snapshot the canonical main context and flush
-      // it to the session so the UI sees the latest state.
-      this.mainContext = this.mainBinding.ref.current
-      await this.flushToSession()
-      this.publishContextState()
-
-      const durationMs = Date.now() - startTime
-      // Reduced logging
-    try { emitFlowEvent(this.requestId, { type: 'nodeEnd', nodeId, durationMs, executionId, sessionId: this.sessionId }) } catch {}
-    // Mark node as no longer active
-    try { this.activeNodeIds.delete(nodeId) } catch {}
-
-      // Check for error status - do not hard-stop the flow here
-      if (result.status === 'error') {
-        const errorMsg = result.error || 'Node execution failed'
-        console.error(`[Scheduler] ${nodeId} - ERROR:`, errorMsg)
-        // Let the caller handle UI; non-entry executions will append an error badge in the catch() below
-        throw new Error(errorMsg)
-      }
-
-      // PUSH PHASE: Call successors with our outputs
-      // Skip this phase if node was executed via pull (caller is waiting for return value)
-      if (!isPull) {
-        // Note: Some nodes (like tools) are pull-only and don't push to successors
-        const outgoingEdges = this.outgoingEdges.get(nodeId) || []
-
-        // Filter out pull-only edges (tools edges should only be pulled, not pushed)
-        const pushEdges = outgoingEdges.filter(edge => {
-          // Tools edges are pull-only - they should not trigger execution
-          if (edge.sourceOutput === 'tools') {
-            return false
-          }
-          return true
-        })
-
-        // Debug: show normalized push edges for this node
-        try {
-          const dbgEdges = pushEdges.map(e => ({ target: e.target, sourceOutput: e.sourceOutput, targetInput: e.targetInput }))
-          console.log(`[Scheduler] ${nodeId} - pushEdges:`, dbgEdges)
-        } catch {}
-
-        // Order successors so we start context recipients first, improving odds of dependent pulls succeeding
-        const successorIds = Array.from(new Set(pushEdges.map(e => e.target)))
-        successorIds.sort((a, b) => {
-          const aHasContext = pushEdges.some(e => e.target === a && e.targetInput === 'context') ? 1 : 0
-          const bHasContext = pushEdges.some(e => e.target === b && e.targetInput === 'context') ? 1 : 0
-          return bHasContext - aHasContext
-        })
-
-        // Kick off all pushes in parallel so pulls can await in-flight producers
-        const runnables: Array<{ id: string; promise: Promise<any> }> = []
-
-        for (const successorId of successorIds) {
-          // Collect all outputs going to this successor
-          const pushedData: Record<string, any> = {}
-          const considered: Array<{sourceOutput: string, targetInput: string, inResult: boolean}> = []
-          let needsContext = false
-
-          for (const edge of pushEdges) {
-            if (edge.target === successorId) {
-              const sourceOutput = edge.sourceOutput
-              const targetInput = edge.targetInput
-              if (targetInput === 'context') {
-                needsContext = true
-              }
-
-              const inResult = sourceOutput in result
-              considered.push({ sourceOutput, targetInput, inResult })
-
-              if (inResult) {
-                const value = (result as any)[sourceOutput]
-                pushedData[targetInput] = value
-              }
-            }
-          }
-
-          if (needsContext && !('context' in pushedData)) {
-            pushedData.context = outputBinding.ref.current
-          }
-
-          try {
-            console.log(`[Scheduler] ${nodeId} - collect for ${successorId}:`, considered)
-          } catch {}
-
-          // If pushing a main context, ensure it has the current provider/model from mainContext
-          // This allows mid-flow model changes to take effect immediately
-          if (pushedData.context && (pushedData.context.contextType === 'main' || !pushedData.context.contextType)) {
-            if (this.mainContext.provider !== pushedData.context.provider ||
-                this.mainContext.model !== pushedData.context.model) {
-              console.log(`[Scheduler] ${nodeId} - Updating pushed context provider/model from mainContext:`, {
-                old: { provider: pushedData.context.provider, model: pushedData.context.model },
-                new: { provider: this.mainContext.provider, model: this.mainContext.model }
-              })
-              pushedData.context = {
-                ...pushedData.context,
-                provider: this.mainContext.provider,
-                model: this.mainContext.model
-              }
-            }
-          }
-
-          // Only push to successor if we have data to push
-          // This prevents calling successors with empty inputs (which would be treated as a pull)
-          if (Object.keys(pushedData).length > 0) {
-            const inFlight = this.inFlightExecutions.get(successorId)
-            if (inFlight) {
-              // Feed the currently in-flight execution; do not start a new one
-              const current = this.pushedInputsByNode.get(successorId) || {}
-              const merged = { ...current, ...pushedData }
-              this.pushedInputsByNode.set(successorId, merged)
-              try { this.resolveNodeInputWaiters(successorId, Object.keys(pushedData)) } catch {}
-              const ctxDbg = merged.context ? { provider: merged.context.provider, model: merged.context.model, contextType: merged.context.contextType } : undefined
-              console.log(`[Scheduler] ${nodeId} - Fed in-flight ${successorId} with:`, Object.keys(pushedData), ctxDbg)
-
-            } else {
-              // Coalesce pending pushes until it's safe to start (avoid ambiguous pulls)
-              const curPending = this.pendingPushesByNode.get(successorId) || {}
-              const merged = { ...curPending, ...pushedData }
-              this.pendingPushesByNode.set(successorId, merged)
-              // Resolve any waiters for inputs we just coalesced
-              try { this.resolveNodeInputWaiters(successorId, Object.keys(pushedData)) } catch {}
-
-              // Determine if any inputs have multiple incoming edges (ambiguous pull)
-              // If so, require that those inputs be present in merged before starting
-              const incoming = this.incomingEdges.get(successorId) || []
-              const counts = new Map<string, number>()
-              for (const e of incoming) {
-                if (e.targetInput === 'tools') continue // tools are pull-only
-                counts.set(e.targetInput, (counts.get(e.targetInput) || 0) + 1)
-              }
-              const missingAmbiguous = Array.from(counts.entries())
-                .filter(([name, count]) => count > 1 && !(name in merged))
-                .map(([name]) => name)
-
-              // Require context to be present before starting if the successor has any context input edge
-              const requiresContext = incoming.some(e => e.targetInput === 'context')
-              const missingContext = requiresContext && !('context' in merged)
-
-              if (missingAmbiguous.length === 0 && !missingContext) {
-                // Safe to start now
-                const initial = { ...merged }
-                this.pendingPushesByNode.delete(successorId)
-                const ctxDbg = initial.context ? { provider: initial.context.provider, model: initial.context.model, contextType: initial.context.contextType } : undefined
-                console.log(`[Scheduler] ${nodeId} - Starting ${successorId} with initial pushed:`, Object.keys(initial), ctxDbg)
-                runnables.push({ id: successorId, promise: this.executeNode(successorId, initial, nodeId) })
-              } else {
-                const waitingFor = [...missingAmbiguous]
-                if (missingContext) waitingFor.push('context')
-                console.log(`[Scheduler] ${nodeId} - Deferring start of ${successorId}; waiting for:`, waitingFor)
-              }
-            }
-          } else {
-            console.log(`[Scheduler] ${nodeId} - NOT pushing to ${successorId} (no data)`)
-          }
-        }
-
-        if (runnables.length) {
-          // Fire-and-forget: do not await successors
-          // Attach catch immediately on each promise to avoid unhandledRejection races
-          for (let i = 0; i < runnables.length; i++) {
-            const succId = runnables[i].id
-            runnables[i].promise = runnables[i].promise.catch((err) => {
-              if (isCancellationError(err)) {
-                console.log(`[Scheduler] ${nodeId} - Successor ${succId} cancelled`)
-                return
-              }
-              console.error(`[Scheduler] ${nodeId} - Successor ${succId} error:`, err)
-            })
-          }
-        }
-      } else {
-        console.log(`[Scheduler] ${nodeId} - SKIP push phase (executed via pull)`)
-      }
-
+    return promise.then((result) => {
+      this.pushSuccessors(nodeId, result)
       return result
-    } catch (e: any) {
-      const error = e?.message || String(e)
-      if (isCancellationError(e)) {
-        console.log(`[FlowScheduler] ${nodeId} cancelled`)
-        throw e
-      }
-      console.error(`[FlowScheduler] Error in ${nodeId}:`, error)
-      if (callerId) {
-        // Non-entry node failed: emit error event
-        try {
-          emitFlowEvent(this.requestId, {
-            type: 'error',
-            nodeId,
-            error,
-            sessionId: this.sessionId
-          })
-        } catch {}
-      } else {
-        // Top-level error (entry execution): emit error event
-        try {
-          emitFlowEvent(this.requestId, {
-            type: 'error',
-            nodeId,
-            error,
-            sessionId: this.sessionId
-          })
-        } catch {}
-      }
-      throw e
-    }
+    })
   }
 
-  /**
-   * Create FlowAPI instance for a node execution
-   */
-  private createFlowAPI(nodeId: string, executionId: string, binding: ContextBinding): FlowAPI {
-    if (!nodeId) {
-      console.error('[FlowScheduler] createFlowAPI called with missing nodeId!', { executionId })
+  private pushSuccessors(nodeId: string, result: NodeOutput): void {
+    const outgoingEdges = this.outgoingEdges.get(nodeId) || []
+    const pushEdges = outgoingEdges.filter(edge => edge.sourceOutput !== 'tools')
+
+    if (pushEdges.length === 0) {
+      console.log(`[Scheduler] ${nodeId} - No push edges, nothing to propagate`)
+      return
     }
-    const emit = createEventEmitter(executionId, nodeId, (event: ExecutionEvent) => {
-      this.handleExecutionEvent(event)
+
+    try {
+      const dbgEdges = pushEdges.map(e => ({ target: e.target, sourceOutput: e.sourceOutput, targetInput: e.targetInput }))
+      console.log(`[Scheduler] ${nodeId} - pushEdges:`, dbgEdges)
+    } catch {}
+
+    const successorIds = Array.from(new Set(pushEdges.map(e => e.target)))
+    successorIds.sort((a, b) => {
+      const aHasContext = pushEdges.some(e => e.target === a && e.targetInput === 'context') ? 1 : 0
+      const bHasContext = pushEdges.some(e => e.target === b && e.targetInput === 'context') ? 1 : 0
+      return bHasContext - aHasContext
     })
 
-    return {
-      nodeId,
-      requestId: this.requestId,
-      executionId,
-      workspaceId: this.workspaceId,
-      signal: this.abortController.signal,
-      checkCancelled: () => {
-        if (this.abortController.signal.aborted) {
-          throw new Error('Flow execution cancelled')
-        }
-      },
-      emitExecutionEvent: emit,
-      store: {},
-      context: binding.manager,
-      contexts: this.buildContextsHelper(binding, nodeId),
-      conversation: {
-        streamChunk: (_chunk: string) => {},
-        addBadge: (_badge: Badge) => `badge-${Date.now()}`,
-        updateBadge: (_badgeId: string, _updates: Partial<Badge>) => {}
-      },
-      log: {
-        debug: (message: string, data?: any) => console.log(`[Flow Debug] ${nodeId}:`, message, data),
-        info: (message: string, data?: any) => console.log(`[Flow Info] ${nodeId}:`, message, data),
-        warn: (message: string, data?: any) => console.warn(`[Flow Warn] ${nodeId}:`, message, data),
-        error: (message: string, data?: any) => console.error(`[Flow Error] ${nodeId}:`, message, data)
-      },
-      tools: {
-        execute: async (toolName: string, args: any) => {
-          console.log(`[Tool] ${nodeId}: ${toolName}`, args)
-          return {}
-        },
-        list: () => (globalThis as any).__agentTools || []
-      },
-      usage: {
-        report: (usage: UsageReport) => {
-          console.log(`[Usage] ${nodeId}:`, usage)
-        }
-      },
-      waitForUserInput: async () => {
-        console.log('[FlowAPI.waitForUserInput] Waiting for input, nodeId:', nodeId)
-        try { emitFlowEvent(this.requestId, { type: 'waitingforinput', nodeId, sessionId: this.sessionId }) } catch {}
-        try { this.pausedNodeId = nodeId } catch {}
+    const runnables: Array<{ id: string; promise: Promise<NodeOutput | undefined> }> = []
 
-        const userInput = await new Promise<string>((resolve, reject) => {
-          this.userInputResolvers.set(nodeId, resolve)
-          if (this.abortController.signal.aborted) {
-            reject(new Error('Flow execution cancelled'))
-            return
-          }
-          this.abortController.signal.addEventListener('abort', () => {
-            reject(new Error('Flow execution cancelled'))
-          }, { once: true })
-        })
+    for (const successorId of successorIds) {
+      const pushedData: Record<string, any> = {}
+      const considered: Array<{ sourceOutput: string; targetInput: string; inResult: boolean }> = []
+      let needsContext = false
 
-        this.userInputResolvers.delete(nodeId)
-        return userInput
-      },
-      triggerPortalOutputs: async (portalId: string) => {
-        await this.triggerPortalOutputs(portalId)
-      },
-      setPortalData: (portalId: string, context?: MainFlowContext, data?: any) => {
-        this.portalRegistry.set(portalId, { context, data })
-      },
-      getPortalData: (portalId: string) => {
-        return this.portalRegistry.get(portalId)
+      for (const edge of pushEdges) {
+        if (edge.target !== successorId) continue
+        const sourceOutput = edge.sourceOutput
+        const targetInput = edge.targetInput
+        if (targetInput === 'context') {
+          needsContext = true
+        }
+
+        const inResult = sourceOutput in result
+        considered.push({ sourceOutput, targetInput, inResult })
+
+        if (inResult) {
+          const value = (result as any)[sourceOutput]
+          pushedData[targetInput] = value
+        }
       }
-    }
-  }
 
-  private buildContextsHelper(activeBinding: ContextBinding, nodeId: string): FlowAPI['contexts'] {
-    return {
-      active: () => this.contextRegistry.cloneContext(activeBinding.ref.current),
-      list: () => this.contextRegistry.listSnapshots(),
-      get: (contextId: string) => this.contextRegistry.getContextSnapshot(contextId),
-      createIsolated: (options) => this.createIsolatedContext({ ...options, createdByNodeId: nodeId }, activeBinding),
-      release: (contextId: string) => this.releaseContext(contextId),
-    }
-  }
-
-  private releaseContext(contextId: string): boolean {
-    if (!contextId) return false
-    const released = this.contextRegistry.releaseContext(contextId)
-    if (released) {
-      this.publishContextState()
-    }
-    return released
-  }
-
-  private createIsolatedContext(options: CreateIsolatedContextOptions, activeBinding: ContextBinding): MainFlowContext {
-    const binding = this.contextRegistry.createIsolatedContext(options, activeBinding)
-    this.publishContextState()
-    return this.contextRegistry.cloneContext(binding.ref.current)
-  }
-
-  private resolveActiveBinding(pushedInputs: Record<string, any>): ContextBinding {
-    if (!this.mainBinding) {
-      this.mainBinding = this.contextRegistry.getMainBinding()
-    }
-
-    const pushed = pushedInputs?.context as MainFlowContext | undefined
-    if (!pushed) {
-      if (pushedInputs) {
-        pushedInputs.context = this.mainBinding.ref.current
+      if (needsContext && !('context' in pushedData)) {
+        pushedData.context = (result as any).context || this.mainBinding.ref.current
       }
-      return this.mainBinding
-    }
 
-    if (pushed === this.mainBinding.ref.current) {
-      if (pushedInputs) {
-        pushedInputs.context = this.mainBinding.ref.current
-      }
-      return this.mainBinding
-    }
+      try {
+        console.log(`[Scheduler] ${nodeId} - collect for ${successorId}:`, considered)
+      } catch {}
 
-    const fallbackType = pushed.contextType === 'isolated' ? 'isolated' : 'main'
-    const binding = this.contextRegistry.resolveFromSnapshot(pushed, fallbackType, { preferExisting: true })
-
-    if (binding.contextType === 'main') {
-      this.mainBinding = binding
-      this.mainContext = binding.ref.current
-    }
-
-    if (pushedInputs) {
-      pushedInputs.context = binding.ref.current
-    }
-    return binding
-  }
-
-  private ensureContextOutput(result: NodeOutput, activeBinding: ContextBinding): ContextBinding {
-    if (!result.context) {
-      result.context = activeBinding.ref.current
-      return activeBinding
-    }
-
-    if (result.context === activeBinding.ref.current) {
-      return activeBinding
-    }
-
-    const binding = this.contextRegistry.ensureBindingForOutput(
-      result.context,
-      result.context.contextType === 'isolated' ? 'isolated' : activeBinding.contextType
-    )
-
-    if (binding.contextType === 'main') {
-      this.mainBinding = binding
-      this.mainContext = binding.ref.current
-    }
-
-    result.context = binding.ref.current
-    return binding
-  }
-
-
-  private captureContextState(): { mainContext: MainFlowContext | null; isolatedContexts: Record<string, MainFlowContext> } {
-    if (!this.contextRegistry) {
-      return { mainContext: null, isolatedContexts: {} }
-    }
-    return this.contextRegistry.captureState()
-  }
-
-  private publishContextState(): void {
-    if (!this.workspaceId) return
-    try {
-      const snapshot = this.captureContextState()
-      this.flowContextsService.setContextsFor({
-        workspaceId: this.workspaceId,
-        requestId: this.requestId,
-        mainContext: snapshot.mainContext,
-        isolatedContexts: snapshot.isolatedContexts,
-      })
-    } catch (error) {
-      console.warn('[FlowScheduler] Failed to publish context state:', error)
-    }
-  }
-  private clearContextState(): void {
-    if (!this.workspaceId) return
-    try {
-      this.flowContextsService.clearContextsFor({
-        workspaceId: this.workspaceId,
-        requestId: this.requestId,
-      })
-    } catch (error) {
-      console.warn('[FlowScheduler] Failed to clear context state:', error)
-    }
-  }
- 
-   /**
-    * Handle execution events from providers and nodes
-   * Routes events to appropriate store handlers based on event type
-   */
-  private async handleExecutionEvent(event: ExecutionEvent): Promise<void> {
-    // If flow has been cancelled, drop streaming/tool events to stop UI updates
-    if (this.abortController.signal.aborted) {
-      if (
-        event.type === 'chunk' ||
-        event.type === 'reasoning' ||
-        event.type === 'tool_start' ||
-        event.type === 'tool_end' ||
-        event.type === 'tool_error' ||
-        event.type === 'rate_limit_wait'
-      ) {
-        return
-      }
-      // Ignore error events emitted after cancellation
-      if (event.type === 'error') {
-        return
-      }
-      // Allow 'usage' so tokens can be recorded; 'done' is harmless if duplicate
-    }
-
-    // Tool event debug log (FlowAPI layer -> before store handling)
-    if (event.type === 'tool_start' || event.type === 'tool_end' || event.type === 'tool_error') {
-      const t = event.tool
-      const name = t?.toolName
-      const callId = t?.toolCallId
-      console.log(`[FlowAPI] Tool event ${event.type} node=${event.nodeId} exec=${event.executionId} name=${name} callId=${callId} provider=${event.provider} model=${event.model}`)
-      console.log(util.inspect(event, { depth: null, colors: false, maxArrayLength: 200 }))
-    }
-
-
-    switch (event.type) {
-      case 'chunk':
-        if (event.chunk) {
-          if (process.env.HF_FLOW_DEBUG === '1') {
-            const brief = (event.chunk || '').slice(0, 60).replace(/\n/g, '\\n')
-            console.log(`[FlowAPI] chunk node=${event.nodeId} exec=${event.executionId} len=${event.chunk.length} brief=${brief}`)
-          }
-          const chunkEvent = { type: 'chunk' as const, nodeId: event.nodeId, text: event.chunk, executionId: event.executionId, sessionId: this.sessionId }
-          try { emitFlowEvent(this.requestId, chunkEvent) } catch {}
-        }
-        break
-
-      case 'reasoning':
-        if ((event as any).reasoning) {
-          if (process.env.HF_FLOW_DEBUG === '1') {
-            const brief = ((event as any).reasoning || '').slice(0, 60).replace(/\n/g, '\\n')
-            console.log(`[FlowAPI] reasoning node=${event.nodeId} exec=${event.executionId} len=${(event as any).reasoning.length} brief=${brief}`)
-          }
-          try { emitFlowEvent(this.requestId, { type: 'reasoning', nodeId: event.nodeId, text: (event as any).reasoning, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
-        }
-        break
-
-      case 'tool_start':
-        if (event.tool) {
-          try { emitFlowEvent(this.requestId, { type: 'toolStart', nodeId: event.nodeId, toolName: event.tool.toolName, callId: event.tool.toolCallId, toolArgs: event.tool.toolArgs, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
-        }
-        break
-
-      case 'tool_end':
-        if (event.tool) {
-          try { emitFlowEvent(this.requestId, { type: 'toolEnd', nodeId: event.nodeId, toolName: event.tool.toolName, callId: event.tool.toolCallId, result: event.tool.toolResult, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
-        }
-        break
-
-      case 'tool_error':
-        if (event.tool) {
-          try { emitFlowEvent(this.requestId, { type: 'toolError', nodeId: event.nodeId, toolName: event.tool.toolName, error: event.tool.toolError || 'Unknown error', callId: event.tool.toolCallId, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
-        }
-        break
-
-      case 'usage':
-        if (event.usage) {
-          try { emitFlowEvent(this.requestId, { type: 'tokenUsage', nodeId: event.nodeId, provider: event.provider, model: event.model, usage: { inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, totalTokens: event.usage.totalTokens, cachedTokens: event.usage.cachedTokens || 0 }, cost: event.usage.cost, executionId: event.executionId, sessionId: this.sessionId }) } catch {}
-        }
-        break
-
-
-      case 'usage_breakdown':
-        if ((event as any).usageBreakdown) {
-          try {
-            emitFlowEvent(this.requestId, {
-              type: 'usageBreakdown',
-              nodeId: event.nodeId,
-              provider: event.provider,
-              model: event.model,
-              breakdown: (event as any).usageBreakdown,
-              executionId: (event as any).executionId,
-              sessionId: this.sessionId
-            })
-          } catch (e) {
-            console.warn('[FlowAPI] usageBreakdown emit failed:', e)
+      if (pushedData.context && (pushedData.context.contextType === 'main' || !pushedData.context.contextType)) {
+        const mainContext = this.mainContext
+        if (mainContext.provider !== pushedData.context.provider || mainContext.model !== pushedData.context.model) {
+          console.log(`[Scheduler] ${nodeId} - Updating pushed context provider/model from mainContext:`, {
+            old: { provider: pushedData.context.provider, model: pushedData.context.model },
+            new: { provider: mainContext.provider, model: mainContext.model }
+          })
+          pushedData.context = {
+            ...pushedData.context,
+            provider: mainContext.provider,
+            model: mainContext.model
           }
         }
-        break
-
-      case 'done':
-        // Flow execution completed
-        try { emitFlowEvent(this.requestId, { type: 'done', sessionId: this.sessionId }) } catch {}
-        break
-
-      case 'error':
-        if (event.error) {
-          try { emitFlowEvent(this.requestId, { type: 'error', nodeId: event.nodeId, error: event.error, sessionId: this.sessionId }) } catch {}
-        }
-        break
-
-      case 'rate_limit_wait':
-        if (event.rateLimitWait) {
-          if (process.env.HF_FLOW_DEBUG === '1') {
-            console.log('[ExecutionEvent] rate_limit_wait', event.rateLimitWait)
-          }
-        }
-        break
-
-      default:
-        console.warn(`[ExecutionEvent] Unknown event type:`, event.type)
-    }
-  }
-
-  /**
-   * Create pull function for a node
-   * Allows nodes to lazily pull from connected inputs
-   */
-  private createPullFunction(
-    nodeId: string
-  ): (inputName: string) => Promise<any> {
-    return async (inputName: string) => {
-      console.log(`[Pull] ${nodeId} attempting to pull ${inputName}`)
-
-      // First, check if this input was pushed to the current execution already (late push support)
-      const livePushed = this.pushedInputsByNode.get(nodeId) || {}
-      if (inputName in livePushed) {
-        return (livePushed as any)[inputName]
       }
 
-      const incomingEdges = this.incomingEdges.get(nodeId) || []
-      const edgesForInput = incomingEdges.filter(e => e.targetInput === inputName)
-
-      if (edgesForInput.length === 0) {
-        console.error(`[Pull] ${nodeId} - No edge found for input '${inputName}'`)
-        throw new Error(`No edge found for input '${inputName}' on node '${nodeId}'`)
+      if (Object.keys(pushedData).length === 0) {
+        console.log(`[Scheduler] ${nodeId} - NOT pushing to ${successorId} (no data)`)
+        continue
       }
 
-      if (edgesForInput.length > 1) {
-        console.error(`[Pull] ${nodeId} - Invalid graph: multiple edges target input '${inputName}'`)
-        throw new Error(`Invalid graph: multiple edges target input '${inputName}' on node '${nodeId}'`)
-      }
-
-      const edge = edgesForInput[0]
-      console.log(`[Pull] ${nodeId} pulling ${inputName} from ${edge.source}.${edge.sourceOutput}`)
-
-      // If source node is already executing, await its result instead of re-executing
-      const inFlight = this.inFlightExecutions.get(edge.source)
+      const inFlight = this.ioCoordinator.getInFlightExecution(successorId)
       if (inFlight) {
-        try {
-          const res = await inFlight
-          if (edge.sourceOutput in res) {
-            return (res as any)[edge.sourceOutput]
-          }
+        const merged = this.ioCoordinator.mergeIntoLiveInputs(successorId, pushedData)
+        const ctxDbg = merged.context ? { provider: merged.context.provider, model: merged.context.model, contextType: merged.context.contextType } : undefined
+        console.log(`[Scheduler] ${nodeId} - Fed in-flight ${successorId} with:`, Object.keys(pushedData), ctxDbg)
+        continue
+      }
+
+      const queueResult = this.ioCoordinator.queuePendingInputs(successorId, pushedData)
+      if (queueResult.type === 'ready') {
+        const initial = { ...queueResult.initialInputs }
+        const ctxDbg = initial.context ? { provider: initial.context.provider, model: initial.context.model, contextType: initial.context.contextType } : undefined
+        console.log(`[Scheduler] ${nodeId} - Starting ${successorId} with initial pushed:`, Object.keys(initial), ctxDbg)
+        runnables.push({ id: successorId, promise: this.executeNode(successorId, initial, nodeId) })
+      } else {
+        console.log(`[Scheduler] ${nodeId} - Deferring start of ${successorId}; waiting for:`, queueResult.waitingFor)
+      }
+    }
+
+    for (const runnable of runnables) {
+      const succId = runnable.id
+      runnable.promise = runnable.promise.catch((err) => {
+        if (isCancellationError(err)) {
+          console.log(`[Scheduler] ${nodeId} - Successor ${succId} cancelled`)
           return undefined
-        } catch (e) {
-          throw e
         }
-      }
-
-
-
-      // Execute source node to get the value (pull-only) — include any pending pushed inputs as initial
-      const initialFromPending = { ...(this.pendingPushesByNode.get(edge.source) || {}) }
-      if (Object.keys(initialFromPending).length > 0) {
-        // Clear pending; execute will register pushed for this run
-        this.pendingPushesByNode.delete(edge.source)
-      }
-      const sourceResult = await this.executeNode(edge.source, initialFromPending, nodeId, true)
-
-      if (edge.sourceOutput in sourceResult) {
-        return (sourceResult as any)[edge.sourceOutput]
-      }
-
-      return undefined
+        console.error(`[Scheduler] ${nodeId} - Successor ${succId} error:`, err)
+        return undefined
+      })
     }
   }
 
-  /**
-   * Create has function for a node
-   * Checks if an input is available (pushed or can be pulled)
-   */
-  private createHasFunction(
-    nodeId: string
-  ): (inputName: string) => boolean {
-    return (inputName: string) => {
-      // If input was already pushed to the CURRENT execution, we have it
-      const pushed = this.pushedInputsByNode.get(nodeId) || {}
-      if (inputName in pushed) {
-        return true
-      }
-
-      const incomingEdges = this.incomingEdges.get(nodeId) || []
-      const edgesForInput = incomingEdges.filter(e => e.targetInput === inputName)
-
-      // If exactly one incoming edge, this input can be pulled (if needed)
-      if (edgesForInput.length === 1) {
-        return true
-      }
-
-      // If multiple incoming edges, we cannot PULL (ambiguous), but PUSH is still allowed.
-      // Do not treat this as a hard error in `has()` — simply report as "not available"
-      // so nodes won't attempt to pull. If a predecessor PUSHES, it will still work.
-      if (edgesForInput.length > 1) {
-        return false
-      }
-
-      // No incoming edges — not available
-      return false
-    }
+  private get mainBinding(): ContextBinding {
+    return this.contextLifecycle.getMainBinding()
   }
 
-  /**
-   * Wait until a specific input is available (pushed or pending) for a node
-   */
-  private async waitForNodeInput(nodeId: string, inputName: string): Promise<void> {
-    // Fast path: if already available, return immediately
-    const pushed = this.pushedInputsByNode.get(nodeId) || {}
-    const pending = this.pendingPushesByNode.get(nodeId) || {}
-    if (inputName in pushed || inputName in pending) return
-
-    return new Promise<void>((resolve) => {
-      let byInput = this.inputWaiters.get(nodeId)
-      if (!byInput) {
-        byInput = new Map<string, Array<() => void>>()
-        this.inputWaiters.set(nodeId, byInput)
-      }
-      const arr = byInput.get(inputName) || []
-      arr.push(resolve)
-      byInput.set(inputName, arr)
-    })
+  private get mainContext(): MainFlowContext {
+    return this.contextLifecycle.getMainContext()
   }
-
-  /**
-   * Resolve any waiters for inputs that just became available for a node
-   */
-  private resolveNodeInputWaiters(nodeId: string, availableKeys: string[]): void {
-    const byInput = this.inputWaiters.get(nodeId)
-    if (!byInput) return
-    for (const key of availableKeys) {
-      const arr = byInput.get(key)
-      if (arr && arr.length) {
-        for (const fn of arr) {
-          try { fn() } catch {}
-        }
-        byInput.delete(key)
-      }
-    }
-    if (byInput.size === 0) this.inputWaiters.delete(nodeId)
-  }
-
 
 
 

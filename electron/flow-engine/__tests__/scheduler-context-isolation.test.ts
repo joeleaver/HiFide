@@ -166,13 +166,13 @@ describe('Scheduler Context Isolation', () => {
 
       // Mock the node execution to capture the context
       let capturedContext: any = null
-      const originalExecuteNode = (scheduler as any).doExecuteNode.bind(scheduler)
-      ;(scheduler as any).doExecuteNode = async function(nodeId: string, pushedInputs: any, callerId: any, isPull: boolean) {
-        // Capture context immediately on entry so we don't miss it if the node throws
-        if (nodeId === 'llmRequest-1' && pushedInputs && pushedInputs.context) {
-          capturedContext = pushedInputs.context
+      const nodeRunner = (scheduler as any).nodeRunner
+      const originalRun = nodeRunner.run.bind(nodeRunner)
+      nodeRunner.run = async function(params: any) {
+        if (params?.nodeId === 'llmRequest-1' && params.pushedInputs?.context) {
+          capturedContext = params.pushedInputs.context
         }
-        return originalExecuteNode(nodeId, pushedInputs, callerId, isPull)
+        return originalRun(params)
       }
 
       // Execute the flow (will fail at llmRequest since we don't have real LLM, but that's OK)
@@ -249,12 +249,13 @@ describe('Scheduler Context Isolation', () => {
 
       // Mock the node execution to capture the context
       let capturedContext: any = null
-      const originalExecuteNode = (scheduler as any).doExecuteNode.bind(scheduler)
-      ;(scheduler as any).doExecuteNode = async function(nodeId: string, pushedInputs: any, callerId: any, isPull: boolean) {
-        if (nodeId === 'llmRequest-1' && pushedInputs && pushedInputs.context) {
-          capturedContext = pushedInputs.context
+      const nodeRunner = (scheduler as any).nodeRunner
+      const originalRun = nodeRunner.run.bind(nodeRunner)
+      nodeRunner.run = async function(params: any) {
+        if (params?.nodeId === 'llmRequest-1' && params.pushedInputs?.context) {
+          capturedContext = params.pushedInputs.context
         }
-        return originalExecuteNode(nodeId, pushedInputs, callerId, isPull)
+        return originalRun(params)
       }
 
       // Execute the flow
@@ -329,12 +330,13 @@ describe('Scheduler Context Isolation', () => {
 
       // Mock to capture context
       let capturedContext: any = null
-      const originalExecuteNode = (scheduler as any).doExecuteNode.bind(scheduler)
-      ;(scheduler as any).doExecuteNode = async function(nodeId: string, pushedInputs: any, callerId: any, isPull: boolean) {
-        if (nodeId === 'llmRequest-1' && pushedInputs && pushedInputs.context) {
-          capturedContext = pushedInputs.context
+      const nodeRunner = (scheduler as any).nodeRunner
+      const originalRun = nodeRunner.run.bind(nodeRunner)
+      nodeRunner.run = async function(params: any) {
+        if (params?.nodeId === 'llmRequest-1' && params.pushedInputs?.context) {
+          capturedContext = params.pushedInputs.context
         }
-        return originalExecuteNode(nodeId, pushedInputs, callerId, isPull)
+        return originalRun(params)
       }
 
       // Execute without failing the test on expected downstream llmRequest error

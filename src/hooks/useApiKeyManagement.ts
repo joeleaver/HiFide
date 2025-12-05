@@ -4,6 +4,8 @@ import { notifications } from '@mantine/notifications'
 import type { BackendClient } from '../lib/backend/client'
 import type { SettingsSnapshotResponse } from '../../electron/types/settings'
 
+type ReadyAwareClient = BackendClient & { whenReady?: (timeout?: number) => Promise<void> }
+
 interface ApiKeyManagementState {
   apiKeys: Record<string, string>
   providerValid: Record<string, boolean>

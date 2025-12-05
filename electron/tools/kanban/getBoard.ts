@@ -1,5 +1,5 @@
 import type { AgentTool } from '../../providers/provider'
-import type { KanbanBoard, KanbanStatus } from '../../store'
+import type { KanbanBoard, KanbanStatus, KanbanTask } from '../../store'
 import { readKanbanBoard } from '../../store/utils/kanban.js'
 
 async function ensureBoardLoadedFor(workspaceId?: string): Promise<KanbanBoard> {
@@ -9,6 +9,35 @@ async function ensureBoardLoadedFor(workspaceId?: string): Promise<KanbanBoard> 
 
   // Always read directly from disk for the specified workspace to avoid single-tenant store crosstalk
   return await readKanbanBoard(workspaceId)
+}
+
+type FilterParams = { status?: KanbanStatus; epicId?: string }
+
+function filterArchivedTasks(board: KanbanBoard): KanbanBoard {
+  const visibleTasks = board.tasks.filter((task) => !task.archived)
+
+  if (visibleTasks.length === board.tasks.length) {
+    return board
+  }
+
+  return { ...board, tasks: visibleTasks }
+}
+
+function filterTasksByParams(tasks: KanbanTask[], params: FilterParams): KanbanTask[] {
+  return tasks.filter((task) => {
+    if (params.status && task.status !== params.status) return false
+    if (params.epicId && task.epicId !== params.epicId) return false
+    return true
+  })
+}
+
+function groupTasksByStatus(tasks: KanbanTask[]): Record<KanbanStatus, KanbanTask[]> {
+  return {
+    backlog: tasks.filter((t) => t.status === 'backlog'),
+    todo: tasks.filter((t) => t.status === 'todo'),
+    inProgress: tasks.filter((t) => t.status === 'inProgress'),
+    done: tasks.filter((t) => t.status === 'done'),
+  }
 }
 
 export const kanbanGetBoardTool: AgentTool = {
@@ -23,22 +52,14 @@ export const kanbanGetBoardTool: AgentTool = {
     additionalProperties: false,
   },
   run: async (input: { status?: KanbanStatus; epicId?: string }, meta?: any) => {
-    const board = await ensureBoardLoadedFor(meta?.workspaceId)
+    const rawBoard = await ensureBoardLoadedFor(meta?.workspaceId)
+    const board = filterArchivedTasks(rawBoard)
 
-    const params = { status: input?.status, epicId: input?.epicId }
+    const params: FilterParams = { status: input?.status, epicId: input?.epicId }
 
-    const tasks = board.tasks.filter((task) => {
-      if (params.status && task.status !== (params.status as KanbanStatus)) return false
-      if (params.epicId && task.epicId !== params.epicId) return false
-      return true
-    })
+    const tasks = filterTasksByParams(board.tasks, params)
 
-    const byStatus: Record<KanbanStatus, typeof tasks> = {
-      backlog: tasks.filter((t) => t.status === 'backlog'),
-      todo: tasks.filter((t) => t.status === 'todo'),
-      inProgress: tasks.filter((t) => t.status === 'inProgress'),
-      done: tasks.filter((t) => t.status === 'done'),
-    }
+    const byStatus = groupTasksByStatus(tasks)
     const counts = {
       backlog: byStatus.backlog.length,
       todo: byStatus.todo.length,

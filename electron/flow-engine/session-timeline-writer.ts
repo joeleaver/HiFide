@@ -1,9 +1,15 @@
 
 import { ServiceRegistry } from '../services/base/ServiceRegistry.js'
 import { getWorkspaceIdForSessionId } from '../utils/workspace-session.js'
-import type { NodeExecutionBox } from '../store/types.js'
+import type { NodeExecutionBox, TokenCost } from '../store/types.js'
 import { broadcastWorkspaceNotification } from '../backend/ws/broadcast.js'
 import { getSettingsService } from '../services/index.js'
+import {
+  mergeCostBucket,
+  normalizeTokenCostSnapshot,
+  serializeNormalizedCost,
+  type NormalizedTokenCost,
+} from './session-cost-utils.js'
 
 /**
  * Handles the "dirty work" of finding a session, updating its timeline items,
@@ -127,94 +133,98 @@ export class SessionTimelineWriter {
     const { session, index, allSessions } = this.getSession(ws)
     if (!session) return
 
-    const tokenUsage = session.tokenUsage || {
-      total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 },
-      byProvider: {},
-      byProviderAndModel: {},
-    }
+    const tokenUsage = session.tokenUsage && typeof session.tokenUsage === 'object'
+      ? session.tokenUsage
+      : {
+        total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0, reasoningTokens: 0 },
+        byProvider: {},
+        byProviderAndModel: {},
+      }
 
-    // Update totals
-    tokenUsage.total.inputTokens += ev.usage.inputTokens || 0
-    tokenUsage.total.outputTokens += ev.usage.outputTokens || 0
-    tokenUsage.total.totalTokens += ev.usage.totalTokens || 0
-    tokenUsage.total.cachedTokens += ev.usage.cachedTokens || 0
+    tokenUsage.total = tokenUsage.total || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0, reasoningTokens: 0 }
+    tokenUsage.byProvider = tokenUsage.byProvider || {}
+    tokenUsage.byProviderAndModel = tokenUsage.byProviderAndModel || {}
 
-    // Update by provider
-    const providerKey = ev.provider
-    if (!tokenUsage.byProvider[providerKey]) {
-      tokenUsage.byProvider[providerKey] = {
-        inputTokens: 0,
-        outputTokens: 0,
-        totalTokens: 0,
-        cachedTokens: 0,
+    const deltaInput = Number(ev.usage?.inputTokens ?? 0)
+    const deltaOutput = Number(ev.usage?.outputTokens ?? 0)
+    const deltaTotal = Number(ev.usage?.totalTokens ?? (deltaInput + deltaOutput))
+    const deltaCached = Number(ev.usage?.cachedTokens ?? 0)
+    const deltaReasoning = Number(ev.usage?.reasoningTokens ?? 0)
+
+    const applyUsageDelta = (bucket: any) => {
+      bucket.inputTokens = Number(bucket.inputTokens || 0) + deltaInput
+      bucket.outputTokens = Number(bucket.outputTokens || 0) + deltaOutput
+      bucket.totalTokens = Number(bucket.totalTokens || 0) + deltaTotal
+      bucket.cachedTokens = Number(bucket.cachedTokens || 0) + deltaCached
+      if (deltaReasoning > 0) {
+        bucket.reasoningTokens = Number(bucket.reasoningTokens || 0) + deltaReasoning
       }
     }
-    tokenUsage.byProvider[providerKey].inputTokens += ev.usage.inputTokens || 0
-    tokenUsage.byProvider[providerKey].outputTokens += ev.usage.outputTokens || 0
-    tokenUsage.byProvider[providerKey].totalTokens += ev.usage.totalTokens || 0
-    tokenUsage.byProvider[providerKey].cachedTokens += ev.usage.cachedTokens || 0
 
-    // Update by provider and model (Nested: provider -> model -> usage)
-    if (!tokenUsage.byProviderAndModel) {
-      tokenUsage.byProviderAndModel = {}
+    applyUsageDelta(tokenUsage.total)
+
+    const providerKey = ev.provider || 'unknown'
+    if (!tokenUsage.byProvider[providerKey]) {
+      tokenUsage.byProvider[providerKey] = { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0, reasoningTokens: 0 }
     }
+    applyUsageDelta(tokenUsage.byProvider[providerKey])
+
+    const modelKey = ev.model || 'unknown'
     if (!tokenUsage.byProviderAndModel[providerKey]) {
       tokenUsage.byProviderAndModel[providerKey] = {}
     }
-    const modelKey = ev.model
     if (!tokenUsage.byProviderAndModel[providerKey][modelKey]) {
-      tokenUsage.byProviderAndModel[providerKey][modelKey] = {
-        inputTokens: 0,
-        outputTokens: 0,
-        totalTokens: 0,
-        cachedTokens: 0,
-      }
+      tokenUsage.byProviderAndModel[providerKey][modelKey] = { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0, reasoningTokens: 0 }
     }
-    tokenUsage.byProviderAndModel[providerKey][modelKey].inputTokens += ev.usage.inputTokens || 0
-    tokenUsage.byProviderAndModel[providerKey][modelKey].outputTokens += ev.usage.outputTokens || 0
-    tokenUsage.byProviderAndModel[providerKey][modelKey].totalTokens += ev.usage.totalTokens || 0
-    tokenUsage.byProviderAndModel[providerKey][modelKey].cachedTokens += ev.usage.cachedTokens || 0
+    applyUsageDelta(tokenUsage.byProviderAndModel[providerKey][modelKey])
 
-    // Update costs
-    const costs = session.costs || {
-      totalCost: 0,
-      currency: 'USD',
-      byProviderAndModel: {}
-    }
+    const costs = session.costs && typeof session.costs === 'object'
+      ? session.costs
+      : { inputCost: 0, cachedCost: 0, outputCost: 0, totalCost: 0, currency: 'USD', byProviderAndModel: {} }
 
-    // Calculate cost if not provided (centralized cost calculation)
-    let cost = ev.cost
-    if (!cost) {
+    costs.byProviderAndModel = costs.byProviderAndModel || {}
+    costs.currency = costs.currency || 'USD'
+    // Session-level aggregates: canonical three-way split.
+    costs.inputCost = Number(costs.inputCost || 0)
+    ;(costs as any).cachedCost = Number((costs as any).cachedCost ?? (costs as any).cachedInputCost ?? 0)
+    costs.outputCost = Number(costs.outputCost || 0)
+    costs.totalCost = Number(costs.totalCost || 0)
+
+    let normalizedCost: NormalizedTokenCost | null = null
+    let calculatedCost: TokenCost | undefined = ev.cost
+
+    if (!calculatedCost) {
       try {
         const settingsService = getSettingsService()
-        cost = settingsService.calculateCost(providerKey, modelKey, ev.usage) || undefined
+        calculatedCost = settingsService.calculateCost(providerKey, modelKey, ev.usage) || undefined
       } catch (e) {
         console.warn('[SessionTimelineWriter] Failed to calculate cost:', e)
       }
     }
 
-    if (cost) {
-      costs.totalCost += cost.totalCost || 0
-      
-      if (!costs.byProviderAndModel) costs.byProviderAndModel = {}
-      if (!costs.byProviderAndModel[providerKey]) costs.byProviderAndModel[providerKey] = {}
-      
-      if (!costs.byProviderAndModel[providerKey][modelKey]) {
-        costs.byProviderAndModel[providerKey][modelKey] = {
-          inputCost: 0,
-          outputCost: 0,
-          totalCost: 0,
-          currency: 'USD'
-        }
-      }
-      
-      costs.byProviderAndModel[providerKey][modelKey].inputCost += cost.inputCost || 0
-      costs.byProviderAndModel[providerKey][modelKey].outputCost += cost.outputCost || 0
-      costs.byProviderAndModel[providerKey][modelKey].totalCost += cost.totalCost || 0
+    if (calculatedCost) {
+      normalizedCost = normalizeTokenCostSnapshot(calculatedCost)
+
+      // Aggregate into session-level totals.
+      costs.inputCost += normalizedCost.inputCost
+      ;(costs as any).cachedCost = Number((costs as any).cachedCost ?? 0) + normalizedCost.cachedCost
+      costs.outputCost += normalizedCost.outputCost
+      costs.totalCost += normalizedCost.totalCost
+
+      const providerCosts = costs.byProviderAndModel[providerKey] || {}
+      costs.byProviderAndModel[providerKey] = providerCosts
+      providerCosts[modelKey] = mergeCostBucket(providerCosts[modelKey], normalizedCost)
     }
 
-    // Append to requestsLog
     const requestsLog = Array.isArray(session.requestsLog) ? [...session.requestsLog] : []
+    const usageSnapshot = {
+      inputTokens: deltaInput,
+      outputTokens: deltaOutput,
+      totalTokens: deltaTotal,
+      cachedTokens: deltaCached,
+      ...(deltaReasoning > 0 ? { reasoningTokens: deltaReasoning } : {}),
+    }
+
     requestsLog.push({
       requestId: ev.requestId,
       nodeId: ev.nodeId,
@@ -222,8 +232,8 @@ export class SessionTimelineWriter {
       provider: ev.provider,
       model: ev.model,
       timestamp: Date.now(),
-      usage: ev.usage,
-      cost: cost // Use the calculated cost (or ev.cost if provided)
+      usage: usageSnapshot,
+      cost: normalizedCost ? serializeNormalizedCost(normalizedCost) : calculatedCost,
     })
 
     // Save updated usage/costs/requests to the session only when we have actual usage

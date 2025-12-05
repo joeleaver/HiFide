@@ -6,17 +6,64 @@
     {
       "id": "defaultContextStart",
       "nodeType": "defaultContextStart",
-      "config": {},
+      "config": {
+        "modelOverrides": [
+          {
+            "model": "accounts/fireworks/models/deepseek-v3p2",
+            "temperature": 0
+          },
+          {
+            "model": "accounts/fireworks/models/deepseek-v3p1-terminus"
+          }
+        ]
+      },
       "position": {
         "x": -665.9652327630902,
         "y": -487.38813591580697
       },
-      "expanded": false
+      "expanded": true
     },
     {
       "id": "tools-1761193059289",
       "nodeType": "tools",
-      "config": {},
+      "config": {
+        "tools": [
+          "terminalExec",
+          "terminalSessionSearchOutput",
+          "terminalSessionTail",
+          "terminalSessionRestart",
+          "textGrep",
+          "workspaceSearch",
+          "workspaceMap",
+          "knowledgeBaseSearch",
+          "knowledgeBaseStore",
+          "knowledgeBaseDelete",
+          "kanbanGetBoard",
+          "kanbanCreateTask",
+          "kanbanUpdateTask",
+          "kanbanDeleteTask",
+          "kanbanMoveTask",
+          "kanbanCreateEpic",
+          "kanbanUpdateEpic",
+          "kanbanDeleteEpic",
+          "applyEdits",
+          "fsReadFile",
+          "fsReadLines",
+          "fsReadDir",
+          "fsWriteFile",
+          "fsCreateDir",
+          "fsDeleteDir",
+          "fsDeleteFile",
+          "fsExists",
+          "fsStat",
+          "fsAppendFile",
+          "fsMove",
+          "fsCopy",
+          "fsRemove",
+          "fsTruncateFile",
+          "fsTruncateDir"
+        ]
+      },
       "position": {
         "x": -132.03643728844327,
         "y": 276.29571938245414
@@ -50,8 +97,8 @@
         "id": "main"
       },
       "position": {
-        "x": -504.5007145739991,
-        "y": -42.96203927129751
+        "x": -467.08159536141795,
+        "y": 95.07293382400209
       },
       "expanded": true
     },

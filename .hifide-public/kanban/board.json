@@ -33,10 +33,70 @@
       "archived": false
     },
     {
+      "id": "task-4ca98197-6bc1-439b-897f-0af8ced1ce60",
+      "title": "Stop session.usage.changed emissions when usage data unchanged",
+      "status": "inProgress",
+      "order": 0,
+      "description": "Renderer logs show session.usage.changed being emitted for every streamed chunk even though the payload is identical. Update the backend/event pipeline so session usage events are only emitted when tokenUsage/costs/requestsLog actually change, preventing redundant renderer updates.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "bug",
+        "usage",
+        "events",
+        "performance"
+      ],
+      "createdAt": 1764898569423,
+      "updatedAt": 1764898572152,
+      "archived": false
+    },
+    {
+      "id": "task-0fb573da-47c8-4b04-bbc0-c7aeb96a3ae8",
+      "title": "Fix terminalExec tool syntax error",
+      "status": "inProgress",
+      "order": 1,
+      "description": "Address the syntax error at electron/tools/terminal/exec.ts:76 introduced during the single-parameter refactor. Restore valid TypeScript by correcting the schema definition (missing comma) and ensure the module builds cleanly.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "terminal",
+        "tooling",
+        "bugfix"
+      ],
+      "createdAt": 1764896785735,
+      "updatedAt": 1764896787506,
+      "archived": false
+    },
+    {
+      "id": "task-752d37f9-f4c1-4475-8d9f-d7a054b288b2",
+      "title": "Fix Tokens & Costs panel input tokens and cost math",
+      "status": "inProgress",
+      "order": 2,
+      "description": "User reports: \"The cost and token reporting still isn't right. input tokens aren't coming through. And I think the math is wrong on the costing.\" Investigate end-to-end token & cost reporting, focusing on missing input tokens and incorrect cost math. Verify backend usage_breakdown payload, renderer aggregation, and per-model pricing tables.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "bug",
+        "usage",
+        "tokens-costs",
+        "frontend",
+        "backend"
+      ],
+      "createdAt": 1764885885902,
+      "updatedAt": 1764888594092,
+      "archived": false
+    },
+    {
       "id": "task-30ac983b-c5da-4f92-976d-aba7a548555c",
       "title": "Refactor Settings pane data hydration and backend alignment",
       "status": "inProgress",
-      "order": 0,
+      "order": 3,
       "description": "Implement the Settings pane refactor per the documented audit plan:\n1. Share a typed settings snapshot populated from SettingsService, ProviderService, and AppService startup message.\n2. Build a renderer hook to hydrate and subscribe to settings/provider updates, ensuring API keys and provider validity load immediately.\n3. Align Fireworks allowlist/load-defaults RPCs with backend handlers and return updated allowlists/models.\n4. Await provider RPCs in the UI, surface errors, and clean up stale \"load defaults\" wiring.",
       "epicId": null,
       "assignees": [
@@ -56,7 +116,7 @@
       "id": "task-3e5dcf0f-58fa-4884-908e-5182f7d149b4",
       "title": "Redesign workspaceMap for language-agnostic repository mapping",
       "status": "inProgress",
-      "order": 1,
+      "order": 4,
       "description": "Define and implement a generic workspaceMap tool that produces useful structure summaries for arbitrary repositories (any language/tooling), replacing the current renderer/electron-specific heuristics.",
       "epicId": "epic-initial",
       "assignees": [
@@ -72,29 +132,10 @@
       "archived": false
     },
     {
-      "id": "task-c6955072-e0c0-4a56-ac37-bd6a48a0c13d",
-      "title": "Run tsc and fix all syntax errors",
-      "status": "inProgress",
-      "order": 2,
-      "description": "Execute TypeScript compiler (tsc) across the repo, identify all syntax/type errors, and apply code fixes until tsc completes without errors. Document findings and tests.",
-      "epicId": null,
-      "assignees": [
-        "assistant"
-      ],
-      "tags": [
-        "build",
-        "typescript",
-        "lint"
-      ],
-      "createdAt": 1764791349409,
-      "updatedAt": 1764791351290,
-      "archived": false
-    },
-    {
       "id": "task-f4fe2e92-89b7-4261-a460-90f332a0ccf0",
       "title": "Fix await usage error in llm-service rate limit check",
       "status": "inProgress",
-      "order": 3,
+      "order": 5,
       "description": "Build fails with: \"await can only be used inside an async function\" at llm-service.ts line 925 for rateLimitTracker.checkAndWait call. Update function signature/call site to be async-safe and ensure rate limiting works.",
       "epicId": null,
       "assignees": [],
@@ -112,7 +153,7 @@
       "id": "task-71cea039-08cd-4bb4-8b08-f7c289c7a7ad",
       "title": "Root Cause Fix for Missing IDs in Usage Breakdown",
       "status": "inProgress",
-      "order": 4,
+      "order": 6,
       "description": "Investigate why usage_breakdown events are missing nodeId and executionId in LLMService. Refactor the code to ensure these IDs are strictly propagated from the request context to the event emission point, eliminating the need for 'best-effort' recovery in the TimelineEventHandler.",
       "epicId": null,
       "assignees": [
@@ -131,7 +172,7 @@
       "id": "task-de6115f7-496d-4cbc-9f63-32ab91129c4d",
       "title": "Add Deepseek 3.2 model to Fireworks provider",
       "status": "inProgress",
-      "order": 5,
+      "order": 7,
       "description": "Add Deepseek 3.2 as a pre-configured model for Fireworks.\nPath: accounts/fireworks/models/deepseek-v3p2\nPricing:\n- Input: $0.56 / 1M\n- Output: $1.68 / 1M",
       "epicId": null,
       "assignees": [],
@@ -141,10 +182,588 @@
       "archived": false
     },
     {
+      "id": "task-059c388a-eb16-4677-a777-777f3eac6cb5",
+      "title": "Return terminalExec output immediately when command exits with error",
+      "status": "done",
+      "order": 0,
+      "description": "terminalExec now returns quickly when a command finishes successfully, but erroring commands that already completed still wait for the full timeout window. Update the terminal exec tool so it detects completion after non-zero exit statuses (or error prompts) and returns the captured stderr/stdout right away instead of blocking for the configured timeout. Add coverage/docs as needed.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "terminal",
+        "tooling",
+        "bugfix"
+      ],
+      "createdAt": 1764952770970,
+      "updatedAt": 1764953646813,
+      "archived": false
+    },
+    {
+      "id": "task-6ab4a573-3894-462f-ab95-b2b8ed20b6ab",
+      "title": "Ensure terminalExec returns immediately when command completes",
+      "status": "done",
+      "order": 1,
+      "description": "Investigate the terminalExec tool and fix cases where completed commands still wait for the configured timeout before returning output. Commands that finish should return immediately with their captured output instead of blocking for the remainder of the timeout window. Add tests or logging as needed to verify the behavior.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "terminal",
+        "tooling",
+        "bugfix"
+      ],
+      "createdAt": 1764951627402,
+      "updatedAt": 1764952564668,
+      "archived": false
+    },
+    {
+      "id": "task-2016b563-3e78-40c0-9bf3-b5950fc12283",
+      "title": "Throttle session.usage.changed logging in renderer",
+      "status": "done",
+      "order": 2,
+      "description": "Renderer console logs the full session usage payload for every chunk (\"[sessionUi] Received session.usage.changed ...\"), creating excessive spam. Adjust the renderer logging or subscription so detailed usage logs only appear when debug logging is enabled or at a lower frequency, while keeping UI updates intact.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [],
+      "createdAt": 1764898418375,
+      "updatedAt": 1764898523401,
+      "archived": false
+    },
+    {
+      "id": "task-7a0b8728-99d1-4dd1-b5e3-3737b33e5d88",
+      "title": "Enable reasoning content & default thinking for Firebase tool calls",
+      "status": "done",
+      "order": 3,
+      "description": "Per latest docs, Firebase-hosted models require reasoning content to be returned for tool-calling to function, and the \"thinking\" (reasoning traces) option must be enabled by default. Audit the model/provider config to ensure reasoning content is returned for Firebase models (currently only GPT is covered) and update defaults so thinking is enabled globally. Update any settings UI or API surfaces to reflect this behavior, add tests, and document the change.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [],
+      "createdAt": 1764897418893,
+      "updatedAt": 1764898141951,
+      "archived": false
+    },
+    {
+      "id": "task-13234334-00a8-4c48-a4a7-2dc2a666ce4a",
+      "title": "Simplify terminalExec tool API to single-parameter command",
+      "status": "done",
+      "order": 4,
+      "description": "Refactor the terminalExec tool so it only accepts a single `command` parameter.\n- Hard-code timeout/idle/output limits via module constants (easily adjustable).\n- Block up to 60s or until the command completes, returning up to 500 lines of output.\n- If the command is still running or produces more than 500 lines, respond with \"Command is long running and still in progress, use terminalSessionCommandOutput to see current state\" and include continuation context.\n- Remove unused/dead code from the existing implementation.\n- Update tool descriptions/docs to match the simplified API and behavior.",
+      "epicId": "epic-initial",
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "terminal",
+        "tooling",
+        "docs"
+      ],
+      "createdAt": 1764896433598,
+      "updatedAt": 1764896656947,
+      "archived": false
+    },
+    {
+      "id": "task-ad72f30c-d572-43b7-b523-077195ed1111",
+      "title": "Increase terminalExec early return timeout and document behavior",
+      "status": "done",
+      "order": 5,
+      "description": "Extend the early-return timer for terminalExec to 60s for long-running commands and enhance terminal tool descriptions so LLMs understand continuation behavior.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "terminal",
+        "tooling",
+        "docs"
+      ],
+      "createdAt": 1764896077536,
+      "updatedAt": 1764896173038,
+      "archived": false
+    },
+    {
+      "id": "task-d77e00b9-167f-473e-88ce-1f72e8d234ae",
+      "title": "Improve terminal tool output handling for long-running commands",
+      "status": "done",
+      "order": 6,
+      "description": "LLMs get partial output from long-running terminal commands and seldom use tail/search to see the remainder. Design and implement a better UX for terminal tool responses (e.g., automatic chunking with continuation tokens, explicit prompts to call tail/search, or alternative streaming). Include renderer/CLI updates, documentation, and tests as needed.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "terminal",
+        "tooling",
+        "ux"
+      ],
+      "createdAt": 1764895639330,
+      "updatedAt": 1764895898893,
+      "archived": false
+    },
+    {
+      "id": "task-f41e7fd3-4938-46fd-a8e7-2353caacccbd",
+      "title": "Filter archived cards from kanbanGetBoard responses",
+      "status": "done",
+      "order": 7,
+      "description": "kanbanGetBoard currently returns archived tasks to LLM callers, which should not happen. Update the board service/tool so archived tasks are excluded from responses (or clearly hidden) when the tool is invoked.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "bug",
+        "kanban",
+        "tooling"
+      ],
+      "createdAt": 1764895119965,
+      "updatedAt": 1764895367094,
+      "archived": false
+    },
+    {
+      "id": "task-1fdd60c5-853e-45bb-8d0c-c1b52ba391f7",
+      "title": "Emit __setUsage only when LLM usage data is available",
+      "status": "done",
+      "order": 8,
+      "description": "__setUsage events are currently sent on every streamed chunk, causing major performance issues in the renderer. Update the usage pipeline so the event fires only when actual usage data is returned by the LLM (e.g., usage_breakdown/final result), rather than per chunk. Ensure existing usage badges and tokens-cost panel still update correctly, and add tests/logging if needed.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "bug",
+        "performance",
+        "usage",
+        "llm-service"
+      ],
+      "createdAt": 1764894471412,
+      "updatedAt": 1764894764845,
+      "archived": false
+    },
+    {
+      "id": "task-a17700ac-e66b-4a1d-b673-e4c2ec909973",
+      "title": "Always log final LLM request config",
+      "status": "done",
+      "order": 9,
+      "description": "Remove the HF_FLOW_DEBUG guard around the agentStream config logging so we always emit a sanitized log of the exact options passed to each provider call.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [],
+      "createdAt": 1764894248966,
+      "updatedAt": 1764894281993,
+      "archived": false
+    },
+    {
+      "id": "task-c1bc47c4-4006-444f-9496-1b032be9fe33",
+      "title": "Log final LLM request options",
+      "status": "done",
+      "order": 10,
+      "description": "Add logging that dumps the exact config object passed to provider LLM calls (after per-model overrides, normalization, etc.), not just the intermediate sampling parameters. Ensure logs can be toggled or scoped to debug builds.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [],
+      "createdAt": 1764894139899,
+      "updatedAt": 1764894213374,
+      "archived": false
+    },
+    {
+      "id": "task-a0ef9bd9-2361-4d5f-b937-7a93ec5af436",
+      "title": "Verify per-model temperature overrides are applied",
+      "status": "done",
+      "order": 11,
+      "description": "User suspects per-model temperature overrides are ignored. Prove whether overrides are used by tracing configuration resolution (flow settings -> provider model overrides -> LLM request payload) and, if missing, fix the wiring.\n\nDeliverables:\n1. Reproduction path showing whether overrides propagate to LLMService/chat requests (logs or tests).\n2. Code fix if overrides aren’t applied, or documentation/logging showing they are.\n3. Tests/verification demonstrating temperature override behavior.\n4. KB update summarizing override resolution.\n",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "bug",
+        "llm",
+        "configuration"
+      ],
+      "createdAt": 1764893959878,
+      "updatedAt": 1764894069601,
+      "archived": false
+    },
+    {
+      "id": "task-a9ee6c57-db11-494f-b353-9f6d5a1959f6",
+      "title": "Clarify applyEdits tool instructions/descriptions",
+      "status": "done",
+      "order": 12,
+      "description": "Improve the user-facing instructions for the applyEdits tool (OpenAI Patch + Search/Replace formats). Ensure the guidance explains the supported formats, delimiters, required headers, and common pitfalls so LLMs can reliably apply edits.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "docs",
+        "applyEdits",
+        "tooling"
+      ],
+      "createdAt": 1764892918171,
+      "updatedAt": 1764893278596,
+      "archived": false
+    },
+    {
+      "id": "task-96880487-2c19-4cc2-a094-f44fe00e8581",
+      "title": "Fix applyEdits OpenAI patch & search/replace failures",
+      "status": "done",
+      "order": 13,
+      "description": "LLMs report applyEdits still fails to modify files:\n1. OpenAI patch format: *** Begin Patch + *** Update File with @@ hunk replacing Line 2 -> \"partial-ok 0/1\" (no change).\n2. Search/Replace format: <<<<<<< SEARCH / ======= / >>>>>>> REPLACE returns \"no-match\" for Line 2 -> Modified Line 2.\nReproduce, fix parser/matcher, and ensure both formats succeed on bug-report-test.txt (`Line 1\\nLine 2\\nLine 3`). Add regression coverage.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "bug",
+        "applyEdits",
+        "tooling"
+      ],
+      "createdAt": 1764891991589,
+      "updatedAt": 1764892728757,
+      "archived": false
+    },
+    {
+      "id": "task-0b1bf17a-5b16-47c8-93d1-00c7b52bdc12",
+      "title": "Fix OpenAI patch format handling in applyEdits tool",
+      "status": "done",
+      "order": 14,
+      "description": "LLMs report that applyEdits rejects the documented OpenAI patch format. Two formats fail:\n1) Basic patch with only Begin/Update headers and @@ hunk\n2) Patch with context lines.\nDetect why applyEdits rejects these inputs, fix the parser, and add regression tests so both variants succeed.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "bug",
+        "applyEdits",
+        "patch-format",
+        "tooling"
+      ],
+      "createdAt": 1764891022660,
+      "updatedAt": 1764891195526,
+      "archived": false
+    },
+    {
+      "id": "task-409455a6-282f-4607-98b3-e117c8c70d49",
+      "title": "Prevent applyEdits from writing raw patch delimiters to files",
+      "status": "done",
+      "order": 15,
+      "description": "On rare runs the applyEdits helper appears to write the literal patch markers (e.g., <<<<<<, ======, >>>>>>) and metadata into source files instead of applying the diff. Investigate the code path inside the applyEdits tool, identify how delimiters escape into the target file, and harden the implementation so only the intended edits are written. Add regression coverage if possible.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "bug",
+        "tooling",
+        "applyEdits",
+        "critical"
+      ],
+      "createdAt": 1764876923787,
+      "updatedAt": 1764885574351,
+      "archived": false
+    },
+    {
+      "id": "task-d219bd93-3d85-46b9-9d09-cb934015277d",
+      "title": "Fix TokensCostsPanel responsive grid constants",
+      "status": "done",
+      "order": 16,
+      "description": "TypeScript build fails after cached token UI update: `summaryGridResponsive` and `inputGridResponsive` are referenced in TokensCostsPanel but the constants are not defined. Define/inline the responsive breakpoint objects or refactor the SimpleGrid usage so tsc passes again.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "ui",
+        "bug",
+        "typescript"
+      ],
+      "createdAt": 1764876301384,
+      "updatedAt": 1764876371018,
+      "archived": false
+    },
+    {
+      "id": "task-64c7529f-47ff-4591-9ea9-4514a368d97d",
+      "title": "Promote cached tokens to first-class data in Tokens & Costs panel",
+      "status": "done",
+      "order": 17,
+      "description": "Update the Tokens & Costs panel UI/state so cached tokens and costs are displayed as explicit, standalone metrics instead of mixing them into the regular input totals. Adjust layout, data bindings, and visual hierarchy to make cached vs non-cached usage easy to compare.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "ui",
+        "usage",
+        "frontend"
+      ],
+      "createdAt": 1764873838132,
+      "updatedAt": 1764875778883,
+      "archived": false
+    },
+    {
+      "id": "task-f8880c27-9006-4b09-87c6-6101e5c6fe70",
+      "title": "Format applyEdits tool description as Markdown",
+      "status": "done",
+      "order": 18,
+      "description": "Update the applyEdits tool metadata so its description field is a markdown-formatted block with explicit line endings, per user request.\n\nDelivered:\n- Rebuilt `electron/tools/edits/apply.ts` so the tool description is a Markdown doc assembled via `[].join('\\n')`, covering Search/Replace, OpenAI Patch, and unified diff formats plus general rules.\n- Verified TypeScript build is clean (`pnpm exec tsc --noEmit --pretty false`).",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "applyEdits",
+        "docs",
+        "tooling"
+      ],
+      "createdAt": 1764893438051,
+      "updatedAt": 1764893864142,
+      "archived": false
+    },
+    {
+      "id": "task-531f8181-9acd-48e1-9e1d-1057e6afc0e7",
+      "title": "Redesign Tokens & Costs panel layout",
+      "status": "done",
+      "order": 19,
+      "description": "Improve the Tokens & Costs panel UX by redesigning the layout for clarity. Goals: make aggregate totals, cached vs. regular costs, provider/model breakdowns, and per-request details easy to scan; introduce sensible grouping, typography hierarchy, and responsive behavior; ensure math still matches session cost data.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "ui",
+        "usage",
+        "frontend"
+      ],
+      "createdAt": 1764873189913,
+      "updatedAt": 1764873762867,
+      "archived": false
+    },
+    {
+      "id": "task-dd938fab-1e7b-44ee-b7d9-957aba6e99a4",
+      "title": "Reset terminal and rerun tsc for regression check",
+      "status": "done",
+      "order": 20,
+      "description": "Restart the shared terminal session, run `pnpm exec tsc --noEmit --pretty false`, and report whether any TypeScript errors remain.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "build",
+        "typescript",
+        "verification"
+      ],
+      "createdAt": 1764871796076,
+      "updatedAt": 1764872481985,
+      "archived": false
+    },
+    {
+      "id": "task-c6955072-e0c0-4a56-ac37-bd6a48a0c13d",
+      "title": "Run tsc and fix all syntax errors",
+      "status": "done",
+      "order": 21,
+      "description": "Execute TypeScript compiler (tsc) across the repo, identify all syntax/type errors, and apply code fixes until tsc completes without errors. Document findings and tests.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "build",
+        "typescript",
+        "lint"
+      ],
+      "createdAt": 1764791349409,
+      "updatedAt": 1764871751989,
+      "archived": false
+    },
+    {
+      "id": "task-f9cb01fd-d5f9-42ae-bea2-ecc495e32cd0",
+      "title": "Resolve llm-service try/catch syntax and ensure tsc is clean",
+      "status": "done",
+      "order": 22,
+      "description": "Vite build fails with \"Expected 'finally' but found '}'\" around electron/flow-engine/llm-service.ts:692. Inspect the surrounding try/catch/finally block, restore valid syntax, and run `pnpm exec tsc --noEmit` to ensure TypeScript builds without errors. Fix any additional issues surfaced by tsc.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [],
+      "createdAt": 1764871025103,
+      "updatedAt": 1764871294924,
+      "archived": false
+    },
+    {
+      "id": "task-69dc721c-c433-4dde-98ee-d40a16cdf81c",
+      "title": "Fix syntax error in llm-service try/catch block",
+      "status": "done",
+      "order": 23,
+      "description": "Build fails with \"Expected 'finally' but found '}'\" at electron/flow-engine/llm-service.ts:691. Inspect nearby try/catch/finally block for malformed syntax and restore valid structure so Vite/esbuild succeeds.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "bug",
+        "build",
+        "llm-service",
+        "syntax"
+      ],
+      "createdAt": 1764870855271,
+      "updatedAt": 1764870958542,
+      "archived": false
+    },
+    {
+      "id": "task-b2ad0776-4680-4d82-abb4-7fb85b49ee68",
+      "title": "Fix Tokens & Costs panel line-item and cached totals",
+      "status": "done",
+      "order": 24,
+      "description": "Line-item costs for token usage show 0 input cost while cached costs work, and the cached token cost total at the top does not update. Review the complete cost/token usage code paths end-to-end for math bugs, architecture issues, and add logging of raw provider token usage responses.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "bug",
+        "usage",
+        "frontend",
+        "backend"
+      ],
+      "createdAt": 1764869627007,
+      "updatedAt": 1764870823460,
+      "archived": false
+    },
+    {
+      "id": "task-31c8fd40-6adc-4992-bb96-41f86f30cc1b",
+      "title": "Refactor FlowNode NodeConfig component",
+      "status": "done",
+      "order": 25,
+      "description": "Break down src/components/FlowNode/NodeConfig.tsx into modular subcomponents/hooks, move business logic into the store, remove useEffect usage, and clean out dead/duplicated code to reduce file size and improve architecture.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "flow-node",
+        "renderer",
+        "refactor",
+        "frontend"
+      ],
+      "createdAt": 1764867809696,
+      "updatedAt": 1764868671235,
+      "archived": false
+    },
+    {
+      "id": "task-720caebf-398a-4ecc-af2e-7402857775ae",
+      "title": "Report current line count of electron/flow-engine/llm-service.ts",
+      "status": "done",
+      "order": 26,
+      "description": "Determine the present line count of electron/flow-engine/llm-service.ts after the recent refactor and report it to the user.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [],
+      "createdAt": 1764867565071,
+      "updatedAt": 1764867582437,
+      "archived": false
+    },
+    {
+      "id": "task-106add0b-750a-4335-aa9b-162055b05577",
+      "title": "Modularize electron/flow-engine/llm-service.ts",
+      "status": "done",
+      "order": 27,
+      "description": "Continue refactoring electron/flow-engine/llm-service.ts: eliminate duplicated helpers, split large responsibilities into cohesive modules, remove dead code paths, and ensure clean separation of concerns with existing flow-engine services.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "flow-engine",
+        "llm",
+        "refactor"
+      ],
+      "createdAt": 1764866939501,
+      "updatedAt": 1764867456302,
+      "archived": false
+    },
+    {
+      "id": "task-fcabf105-6527-429a-af43-60419aeb80d8",
+      "title": "Inventory files exceeding 500 lines",
+      "status": "done",
+      "order": 28,
+      "description": "Audit the repository for large source files (>=500 lines), report their paths and sizes, and highlight candidates for refactor follow-ups.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [],
+      "createdAt": 1764866504965,
+      "updatedAt": 1764866668687,
+      "archived": false
+    },
+    {
+      "id": "task-20808ff0-aea1-4fa9-965d-fdf946b04749",
+      "title": "Modularize FlowScheduler and break up scheduler.ts",
+      "status": "done",
+      "order": 29,
+      "description": "FlowScheduler still sits in a ~1000-line scheduler.ts. Refactor it into cohesive modules: separate execution lifecycle management, context/portal handling, and dependency coordination; remove dead code paths; improve naming; and ensure FlowScheduler orchestrates rather than implements low-level behaviors. Deliver tests/verification and update docs.",
+      "epicId": "epic-initial",
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [
+        "flow-engine",
+        "refactor",
+        "architecture"
+      ],
+      "createdAt": 1764865075629,
+      "updatedAt": 1764866358661,
+      "archived": false
+    },
+    {
+      "id": "task-eddda0b3-732a-4c21-80c4-93575fc8653e",
+      "title": "Audit and remove dead code after flow/LLM refactor",
+      "status": "done",
+      "order": 30,
+      "description": "Review the flow-engine and LLM modules for code that became unused after the monolith refactor (duplicate helpers, unused exports, unreachable branches). Remove the dead code, align imports, and ensure tests still pass.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [],
+      "createdAt": 1764864510617,
+      "updatedAt": 1764864995866,
+      "archived": false
+    },
+    {
+      "id": "task-50f647bb-ec20-4abe-99dd-b9a5ce8fc534",
+      "title": "Refactor oversized monolithic files for maintainability",
+      "status": "done",
+      "order": 31,
+      "description": "Identify the largest monolithic source files (1000+ lines), design a refactor plan covering architecture, dead code removal, separation of concerns, and variable naming improvements, then implement the plan and validate the build/tests.",
+      "epicId": null,
+      "assignees": [
+        "assistant"
+      ],
+      "tags": [],
+      "createdAt": 1764860619247,
+      "updatedAt": 1764864383399,
+      "archived": false
+    },
+    {
       "id": "task-3d82e8f3-731a-4203-8601-944142ad0cbf",
       "title": "KB: Document Timeline Event Handling",
       "status": "done",
-      "order": 0,
+      "order": 32,
       "description": "Document the TimelineEventHandler architecture, specifically the usage_breakdown event handling and ID recovery mechanism for detached events.",
       "epicId": null,
       "assignees": [],
@@ -157,7 +776,7 @@
       "id": "task-329acc9f-4660-4f32-8da5-9286d4ce4aa7",
       "title": "Audit Settings pane data vs backend and propose refactor",
       "status": "done",
-      "order": 1,
+      "order": 33,
       "description": "Review the renderer SettingsPane UI, compare each field to the backend/electron data model and persistence format, and prepare a refactor plan covering API alignment, missing hydration, and validation logic so the settings screen works end-to-end.",
       "epicId": null,
       "assignees": [
@@ -172,7 +791,7 @@
       "id": "task-529ddedc-0ca7-42c2-910b-0ab5e2819aff",
       "title": "Fix ReferenceError in LLMService usage_breakdown emission",
       "status": "done",
-      "order": 2,
+      "order": 34,
       "description": "Fix ReferenceError: costEstimate is not defined in LLMService. The variable was likely removed during refactor but still referenced in usage_breakdown event emission.",
       "epicId": null,
       "assignees": [],
@@ -185,7 +804,7 @@
       "id": "task-74140260-4074-426f-82c5-9ba2152e06a0",
       "title": "Refactor Settings Pane & Data Sync",
       "status": "done",
-      "order": 3,
+      "order": 35,
       "description": "Execute the refactor plan for the Settings pane:\n1. Define `SettingsSnapshot` type.\n2. Update backend `settings.get` to return full snapshot.\n3. Update backend RPCs for Fireworks to match renderer needs.\n4. Create `useSettingsSnapshot` hook in renderer.\n5. Refactor `SettingsPane` to use the hook and new RPCs.\n6. Ensure startup message is correctly piped.",
       "epicId": null,
       "assignees": [],
@@ -198,7 +817,7 @@
       "id": "task-6104a3e0-8765-4a53-97b8-44d4366fe42a",
       "title": "Remove indexing section from Settings screen",
       "status": "done",
-      "order": 4,
+      "order": 36,
       "description": "The Settings view still shows an \"Indexing\" section even though indexes are no longer supported. Remove the entire section from the renderer UI (and any associated state/IPC wiring that is now obsolete), ensuring the remaining Settings panels render correctly on all platforms.",
       "epicId": null,
       "assignees": [
@@ -213,7 +832,7 @@
       "id": "task-08615ada-c196-4bcc-940a-5963eda38d5b",
       "title": "Fix Usage Badge Renderer Listener",
       "status": "done",
-      "order": 5,
+      "order": 37,
       "description": "Investigate why the usage breakdown event is not updating the renderer UI, even though it is being broadcast. Fix the listener or state update logic in the renderer.",
       "epicId": null,
       "assignees": [],
@@ -226,7 +845,7 @@
       "id": "task-3778f4eb-9063-490b-a51c-b92fce009abf",
       "title": "Reduce setUsage emissions to avoid frontend rerender storms",
       "status": "done",
-      "order": 6,
+      "order": 38,
       "description": "Limit setUsage emissions to only when LLM usage information is received (usage_breakdown / final result), eliminating per-chunk updates that cause frontend rerender storms.",
       "epicId": null,
       "assignees": [],
@@ -244,7 +863,7 @@
       "id": "task-e016c447-caba-4ffd-9569-66f813b074df",
       "title": "Fix usage badge not appearing in session timeline",
       "status": "done",
-      "order": 7,
+      "order": 39,
       "description": "usage_breakdown events are emitted with null nodeId/executionId; badges do not appear in session timeline. Fix LLMService emission and timeline-event-handler robustness.",
       "epicId": null,
       "assignees": [
@@ -264,7 +883,7 @@
       "id": "task-36e9c940-5feb-4c44-af75-8e65431e556d",
       "title": "Persist flow/provider selection across sessions",
       "status": "done",
-      "order": 8,
+      "order": 40,
       "description": "When starting a new session, reuse the flow and provider/model previously selected. When loading a saved session, preselect the flow and provider/model last used in that session so the widgets reflect the actual runtime configuration.",
       "epicId": null,
       "assignees": [
@@ -279,7 +898,7 @@
       "id": "task-8754a565-9fed-4f60-b7df-11f8c244a610",
       "title": "Fix await usage syntax error in SessionControlsBar metadata sync",
       "status": "done",
-      "order": 9,
+      "order": 41,
       "description": "Vite build fails with \"Unexpected reserved word 'await'\" in src/components/SessionControlsBar.tsx:127. Ensure any awaiting of metadata update promises occurs inside an async function or via .then, and restore working flow status widget controls.",
       "epicId": null,
       "assignees": [
@@ -294,7 +913,7 @@
       "id": "task-923949fe-98df-41e8-9718-57fde88eb117",
       "title": "KB: Document Token Usage Fix",
       "status": "done",
-      "order": 10,
+      "order": 42,
       "description": "Update KB with fix details for token usage and cost architecture.",
       "epicId": null,
       "assignees": [],
@@ -307,7 +926,7 @@
       "id": "task-0ccaa217-e570-4365-b765-56f5ab641c92",
       "title": "Fix TokensCostsPanel rendering",
       "status": "done",
-      "order": 11,
+      "order": 43,
       "description": "Investigate and fix why TokensCostsPanel is not displaying data despite receiving it.",
       "epicId": null,
       "assignees": [],
@@ -320,7 +939,7 @@
       "id": "task-e8b27346-8803-447c-beb8-addab56bc816",
       "title": "Fix flow status widget start/stop controls",
       "status": "done",
-      "order": 12,
+      "order": 44,
       "description": "Start/stop buttons in the flow status widget do not consistently work and perform the wrong actions when they do. Investigate the renderer-side logic, wire up the correct IPC/flow-engine calls, and ensure the widget accurately reflects and controls the flow runtime state. Add regression coverage if possible.",
       "epicId": null,
       "assignees": [
@@ -340,7 +959,7 @@
       "id": "task-4de176d7-606c-4c86-af34-526036db21d4",
       "title": "Audit and Refactor Token/Cost Usage Architecture",
       "status": "done",
-      "order": 13,
+      "order": 45,
       "description": "Audit how token and cost usage is emitted from main and consumed by renderer. Consolidate overlapping code paths into a clean architecture. Ensure usage_breakdown and setUsage events are consistent and efficient.",
       "epicId": null,
       "assignees": [],
@@ -353,7 +972,7 @@
       "id": "task-9763dd95-18b0-4d05-9643-c8797cc0be13",
       "title": "Investigate workspaceMap behavior and usefulness",
       "status": "done",
-      "order": 14,
+      "order": 46,
       "description": "LLMs report that workspaceMap does not return useful data. Determine the intended output/behavior of workspaceMap and document how it should work so we can adjust implementation accordingly.",
       "epicId": null,
       "assignees": [
@@ -372,7 +991,7 @@
       "id": "task-62c9dc98-2c36-4ab8-9beb-5574745fc45c",
       "title": "Fix syntax error in event-subscriptions.ts",
       "status": "done",
-      "order": 15,
+      "order": 47,
       "description": "Fix syntax error in electron/backend/ws/event-subscriptions.ts where a const declaration was misplaced inside an object or function call.",
       "epicId": null,
       "assignees": [],
@@ -385,7 +1004,7 @@
       "id": "task-e0e816e6-c23d-498a-8d15-49f75d785cee",
       "title": "Add default pricing for gpt-5.1",
       "status": "done",
-      "order": 16,
+      "order": 48,
       "description": "Add default pricing for gpt-5.1:\nInput: $1.250 / 1M tokens\nCached input: $0.125 / 1M tokens\nOutput: $10.000 / 1M tokens",
       "epicId": null,
       "assignees": [],
@@ -398,7 +1017,7 @@
       "id": "task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4",
       "title": "Refactor flow engine context architecture for single-writer ContextManager and multi-context support",
       "status": "done",
-      "order": 17,
+      "order": 49,
       "description": "Implement single-writer ContextManager for the main flow context, refactor LMService/llmRequest to use it, and adapt manualInput/userInput/injectMessages/newContext nodes. Multi-context isolated flows are temporarily degraded and will be reintroduced with per-context managers in a follow-up task.\n\nProgress tracker:\n- [x] Single-writer ContextManager integration + node refactors\n- [x] Context registry + automatic context propagation/multi-context scheduling (dedicated ContextRegistry + tests)\n- [x] FlowAPI contexts helper + isolated context lifecycle utilities\n- [x] Renderer/websocket sync + portal/context-edge validation\n- [x] End-to-end & regression tests for multi-context flows",
       "epicId": null,
       "assignees": [
@@ -413,7 +1032,7 @@
       "id": "task-54e42bbc-117c-4002-93eb-222b4daa6f75",
       "title": "Fix Null Usage Badge Emission",
       "status": "done",
-      "order": 18,
+      "order": 50,
       "description": "Investigate why LLMService is emitting usage_breakdown events with null nodeId and executionId, preventing badges from appearing.",
       "epicId": null,
       "assignees": [],
@@ -426,7 +1045,7 @@
       "id": "task-9666f09e-facf-40b8-8c03-eb6593996940",
       "title": "Fix 'Usage Badge' Missing Issue",
       "status": "done",
-      "order": 19,
+      "order": 51,
       "description": "Investigate and fix the missing Usage badge issue related to 'usage_breakdown' event handling.",
       "epicId": null,
       "assignees": [],
@@ -439,7 +1058,7 @@
       "id": "task-9b4b0a25-a2eb-4d4f-98e5-19cbc52113c6",
       "title": "Fix LLM provider/model resolution from flow context and restore usage badges",
       "status": "done",
-      "order": 20,
+      "order": 52,
       "description": "Fix LLM provider/model resolution from flow context and restore usage badges.\n\nClosed: provider/model resolution + usage badge fixes delivered in task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
       "epicId": null,
       "assignees": [],
@@ -452,7 +1071,7 @@
       "id": "task-a33b1072-5d67-4551-b1f1-10b096a43289",
       "title": "Fix LLM provider/model resolution and usage badge emission in flow engine",
       "status": "done",
-      "order": 21,
+      "order": 53,
       "description": "Fix LLM provider/model resolution and usage badge emission in flow engine.\n\nClosed: redundant after task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4 shipped the consolidated fixes.",
       "epicId": null,
       "assignees": [],
@@ -465,7 +1084,7 @@
       "id": "task-aa9b4c39-e52f-45ab-bd22-170692621163",
       "title": "Investigate and resolve 'Usage badge' missing issue",
       "status": "done",
-      "order": 22,
+      "order": 54,
       "description": "Debug why the 'Usage badge' does not appear after LLM execution. Current logs indicate that `LLMService` may not emit the `usage_breakdown` event properly. Check the flow and ensure that the badge is updated accordingly when `llmService.chat` completes without an error.",
       "epicId": null,
       "assignees": [],
@@ -483,7 +1102,7 @@
       "id": "task-63886547-0ec5-4c1f-b164-bcad1f1df3b2",
       "title": "Implement Usage Badge Display After LLM Execution",
       "status": "done",
-      "order": 23,
+      "order": 55,
       "description": "Define and implement the logic for displaying usage badges in the session timeline after LLM execution by ensuring event emission and badge update mechanism.",
       "epicId": null,
       "assignees": [],
@@ -500,7 +1119,7 @@
       "id": "task-7d5708f4-5e80-4933-8975-f80bef112f0d",
       "title": "Fix message history being overwritten in LLMService chat context",
       "status": "done",
-      "order": 24,
+      "order": 56,
       "description": "Investigate why messageHistory is no longer preserved across turns and is overwritten with only the latest user/agent pair. Ensure flow context merging/appending logic correctly accumulates history instead of replacing it.",
       "epicId": null,
       "assignees": [
@@ -520,7 +1139,7 @@
       "id": "task-6fbcf188-a238-4490-a649-a12901d0b5d0",
       "title": "Refactor flow engine context architecture for single-writer context API",
       "status": "done",
-      "order": 25,
+      "order": 57,
       "description": "Design and implement a clean architecture where FlowScheduler.mainContext is the single source of truth and only a dedicated Context API can mutate it. Nodes must treat context as immutable input and communicate state changes exclusively through the Context API. This includes redesigning LMService/chat, userInput, and scheduler-node integration so messageHistory and other context fields are never overwritten accidentally.\n\nClosed: solved comprehensively by task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4 (single-writer ContextManager + ContextRegistry refactor).",
       "epicId": null,
       "assignees": [],
@@ -538,7 +1157,7 @@
       "id": "task-52c64b28-deb8-4a7b-8210-08b88df22f45",
       "title": "Fix LM node context overwrite of messageHistory",
       "status": "done",
-      "order": 26,
+      "order": 58,
       "description": "Investigate and fix message history being overwritten when LM node executes. Ensure LMService.chat and flow/scheduler integration append to existing messageHistory rather than replacing it.\n\nClosed: redundant after the comprehensive refactor delivered in task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
       "epicId": null,
       "assignees": [],
@@ -551,7 +1170,7 @@
       "id": "task-2797bfb3-b893-4a5c-a0f4-e15b18946c21",
       "title": "Fix LM node context overwrite of messageHistory",
       "status": "done",
-      "order": 27,
+      "order": 59,
       "description": "Investigate and fix where LM node execution overwrites MainFlowContext.messageHistory with only the latest user/assistant pair instead of appending. Ensure FlowScheduler adopts LLMService.chat updatedContext correctly and that flushToSession/updateContextFor persist full history.\n\nClosed: covered by task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4 deliverables (single-writer context + flush integration tests).",
       "epicId": null,
       "assignees": [],
@@ -564,7 +1183,7 @@
       "id": "task-66d19218-194c-476b-83f1-ce84b820ded1",
       "title": "Fix message history overwrite when LM node executes",
       "status": "done",
-      "order": 28,
+      "order": 60,
       "description": "Root-cause and fix the bug where message history is overwritten with only the latest user/assistant pair when the LLM node executes. Ensure LMService.chat and scheduler/context integration preserve full history. Add regression tests.\n\nClosed: requirements satisfied by task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4 (ContextManager + regression suite).",
       "epicId": null,
       "assignees": [],
@@ -577,7 +1196,7 @@
       "id": "task-fc6bdd50-82d0-4ab7-8501-d53e0e5d0bbc",
       "title": "Investigate and fix messageHistory overwrite in llmRequest flow integration",
       "status": "done",
-      "order": 29,
+      "order": 61,
       "description": "Investigate and fix messageHistory overwrite in llmRequest flow integration.\n\nClosed: refactor completed under task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
       "epicId": null,
       "assignees": [],
@@ -590,7 +1209,7 @@
       "id": "task-72cd43fb-b242-42c4-bd77-e80ed22a0fe8",
       "title": "Investigate and fix context messageHistory overwrite during LLM node execution",
       "status": "done",
-      "order": 30,
+      "order": 62,
       "description": "Investigate and fix context messageHistory overwrite during LLM node execution.\n\nClosed: resolved by the consolidated context refactor (task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4).",
       "epicId": null,
       "assignees": [],
@@ -603,7 +1222,7 @@
       "id": "task-b0cbae5f-e154-4ffc-b626-61912a7ab252",
       "title": "Investigate and fix message history overwrite when LLM node executes",
       "status": "done",
-      "order": 31,
+      "order": 63,
       "description": "Investigate and fix message history overwrite when LLM node executes.\n\nClosed: covered by single-writer ContextManager + registry work in task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
       "epicId": null,
       "assignees": [],
@@ -616,7 +1235,7 @@
       "id": "task-04d75cf2-6454-4cd3-b372-34ec52088a06",
       "title": "Fix LMService syntax error and restore build",
       "status": "done",
-      "order": 32,
+      "order": 64,
       "description": "Fix LMService syntax error and restore build.\n\nClosed: addressed while landing the consolidated context/LLM refactor (task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4).",
       "epicId": null,
       "assignees": [],
@@ -629,7 +1248,7 @@
       "id": "task-d6615ffe-7ffa-4a8f-8b64-80ea0d2f39b3",
       "title": "Fix 'provider is not defined' error in LLMService.chat flow",
       "status": "done",
-      "order": 33,
+      "order": 65,
       "description": "ReferenceError: provider is not defined in LLMService.chat during llmRequest node execution when submitting user input. Investigate provider/model resolution and ensure 'provider' is always defined before use.\n\nClosed: resolved via LLMService provider/model overhaul in task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
       "epicId": null,
       "assignees": [
@@ -650,7 +1269,7 @@
       "id": "task-db15a9c2-678d-4b4b-87b6-cb9494491497",
       "title": "Fix await usage errors in electron/flow-engine/llm-service.ts",
       "status": "done",
-      "order": 34,
+      "order": 66,
       "description": "Fix await usage errors in electron/flow-engine/llm-service.ts.\n\nClosed: async refactors landed as part of task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
       "epicId": null,
       "assignees": [],
@@ -663,7 +1282,7 @@
       "id": "task-0401ca08-1dab-46c6-a51e-941d3f08c58b",
       "title": "Fix llmRequest 'message is not defined' error and stabilize LLM request flow",
       "status": "done",
-      "order": 35,
+      "order": 67,
       "description": "Fix llmRequest 'message is not defined' error and stabilize LLM request flow.\n\nClosed: handled during task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4 refactor (scheduler + FlowAPI cleanup).",
       "epicId": null,
       "assignees": [],
@@ -676,7 +1295,7 @@
       "id": "task-3eeca1d8-79bb-4ca0-802f-5f8d3e1d4aea",
       "title": "Fix flow context handling and LLM usage badge issues",
       "status": "done",
-      "order": 36,
+      "order": 68,
       "description": "Resolve provider/model resolution, context duplication, messageHistory non-iterable errors, and usage badge emission for llmRequest flows.\n\nClosed: superseded by consolidated refactor task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
       "epicId": null,
       "assignees": [],
@@ -689,7 +1308,7 @@
       "id": "task-b9d8dc28-637b-434b-930f-daad3f4dd216",
       "title": "Fix duplicated flow context and messageHistory not iterable error",
       "status": "done",
-      "order": 37,
+      "order": 69,
       "description": "Refactor flow context handling to use a single source of truth, normalize messageHistory, and clean up front-end/backend context sync to be RPC-driven and one-way from engine to UI.\n\nClosed: work delivered under task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4.",
       "epicId": null,
       "assignees": [],
@@ -702,7 +1321,7 @@
       "id": "task-82749ed8-b33b-401c-a6ce-5efe417b60ce",
       "title": "Fix duplicated flow context and messageHistory not iterable error",
       "status": "done",
-      "order": 38,
+      "order": 70,
       "description": "FlowScheduler error: `context.messageHistory is not iterable`. Root cause likely due to keeping duplicate context objects (FlowScheduler context vs flowAPI.context) and syncing them in two directions. Need to refactor flow context handling so there is a single source of truth, or a clear, one-way sync, and ensure messageHistory is always an array when used.\n\nClosed: superseded by task-619a5f3d-dc19-42a9-b48f-ea7d22b87ef4 refactor.",
       "epicId": null,
       "assignees": [],
@@ -721,7 +1340,7 @@
       "id": "task-a6324b40-c7e8-4091-99f4-65525bd40f1c",
       "title": "Fix syntax error in ProviderService",
       "status": "done",
-      "order": 39,
+      "order": 71,
       "description": "Fix syntax error in ProviderService.ts where async methods were defined without bodies and orphaned code was present.",
       "epicId": null,
       "assignees": [],
@@ -734,7 +1353,7 @@
       "id": "task-a4dda06e-27a9-4b43-b31c-026d590d6ef0",
       "title": "Fix zero costs in Tokens & Costs panel",
       "status": "done",
-      "order": 40,
+      "order": 72,
       "description": "Investigate and fix the issue where costs are 0.00 in the Tokens & Costs panel, likely due to missing pricing configuration for new models.",
       "epicId": null,
       "assignees": [],

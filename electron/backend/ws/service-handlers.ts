@@ -228,16 +228,16 @@ export const providerHandlers = {
       fireworksAllowedModels: providerService.getFireworksAllowedModels(),
       models: providerService.getModelsForProvider('fireworks'),
     }
+  },
+
+  async removeFireworksModel(model: string) {
+    const providerService = getProviderService()
     await providerService.removeFireworksModel(model)
     return {
       ok: true,
       fireworksAllowedModels: providerService.getFireworksAllowedModels(),
       models: providerService.getModelsForProvider('fireworks'),
     }
-  async removeFireworksModel(model: string) {
-    const providerService = getProviderService()
-    providerService.removeFireworksModel(model)
-    return { ok: true }
   },
 
   async setSelectedProvider(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai') {

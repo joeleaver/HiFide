@@ -54,7 +54,7 @@ function createChatTimelineStore() {
     hydrationVersion: 0,
 
     clear: () => {
-      console.log('[chatTimeline] clear() called')
+      // console.log('[chatTimeline] clear() called')
       set({ items: [], sig: '0', hasRenderedOnce: false })
     },
 
@@ -65,7 +65,7 @@ function createChatTimelineStore() {
       const seen = new Set<string>()
       const deduped = arr.filter(item => {
         if (seen.has(item.id)) {
-          console.warn('[chatTimeline] Duplicate item ID detected, skipping:', item.id)
+          // console.warn('[chatTimeline] Duplicate item ID detected, skipping:', item.id)
           return false
         }
         seen.add(item.id)
@@ -80,7 +80,7 @@ function createChatTimelineStore() {
           const uniqueContent = (item.content || []).filter((c: any) => {
             if (c.type === 'badge' && c.badge?.id) {
               if (contentSeen.has(c.badge.id)) {
-                console.warn('[chatTimeline] Duplicate badge in content, skipping:', c.badge.id)
+                // console.warn('[chatTimeline] Duplicate badge in content, skipping:', c.badge.id)
                 return false
               }
               contentSeen.add(c.badge.id)
@@ -94,7 +94,7 @@ function createChatTimelineStore() {
             const badgeSeen = new Set<string>()
             uniqueBadges = item.badges.filter((badge: any) => {
               if (badgeSeen.has(badge.id)) {
-                console.warn('[chatTimeline] Duplicate badge in badges array, skipping:', badge.id)
+                // console.warn('[chatTimeline] Duplicate badge in badges array, skipping:', badge.id)
                 return false
               }
               badgeSeen.add(badge.id)
@@ -306,9 +306,9 @@ export function initChatTimelineEvents(): void {
 
   const processDelta = (msg: any) => {
     const op = msg?.op
-    console.log('[chatTimeline] processDelta received:', { op, hasItem: !!msg?.item, item: msg?.item })
+    //console.log('[chatTimeline] processDelta received:', { op, hasItem: !!msg?.item, item: msg?.item })
     if (op === 'message' && msg.item) {
-      console.log('[chatTimeline] Adding message to timeline:', msg.item)
+      // console.log('[chatTimeline] Adding message to timeline:', msg.item)
       useChatTimeline.getState().appendRawItem(msg.item as TimelineItem)
       return
     }

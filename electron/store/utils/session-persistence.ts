@@ -184,8 +184,12 @@ function upgradeLegacySession(session: any): Session | null {
         // Load messageHistory from disk to preserve conversation context
         messageHistory: Array.isArray(ctx.messageHistory) ? ctx.messageHistory : [],
       },
-      tokenUsage: (session.tokenUsage && typeof session.tokenUsage === 'object') ? session.tokenUsage : { byProvider: {}, byProviderAndModel: {}, total: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
-      costs: (session.costs && typeof session.costs === 'object') ? session.costs : { byProviderAndModel: {}, totalCost: 0, currency: 'USD' },
+      tokenUsage: (session.tokenUsage && typeof session.tokenUsage === 'object')
+        ? session.tokenUsage
+        : { byProvider: {}, byProviderAndModel: {}, total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0, reasoningTokens: 0 } },
+      costs: (session.costs && typeof session.costs === 'object')
+        ? session.costs
+        : { byProviderAndModel: {}, totalCost: 0, currency: 'USD', cachedInputCostTotal: 0, normalInputCostTotal: 0, totalSavings: 0 },
     }
 
     // Must have items array to be valid after upgrade (can be empty if truly no history)
@@ -308,7 +312,7 @@ class DebouncedSessionSaver {
    * Returns a Promise when immediate=true, void when debounced
    */
   save(session: Session, immediate = false, workspaceRoot?: string): Promise<void> | void {
-    console.log('[sessionSaver] save() called:', { sessionId: session.id, immediate, workspaceRoot, itemCount: session.items?.length })
+    //console.log('[sessionSaver] save() called:', { sessionId: session.id, immediate, workspaceRoot, itemCount: session.items?.length })
 
     // Store workspace for this session
     if (workspaceRoot) {
@@ -327,9 +331,9 @@ class DebouncedSessionSaver {
       return this.performSave(session)
     } else {
       // Debounced save - fire and forget
-      console.log('[sessionSaver] Scheduling debounced save in', this.debounceMs, 'ms')
+      //console.log('[sessionSaver] Scheduling debounced save in', this.debounceMs, 'ms')
       const timeout = setTimeout(() => {
-        console.log('[sessionSaver] Debounce timeout fired, performing save')
+        //console.log('[sessionSaver] Debounce timeout fired, performing save')
         this.performSave(session)
         this.saveTimeouts.delete(session.id)
       }, this.debounceMs)
@@ -343,7 +347,7 @@ class DebouncedSessionSaver {
    */
   private async performSave(session: Session): Promise<void> {
     const workspaceRoot = this.workspaceBySession.get(session.id)
-    console.log('[sessionSaver] performSave() starting for session:', session.id, 'workspace:', workspaceRoot)
+    //console.log('[sessionSaver] performSave() starting for session:', session.id, 'workspace:', workspaceRoot)
 
     // Wait for any active save to complete
     const activeSave = this.activeSaves.get(session.id)
@@ -356,7 +360,7 @@ class DebouncedSessionSaver {
     // Start new save
     const savePromise = saveSessionToDisk(session, workspaceRoot)
       .then(() => {
-        console.log('[sessionSaver] Successfully saved session to disk:', session.id)
+        //console.log('[sessionSaver] Successfully saved session to disk:', session.id)
       })
       .catch(e => {
         console.error('[session-persistence] Save failed:', e)

@@ -107,6 +107,10 @@ Agent Mode lets the assistant call local tools during a conversation. You contro
   - PTY-backed shell (node-pty + xterm) inside the app
   - Uses: run tests/linters/builds, quick scripts
   - Policy: disabled by default; opt-in per workspace; confirmations for risky commands
+  - Behavior: terminalExec(command) is the only input. It blocks for up to 60s (or until the command exits) and then returns the entire log capped at 500 lines.
+  - Long runs: If the command produces more than 500 lines or is still running after 60s, the tool responds with "Command is long running and still in progress, use terminalSessionCommandOutput to see current state" and includes the commandId.
+  - Continuations: Call terminalSessionCommandOutput with that commandId (and optional offset/maxBytes) to page through the remaining log deterministically.
+>>>>>> REPLACE
 
 - Structured edits [experimental]
   - AST-aware refactors using TypeScript and ts-morph

@@ -1,163 +1,269 @@
 import type { AgentTool } from '../../providers/provider'
+import type { AgentPtyRecord } from '../../services/agentPty'
 import { getSessionService } from '../../services/index.js'
-import path from 'node:path'
-import { sanitizeTerminalOutput, redactOutput } from '../utils'
 import * as agentPty from '../../services/agentPty'
+import { sanitizeTerminalOutput, redactOutput } from '../utils'
+
+const COMMAND_TIMEOUT_MS = 60_000
+const POLL_INTERVAL_MS = 100
+const MAX_OUTPUT_LINES = 500
+const LONG_RUNNING_MESSAGE = 'Command is long running and still in progress, use terminalSessionCommandOutput to see current state'
+const PROMPT_SNAPSHOT_WINDOW = 2_000
+const PROMPT_TAIL_WINDOW = 1_200
+const PROMPT_STABLE_MS = 150
+const PROMPT_REGEXES = [
+  /\nPS [^\n]*> $/i,
+  /\n[A-Z]:\\[^\n]*> $/,
+  /\n[\w.@~\-/\s]+[$#%] $/,
+  /\n[$#%] $/,
+  /\n(?!>> )> $/,
+  /\n[^\n]{0,160}[❯➜➝➞➟➠➢➣➤➥➦➧➨➩➪➫➬➭➮➯➱➲➳➵➸➺➻➼➽➾⚡λƒπΣΦΩ✗✘✖✕×╳✓✔»›⋗⋙] $/u,
+]
+
+const PROMPT_STATUS_MARKERS = /[✗✘✖✕×╳⚠‼!]+\s*$/u
+
+type AgentCommand = AgentPtyRecord['state']['commands'][number]
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const normalizeNewlines = (value: string): string => value.replace(/\r\n/g, '\n')
+
+const getLatestCommand = (rec: AgentPtyRecord): AgentCommand | null => {
+  const { commands, activeIndex } = rec.state
+  if (activeIndex != null && commands[activeIndex]) return commands[activeIndex]
+  return commands.length > 0 ? commands[commands.length - 1] : null
+}
+
+const getCommandById = (rec: AgentPtyRecord, commandId: number): AgentCommand | null => {
+  return rec.state.commands.find((cmd) => cmd.id === commandId) ?? null
+}
+
+const getLastNonEmptyLine = (block: string): string | null => {
+  if (!block) return null
+  const lines = block.split('\n')
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const candidate = lines[i]
+    if (candidate && candidate.trim().length > 0) {
+      return candidate
+    }
+  }
+  return null
+}
+
+const getPromptSnapshot = (ring: string): string | null => {
+  if (!ring) return null
+  const windowed = ring.slice(-PROMPT_SNAPSHOT_WINDOW)
+  const sanitized = normalizeNewlines(sanitizeTerminalOutput(windowed))
+  if (!sanitized) return null
+  return getLastNonEmptyLine(sanitized)
+}
+
+const stripPromptStatusMarkers = (line: string): string => line.replace(PROMPT_STATUS_MARKERS, '').trimEnd()
+
+const buildPromptSignature = (line: string): string | null => {
+  if (!line) return null
+  const withoutMarkers = stripPromptStatusMarkers(line)
+  const signature = withoutMarkers
+    .replace(/[^A-Za-z0-9_./\\:@~-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return signature || null
+}
+
+const hasPromptReturned = (
+  cmd: AgentCommand,
+  expectedPrompt?: string | null,
+  expectedSignature?: string | null,
+): boolean => {
+  if (!cmd?.data) return false
+  const tail = normalizeNewlines(sanitizeTerminalOutput(cmd.data.slice(-PROMPT_TAIL_WINDOW)))
+  if (!tail) return false
+  if (expectedPrompt && tail.endsWith(expectedPrompt)) return true
+  const lastLine = getLastNonEmptyLine(tail)
+  if (expectedSignature && lastLine) {
+    const candidateSignature = buildPromptSignature(lastLine)
+    if (candidateSignature && candidateSignature === expectedSignature) return true
+  }
+  return PROMPT_REGEXES.some((regex) => regex.test(tail))
+}
+
+const normalizeCommand = (command: string): string => {
+  const isWin = process.platform === 'win32'
+  const EOL = isWin ? '\r\n' : '\n'
+  return command
+    .replace(/\r\n?|\n/g, EOL)
+    .replace(/[\u2028\u2029]/g, EOL)
+    .trimEnd()
+}
+
+const buildPayload = (command: string): string => {
+  const normalized = normalizeCommand(command)
+  if (process.platform === 'win32') {
+    const BP_START = '\u001b[200~'
+    const BP_END = '\u001b[201~'
+    const ENTER = '\r'
+    return `${BP_START}${normalized}${BP_END}${ENTER}`
+  }
+  return `${normalized}\n`
+}
+
+const maybeRecoverWindowsContinuation = async (rec: AgentPtyRecord, sessionId: string): Promise<void> => {
+  if (process.platform !== 'win32') return
+  try {
+    await sleep(60)
+    const tail = String(rec.state.ring).slice(-200)
+    const inContinuation = /\n>> $/.test(tail) && !/\nPS [^\n]*> $/.test(tail)
+    if (inContinuation) {
+      agentPty.write(sessionId, '\u0003') // Ctrl+C
+    }
+  } catch {}
+}
+
+type WaitForCommandOptions = {
+  commandId: number
+  expectedPrompt?: string | null
+  expectedPromptSignature?: string | null
+}
+
+const waitForCommand = async (rec: AgentPtyRecord, opts: WaitForCommandOptions): Promise<void> => {
+  const start = Date.now()
+  let lastLength = 0
+  let lastChangeAt = Date.now()
+  while (Date.now() - start < COMMAND_TIMEOUT_MS) {
+    const active = getCommandById(rec, opts.commandId)
+    if (!active) return
+    if (active.endedAt) return
+
+    const currentLength = active.data.length
+    if (currentLength !== lastLength) {
+      lastLength = currentLength
+      lastChangeAt = Date.now()
+    }
+
+    const promptRestored = hasPromptReturned(active, opts.expectedPrompt, opts.expectedPromptSignature)
+    const idleLongEnough = Date.now() - lastChangeAt > PROMPT_STABLE_MS
+    if (promptRestored && idleLongEnough) {
+      active.endedAt = active.endedAt ?? Date.now()
+      if (rec.state.activeIndex != null && rec.state.commands[rec.state.activeIndex]?.id === active.id) {
+        rec.state.activeIndex = null
+      }
+      return
+    }
+
+    await sleep(POLL_INTERVAL_MS)
+  }
+}
+
+const sanitizeLines = (raw: string): { lines: string[]; totalChars: number } => {
+  const sanitized = sanitizeTerminalOutput(raw)
+  const { redacted } = redactOutput(sanitized)
+  const normalized = redacted.replace(/\r\n/g, '\n')
+  if (!normalized) return { lines: [], totalChars: 0 }
+  const split = normalized.split('\n')
+  const hasTrailingBlank = split.length > 0 && split[split.length - 1] === ''
+  const lines = hasTrailingBlank ? split.slice(0, -1) : split
+  return { lines, totalChars: normalized.length }
+}
 
 export const terminalExecTool: AgentTool = {
   name: 'terminalExec',
-  description: 'Execute a command in the persistent terminal session (visible in UI). Auto-creates session if needed. Output streams to the visible terminal panel, and captured output is returned to the LLM (complete if quick; partial if long-running).',
+  description: [
+    'Execute a command inside the shared agent terminal. The PTY session is visible in the UI and reused between calls.',
+    'The tool blocks for up to 60 seconds (or until the command exits) and then returns the full output, capped at 500 lines.',
+    'If the output exceeds 500 lines or the command is still running after 60 seconds, the tool responds with "Command is long running and still in progress, use terminalSessionCommandOutput to see current state" plus a preview.',
+  ].join('\n'),
   parameters: {
     type: 'object',
     properties: {
       command: { type: 'string', description: 'Shell command to execute' },
-      cwd: { type: 'string', description: 'Optional working directory (workspace-relative or absolute). Only used when creating a new session.' },
-      timeoutMs: { type: 'integer', minimum: 500, maximum: 30000, default: 5000, description: 'Max time to wait for output capture before returning partial output' },
-      idleMs: { type: 'integer', minimum: 150, maximum: 2000, default: 300, description: 'Idle window (no new bytes) to consider command output quiescent' },
-      tailBytes: { type: 'integer', minimum: 500, maximum: 20000, default: 6000, description: 'Max bytes of output to include in tool result (tail of buffer)' }
     },
     required: ['command'],
     additionalProperties: false,
   },
-  run: async (
-    args: { command: string; cwd?: string; timeoutMs?: number; idleMs?: number; tailBytes?: number },
-    meta?: { requestId?: string; [key: string]: any }
-  ) => {
-    // Always use the current session ID for the agent PTY (one terminal per session)
-    const sessionService = getSessionService()
-    const ws = (meta as any)?.workspaceId || null
-    const sessionId = ws ? sessionService.getCurrentIdFor({ workspaceId: ws }) : null
-    if (!sessionId) {
-      console.error('[terminal.exec] No active sessionId')
-      return { ok: false, error: 'no-session' }
-    }
-
-
-    // Get or create session with optional cwd
-    if (!(meta as any)?.workspaceId) {
-      return { ok: false, error: 'workspaceId required in meta' }
-    }
-    const root = path.resolve((meta as any).workspaceId)
-    const desiredCwd = args.cwd ? (path.isAbsolute(args.cwd) ? args.cwd : path.join(root, args.cwd)) : undefined
-  
-
-    const sid = await agentPty.getOrCreateAgentPtyFor(sessionId, desiredCwd ? { cwd: desiredCwd } : undefined)
-  
-
-    const rec = agentPty.getSessionRecord(sid)
-    if (!rec) {
-      console.error('[terminal.exec] No session record found for sessionId:', sid)
-      return { ok: false, error: 'no-session' }
-    }
-  
-
-    // Execute command
-  
-    await agentPty.beginCommand(rec.state, args.command)
+  run: async (args: { command: string }, meta?: { requestId?: string; workspaceId?: string }) => {
     try {
-      // On Windows/PSReadLine, wrap the command in Bracketed Paste markers to
-      // ensure the entire command is processed atomically and avoid falling into
-      // continuation mode (" >> ") if quotes/braces briefly appear unmatched.
-      const isWin = process.platform === 'win32'
-      const EOL = isWin ? '\r\n' : '\n'
-      const ENTER = isWin ? '\r' : '\n'
-      const BP_START = '\x1b[200~'
-      const BP_END = '\x1b[201~'
-
-      // Normalize command line endings and strip trailing newlines to avoid
-      // PSReadLine seeing partial lines or extra blank lines.
-      const cmd = args.command
-        .replace(/\r\n?|\n/g, EOL)
-        .replace(/[\u2028\u2029]/g, EOL)
-        .trimEnd()
-
-      // Only use bracketed paste on Windows (PowerShell/PSReadLine supports it by default).
-      // Other shells also support it, but we keep scope conservative to avoid echoing
-      // the markers on exotic shells that might not have it enabled.
-      const payload = isWin ? (BP_START + cmd + BP_END + ENTER) : (cmd + ENTER)
-      agentPty.write(sid, payload)
-    
-
-      // Heuristic: if PSReadLine falls into continuation prompt (" >> ")
-      // after our write (seen sometimes on Windows), send Ctrl+C to recover.
-      if (isWin) {
-        try {
-          await new Promise((r) => setTimeout(r, 60))
-          const tail = String(rec.state.ring).slice(-200)
-          if (/\n>> $/.test(tail) && !/\nPS [^\n]*> $/.test(tail)) {
-          
-            agentPty.write(sid, '\x03') // Ctrl+C
-          }
-        } catch {}
+      const rawCommand = typeof args.command === 'string' ? args.command : ''
+      if (!rawCommand.trim()) {
+        return { ok: false, error: 'empty-command' }
       }
 
-      // Passive capture: wait briefly for output and return either complete or partial text
-      const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
-      const timeoutMs = clamp(Number(args.timeoutMs ?? 5000), 500, 30000)
-      const idleMs = clamp(Number(args.idleMs ?? 300), 150, 2000)
-      const tailBytes = clamp(Number(args.tailBytes ?? 6000), 500, 20000)
-
-      const idx = rec.state.activeIndex
-      const capStart = Date.now()
-      let lastBytes = (idx != null && rec.state.commands[idx]) ? rec.state.commands[idx].bytes : 0
-      let lastChange = Date.now()
-
-      // Poll for activity until idle or timeout
-      while (Date.now() - capStart < timeoutMs) {
-        await new Promise((r) => setTimeout(r, 80))
-        const now = Date.now()
-        const bytes = (idx != null && rec.state.commands[idx]) ? rec.state.commands[idx].bytes : lastBytes
-        if (bytes !== lastBytes) {
-          lastBytes = bytes
-          lastChange = now
-        } else if (now - lastChange > idleMs) {
-          // Consider it quiescent
-          break
-        }
+      const sessionService = getSessionService()
+      const workspaceId = meta?.workspaceId || null
+      const sessionId = workspaceId ? sessionService.getCurrentIdFor({ workspaceId }) : null
+      if (!sessionId) {
+        console.error('[terminal.exec] No active sessionId for workspace:', workspaceId)
+        return { ok: false, error: 'no-session' }
       }
 
-      const raw = (idx != null && rec.state.commands[idx]) ? rec.state.commands[idx].data : String(rec.state.ring)
-      const textRaw = raw.slice(-tailBytes)
-      const textSanitized = sanitizeTerminalOutput(textRaw)
-      const text = redactOutput(textSanitized).redacted
-      const truncated = textRaw.length < raw.length
-      const durationMs = Date.now() - capStart
-      const complete = Date.now() - lastChange > idleMs
+      const sid = await agentPty.getOrCreateAgentPtyFor(sessionId)
+      const rec = agentPty.getSessionRecord(sid)
+      if (!rec) {
+        console.error('[terminal.exec] No PTY record for sessionId:', sid)
+        return { ok: false, error: 'no-session' }
+      }
 
-      // Return session info along with execution confirmation and captured output
-      const state = rec.state
-      const lastCmds = state.commands.slice(-5).map((c: any) => {
-        const cmd = redactOutput(sanitizeTerminalOutput(c.command.slice(0, 200))).redacted
-        const tail = redactOutput(sanitizeTerminalOutput(c.data.slice(-200))).redacted
-        return {
-          id: c.id,
-          command: cmd,
-          startedAt: c.startedAt,
-          endedAt: c.endedAt,
-          bytes: c.bytes,
-          tail
-        }
+      await agentPty.beginCommand(rec.state, rawCommand)
+      const latestCommand = getLatestCommand(rec)
+      if (!latestCommand) {
+        return { ok: false, error: 'command-missing' }
+      }
+
+      const promptSnapshot = getPromptSnapshot(rec.state.ring)
+      const promptSignature = promptSnapshot ? buildPromptSignature(promptSnapshot) : null
+
+      agentPty.write(sid, buildPayload(rawCommand))
+
+      await maybeRecoverWindowsContinuation(rec, sid)
+      await waitForCommand(rec, {
+        commandId: latestCommand.id,
+        expectedPrompt: promptSnapshot,
+        expectedPromptSignature: promptSignature,
       })
 
-      const liveTailRaw = state.ring.slice(-400)
-      const liveTail = redactOutput(sanitizeTerminalOutput(liveTailRaw)).redacted
+      const { lines, totalChars } = sanitizeLines(latestCommand.data)
+      const truncated = lines.length > MAX_OUTPUT_LINES
+      const previewLines = truncated ? lines.slice(-MAX_OUTPUT_LINES) : lines
+      const preview = previewLines.join('\n')
+      const commandFinished = Boolean(latestCommand.endedAt)
+      const commandId = latestCommand.id
+      const needsContinuation = truncated || !commandFinished
 
-      const result = {
+      if (!needsContinuation) {
+        return {
+          ok: true,
+          sessionId: sid,
+          commandId,
+          commandFinished: true,
+          lineCount: lines.length,
+          output: preview,
+          totalChars,
+        }
+      }
+
+      return {
         ok: true,
         sessionId: sid,
-        shell: rec.shell,
-        cwd: rec.cwd,
-        commandCount: state.commands.length,
-        lastCommands: lastCmds,
-        liveTail,
-        captured: { text, bytes: lastBytes, truncated, durationMs, complete }
+        commandId,
+        commandFinished,
+        message: LONG_RUNNING_MESSAGE,
+        preview,
+        previewLineCount: previewLines.length,
+        totalLines: lines.length,
+        truncated,
+        continuation: { tool: 'terminalSessionCommandOutput', commandId },
+        totalChars,
       }
-    
-      return result
-    } catch (e: any) {
-      console.error('[terminal.exec] Error executing command:', e)
-      return { ok: false, error: e?.message || String(e) }
+    } catch (error: any) {
+      console.error('[terminal.exec] Error executing command:', error)
+      return { ok: false, error: error?.message || String(error) }
     }
-  }
+  },
 }
 
+export default terminalExecTool
+
+export const __terminalExecInternals = {
+  getPromptSnapshot,
+  hasPromptReturned,
+  buildPromptSignature,
+}

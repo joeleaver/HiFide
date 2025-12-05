@@ -34,9 +34,9 @@ let resolveBootstrap: ((value: WsBootstrap) => void) | null = null
 function broadcastFlowEvent(ev: any): void {
   try {
     const sid = (ev && typeof ev === 'object') ? (ev.sessionId || null) : null
-    console.log('[broadcastFlowEvent] Event type:', ev.type, 'sessionId:', sid)
+    //console.log('[broadcastFlowEvent] Event type:', ev.type, 'sessionId:', sid)
     const wsFromSid = getWorkspaceIdForSessionId(sid)
-    console.log('[broadcastFlowEvent] Workspace from sessionId:', wsFromSid)
+    //console.log('[broadcastFlowEvent] Workspace from sessionId:', wsFromSid)
     if (!wsFromSid) {
       console.error('[broadcastFlowEvent] Failed to find workspace for sessionId:', sid, 'event type:', ev.type)
       return
@@ -136,13 +136,13 @@ export function startWsBackend(): Promise<WsBootstrap> {
               method.startsWith('session.') ||
               method.startsWith('flow.')
             ) {
-              const meta = activeConnections.get(connection)
-              const workspaceService = getWorkspaceService()
-              const workspace = meta?.windowId ? workspaceService.getWorkspaceForWindow(meta.windowId) : null
-              console.log('[ws-main] send', method, {
-                toWindow: meta?.windowId || null,
-                workspaceId: workspace || null,
-              })
+              // const meta = activeConnections.get(connection)
+              // const workspaceService = getWorkspaceService()
+              // const workspace = meta?.windowId ? workspaceService.getWorkspaceForWindow(meta.windowId) : null
+              // console.log('[ws-main] send', method, {
+              //   toWindow: meta?.windowId || null,
+              //   workspaceId: workspace || null,
+              // })
             }
           } catch { }
           // Send as notification (no response expected)

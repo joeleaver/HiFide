@@ -228,7 +228,14 @@ export function createMiscHandlers(
 
       // Execute flow
       const { executeFlow } = await import('../../../flow-engine/index.js')
+      const includeThoughts = session.currentContext.includeThoughts ?? true
+      const thinkingBudget = session.currentContext.thinkingBudget !== undefined
+        ? session.currentContext.thinkingBudget
+        : (includeThoughts ? 2048 : undefined)
+
       const result = await executeFlow(wc, {
+          includeThoughts,
+          ...(thinkingBudget !== undefined ? { thinkingBudget } : {}),
         requestId,
         flowDef: { nodes, edges: flowEdges },
         sessionId: currentSessionId,

@@ -162,6 +162,7 @@ export type TokenCost = {
   totalCost: number
   currency: string  // 'USD'
   cachedInputCost?: number  // Cost of cached tokens (if applicable)
+  normalInputCost?: number  // Cost of non-cached input tokens
   savings?: number          // Amount saved from caching
   savingsPercent?: number   // Percentage saved from caching
 }
@@ -183,12 +184,15 @@ export type Session = {
     messageHistory?: Array<{
       role: 'system' | 'user' | 'assistant'
       content: string
+      reasoning?: string
       metadata?: {
         id: string
         pinned?: boolean
         priority?: number
       }
     }>
+    includeThoughts?: boolean
+    thinkingBudget?: number
   }
 
   // Flow cache - persisted cache data from cache nodes
@@ -232,6 +236,9 @@ export type Session = {
     byProviderAndModel: Record<string, Record<string, TokenCost>>  // provider -> model -> cost
     totalCost: number
     currency: string
+    cachedInputCostTotal?: number
+    normalInputCostTotal?: number
+    totalSavings?: number
   }
 
   // Log of finalized LLM requests for this session (per node execution)

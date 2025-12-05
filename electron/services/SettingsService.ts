@@ -464,6 +464,7 @@ export class SettingsService extends Service<SettingsState> {
       totalCost: inputCost + outputCost,
       currency: 'USD',
       cachedInputCost: cachedTokens > 0 ? cachedInputCost : undefined,
+      normalInputCost: normalInputTokens > 0 ? normalInputCost : undefined,
       savings: savings > 0 ? savings : undefined,
       savingsPercent: savingsPercent > 0 ? savingsPercent : undefined,
     }

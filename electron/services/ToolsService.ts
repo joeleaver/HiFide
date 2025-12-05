@@ -62,6 +62,7 @@ const DEFAULT_TOOL_CATEGORY_MAP: Record<string, ToolCategory> = {
   terminalExec: 'terminal',
   sessionTail: 'terminal',
   sessionSearchOutput: 'terminal',
+  terminalSessionCommandOutput: 'terminal',
   sessionRestart: 'terminal',
 
   // Code analysis

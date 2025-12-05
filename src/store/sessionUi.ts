@@ -3,6 +3,28 @@ import { getBackendClient } from '../lib/backend/bootstrap'
 import { useChatTimeline } from './chatTimeline'
 import { useFlowRuntime, refreshFlowRuntimeStatusWithRetry } from './flowRuntime'
 
+const SESSION_USAGE_DEBUG_FROM_ENV = import.meta.env?.VITE_SESSION_USAGE_DEBUG === '1'
+
+const shouldLogSessionUsageDebug = (): boolean => {
+  if (SESSION_USAGE_DEBUG_FROM_ENV) return true
+  if (typeof window !== 'undefined' && '__HF_SESSION_USAGE_DEBUG' in window) {
+    return Boolean((window as unknown as { __HF_SESSION_USAGE_DEBUG?: boolean }).__HF_SESSION_USAGE_DEBUG)
+  }
+  return false
+}
+
+const logSessionUsageDebug = (...args: unknown[]): void => {
+  if (!shouldLogSessionUsageDebug()) return
+  console.debug(...args)
+}
+
+const summarizeUsagePayload = (payload: any) => ({
+  tokenTotals: payload?.tokenUsage?.total ?? null,
+  totalCost: payload?.costs?.totalCost ?? null,
+  currency: payload?.costs?.currency ?? null,
+  requestsLogLength: Array.isArray(payload?.requestsLog) ? payload.requestsLog.length : 0,
+})
+
 
 export interface SessionSummary { id: string; title: string }
 export interface ProviderOption { value: string; label: string }
@@ -281,12 +303,12 @@ export function initSessionUiEvents(): void {
   })
 
   client.subscribe('session.usage.changed', (p: any) => {
-    console.log('[sessionUi] Received session.usage.changed event:', p)
+    logSessionUsageDebug('[sessionUi] Received session.usage.changed event summary:', summarizeUsagePayload(p))
     try {
       const st = useSessionUi.getState()
-      console.log('[sessionUi] Calling __setUsage with:', { tokenUsage: p.tokenUsage, costs: p.costs, requestsLog: p.requestsLog })
+      logSessionUsageDebug('[sessionUi] Calling __setUsage with summary:', summarizeUsagePayload(p))
       st.__setUsage(p.tokenUsage, p.costs, p.requestsLog)
-      console.log('[sessionUi] __setUsage completed successfully')
+      logSessionUsageDebug('[sessionUi] __setUsage completed successfully')
     } catch (e) {
       console.error('[sessionUi] Error in __setUsage:', e)
     }
