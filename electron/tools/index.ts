@@ -47,10 +47,6 @@ import { workspaceMapTool } from './workspace/map'
 
 // Terminal tools
 import { terminalExecTool } from './terminal/exec'
-import { sessionSearchOutputTool } from './terminal/sessionSearchOutput'
-import { sessionTailTool } from './terminal/sessionTail'
-import { sessionRestartTool } from './terminal/sessionRestart'
-import { sessionCommandOutputTool } from './terminal/sessionCommandOutput'
 
 // Text tools
 import { grepTool } from './text/grep'
@@ -97,10 +93,6 @@ export const agentTools: AgentTool[] = [
   workspaceMapTool,
 
   terminalExecTool,
-  sessionSearchOutputTool,
-  sessionTailTool,
-  sessionCommandOutputTool,
-  sessionRestartTool,
 
   grepTool,
 

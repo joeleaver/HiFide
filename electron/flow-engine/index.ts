@@ -209,7 +209,8 @@ export async function cancelFlow(requestId: string): Promise<{ ok: boolean; erro
 
     // Emit "done" BEFORE tearing down listeners so both the WS forwarder and
     // persistence subscriber can flush and notify renderers
-    try { emitFlowEvent(requestId, { type: 'done' }) } catch {}
+    const sessionId = scheduler.getSessionId()
+    try { emitFlowEvent(requestId, { type: 'done', sessionId }) } catch {}
 
     // Allow the synchronous onFlowEvent handlers to run before cleanup
     // (EventEmitter dispatch is synchronous)

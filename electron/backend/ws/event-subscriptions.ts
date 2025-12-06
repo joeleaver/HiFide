@@ -9,7 +9,6 @@ import { getConnectionWorkspaceId } from './broadcast.js'
 import type { RpcConnection } from './types'
 import {
   getSessionService,
-  getTerminalService,
   getKanbanService,
   getKnowledgeBaseService,
   getAppService,
@@ -80,14 +79,7 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
     subscriptions.push({ service, event, handler, workspaceScoped: false })
   }
 
-  // Terminal tabs
-  const terminalService = getTerminalService()
-  addWorkspaceSubscription(terminalService, 'terminal:tabs:changed', 'terminal.tabs.changed', (data) => ({
-    agentTabs: Array.isArray(data.agentTabs) ? data.agentTabs : [],
-    agentActive: data.agentActive || null,
-    explorerTabs: Array.isArray(data.explorerTabs) ? data.explorerTabs : [],
-    explorerActive: data.explorerActive || null,
-  }))
+  // Terminal tabs removed post-refactor (non-interactive terminalExec only)
 
   // Kanban board
   const kanbanService = getKanbanService()

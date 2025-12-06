@@ -117,16 +117,7 @@ export async function loadWorkspace(options: WorkspaceLoadOptions): Promise<{ ok
 
       // 7.5 Ensure PTY is attached for the selected session
       // This is a safeguard in case the session:selected event was missed
-      const finalSessionId = sessionService.getCurrentIdFor({ workspaceId })
-      if (finalSessionId) {
-        try {
-          const agentPty = await import('../../services/agentPty.js')
-          await agentPty.getOrCreateAgentPtyFor(finalSessionId)
-        } catch (err) {
-          console.error('[workspace-loader] Failed to ensure PTY attachment:', err)
-          // Don't fail workspace load if PTY attachment fails
-        }
-      }
+
 
       // 8. Send workspace.attached notification (canonical binding signal)
       // Note: Connection→workspace binding is now managed via window→workspace mapping in WorkspaceService

@@ -32,6 +32,13 @@ export const FlowService = {
     return client.rpc('flow.cancel', { requestId })
   },
 
+  async stop(requestId?: string): Promise<{ ok: boolean; error?: string }> {
+    const client = getBackendClient()
+    if (!client) return { ok: false, error: 'backend-not-ready' }
+    try { await client.whenReady?.(5000) } catch {}
+    return client.rpc('flow.stop', { requestId })
+  },
+
   async getTools(): Promise<Array<{ name: string; description: string; category?: string }>> {
     const client = getBackendClient()
     if (!client) return []

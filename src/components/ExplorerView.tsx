@@ -382,7 +382,7 @@ export default function ExplorerView() {
             />
           </div>
           <div style={{ borderTop: '1px solid #3e3e42', flexShrink: 0 }}>
-            <TerminalPanel context="explorer" />
+            <TerminalPanel />
           </div>
         </div>
       </div>

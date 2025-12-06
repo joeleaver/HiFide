@@ -42,6 +42,10 @@
 
 .reasoningText {
     font-style: italic;
-    white-space: pre-wrap;
 }
 
+
+.reasoningText code,
+.reasoningText pre {
+    font-style: normal;
+}

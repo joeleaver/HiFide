@@ -146,7 +146,7 @@ export function createMiscHandlers(
   // NOTE: Uses session.executedFlow to determine which flow to run.
   // If editor is editing the same flow, uses editor's graph (picks up live edits).
   // If editor is editing a different flow, loads fresh from disk.
-  addMethod('flow.start', async () => {
+  addMethod('flow.start', async (args: any) => {
     try {
       const workspaceId = await getConnectionWorkspaceId(connection)
       if (!workspaceId) {
@@ -159,7 +159,7 @@ export function createMiscHandlers(
       const flowProfileService = getFlowProfileService()
 
       // Get current session
-      const currentSessionId = sessionService.getCurrentIdFor({ workspaceId })
+      const currentSessionId = args?.sessionId || sessionService.getCurrentIdFor({ workspaceId })
       if (!currentSessionId) {
         return { ok: false, error: 'No current session', code: 'no-current-session' }
       }
@@ -254,6 +254,9 @@ export function createMiscHandlers(
         return { ok: false, error: result.error }
       }
     } catch (e: any) {
+      if (e.name === 'AbortError' || e.message === 'Flow execution cancelled') {
+        return { ok: false, error: 'cancelled' }
+      }
       console.error('[flow.start] Error:', e)
       return { ok: false, error: e?.message || String(e) }
     }
@@ -306,6 +309,41 @@ export function createMiscHandlers(
       }
     } catch (e: any) {
       console.error('[flow.cancel] Error:', e)
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  // Alias flow.stop to flow.cancel
+  addMethod('flow.stop', async (args: any) => {
+    // Re-use logic for flow.cancel
+    try {
+      const { cancelFlow } = await import('../../../flow-engine/index.js')
+      const requestId = args?.requestId
+
+      if (requestId) {
+        // Cancel specific flow
+        const result = await cancelFlow(requestId)
+        return result
+      } else {
+        // Cancel all flows for this workspace
+        const workspaceId = await getConnectionWorkspaceId(connection)
+        if (!workspaceId) {
+          return { ok: false, error: 'No workspace bound' }
+        }
+
+        const { getActiveFlows } = await import('../../../flow-engine/index.js')
+        const activeFlows = getActiveFlows()
+
+        // Cancel all flows for this workspace
+        const results = await Promise.all(
+          Array.from(activeFlows.keys()).map((rid) => cancelFlow(rid))
+        )
+
+        const allOk = results.every((r) => r.ok)
+        return { ok: allOk }
+      }
+    } catch (e: any) {
+      console.error('[flow.stop] Error:', e)
       return { ok: false, error: e?.message || String(e) }
     }
   })

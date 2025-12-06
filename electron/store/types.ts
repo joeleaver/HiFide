@@ -61,6 +61,28 @@ export type BadgeType =
   | 'error'       // Error badge
   | 'custom'      // Custom badge
 
+export type BadgeStatus = 'running' | 'success' | 'error' | 'warning'
+
+export type BadgeContentType = 
+  | 'diff' 
+  | 'search' 
+  | 'workspace-search' 
+  | 'workspace-jump' 
+  | 'workspace-map' 
+  | 'ast-search' 
+  | 'read-lines' 
+  | 'kb-search' 
+  | 'kb-store' 
+  | 'agent-assess' 
+  | 'usage-breakdown' 
+  | 'json' 
+  | 'text' 
+  | 'custom'
+  | 'terminal-exec'
+  | 'search-results'
+  | 'text-search'
+  | 'operation-result'
+
 export type Badge = {
   id: string                    // Unique ID for this badge
   type: BadgeType
@@ -93,13 +115,13 @@ export type Badge = {
   filesChanged?: number
 
   // Status (for tool badges)
-  status?: 'running' | 'success' | 'error'
+  status?: BadgeStatus
   error?: string
 
   // Expandable container support
   expandable?: boolean           // Whether this badge can be expanded
   defaultExpanded?: boolean      // Initial expansion state
-  contentType?: 'diff' | 'search' | 'workspace-search' | 'workspace-jump' | 'workspace-map' | 'ast-search' | 'read-lines' | 'kb-search' | 'kb-store' | 'agent-assess' | 'usage-breakdown' | 'json' | 'text' | 'custom'  // Type of expanded content
+  contentType?: BadgeContentType  // Type of expanded content
 
   // Enhanced metadata for header display
   metadata?: {

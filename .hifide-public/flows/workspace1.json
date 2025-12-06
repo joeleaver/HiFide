@@ -13,13 +13,14 @@
             "temperature": 0
           },
           {
-            "model": "accounts/fireworks/models/deepseek-v3p1-terminus"
+            "model": "accounts/fireworks/models/kimi-k2-thinking",
+            "temperature": 0.6
           }
         ]
       },
       "position": {
         "x": -665.9652327630902,
-        "y": -487.38813591580697
+        "y": -488.0844315705274
       },
       "expanded": true
     },

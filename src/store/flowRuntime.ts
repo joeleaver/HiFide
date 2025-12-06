@@ -86,26 +86,14 @@ function createFlowRuntimeStore() {
           cacheHit: false,
           style: { border: '3px solid #60a5fa', boxShadow: '0 0 0 2px rgba(96,165,250,0.15)' }
         })
-        // Don't override waitingForInput status when other nodes start
-        const currentStatus = get().status
-        if (currentStatus !== 'waitingForInput') {
-          set({ status: 'running', requestId: ev.requestId, lastEventAt: now })
-        } else {
-          set({ requestId: ev.requestId, lastEventAt: now })
-        }
+        set({ status: 'running', requestId: ev.requestId, lastEventAt: now })
         return
       }
 
       if (t === 'chunk') {
         const nodeId = ev.nodeId as string
         updateNode(nodeId, { status: 'streaming' })
-        // Don't override waitingForInput status when chunks arrive
-        const currentStatus = get().status
-        if (currentStatus !== 'waitingForInput') {
-          set({ status: 'running', requestId: ev.requestId, lastEventAt: now })
-        } else {
-          set({ requestId: ev.requestId, lastEventAt: now })
-        }
+        set({ status: 'running', requestId: ev.requestId, lastEventAt: now })
         return
       }
 
@@ -132,13 +120,7 @@ function createFlowRuntimeStore() {
           durationMs,
           style: { border: '3px solid #22c55e', boxShadow: '0 0 0 2px rgba(34,197,94,0.2)' }
         })
-        // Don't override waitingForInput status when other nodes complete
-        const currentStatus = get().status
-        if (currentStatus !== 'waitingForInput') {
-          set({ status: 'running', requestId: ev.requestId, lastEventAt: now })
-        } else {
-          set({ requestId: ev.requestId, lastEventAt: now })
-        }
+        set({ status: 'running', requestId: ev.requestId, lastEventAt: now })
         return
       }
 

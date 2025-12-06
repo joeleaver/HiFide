@@ -30,7 +30,7 @@ export class FlowNodeIoCoordinator {
     promise.finally(() => {
       this.inFlightExecutions.delete(nodeId)
       this.pushedInputsByNode.delete(nodeId)
-    })
+    }).catch(() => {})
   }
 
   getInFlightExecution(nodeId: string): Promise<NodeOutput> | undefined {

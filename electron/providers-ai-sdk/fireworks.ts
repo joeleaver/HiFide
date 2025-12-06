@@ -71,6 +71,32 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
     const systemText: string | undefined = typeof system === 'string' ? system : undefined
     const msgs = (messages || []) as any
 
+    // Buffer for text chunks to filter out "None" artifacts from reasoning models
+    let textBuffer = ''
+    let hasEmittedText = false
+    
+    // Buffer for reasoning chunks to filter out "None" artifacts at start
+    let reasoningBuffer = ''
+    let hasEmittedReasoning = false
+
+    const flushText = () => {
+      if (textBuffer) {
+        // Filter out standalone "None" artifacts which are common with this provider/model combo
+        // particularly after tool calls or before reasoning blocks.
+        // We use trim() to handle "None\n" or "\nNone".
+        const trimmed = textBuffer.trim()
+        if (trimmed === 'None' && !hasEmittedText) {
+          // It's the artifact. Drop it.
+          textBuffer = ''
+          return
+        }
+        
+        onTextChunk?.(textBuffer)
+        hasEmittedText = true
+        textBuffer = ''
+      }
+    }
+
     const DEBUG = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
 
     try {
@@ -83,42 +109,96 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
         messages: msgs as any,
         tools: Object.keys(aiTools).length ? aiTools : undefined,
         toolChoice: Object.keys(aiTools).length ? 'auto' : 'none',
-        parallelToolCalls: false,
-        // providerOptions: {
-        //   thinking: "enabled",
-        //   presence_penalty: 0,
-        //   frequency_penalty: 0,
-        //   top_p: 1,
-        //   top_k: 40
-        // },
+        parallelToolCalls: true,
         temperature: typeof temperature === 'number' ? temperature : undefined,
         abortSignal: ac.signal,
         stopWhen: stepCountIs(AGENT_MAX_STEPS),
         includeRawChunks: DEBUG,
-        // Stream mapping (AI SDK v5 onChunk passes { chunk })
         onChunk({ chunk }: any) {
           try {
             if (DEBUG) {
               const brief = typeof (chunk as any).text === 'string' ? (chunk as any).text.slice(0, 40) : undefined
               console.log('[ai-sdk:fireworks] onChunk', { type: chunk.type, tool: (chunk as any).toolName, brief })
-              //console.log(chunk.type);
             }
             switch (chunk.type) {
               case 'text-delta': {
+                // Reset reasoning state as we are back to text
+                hasEmittedReasoning = false
+                reasoningBuffer = ''
+
                 const d = chunk.text || ''
-                if (d) onTextChunk?.(d)
+                if (d) {
+                  textBuffer += d
+                  const t = textBuffer.trim()
+                  if (['N', 'No', 'Non', 'None'].includes(t)) {
+                    // Wait for more context
+                  } else {
+                    flushText()
+                  }
+                }
                 break
               }
               case 'reasoning-delta': {
+                flushText() 
+                // Don't reset hasEmittedText here; reasoning interrupts text stream but doesn't necessarily invalidate previous text emission state
+
                 const d = chunk.text || ''
                 if (d) {
-                  try { emit?.({ type: 'reasoning', provider: 'fireworks', model, reasoning: d }) } catch {}
+                  if (!hasEmittedReasoning) {
+                    reasoningBuffer += d
+                    const trimmed = reasoningBuffer.trimStart()
+                    
+                    // Check if buffer matches a prefix of "None"
+                    if (['N', 'No', 'Non', 'None'].includes(trimmed)) {
+                       // wait for more context
+                    } else if (trimmed.startsWith('None')) {
+                         // It's longer than "None". Check if we should strip it.
+                         // Heuristic: Strip "None" if followed by something that isn't a lowercase letter, space, comma, or period.
+                         // This targets "None**", "NoneNow", "None\n" while preserving "Nonetheless", "None of".
+                         // Also strip if it is just "None" followed by non-alpha (e.g. "None-").
+                         
+                         // We look at the character immediately following 'None'
+                         // trimmed is "NoneX..."
+                         const after = trimmed.slice(4)
+                         const firstChar = after.charAt(0)
+                         
+                         // Allowed followers (preserve None): [a-z], space, comma, period
+                         // Disallowed followers (strip None): [A-Z], *, \n, digits, symbols
+                         
+                         if (/[a-z ,.]/.test(firstChar)) {
+                            // Valid usage (e.g. "None of", "None.", "Nonetheless")
+                            emit?.({ type: 'reasoning', provider: 'fireworks', model, reasoning: reasoningBuffer })
+                            hasEmittedReasoning = true
+                            reasoningBuffer = ''
+                         } else {
+                            // Artifact usage (e.g. "None**", "NoneNow", "None\n")
+                            // Strip "None" (and the leading whitespace from original buffer if any, effectively used trimmed logic)
+                            
+                            emit?.({ type: 'reasoning', provider: 'fireworks', model, reasoning: after })
+                            hasEmittedReasoning = true
+                            reasoningBuffer = ''
+                         }
+                    } else {
+                      // Does not start with None (e.g. "Okay..."), emit immediately
+                      emit?.({ type: 'reasoning', provider: 'fireworks', model, reasoning: reasoningBuffer })
+                      hasEmittedReasoning = true
+                      reasoningBuffer = ''
+                    }
+                  } else {
+                    // Already emitting, pass through
+                    emit?.({ type: 'reasoning', provider: 'fireworks', model, reasoning: d })
+                  }
                 }
                 break
               }
               case 'tool-input-start': {
+                flushText()
+                hasEmittedText = false
+                hasEmittedReasoning = false
+                reasoningBuffer = ''
+                
                 const callId = chunk.toolCallId || chunk.id || ''
-                if (callId) {
+                if (callId && !seenStarts.has(callId)) {
                   const args = (chunk as any).input
                   if (args !== undefined) {
                     const safe = String(chunk.toolName || '')
@@ -130,12 +210,16 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
                 break
               }
               case 'tool-input-delta': {
-                // Ignore deltas; wait for 'tool-call' which includes full arguments.
                 break
               }
               case 'tool-call': {
+                flushText()
+                hasEmittedText = false
+                hasEmittedReasoning = false
+                reasoningBuffer = ''
+                
                 const callId = chunk.toolCallId || chunk.id || ''
-                if (callId) {
+                if (callId && !seenStarts.has(callId)) {
                   const safe = String(chunk.toolName || '')
                   const original = nameMap.get(safe) || safe
                   onToolStart?.({ callId, name: original, arguments: (chunk as any).input })
@@ -144,6 +228,11 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
                 break
               }
               case 'tool-result': {
+                flushText()
+                hasEmittedText = false
+                hasEmittedReasoning = false
+                reasoningBuffer = ''
+                
                 const callId = chunk.toolCallId || chunk.id || ''
                 const safe = String(chunk.toolName || '')
                 const original = nameMap.get(safe) || safe
@@ -160,7 +249,6 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
                 break
               }
               case 'finish-step': {
-                // Usage is emitted in onStepFinish; avoid double-counting here
                 break
               }
               default:
@@ -191,6 +279,15 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
         onFinish() {
           try {
             if (DEBUG) console.log('[ai-sdk:fireworks] onFinish')
+            flushText()
+            // Flush any pending reasoning buffer if valid
+            if (reasoningBuffer && !hasEmittedReasoning) {
+               // If it's just "None" at the very end, we probably drop it too?
+               const trimmed = reasoningBuffer.trim()
+               if (trimmed !== 'None') {
+                 emit?.({ type: 'reasoning', provider: 'fireworks', model, reasoning: reasoningBuffer })
+               }
+            }
             onStreamDone?.()
           } catch {}
         },
@@ -202,7 +299,6 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
           } catch {}
         }
       } as any)
-      // Ensure the stream is consumed so callbacks fire reliably
       result.consumeStream().catch((err: any) => {
         if (DEBUG) console.error('[ai-sdk:fireworks] consumeStream error', err)
         try { onStreamError?.(String(err?.message || err)) } catch {}
@@ -219,4 +315,3 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
     }
   }
 }
-

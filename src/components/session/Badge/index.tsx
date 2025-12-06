@@ -26,7 +26,7 @@ export const Badge = memo(function Badge({ badge }: BadgeProps) {
   }
 
   // Tool and error badges - expandable with content
-  const canExpand = Boolean(badge.expandable && (badge.contentType || badge.toolName))
+  const canExpand = Boolean(badge.contentType || badge.toolName || badge.expandable)
 
   return (
     <BadgeContainer badge={badge} canExpand={canExpand}>

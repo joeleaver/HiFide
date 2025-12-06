@@ -7,17 +7,17 @@ import { usePanelResize } from '../hooks/usePanelResize'
 import TerminalView from './TerminalView'
 import { getBackendClient } from '../lib/backend/bootstrap'
 
-export default function TerminalPanel({ context }: { context: 'agent' | 'explorer' }) {
+export default function TerminalPanel() {
   // Get tabs from store (not local state!)
-  const tabs = useTerminalTabs((s) => context === 'agent' ? s.agentTabs : s.explorerTabs)
-  const activeTab = useTerminalTabs((s) => context === 'agent' ? s.agentActive : s.explorerActive)
+  const tabs = useTerminalTabs((s) => s.explorerTabs)
+  const activeTab = useTerminalTabs((s) => s.explorerActive)
   const hydrateTabs = useTerminalTabs((s) => s.hydrateTabs)
 
   const [panelHeight, setPanelHeight] = useState<number>(300)
 
   // Use renderer-local terminal store for xterm operations and UI state
   const fitTerminal = useTerminalStore((s) => s.fitTerminal)
-  const open = useTerminalStore((s) => context === 'agent' ? s.agentTerminalPanelOpen : s.explorerTerminalPanelOpen)
+  const open = useTerminalStore((s) => s.explorerTerminalPanelOpen)
   const setTerminalPanelOpen = useTerminalStore((s) => s.setTerminalPanelOpen)
 
   // Hydrate tabs and height on mount
@@ -28,28 +28,22 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
         const w: any = await getBackendClient()?.rpc('ui.getWindowState', {})
         const ws = w?.windowState || {}
         setPanelHeight(
-          context === 'agent'
-            ? (typeof ws.agentTerminalPanelHeight === 'number' ? ws.agentTerminalPanelHeight : 300)
-            : (typeof ws.explorerTerminalPanelHeight === 'number' ? ws.explorerTerminalPanelHeight : 300)
+          typeof ws.explorerTerminalPanelHeight === 'number' ? ws.explorerTerminalPanelHeight : 300
         )
       } catch {}
     })()
-  }, [hydrateTabs, context])
+  }, [hydrateTabs])
 
   const addTab = async () => {
-    try { await getBackendClient()?.rpc('terminal.addTab', { context }) } catch {}
+    try { await getBackendClient()?.rpc('terminal.addTab', { context: 'explorer' }) } catch {}
   }
 
   const closeTab = async (id: string) => {
-    if (context === 'agent') {
-      try { await getBackendClient()?.rpc('terminal.restartAgent', { tabId: id }) } catch {}
-    } else {
-      try { await getBackendClient()?.rpc('terminal.removeTab', { context, tabId: id }) } catch {}
-    }
+    try { await getBackendClient()?.rpc('terminal.removeTab', { context: 'explorer', tabId: id }) } catch {}
   }
 
   const onToggleClick = () => {
-    setTerminalPanelOpen(context, !open)
+    setTerminalPanelOpen('explorer', !open)
   }
 
   const { onMouseDown, isResizingRef } = usePanelResize({
@@ -58,7 +52,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
       setPanelHeight(newHeight)
       void getBackendClient()?.rpc('ui.updateWindowState', {
         updates: {
-          [context === 'agent' ? 'agentTerminalPanelHeight' : 'explorerTerminalPanelHeight']: newHeight
+          explorerTerminalPanelHeight: newHeight
         }
       })
     },
@@ -126,7 +120,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
       >
         <Group gap="xs">
           <Text size="xs" fw={600} c="dimmed">
-            {context === 'agent' ? 'AGENT TERMINAL' : 'TERMINAL'}
+            TERMINAL
           </Text>
           {tabs.length > 1 && (
             <Badge size="xs" variant="light" color="gray">
@@ -135,7 +129,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
           )}
         </Group>
         <Group gap="xs">
-          {open && context === 'explorer' && (
+          {open && (
             <UnstyledButton
               onClick={addTab}
               style={{
@@ -194,7 +188,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
               <div
                 key={id}
                 onClick={async () => {
-                  try { await getBackendClient()?.rpc('terminal.setActive', { context, tabId: id }) } catch {}
+                  try { await getBackendClient()?.rpc('terminal.setActive', { context: 'explorer', tabId: id }) } catch {}
                 }}
                 style={{
                   height: '32px',
@@ -240,7 +234,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
           <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
             {tabs.length === 0 ? (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888' }}>
-                <Text size="sm">{context === 'explorer' ? 'No terminals open. Click + to create one.' : 'No terminals open.'}</Text>
+                <Text size="sm">No terminals open. Click + to create one.</Text>
               </div>
             ) : (
               tabs.map((id) => (
@@ -255,7 +249,7 @@ export default function TerminalPanel({ context }: { context: 'agent' | 'explore
                     display: activeTab === id ? 'block' : 'none',
                   }}
                 >
-                  <TerminalView tabId={id} context={context} />
+                  <TerminalView tabId={id} />
                 </div>
               ))
             )}

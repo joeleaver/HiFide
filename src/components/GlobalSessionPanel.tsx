@@ -5,7 +5,6 @@ import { useUiStore } from '../store/ui'
 import { useSessionUi } from '../store/sessionUi'
 import { useChatTimeline } from '../store/chatTimeline'
 import SessionPane from '../SessionPane'
-import TerminalPanel from './TerminalPanel'
 import { getBackendClient } from '../lib/backend/bootstrap'
 
 const NAV_WIDTH = 48
@@ -133,7 +132,6 @@ export default function GlobalSessionPanel() {
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <SessionPane />
         </div>
-        <TerminalPanel context="agent" />
       </div>
 
       {/* Resize handle for session panel (only when main is visible) */}

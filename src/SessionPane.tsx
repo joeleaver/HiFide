@@ -235,7 +235,9 @@ function SessionPane() {
                     >
                       <Text c="gray.5" className={classes.quoteIconLeft}>“</Text>
                       <Text c="gray.5" className={classes.quoteIconRight}>”</Text>
-                      <Text className={classes.reasoningText}>{trimmed}</Text>
+                      <div className={classes.reasoningText}>
+                        <Markdown content={trimmed} />
+                      </div>
                     </div>
                   )
                 }

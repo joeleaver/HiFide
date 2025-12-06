@@ -84,6 +84,20 @@ export function BadgeHeader({ badge, simple }: BadgeHeaderProps) {
             }}
           />
 
+          {/* Tool Name Badge */}
+          {badge.toolName && (
+            <MantineBadge 
+              size="xs" 
+              variant="light" 
+              color="gray" 
+              radius="sm" 
+              tt="uppercase" 
+              style={{ flexShrink: 0, opacity: 0.9, letterSpacing: 0.5 }}
+            >
+              {badge.toolName.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ')}
+            </MantineBadge>
+          )}
+
           {/* Tool Name */}
           <Text
             size="xs"

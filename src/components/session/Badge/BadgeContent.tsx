@@ -15,6 +15,7 @@ import { KBStoreViewer } from './viewers/KBStoreViewer'
 import { AgentAssessViewer } from './viewers/AgentAssessViewer'
 import { UsageBreakdownViewer } from './viewers/UsageBreakdownViewer'
 import { JsonViewer } from './viewers/JsonViewer'
+import { TerminalExecViewer } from './viewers/TerminalExecViewer'
 import { ErrorViewer } from './viewers/ErrorViewer'
 
 interface BadgeContentProps {
@@ -64,6 +65,9 @@ export function BadgeContent({ badge }: BadgeContentProps) {
 
     case 'usage-breakdown':
       return <UsageBreakdownViewer badge={badge} />
+
+    case 'terminal-exec':
+      return <TerminalExecViewer badge={badge} />
     
     case 'json':
     case 'text':
@@ -85,6 +89,7 @@ function inferContentType(toolName?: string): string {
   if (toolName.includes('knowledgeBase.search')) return 'kb-search'
   if (toolName.includes('knowledgeBase.store')) return 'kb-store'
   if (toolName.includes('index.search')) return 'search'
+  if (toolName === 'terminalExec') return 'terminal-exec'
 
   return 'json'
 }

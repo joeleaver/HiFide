@@ -1,14 +1,10 @@
 import { useRef, useLayoutEffect } from 'react'
 import '@xterm/xterm/css/xterm.css'
 import { useTerminalStore } from '../store/terminal'
-import { useSessionUi, SessionUiState } from '../store/sessionUi'
 import * as terminalInstances from '../services/terminalInstances'
 
-export default function TerminalView({ tabId, context = 'explorer' }: { tabId: string; context?: 'agent' | 'explorer' }) {
+export default function TerminalView({ tabId }: { tabId: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
-
-  // For agent terminals, get the session ID from the store (not WebSocket!)
-  const currentId = useSessionUi((s: SessionUiState) => s.currentId)
 
   // Renderer-local terminal actions/state
   const mountTerminal = useTerminalStore((s) => s.mountTerminal)
@@ -18,12 +14,6 @@ export default function TerminalView({ tabId, context = 'explorer' }: { tabId: s
   useLayoutEffect(() => {
     const container = containerRef.current
     if (!container) return
-
-    // For agent terminals, wait for a session to be loaded
-    if (context === 'agent' && !currentId) {
-      console.log('[TerminalView] Agent terminal but no currentId yet, skipping mount for:', tabId)
-      return
-    }
 
     let didMountOrBind = false
 
@@ -35,21 +25,13 @@ export default function TerminalView({ tabId, context = 'explorer' }: { tabId: s
         fitTerminal(tabId)
       }
 
-      if (context === 'agent') {
-        // For agent terminals, use currentId as the session ID
-        if (currentId && trackedSessionId !== currentId) {
-          console.log('[TerminalView] (Re)attaching agent terminal:', { tabId, sessionId: currentId, trackedSessionId })
-          void mountTerminal({ tabId, container, context: 'agent', sessionId: currentId })
-        }
-      } else {
-        // Explorer terminals: ensure a PTY exists for this tab
-        if (!trackedSessionId) {
-          console.log('[TerminalView] Mounting explorer terminal:', { tabId })
-          void mountTerminal({ tabId, container, context: 'explorer' })
-        } else if (!existing) {
-          // Re-mount terminal instance for existing PTY session
-          void mountTerminal({ tabId, container, context: 'explorer' })
-        }
+      // Explorer terminals: ensure a PTY exists for this tab
+      if (!trackedSessionId) {
+        console.log('[TerminalView] Mounting explorer terminal:', { tabId })
+        void mountTerminal({ tabId, container, context: 'explorer' })
+      } else if (!existing) {
+        // Re-mount terminal instance for existing PTY session
+        void mountTerminal({ tabId, container, context: 'explorer' })
       }
 
       didMountOrBind = true
@@ -79,7 +61,7 @@ export default function TerminalView({ tabId, context = 'explorer' }: { tabId: s
       try { terminalInstances.unmountTerminalInstance(tabId) } catch {}
       try { ro.disconnect() } catch {}
     }
-  }, [tabId, context, currentId, trackedSessionId, mountTerminal, fitTerminal])
+  }, [tabId, trackedSessionId, mountTerminal, fitTerminal])
 
   return (
     <div

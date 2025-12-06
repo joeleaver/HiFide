@@ -15,7 +15,7 @@ import { SettingsService } from './SettingsService'
 import { KanbanService } from './KanbanService'
 import { KnowledgeBaseService } from './KnowledgeBaseService'
 import { AppService } from './AppService'
-import { TerminalService } from './TerminalService'
+
 import { SessionService } from './SessionService'
 import { FlowProfileService } from './FlowProfileService'
 import { FlowConfigService } from './FlowConfigService'
@@ -36,7 +36,7 @@ let settingsService: SettingsService | null = null
 let kanbanService: KanbanService | null = null
 let knowledgeBaseService: KnowledgeBaseService | null = null
 let appService: AppService | null = null
-let terminalService: TerminalService | null = null
+
 let sessionService: SessionService | null = null
 let flowProfileService: FlowProfileService | null = null
 let flowConfigService: FlowConfigService | null = null
@@ -69,7 +69,7 @@ export function initializeServices(): void {
 
   // Phase 4: Complex services that depend on session
   appService = new AppService()
-  terminalService = new TerminalService()
+
 
   // Phase 5: Flow services
   flowProfileService = new FlowProfileService()
@@ -87,7 +87,7 @@ export function initializeServices(): void {
   registry.register('kanban', kanbanService)
   registry.register('knowledgeBase', knowledgeBaseService)
   registry.register('app', appService)
-  registry.register('terminal', terminalService)
+
   registry.register('session', sessionService)
   registry.register('flowCache', flowCacheService)
   registry.register('flowProfile', flowProfileService)
@@ -161,10 +161,7 @@ export function getAppService(): AppService {
   return appService
 }
 
-export function getTerminalService(): TerminalService {
-  if (!terminalService) throw new Error('[Services] TerminalService not initialized')
-  return terminalService
-}
+
 
 export function getSessionService(): SessionService {
   if (!sessionService) throw new Error('[Services] SessionService not initialized')
@@ -210,7 +207,7 @@ export { SettingsService } from './SettingsService'
 export { KanbanService } from './KanbanService'
 export { KnowledgeBaseService } from './KnowledgeBaseService'
 export { AppService } from './AppService'
-export { TerminalService } from './TerminalService'
+
 export { SessionService } from './SessionService'
 export { FlowProfileService } from './FlowProfileService'
 export { FlowConfigService } from './FlowConfigService'
