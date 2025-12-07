@@ -11,6 +11,7 @@ import { IconClock, IconPlayerStop, IconPlayerPlay } from '@tabler/icons-react'
 import { useFlowRuntime } from '../store/flowRuntime'
 import { FlowService } from '@/services/flow'
 import { useSessionUi } from '../store/sessionUi'
+import type { SessionUiState } from '../store/sessionUi'
 
 interface StatusConfig {
   icon: React.ReactNode
@@ -20,7 +21,7 @@ interface StatusConfig {
 
 export function FlowStatusIndicator() {
   const runtime = useFlowRuntime()
-  const currentId = useSessionUi(s => s.currentId)
+  const currentId = useSessionUi((state: SessionUiState) => state.currentId)
   const { status, nodeState, requestId } = runtime
 
   // Compute executing node badge for running status

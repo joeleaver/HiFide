@@ -150,51 +150,83 @@ export const kanbanHandlers = {
     return { ok: true }
   },
 
-  async createTask(input: any) {
+  async createTask(connection: RpcConnection, input: any) {
+    const workspaceId = await getConnectionWorkspaceId(connection)
+    if (!workspaceId) {
+      return { ok: false, error: 'No workspace bound to connection' }
+    }
     const kanbanService = getKanbanService()
-    const task = await kanbanService.kanbanCreateTask(input)
+    const task = await kanbanService.kanbanCreateTask({ ...(input || {}), workspaceId })
     return { ok: !!task, task: task || null }
   },
 
-  async updateTask(taskId: string, patch: any) {
+  async updateTask(connection: RpcConnection, taskId: string, patch: any) {
+    const workspaceId = await getConnectionWorkspaceId(connection)
+    if (!workspaceId) {
+      return { ok: false, error: 'No workspace bound to connection' }
+    }
     const kanbanService = getKanbanService()
-    const task = await kanbanService.kanbanUpdateTask(taskId, patch)
+    const task = await kanbanService.kanbanUpdateTask(taskId, patch || {}, workspaceId)
     return { ok: !!task, task: task || null }
   },
 
-  async deleteTask(taskId: string) {
+  async deleteTask(connection: RpcConnection, taskId: string) {
+    const workspaceId = await getConnectionWorkspaceId(connection)
+    if (!workspaceId) {
+      return { ok: false, error: 'No workspace bound to connection' }
+    }
     const kanbanService = getKanbanService()
-    await kanbanService.kanbanDeleteTask(taskId)
+    await kanbanService.kanbanDeleteTask(taskId, workspaceId)
     return { ok: true }
   },
 
-  async moveTask(taskId: string, toStatus: string, toIndex: number) {
+  async moveTask(connection: RpcConnection, taskId: string, toStatus: string, toIndex: number) {
+    const workspaceId = await getConnectionWorkspaceId(connection)
+    if (!workspaceId) {
+      return { ok: false, error: 'No workspace bound to connection' }
+    }
     const kanbanService = getKanbanService()
-    await kanbanService.kanbanMoveTask({ taskId, toStatus: toStatus as any, toIndex })
+    await kanbanService.kanbanMoveTask({ taskId, toStatus: toStatus as any, toIndex, workspaceId })
     return { ok: true }
   },
 
-  async createEpic(input: any) {
+  async createEpic(connection: RpcConnection, input: any) {
+    const workspaceId = await getConnectionWorkspaceId(connection)
+    if (!workspaceId) {
+      return { ok: false, error: 'No workspace bound to connection' }
+    }
     const kanbanService = getKanbanService()
-    const epic = await kanbanService.kanbanCreateEpic(input)
+    const epic = await kanbanService.kanbanCreateEpic({ ...(input || {}), workspaceId })
     return { ok: !!epic, epic: epic || null }
   },
 
-  async updateEpic(epicId: string, patch: any) {
+  async updateEpic(connection: RpcConnection, epicId: string, patch: any) {
+    const workspaceId = await getConnectionWorkspaceId(connection)
+    if (!workspaceId) {
+      return { ok: false, error: 'No workspace bound to connection' }
+    }
     const kanbanService = getKanbanService()
-    const epic = await kanbanService.kanbanUpdateEpic(epicId, patch)
+    const epic = await kanbanService.kanbanUpdateEpic(epicId, patch || {}, workspaceId)
     return { ok: !!epic, epic: epic || null }
   },
 
-  async deleteEpic(epicId: string) {
+  async deleteEpic(connection: RpcConnection, epicId: string) {
+    const workspaceId = await getConnectionWorkspaceId(connection)
+    if (!workspaceId) {
+      return { ok: false, error: 'No workspace bound to connection' }
+    }
     const kanbanService = getKanbanService()
-    await kanbanService.kanbanDeleteEpic(epicId)
+    await kanbanService.kanbanDeleteEpic(epicId, workspaceId)
     return { ok: true }
   },
 
-  async archiveTasks(olderThan: number) {
+  async archiveTasks(connection: RpcConnection, olderThan: number) {
+    const workspaceId = await getConnectionWorkspaceId(connection)
+    if (!workspaceId) {
+      return { ok: false, error: 'No workspace bound to connection' }
+    }
     const kanbanService = getKanbanService()
-    await kanbanService.kanbanArchiveTasks({ olderThan })
+    await kanbanService.kanbanArchiveTasks({ olderThan, workspaceId })
     return { ok: true }
   },
 }

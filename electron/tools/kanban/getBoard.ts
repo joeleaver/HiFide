@@ -23,6 +23,16 @@ function filterArchivedTasks(board: KanbanBoard): KanbanBoard {
   return { ...board, tasks: visibleTasks }
 }
 
+function filterDoneTasks(board: KanbanBoard): KanbanBoard {
+  const activeTasks = board.tasks.filter((task) => task.status !== 'done')
+
+  if (activeTasks.length === board.tasks.length) {
+    return board
+  }
+
+  return { ...board, tasks: activeTasks }
+}
+
 function filterTasksByParams(tasks: KanbanTask[], params: FilterParams): KanbanTask[] {
   return tasks.filter((task) => {
     if (params.status && task.status !== params.status) return false
@@ -53,7 +63,7 @@ export const kanbanGetBoardTool: AgentTool = {
   },
   run: async (input: { status?: KanbanStatus; epicId?: string }, meta?: any) => {
     const rawBoard = await ensureBoardLoadedFor(meta?.workspaceId)
-    const board = filterArchivedTasks(rawBoard)
+    const board = filterDoneTasks(filterArchivedTasks(rawBoard))
 
     const params: FilterParams = { status: input?.status, epicId: input?.epicId }
 

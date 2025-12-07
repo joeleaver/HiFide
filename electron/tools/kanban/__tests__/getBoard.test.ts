@@ -59,7 +59,7 @@ describe('kanbanGetBoardTool', () => {
     expect(result.counts.todo).toBe(1)
   })
 
-  it('never returns archived tasks, even when additional filters are provided', async () => {
+  it('never returns done tasks, even when additional filters are provided', async () => {
     mockedRead.mockResolvedValue(
       buildBoard([
         buildTask({ id: 'done-visible', status: 'done', order: 0 }),
@@ -70,9 +70,9 @@ describe('kanbanGetBoardTool', () => {
 
     const result = await kanbanGetBoardTool.run({ status: 'done' }, { workspaceId })
 
-    expect(result.board.tasks.map((t: KanbanTask) => t.id)).toEqual(['done-visible', 'todo-visible'])
-    expect(result.tasks.map((t: KanbanTask) => t.id)).toEqual(['done-visible'])
-    expect(result.byStatus.done.map((t: KanbanTask) => t.id)).toEqual(['done-visible'])
-    expect(result.counts.done).toBe(1)
+    expect(result.board.tasks.map((t: KanbanTask) => t.id)).toEqual(['todo-visible'])
+    expect(result.tasks).toHaveLength(0)
+    expect(result.byStatus.done).toHaveLength(0)
+    expect(result.counts.done).toBe(0)
   })
 })
