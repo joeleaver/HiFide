@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { getBackendClient } from '../lib/backend/bootstrap'
 import { notifications } from '@mantine/notifications'
 import type { BackendClient } from '../lib/backend/client'
@@ -24,6 +24,14 @@ interface ValidateKeysResult {
   failures?: string[]
 }
 
+interface UseApiKeyManagementOptions {
+  autoHydrate?: boolean
+  apiKeys?: Record<string, string>
+  onApiKeysChange?: (keys: Record<string, string>) => void
+  providerValid?: Record<string, boolean>
+  onProviderValidChange?: (state: Record<string, boolean>) => void
+}
+
 
 async function waitForBackendReady(client: BackendClient | null): Promise<void> {
   if (!client) return
@@ -31,7 +39,13 @@ async function waitForBackendReady(client: BackendClient | null): Promise<void> 
   await readyClient.whenReady?.(5000).catch(() => {})
 }
 
-export function useApiKeyManagement(autoHydrate = true) {
+type UseApiKeyManagementArg = boolean | UseApiKeyManagementOptions | undefined
+
+export function useApiKeyManagement(arg: UseApiKeyManagementArg = true) {
+  const options: UseApiKeyManagementOptions =
+    typeof arg === 'boolean' ? { autoHydrate: arg } : arg || {}
+  const autoHydrate = options.autoHydrate ?? true
+
   const [state, setState] = useState<ApiKeyManagementState>({
     apiKeys: {},
     providerValid: {},
@@ -40,13 +54,38 @@ export function useApiKeyManagement(autoHydrate = true) {
     validating: false,
   })
 
-  const setApiKeys = (apiKeys: Record<string, string>) => {
-    setState((prev) => ({ ...prev, apiKeys }))
-  }
+  const isApiKeysControlled = options.apiKeys !== undefined && typeof options.onApiKeysChange === 'function'
+  const isProviderValidControlled =
+    options.providerValid !== undefined && typeof options.onProviderValidChange === 'function'
 
-  const setProviderValid = (providerValid: Record<string, boolean>) => {
-    setState((prev) => ({ ...prev, providerValid }))
-  }
+  const currentApiKeys = (isApiKeysControlled ? options.apiKeys : state.apiKeys) || {}
+  const currentProviderValid =
+    (isProviderValidControlled ? options.providerValid : state.providerValid) || {}
+
+  const onApiKeysChange = options.onApiKeysChange
+  const onProviderValidChange = options.onProviderValidChange
+
+  const setApiKeys = useCallback(
+    (apiKeys: Record<string, string>) => {
+      if (isApiKeysControlled) {
+        onApiKeysChange?.(apiKeys)
+        return
+      }
+      setState((prev) => ({ ...prev, apiKeys }))
+    },
+    [isApiKeysControlled, onApiKeysChange]
+  )
+
+  const setProviderValid = useCallback(
+    (providerValid: Record<string, boolean>) => {
+      if (isProviderValidControlled) {
+        onProviderValidChange?.(providerValid)
+        return
+      }
+      setState((prev) => ({ ...prev, providerValid }))
+    },
+    [isProviderValidControlled, onProviderValidChange]
+  )
 
   const hydrate = async () => {
     const client = getBackendClient()
@@ -57,15 +96,12 @@ export function useApiKeyManagement(autoHydrate = true) {
       await waitForBackendReady(client)
       const res = await client.rpc<SettingsSnapshotResponse>('settings.get', {})
       if (res?.ok) {
-        setState((prev) => ({
-          ...prev,
-          apiKeys: res.settingsApiKeys || {},
-          providerValid: res.providerValid || {},
-          loading: false,
-        }))
+        setApiKeys(res.settingsApiKeys || {})
+        setProviderValid(res.providerValid || {})
       }
     } catch (e) {
       console.error('[useApiKeyManagement] hydrate failed:', e)
+    } finally {
       setState((prev) => ({ ...prev, loading: false }))
     }
   }
@@ -84,7 +120,7 @@ export function useApiKeyManagement(autoHydrate = true) {
     setState((prev) => ({ ...prev, saving: true, validating: true }))
     try {
       await waitForBackendReady(client)
-      await client.rpc('settings.setApiKeys', { apiKeys: state.apiKeys })
+      await client.rpc('settings.setApiKeys', { apiKeys: currentApiKeys })
       await client.rpc('settings.saveKeys', {})
 
       const res = await client.rpc<ValidateKeysResult>('settings.validateKeys', {})
@@ -193,6 +229,8 @@ export function useApiKeyManagement(autoHydrate = true) {
 
   return {
     ...state,
+    apiKeys: currentApiKeys,
+    providerValid: currentProviderValid,
     setApiKeys,
     setProviderValid,
     hydrate,

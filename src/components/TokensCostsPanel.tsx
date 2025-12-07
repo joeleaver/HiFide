@@ -1,4 +1,4 @@
-import { Badge, Card, Divider, Group, ScrollArea, SimpleGrid, Stack, Text } from '@mantine/core'
+import { Badge, Card, Group, ScrollArea, SimpleGrid, Stack, Text } from '@mantine/core'
 import type { ReactNode } from 'react'
 import CollapsiblePanel from './CollapsiblePanel'
 import { useUiStore } from '../store/ui'
@@ -98,6 +98,25 @@ const inputGridResponsive = {
   breakpoints: [{ maxWidth: '48em', cols: 1 }],
 }
 
+const requestMetricsGrid = {
+  breakpoints: [
+    { maxWidth: '62em', cols: 2 },
+    { maxWidth: '40em', cols: 1 },
+  ],
+}
+
+type MetricValueProps = {
+  tokens: number
+  cost: number
+  currency: string
+  tokensColor: string
+  costColor: string
+  tokenLabel?: string
+  subtitle?: ReactNode
+  align?: 'flex-start' | 'flex-end' | 'center' | 'stretch'
+  showCost?: boolean
+}
+
 const MetricValue = ({
   tokens,
   cost,
@@ -108,17 +127,7 @@ const MetricValue = ({
   subtitle,
   align = 'flex-end',
   showCost = true,
-}: {
-  tokens: number
-  cost: number
-  currency: string
-  tokensColor: string
-  costColor: string
-  tokenLabel?: string
-  subtitle?: ReactNode
-  align?: 'flex-start' | 'flex-end' | 'center' | 'stretch'
-  showCost?: boolean
-}) => (
+}: MetricValueProps) => (
   <Stack gap={2} align={align} style={{ minWidth: 90 }}>
     <Text size="xs" style={{ color: tokensColor }}>
       {formatTokens(tokens)} {tokenLabel}
@@ -129,6 +138,15 @@ const MetricValue = ({
         {formatCurrency(cost, currency)}
       </Text>
     )}
+  </Stack>
+)
+
+const RequestMetric = ({ label, align = 'flex-start', ...metricProps }: { label: string } & MetricValueProps) => (
+  <Stack gap={2} style={{ minWidth: 110 }}>
+    <Text size="xs" fw={600} c="dimmed">
+      {label}
+    </Text>
+    <MetricValue align={align} {...metricProps} />
   </Stack>
 )
 
@@ -420,18 +438,18 @@ export default function TokensCostsPanel() {
                     <Card
                       key={`${entry.requestId}:${entry.nodeId}:${entry.executionId}:${idx}`}
                       withBorder
-                      padding="sm"
-                      radius="md"
+                      padding="xs"
+                      radius="sm"
                     >
-                      <Group justify="space-between" align="flex-start" mb="xs">
-                        <div>
+                      <Group justify="space-between" align="flex-start" gap="sm">
+                        <Stack gap={2}>
                           <Text size="sm" fw={600}>{entry.provider} / {entry.model}</Text>
                           {(entry.nodeId || entry.executionId) && (
                             <Text size="xs" c="dimmed">
                               node {entry.nodeId || '—'} · exec {entry.executionId || '—'}
                             </Text>
                           )}
-                        </div>
+                        </Stack>
                         {(timestamp || cachedPercent > 0) && (
                           <Stack gap={4} align="flex-end">
                             {timestamp && (
@@ -443,51 +461,38 @@ export default function TokensCostsPanel() {
                           </Stack>
                         )}
                       </Group>
-                      <Divider mb="xs" color="#222" />
-                      <Stack gap={6}>
-                        <LabelValueRow
+                      <SimpleGrid cols={3} spacing="sm" mt="xs" {...requestMetricsGrid}>
+                        <RequestMetric
                           label="Input"
-                          value={(
-                            <MetricValue
-                              tokens={input}
-                              cost={inputCost}
-                              currency={currency}
-                              tokensColor="#4fc3f7"
-                              costColor="#4ade80"
-                            />
-                          )}
+                          tokens={input}
+                          cost={inputCost}
+                          currency={currency}
+                          tokensColor="#4fc3f7"
+                          costColor="#4ade80"
                         />
-                        <LabelValueRow
+                        <RequestMetric
                           label="Cached input"
-                          value={(
-                            <MetricValue
-                              tokens={cachedTokens}
-                              cost={cachedCost}
-                              currency={currency}
-                              tokensColor="#ffa726"
-                              costColor="#ffa726"
-                              subtitle={cachedPercent > 0 ? (
-                                <Text size="xs" style={{ color: '#ffa726' }}>{cachedPercent}% of input</Text>
-                              ) : undefined}
-                            />
-                          )}
+                          tokens={cachedTokens}
+                          cost={cachedCost}
+                          currency={currency}
+                          tokensColor="#ffa726"
+                          costColor="#ffa726"
+                          subtitle={cachedPercent > 0 ? (
+                            <Text size="xs" style={{ color: '#ffa726' }}>{cachedPercent}% of input</Text>
+                          ) : undefined}
                         />
-                        <LabelValueRow
+                        <RequestMetric
                           label="Output"
-                          value={(
-                            <MetricValue
-                              tokens={output}
-                              cost={outputCost}
-                              currency={currency}
-                              tokensColor="#81c784"
-                              costColor="#81c784"
-                              subtitle={reasoning > 0 ? (
-                                <Text size="xs" style={{ color: '#a5d6a7' }}>{formatTokens(reasoning)} thinking</Text>
-                              ) : undefined}
-                            />
-                          )}
+                          tokens={output}
+                          cost={outputCost}
+                          currency={currency}
+                          tokensColor="#81c784"
+                          costColor="#81c784"
+                          subtitle={reasoning > 0 ? (
+                            <Text size="xs" style={{ color: '#a5d6a7' }}>{formatTokens(reasoning)} thinking</Text>
+                          ) : undefined}
                         />
-                      </Stack>
+                      </SimpleGrid>
                     </Card>
                   )
                 })}

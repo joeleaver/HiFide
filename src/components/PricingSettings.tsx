@@ -1,38 +1,44 @@
 import { useState } from 'react'
 import { Card, Stack, Group, Text, Button, Accordion, Table, NumberInput, Badge } from '@mantine/core'
-import type { PricingConfig, ModelPricing, ModelOption } from '../../electron/store/types'
+import type { ModelPricing, ModelOption } from '../../electron/store/types'
+import { useSettingsPricingDraft } from '../store/settingsPricingDraft'
 
 type ProviderName = 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai'
 
 interface PricingSettingsProps {
   modelsByProvider: Record<string, ModelOption[]>
   providerValid: Record<string, boolean>
-  pricingConfig: PricingConfig | null
-  defaultPricingConfig: PricingConfig | null
-  onResetAll: () => void
-  onResetProvider: (provider: ProviderName) => void
-  onSetPrice: (provider: ProviderName, model: string, pricing: ModelPricing) => void
 }
 
-export default function PricingSettings({
-  modelsByProvider,
-  providerValid,
-  pricingConfig,
-  defaultPricingConfig,
-  onResetAll,
-  onResetProvider,
-  onSetPrice,
-}: PricingSettingsProps) {
+export default function PricingSettings({ modelsByProvider, providerValid }: PricingSettingsProps) {
   const [expanded, setExpanded] = useState<string | null>(null)
-  const hasCustomRates = Boolean(pricingConfig?.customRates)
+  const draftPricing = useSettingsPricingDraft((state) => state.draft)
+  const defaultPricingConfig = useSettingsPricingDraft((state) => state.defaults)
+  const resetProviderToDefault = useSettingsPricingDraft((state) => state.resetProviderToDefault)
+  const resetAllToDefaults = useSettingsPricingDraft((state) => state.resetAllToDefaults)
+  const updateModelPricing = useSettingsPricingDraft((state) => state.updateModelPricing)
+  const dirtyProviders = useSettingsPricingDraft((state) => state.dirtyProviders)
+
+  const hasCustomRates = (draftPricing?.customRates ?? false) || dirtyProviders.length > 0
 
   const getPricingFor = (provider: ProviderName) =>
-    ((pricingConfig?.[provider] as Record<string, ModelPricing>) || {})
+    ((draftPricing?.[provider] as Record<string, ModelPricing>) || {})
 
   const getDefaultPricingFor = (provider: ProviderName) =>
     ((defaultPricingConfig?.[provider] as Record<string, ModelPricing>) || {})
 
   const getModelsFor = (provider: ProviderName) => modelsByProvider[provider] || []
+
+  if (!draftPricing || !defaultPricingConfig) {
+    return (
+      <Card withBorder style={{ backgroundColor: '#1e1e1e', borderColor: '#3e3e42' }}>
+        <Stack gap="xs">
+          <Text size="sm" c="#cccccc">Cost Estimation</Text>
+          <Text size="xs" c="dimmed">Pricing configuration is loading…</Text>
+        </Stack>
+      </Card>
+    )
+  }
 
   return (
     <Card withBorder style={{ backgroundColor: '#1e1e1e', borderColor: '#3e3e42' }}>
@@ -51,7 +57,7 @@ export default function PricingSettings({
             size="xs"
             variant="light"
             color="red"
-            onClick={onResetAll}
+            onClick={resetAllToDefaults}
             disabled={!hasCustomRates}
           >
             Reset All to Defaults
@@ -84,8 +90,8 @@ export default function PricingSettings({
             models={getModelsFor('openai')}
             pricing={getPricingFor('openai')}
             defaultPricing={getDefaultPricingFor('openai')}
-            onReset={() => onResetProvider('openai')}
-            onUpdate={(model, pricing) => onSetPrice('openai', model, pricing)}
+            onReset={() => resetProviderToDefault('openai')}
+            onUpdate={(model, pricing) => updateModelPricing('openai', model, pricing)}
           />
 
           <PricingSection
@@ -94,8 +100,8 @@ export default function PricingSettings({
             models={getModelsFor('anthropic')}
             pricing={getPricingFor('anthropic')}
             defaultPricing={getDefaultPricingFor('anthropic')}
-            onReset={() => onResetProvider('anthropic')}
-            onUpdate={(model, pricing) => onSetPrice('anthropic', model, pricing)}
+            onReset={() => resetProviderToDefault('anthropic')}
+            onUpdate={(model, pricing) => updateModelPricing('anthropic', model, pricing)}
           />
 
           <PricingSection
@@ -104,8 +110,8 @@ export default function PricingSettings({
             models={getModelsFor('gemini')}
             pricing={getPricingFor('gemini')}
             defaultPricing={getDefaultPricingFor('gemini')}
-            onReset={() => onResetProvider('gemini')}
-            onUpdate={(model, pricing) => onSetPrice('gemini', model, pricing)}
+            onReset={() => resetProviderToDefault('gemini')}
+            onUpdate={(model, pricing) => updateModelPricing('gemini', model, pricing)}
           />
 
           {providerValid.fireworks && (
@@ -115,8 +121,8 @@ export default function PricingSettings({
               models={getModelsFor('fireworks')}
               pricing={getPricingFor('fireworks')}
               defaultPricing={getDefaultPricingFor('fireworks')}
-              onReset={() => onResetProvider('fireworks')}
-              onUpdate={(model, pricing) => onSetPrice('fireworks', model, pricing)}
+              onReset={() => resetProviderToDefault('fireworks')}
+              onUpdate={(model, pricing) => updateModelPricing('fireworks', model, pricing)}
             />
           )}
 
@@ -126,8 +132,8 @@ export default function PricingSettings({
             models={getModelsFor('xai')}
             pricing={getPricingFor('xai')}
             defaultPricing={getDefaultPricingFor('xai')}
-            onReset={() => onResetProvider('xai')}
-            onUpdate={(model, pricing) => onSetPrice('xai', model, pricing)}
+            onReset={() => resetProviderToDefault('xai')}
+            onUpdate={(model, pricing) => updateModelPricing('xai', model, pricing)}
           />
         </Accordion>
 

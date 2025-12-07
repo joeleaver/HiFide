@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Alert, Button, Center, Divider, Group, Loader, Select, Stack, Switch, Text, TextInput, Title } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { getBackendClient } from './lib/backend/bootstrap'
 import PricingSettings from './components/PricingSettings'
-import { ApiKeysForm } from './components/ApiKeysForm'
-import { useApiKeyManagement } from './hooks/useApiKeyManagement'
+import { ApiKeysSection } from './components/ApiKeysSection'
 import { useSettingsSnapshot } from './hooks/useSettingsSnapshot'
-import type { ModelOption, ModelPricing, PricingConfig } from '../electron/store/types'
+import type { ModelOption } from '../electron/store/types'
+import { useSettingsPricingDraft } from './store/settingsPricingDraft'
 
 type ProviderName = 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai'
+
 
 type FireworksUpdatePayload = {
   fireworksAllowedModels?: string[]
@@ -19,20 +20,32 @@ type FireworksRpcResponse = FireworksUpdatePayload & { ok: boolean }
 
 type RefreshModelsResponse = { ok: boolean; models?: ModelOption[] }
 
-type ResetPricingResponse = { ok: boolean; pricingConfig: PricingConfig; defaultPricingConfig: PricingConfig }
-
-type PricingOnlyResponse = { ok: boolean; pricingConfig: PricingConfig }
 
 export default function SettingsPane() {
   const { snapshot, error, refresh, mergeSnapshot } = useSettingsSnapshot()
-  const { apiKeys, setApiKeys, providerValid, setProviderValid, saving, validating, saveAndValidate } = useApiKeyManagement(false)
-  const [newFwModel, setNewFwModel] = useState('')
+  const syncPricingDraft = useSettingsPricingDraft((state) => state.syncFromSnapshot)
+  const persistPricingDraft = useSettingsPricingDraft((state) => state.persistDraft)
+  const discardPricingDraft = useSettingsPricingDraft((state) => state.discardDraft)
+  const pricingSaving = useSettingsPricingDraft((state) => state.saving)
+  const pricingDirty = useSettingsPricingDraft(
+    (state) => state.dirtyProviders.length > 0 || state.pendingResetAll || state.pendingProviderResets.length > 0
+  )
 
   useEffect(() => {
-    if (!snapshot) return
-    setApiKeys(snapshot.settingsApiKeys || {})
-    setProviderValid(snapshot.providerValid || {})
-  }, [snapshot, setApiKeys, setProviderValid])
+    if (snapshot) {
+      syncPricingDraft(snapshot.pricingConfig, snapshot.defaultPricingConfig)
+    }
+  }, [snapshot?.pricingConfig, snapshot?.defaultPricingConfig, syncPricingDraft])
+
+  const handleSavePricingDraft = useCallback(async () => {
+    const nextConfig = await persistPricingDraft()
+    if (nextConfig) {
+      mergeSnapshot({ pricingConfig: nextConfig })
+    }
+  }, [persistPricingDraft, mergeSnapshot])
+
+  const [newFwModel, setNewFwModel] = useState('')
+
 
   if (!snapshot) {
     return (
@@ -55,10 +68,6 @@ export default function SettingsPane() {
   const fireworksOptions = modelsByProvider.fireworks || []
   const xaiOptions = modelsByProvider.xai || []
 
-  const handleSaveKeys = async () => {
-    await saveAndValidate()
-    await refresh()
-  }
 
   const updateDefaultModel = async (provider: ProviderName, value: string | null) => {
     if (!value) return
@@ -158,47 +167,6 @@ export default function SettingsPane() {
     }
   }
 
-  const resetAllPricing = async () => {
-    const client = getBackendClient()
-    if (!client) return
-    try {
-      const res = await client.rpc<ResetPricingResponse>('settings.resetPricingToDefaults', {})
-      if (res?.ok) {
-        mergeSnapshot({
-          pricingConfig: res.pricingConfig || snapshot.pricingConfig,
-          defaultPricingConfig: res.defaultPricingConfig || snapshot.defaultPricingConfig,
-        })
-      }
-    } catch (err) {
-      notifications.show({ color: 'red', title: 'Error', message: String(err) })
-    }
-  }
-
-  const resetProviderPricing = async (provider: ProviderName) => {
-    const client = getBackendClient()
-    if (!client) return
-    try {
-      const res = await client.rpc<PricingOnlyResponse>('settings.resetProviderPricing', { provider })
-      if (res?.ok) {
-        mergeSnapshot({ pricingConfig: res.pricingConfig || snapshot.pricingConfig })
-      }
-    } catch (err) {
-      notifications.show({ color: 'red', title: 'Error', message: String(err) })
-    }
-  }
-
-  const setPricingForModel = async (provider: ProviderName, model: string, pricing: ModelPricing) => {
-    const client = getBackendClient()
-    if (!client) return
-    try {
-      const res = await client.rpc<PricingOnlyResponse>('settings.setPricingForModel', { provider, model, pricing })
-      if (res?.ok) {
-        mergeSnapshot({ pricingConfig: res.pricingConfig || snapshot.pricingConfig })
-      }
-    } catch (err) {
-      notifications.show({ color: 'red', title: 'Error', message: String(err) })
-    }
-  }
 
   return (
     <Stack gap="xl" p="md">
@@ -220,61 +188,52 @@ export default function SettingsPane() {
           <Text size="sm" c="dimmed">Configure provider API keys (persisted locally via Electron Store in the main process)</Text>
         </div>
 
-        <ApiKeysForm
-          apiKeys={apiKeys}
-          onChange={setApiKeys}
-          providerValid={providerValid}
-          showValidation={true}
-        />
+        <ApiKeysSection
+          initialApiKeys={snapshot.settingsApiKeys}
+          initialProviderValid={snapshot.providerValid}
+          onSaveComplete={refresh}
+        >
+          {providerState.fireworks && (
+            <Stack gap="xs">
+              <Title order={4}>Fireworks Models</Title>
+              <Text size="sm" c="dimmed">Select which Fireworks models to expose in the app. Start with recommended defaults or add specific model IDs.</Text>
 
-        {providerState.fireworks && (
-          <Stack gap="xs">
-            <Title order={4}>Fireworks Models</Title>
-            <Text size="sm" c="dimmed">Select which Fireworks models to expose in the app. Start with recommended defaults or add specific model IDs.</Text>
+              <Group align="flex-end">
+                <TextInput
+                  style={{ flex: 1 }}
+                  label="Add model by ID"
+                  placeholder="e.g., accounts/fireworks/models/qwen3-coder-480b-a35b-instruct"
+                  value={newFwModel}
+                  onChange={(e) => setNewFwModel(e.currentTarget.value)}
+                />
+                <Button onClick={addFireworksModel} disabled={!newFwModel.trim()}>
+                  Add
+                </Button>
+                <Button variant="light" onClick={loadFireworksDefaults}>
+                  Load Recommended Defaults
+                </Button>
+                <Button variant="light" onClick={refreshFireworksModels}>
+                  Refresh
+                </Button>
+              </Group>
 
-            <Group align="flex-end">
-              <TextInput
-                style={{ flex: 1 }}
-                label="Add model by ID"
-                placeholder="e.g., accounts/fireworks/models/qwen3-coder-480b-a35b-instruct"
-                value={newFwModel}
-                onChange={(e) => setNewFwModel(e.currentTarget.value)}
-              />
-              <Button onClick={addFireworksModel} disabled={!newFwModel.trim()}>
-                Add
-              </Button>
-              <Button variant="light" onClick={loadFireworksDefaults}>
-                Load Recommended Defaults
-              </Button>
-              <Button variant="light" onClick={refreshFireworksModels}>
-                Refresh
-              </Button>
-            </Group>
-
-            <Stack gap={4}>
-              {fireworksAllowed.length === 0 ? (
-                <Text size="xs" c="dimmed">No allowed models yet.</Text>
-              ) : (
-                fireworksAllowed.map((m) => (
-                  <Group key={m} justify="space-between" wrap="nowrap">
-                    <Text size="xs" c="#ccc" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</Text>
-                    <Button size="xs" variant="light" color="red" onClick={() => removeFireworksModel(m)}>
-                      Remove
-                    </Button>
-                  </Group>
-                ))
-              )}
+              <Stack gap={4}>
+                {fireworksAllowed.length === 0 ? (
+                  <Text size="xs" c="dimmed">No allowed models yet.</Text>
+                ) : (
+                  fireworksAllowed.map((m) => (
+                    <Group key={m} justify="space-between" wrap="nowrap">
+                      <Text size="xs" c="#ccc" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</Text>
+                      <Button size="xs" variant="light" color="red" onClick={() => removeFireworksModel(m)}>
+                        Remove
+                      </Button>
+                    </Group>
+                  ))
+                )}
+              </Stack>
             </Stack>
-          </Stack>
-        )}
-
-        <Divider />
-
-        <Group>
-          <Button onClick={handleSaveKeys} loading={saving || validating}>
-            Save & Validate Keys
-          </Button>
-        </Group>
+          )}
+        </ApiKeysSection>
       </Stack>
 
       <Divider />
@@ -359,12 +318,15 @@ export default function SettingsPane() {
         <PricingSettings
           modelsByProvider={modelsByProvider}
           providerValid={providerState}
-          pricingConfig={snapshot.pricingConfig}
-          defaultPricingConfig={snapshot.defaultPricingConfig}
-          onResetAll={resetAllPricing}
-          onResetProvider={resetProviderPricing}
-          onSetPrice={setPricingForModel}
         />
+        <Group justify="space-between">
+          <Button variant="subtle" color="gray" onClick={discardPricingDraft} disabled={!pricingDirty}>
+            Discard Pricing Draft
+          </Button>
+          <Button onClick={handleSavePricingDraft} loading={pricingSaving} disabled={!pricingDirty}>
+            Save Pricing Changes
+          </Button>
+        </Group>
       </Stack>
     </Stack>
   )
