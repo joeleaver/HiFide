@@ -8,6 +8,7 @@ import { Service } from './base/Service.js'
 import type { ApiKeys, ModelPricing, PricingConfig, TokenUsage, TokenCost } from '../store/types.js'
 import { DEFAULT_PRICING } from '../data/defaultPricing.js'
 import { getProviderService, getAppService } from './index.js'
+import { computeTokenCost } from './settings-cost-utils.js'
 
 interface SettingsState {
   settingsApiKeys: ApiKeys
@@ -434,39 +435,6 @@ export class SettingsService extends Service<SettingsState> {
     const pricing = (config as any)?.[model] as ModelPricing | undefined
     if (!pricing) return null
 
-    // cachedTokens is SEPARATE from inputTokens, not included in it
-    const cachedTokens = usage.cachedTokens || 0
-    const totalInputTokens = usage.inputTokens || 0
-    const normalInputTokens = Math.max(0, totalInputTokens - cachedTokens)
-
-    // Get cached pricing (fallback to full price if not configured)
-    const cachedInputCostPer1M = (pricing as any).cachedInputCostPer1M ?? pricing.inputCostPer1M
-
-    // Calculate costs
-    const normalInputCost = (normalInputTokens / 1_000_000) * pricing.inputCostPer1M
-    const cachedInputCost = (cachedTokens / 1_000_000) * cachedInputCostPer1M
-    const inputCost = normalInputCost + cachedInputCost
-    const outputCost = (usage.outputTokens / 1_000_000) * pricing.outputCostPer1M
-
-    // Calculate savings if caching was used
-    let savings = 0
-    let savingsPercent = 0
-    if (cachedTokens > 0 && cachedInputCostPer1M < pricing.inputCostPer1M) {
-      const fullPriceCost = (cachedTokens / 1_000_000) * pricing.inputCostPer1M
-      savings = fullPriceCost - cachedInputCost
-      const totalWithoutSavings = inputCost + outputCost + savings
-      savingsPercent = totalWithoutSavings > 0 ? (savings / totalWithoutSavings) * 100 : 0
-    }
-
-    return {
-      inputCost,
-      outputCost,
-      totalCost: inputCost + outputCost,
-      currency: 'USD',
-      cachedInputCost: cachedTokens > 0 ? cachedInputCost : undefined,
-      normalInputCost: normalInputTokens > 0 ? normalInputCost : undefined,
-      savings: savings > 0 ? savings : undefined,
-      savingsPercent: savingsPercent > 0 ? savingsPercent : undefined,
-    }
+    return computeTokenCost(pricing, usage)
   }
 }

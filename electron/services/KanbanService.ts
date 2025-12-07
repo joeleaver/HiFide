@@ -80,7 +80,7 @@ export class KanbanService extends Service<KanbanState> {
   }
 
   // Helper methods
-  private async resolveWorkspaceRoot(workspaceId?: string): Promise<string> {
+  private async resolveWorkspaceRoot(workspaceId: string): Promise<string> {
     if (!workspaceId) {
       throw new Error('Workspace ID is required. Kanban board is workspace-scoped.')
     }
@@ -90,7 +90,7 @@ export class KanbanService extends Service<KanbanState> {
   private async persistBoard(params: {
     board: KanbanBoard
     previous: KanbanBoard | null
-    workspaceId?: string
+    workspaceId: string
     immediate?: boolean
   }): Promise<void> {
     const { board, workspaceId, immediate = false } = params
@@ -207,7 +207,7 @@ export class KanbanService extends Service<KanbanState> {
   }
 
   async kanbanCreateTask(input: {
-    workspaceId?: string
+    workspaceId: string
     title: string
     status?: KanbanStatus
     epicId?: string | null
@@ -260,7 +260,7 @@ export class KanbanService extends Service<KanbanState> {
       assignees?: string[]
       tags?: string[]
     },
-    workspaceId?: string
+    workspaceId: string
   ): Promise<KanbanTask> {
     const board = this.state.kanbanBoard
     if (!board) throw new Error('Board not loaded')
@@ -296,7 +296,7 @@ export class KanbanService extends Service<KanbanState> {
 
   async kanbanDeleteTask(
     taskId: string,
-    workspaceId?: string
+    workspaceId: string
   ): Promise<{ ok: boolean; deleted?: { taskId: string }; error?: string; code?: string }> {
     const board = this.state.kanbanBoard
     if (!board) return { ok: false, error: 'Board not loaded', code: 'NOT_LOADED' }
@@ -319,7 +319,7 @@ export class KanbanService extends Service<KanbanState> {
     taskId: string
     toStatus: KanbanStatus
     toIndex: number
-    workspaceId?: string
+    workspaceId: string
   }): Promise<{ ok: boolean; task?: KanbanTask | null; error?: string; code?: string }> {
     const { taskId, toStatus, toIndex, workspaceId } = params
     const board = this.state.kanbanBoard
@@ -361,7 +361,7 @@ export class KanbanService extends Service<KanbanState> {
   }
 
   async kanbanCreateEpic(params: {
-    workspaceId?: string
+    workspaceId: string
     name: string
     color: string
     description: string
@@ -399,7 +399,7 @@ export class KanbanService extends Service<KanbanState> {
   async kanbanUpdateEpic(
     epicId: string,
     patch: Partial<Omit<KanbanEpic, 'id' | 'createdAt'>>,
-    workspaceId?: string
+    workspaceId: string
   ): Promise<KanbanEpic> {
     const board = this.state.kanbanBoard
     if (!board) throw new Error('Board not loaded')
@@ -430,7 +430,7 @@ export class KanbanService extends Service<KanbanState> {
 
   async kanbanDeleteEpic(
     epicId: string,
-    workspaceId?: string
+    workspaceId: string
   ): Promise<{ ok: boolean; deleted?: { epicId: string }; error?: string; code?: string }> {
     const board = this.state.kanbanBoard
     if (!board) return { ok: false, error: 'Board not loaded', code: 'NOT_LOADED' }
@@ -456,7 +456,7 @@ export class KanbanService extends Service<KanbanState> {
 
   async kanbanArchiveTasks(params: {
     olderThan: number
-    workspaceId?: string
+    workspaceId: string
   }): Promise<{ ok: boolean; archivedCount?: number; error?: string }> {
     const board = this.state.kanbanBoard
     if (!board) return { ok: false, error: 'Board not loaded' }

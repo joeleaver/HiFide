@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRef } from 'react'
 import {
   ActionIcon,
   Badge,
@@ -31,6 +31,9 @@ import { getBackendClient } from '../../lib/backend/bootstrap'
 import type { KanbanEpic, KanbanStatus, KanbanTask, KanbanBoard } from '../../../electron/store/types'
 import { useKanban } from '@/store/kanban'
 import { useKanbanHydration } from '@/store/screenHydration'
+import { useBackendBinding } from '@/store/binding'
+import { useKanbanUI } from '@/store/kanbanUI'
+import type { TaskFormValues, EpicFormValues } from '@/store/kanbanUI'
 import StreamingMarkdown from '../StreamingMarkdown'
 
 const COLUMNS: { status: KanbanStatus; label: string }[] = [
@@ -39,27 +42,6 @@ const COLUMNS: { status: KanbanStatus; label: string }[] = [
   { status: 'inProgress', label: 'In Progress' },
   { status: 'done', label: 'Done' },
 ]
-
-type TaskModalState =
-  | { mode: 'create'; status: KanbanStatus }
-  | { mode: 'edit'; task: KanbanTask }
-
-type EpicModalState =
-  | { mode: 'create' }
-  | { mode: 'edit'; epic: KanbanEpic }
-
-type TaskFormValues = {
-  title: string
-  status: KanbanStatus
-  epicId: string | null
-  description: string
-}
-
-type EpicFormValues = {
-  name: string
-  color?: string
-  description?: string
-}
 
 /**
  * Skeleton for Kanban board while loading
@@ -93,63 +75,35 @@ function KanbanSkeleton() {
 export default function KanbanView() {
   const theme = useMantineTheme()
 
+  // Get workspaceId from backend binding
+  const workspaceId = useBackendBinding((s: any) => s.workspaceId)
+
   // Screen hydration state
   const screenPhase = useKanbanHydration((s) => s.phase)
   const screenError = useKanbanHydration((s) => s.error)
   const startLoading = useKanbanHydration((s) => s.startLoading)
-  const setReady = useKanbanHydration((s) => s.setReady)
+
 
   // Get state from store (not local state!)
   const board = useKanban((s) => s.board)
   const saving = useKanban((s) => s.saving)
-  const error = useKanban((s) => s.error)
+
   const setBoard = useKanban((s) => s.setBoard)
 
   const epics = board?.epics ?? []
 
-  // Mark screen as ready on mount - data is already loaded from snapshot
-  useEffect(() => {
-    if (screenPhase === 'idle') {
-      // Transition idle → loading → ready
-      startLoading()
-      setReady()
-    }
-  }, [screenPhase, startLoading, setReady])
+  const tasksByStatus = useKanban((s) => s.tasksByStatus)
+  const epicMap = useKanban((s) => s.epicMap)
 
-  const tasksByStatus = useMemo(() => {
-    const grouped: Record<KanbanStatus, KanbanTask[]> = {
-      backlog: [],
-      todo: [],
-      inProgress: [],
-      done: [],
-    }
-    const tasks = board?.tasks ?? []
-
-    // Filter out archived tasks
-    for (const t of tasks) {
-      if (!t.archived) {
-        grouped[t.status].push(t)
-      }
-    }
-    grouped.backlog.sort((a, b) => a.order - b.order)
-    grouped.todo.sort((a, b) => a.order - b.order)
-    grouped.inProgress.sort((a, b) => a.order - b.order)
-    grouped.done.sort((a, b) => a.order - b.order)
-    return grouped
-  }, [board?.tasks])
-
-  const epicMap = useMemo(() => {
-    const map = new Map<string, KanbanEpic>()
-    for (const epic of epics) {
-      map.set(epic.id, epic)
-    }
-    return map
-  }, [epics])
-
-  const [taskModal, setTaskModal] = useState<TaskModalState | null>(null)
-  const [epicModal, setEpicModal] = useState<EpicModalState | null>(null)
-  const [epicDrawerOpen, setEpicDrawerOpen] = useState(false)
-  const [archiveModalOpen, setArchiveModalOpen] = useState(false)
+  const openCreateTask = useKanbanUI((s) => s.openCreateTask)
+  const openEditTask = useKanbanUI((s) => s.openEditTask)
+  const closeTaskModal = useKanbanUI((s) => s.closeTaskModal)
+  const openCreateEpic = useKanbanUI((s) => s.openCreateEpic)
+  const openEditEpic = useKanbanUI((s) => s.openEditEpic)
+  const closeEpicModal = useKanbanUI((s) => s.closeEpicModal)
+  const epicDrawerOpen = useKanbanUI((s) => s.epicDrawerOpen)
+  const setEpicDrawerOpen = useKanbanUI((s) => s.setEpicDrawerOpen)
+  const setArchiveModalOpen = useKanbanUI((s) => s.setArchiveModalOpen)
 
   // Board is pre-fetched during loading overlay phase, no need to load on mount
 
@@ -194,12 +148,6 @@ export default function KanbanView() {
     }
   }
 
-  // Show error notification when board operations fail
-  useEffect(() => {
-    if (error) {
-      notifications.show({ color: 'red', title: 'Kanban error', message: error })
-    }
-  }, [error])
 
   const handleDragEnd = async (result: DropResult) => {
     const destination = result.destination
@@ -222,6 +170,7 @@ export default function KanbanView() {
     try {
       const client = getBackendClient()
       const res: any = await client?.rpc('kanban.moveTask', {
+        workspaceId,
         taskId: result.draggableId,
         toStatus: destination.droppableId as KanbanStatus,
         toIndex: destination.index,
@@ -236,20 +185,13 @@ export default function KanbanView() {
     }
   }
 
-  const openCreateTask = (status: KanbanStatus) => setTaskModal({ mode: 'create', status })
-  const openEditTask = (task: KanbanTask) => setTaskModal({ mode: 'edit', task })
-  const closeTaskModal = () => setTaskModal(null)
-
-  const openCreateEpic = () => setEpicModal({ mode: 'create' })
-  const openEditEpic = (epic: KanbanEpic) => setEpicModal({ mode: 'edit', epic })
-  const closeEpicModal = () => setEpicModal(null)
 
   const handleDeleteTask = async (task: KanbanTask) => {
     const confirmed = window.confirm(`Delete task "${task.title}"?`)
     if (!confirmed) return
 
     try {
-      const res: any = await getBackendClient()?.rpc('kanban.deleteTask', { taskId: task.id })
+      const res: any = await getBackendClient()?.rpc('kanban.deleteTask', { workspaceId, taskId: task.id })
       if (!res?.ok) throw new Error('Delete rejected')
       notifications.show({ color: 'green', title: 'Task deleted', message: 'The task was removed.' })
     } catch (err) {
@@ -262,6 +204,7 @@ export default function KanbanView() {
     try {
       if (existingId) {
         const res: any = await getBackendClient()?.rpc('kanban.updateTask', {
+          workspaceId,
           taskId: existingId,
           patch: {
             title: values.title,
@@ -274,6 +217,7 @@ export default function KanbanView() {
         notifications.show({ color: 'green', title: 'Task updated', message: `Saved "${values.title}".` })
       } else {
         const res: any = await getBackendClient()?.rpc('kanban.createTask', {
+          workspaceId,
           input: {
             title: values.title,
             status: values.status,
@@ -296,6 +240,7 @@ export default function KanbanView() {
     try {
       if (existingId) {
         const res: any = await getBackendClient()?.rpc('kanban.updateEpic', {
+          workspaceId,
           epicId: existingId,
           patch: {
             name: values.name,
@@ -307,6 +252,7 @@ export default function KanbanView() {
         notifications.show({ color: 'green', title: 'Epic updated', message: `Updated "${values.name}".` })
       } else {
         const res: any = await getBackendClient()?.rpc('kanban.createEpic', {
+          workspaceId,
           input: {
             name: values.name,
             color: values.color?.trim() || undefined,
@@ -329,7 +275,7 @@ export default function KanbanView() {
     if (!confirmed) return
 
     try {
-      const res: any = await getBackendClient()?.rpc('kanban.deleteEpic', { epicId: epic.id })
+      const res: any = await getBackendClient()?.rpc('kanban.deleteEpic', { workspaceId, epicId: epic.id })
       if (!res?.ok) throw new Error('Delete rejected')
       notifications.show({ color: 'green', title: 'Epic deleted', message: 'Tasks were unassigned.' })
     } catch (err) {
@@ -340,7 +286,7 @@ export default function KanbanView() {
 
   const handleArchiveTasks = async (olderThan: number) => {
     try {
-      const res: any = await getBackendClient()?.rpc('kanban.archiveTasks', { olderThan })
+      const res: any = await getBackendClient()?.rpc('kanban.archiveTasks', { workspaceId, olderThan })
       if (!res?.ok) throw new Error(res?.error || 'Archive failed')
       const count = res.archivedCount ?? 0
       notifications.show({
@@ -509,16 +455,14 @@ export default function KanbanView() {
       </DragDropContext>
 
       <TaskModal
-        state={taskModal}
-        onClose={closeTaskModal}
+
         onSubmit={handleSubmitTask}
         epics={epics}
         saving={saving}
       />
 
       <EpicModal
-        state={epicModal}
-        onClose={closeEpicModal}
+
         onSubmit={handleSubmitEpic}
         onDelete={handleDeleteEpic}
         saving={saving}
@@ -534,8 +478,7 @@ export default function KanbanView() {
       />
 
       <ArchiveDoneModal
-        open={archiveModalOpen}
-        onClose={() => setArchiveModalOpen(false)}
+
         onArchive={handleArchiveTasks}
       />
     </Box>
@@ -597,77 +540,60 @@ function KanbanTaskCard({ task, epic, provided, dragging, onEdit, onDelete }: Ka
 }
 
 type TaskModalProps = {
-  state: TaskModalState | null
-  onClose: () => void
   onSubmit: (values: TaskFormValues, existingId?: string) => Promise<void>
   epics: KanbanEpic[]
   saving: boolean
 }
 
-function TaskModal({ state, onClose, onSubmit, epics, saving }: TaskModalProps) {
+function TaskModal({ epics, onSubmit, saving }: TaskModalProps) {
+  const modalState = useKanbanUI((s) => s.taskModal)
+  const taskForm = useKanbanUI((s) => s.taskForm)
+  const updateTaskForm = useKanbanUI((s) => s.updateTaskForm)
+  const closeTaskModal = useKanbanUI((s) => s.closeTaskModal)
+  const isTaskFormValid = useKanbanUI((s) => s.isTaskFormValid())
 
-  const initial: TaskFormValues = useMemo(() => {
-    if (!state) {
-      return { title: '', status: 'backlog', epicId: null, description: '' }
-    }
-    if (state.mode === 'create') {
-      return { title: '', status: state.status, epicId: null, description: '' }
-    }
-    const { task } = state
-    return {
-      title: task.title,
-      status: task.status,
-      epicId: task.epicId ?? null,
-      description: task.description ?? '',
-    }
-  }, [state])
-
-  const [values, setValues] = useState<TaskFormValues>(initial)
-
-  useEffect(() => {
-    setValues(initial)
-  }, [initial])
-
-  if (!state) return null
+  if (!modalState) return null
 
   const handleSubmit = () => {
-    if (!values.title.trim()) {
+    if (!isTaskFormValid) {
       notifications.show({ color: 'red', title: 'Validation', message: 'Title is required.' })
       return
     }
     void onSubmit(
       {
-        title: values.title.trim(),
-        status: values.status,
-        epicId: values.epicId,
-        description: values.description.trim(),
+        title: taskForm.title.trim(),
+        status: taskForm.status,
+        epicId: taskForm.epicId,
+        description: taskForm.description.trim(),
       },
-      state.mode === 'edit' ? state.task.id : undefined,
+      modalState.mode === 'edit' ? modalState.task.id : undefined,
     )
   }
 
   return (
     <Modal
-      opened={!!state}
-      onClose={onClose}
-      title={state.mode === 'create' ? 'New Task' : 'Edit Task'}
+      opened={!!modalState}
+      onClose={closeTaskModal}
+      title={modalState.mode === 'create' ? 'New Task' : 'Edit Task'}
       centered
       size="lg"
     >
       <Stack gap="md">
         <TextInput
           label="Title"
-          value={values.title}
-          onChange={(event) => setValues((prev) => ({ ...prev, title: event.currentTarget.value }))}
+          value={taskForm.title}
+          onChange={(event) =>
+            updateTaskForm({ title: event.currentTarget.value })
+          }
           withAsterisk
         />
         <Group grow>
           <Select
             label="Status"
             data={COLUMNS.map(({ status, label }) => ({ value: status, label }))}
-            value={values.status}
+            value={taskForm.status}
             onChange={(value) =>
-              setValues((prev) => ({ ...prev, status: (value as KanbanStatus) ?? prev.status }))
+              updateTaskForm({ status: (value as KanbanStatus) ?? taskForm.status })
             }
           />
           <Select
@@ -675,23 +601,23 @@ function TaskModal({ state, onClose, onSubmit, epics, saving }: TaskModalProps) 
             data={epics.map((epic) => ({ value: epic.id, label: epic.name }))}
             allowDeselect
             placeholder="Unassigned"
-            value={values.epicId}
-            onChange={(value) => setValues((prev) => ({ ...prev, epicId: value }))}
+            value={taskForm.epicId}
+            onChange={(value) => updateTaskForm({ epicId: value })}
           />
         </Group>
         <Textarea
           label="Description"
           minRows={4}
           autosize
-          value={values.description}
-          onChange={(event) => setValues((prev) => ({ ...prev, description: event.currentTarget.value }))}
+          value={taskForm.description}
+          onChange={(event) => updateTaskForm({ description: event.currentTarget.value })}
         />
         <Group justify="flex-end" gap="sm">
-          <Button variant="default" onClick={onClose} disabled={saving}>
+          <Button variant="default" onClick={closeTaskModal} disabled={saving}>
             Cancel
           </Button>
           <Button onClick={handleSubmit} loading={saving}>
-            {state.mode === 'create' ? 'Create' : 'Save'}
+            {modalState.mode === 'create' ? 'Create' : 'Save'}
           </Button>
         </Group>
       </Stack>
@@ -700,85 +626,72 @@ function TaskModal({ state, onClose, onSubmit, epics, saving }: TaskModalProps) 
 }
 
 type EpicModalProps = {
-  state: EpicModalState | null
-  onClose: () => void
   onSubmit: (values: EpicFormValues, existingId?: string) => Promise<void>
   onDelete: (epic: KanbanEpic) => Promise<void>
   saving: boolean
 }
 
-function EpicModal({ state, onClose, onSubmit, onDelete, saving }: EpicModalProps) {
-  const initial: EpicFormValues = useMemo(() => {
-    if (!state || state.mode === 'create') {
-      return { name: '', color: '#5C7AEA', description: '' }
-    }
-    return {
-      name: state.epic.name,
-      color: state.epic.color,
-      description: state.epic.description ?? '',
-    }
-  }, [state])
+function EpicModal({ onSubmit, onDelete, saving }: EpicModalProps) {
+  const modalState = useKanbanUI((s) => s.epicModal)
+  const epicForm = useKanbanUI((s) => s.epicForm)
+  const updateEpicForm = useKanbanUI((s) => s.updateEpicForm)
+  const closeEpicModal = useKanbanUI((s) => s.closeEpicModal)
+  const isEpicFormValid = useKanbanUI((s) => s.isEpicFormValid())
 
-  const [values, setValues] = useState<EpicFormValues>(initial)
-
-  useEffect(() => {
-    setValues(initial)
-  }, [initial])
-
-  if (!state) return null
+  if (!modalState) return null
 
   const handleSubmit = () => {
-    if (!values.name.trim()) {
+    if (!isEpicFormValid) {
       notifications.show({ color: 'red', title: 'Validation', message: 'Name is required.' })
       return
     }
     void onSubmit(
       {
-        name: values.name.trim(),
-        color: values.color?.trim() || undefined,
-        description: values.description?.trim() || undefined,
+        name: epicForm.name.trim(),
+        color: epicForm.color?.trim() || undefined,
+        description: epicForm.description?.trim() || undefined,
       },
-      state.mode === 'edit' ? state.epic.id : undefined,
+      modalState.mode === 'edit' ? modalState.epic.id : undefined,
     )
   }
 
   const handleDelete = () => {
-    if (state.mode === 'edit') {
-      void onDelete(state.epic)
-      onClose()
+    if (modalState.mode === 'edit') {
+      void onDelete(modalState.epic)
+      closeEpicModal()
     }
   }
 
   return (
     <Modal
-      opened={!!state}
-      onClose={onClose}
-      title={state.mode === 'create' ? 'New Epic' : 'Edit Epic'}
+      opened={!!modalState}
+      onClose={closeEpicModal}
+      title={modalState.mode === 'create' ? 'New Epic' : 'Edit Epic'}
       centered
       size="md"
     >
       <Stack gap="md">
         <TextInput
           label="Name"
-          value={values.name}
-          onChange={(event) => setValues((prev) => ({ ...prev, name: event.currentTarget.value }))}
+          value={epicForm.name}
+          onChange={(event) => updateEpicForm({ name: event.currentTarget.value })}
           withAsterisk
         />
         <TextInput
           label="Color"
-          value={values.color ?? ''}
-          onChange={(event) => setValues((prev) => ({ ...prev, color: event.currentTarget.value }))}
+          value={epicForm.color ?? ''}
+          onChange={(event) => updateEpicForm({ color: event.currentTarget.value })}
           placeholder="#5C7AEA"
         />
         <Textarea
           label="Description"
           minRows={3}
           autosize
-          value={values.description ?? ''}
-          onChange={(event) => setValues((prev) => ({ ...prev, description: event.currentTarget.value }))}
+          value={epicForm.description ?? ''}
+          onChange={(event) => updateEpicForm({ description: event.currentTarget.value })}
         />
         <Group justify="space-between" gap="sm">
-          {state.mode === 'edit' ? (
+          {modalState.mode === 'edit' ? (
             <Button variant="outline" color="red" onClick={handleDelete} leftSection={<IconTrash size={16} />}>
               Delete
             </Button>
@@ -786,11 +699,11 @@ function EpicModal({ state, onClose, onSubmit, onDelete, saving }: EpicModalProp
             <div />
           )}
           <Group gap="sm">
-            <Button variant="default" onClick={onClose} disabled={saving}>
+            <Button variant="default" onClick={closeEpicModal} disabled={saving}>
               Cancel
             </Button>
             <Button onClick={handleSubmit} loading={saving}>
-              {state.mode === 'create' ? 'Create' : 'Save'}
+              {modalState.mode === 'create' ? 'Create' : 'Save'}
             </Button>
           </Group>
         </Group>
@@ -846,21 +759,29 @@ function EpicDrawer({ open, onClose, epics, onCreate, onEdit, onDelete }: EpicDr
 }
 
 type ArchiveDoneModalProps = {
-  open: boolean
-  onClose: () => void
   onArchive: (olderThan: number) => Promise<void>
 }
 
-function ArchiveDoneModal({ open, onClose, onArchive }: ArchiveDoneModalProps) {
-  const [mode, setMode] = useState<'today' | 'week' | 'custom'>('week')
-  const [customDate, setCustomDate] = useState('')
-  const [archiving, setArchiving] = useState(false)
+function ArchiveDoneModal({ onArchive }: ArchiveDoneModalProps) {
+  const open = useKanbanUI((s) => s.archiveModalOpen)
+  const archiveMode = useKanbanUI((s) => s.archiveMode)
+  const archiveCustomDate = useKanbanUI((s) => s.archiveCustomDate)
+  const setArchiveMode = useKanbanUI((s) => s.setArchiveMode)
+  const setArchiveCustomDate = useKanbanUI((s) => s.setArchiveCustomDate)
+  const archiving = useKanbanUI((s) => s.archiving)
+  const setArchiving = useKanbanUI((s) => s.setArchiving)
+  const isArchiveFormValid = useKanbanUI((s) => s.isArchiveFormValid())
+  const setArchiveModalOpen = useKanbanUI((s) => s.setArchiveModalOpen)
+
+  const closeModal = () => {
+    setArchiveModalOpen(false)
+  }
 
   const handleArchive = async () => {
     let cutoffDate: Date
     const now = new Date()
 
-    switch (mode) {
+    switch (archiveMode) {
       case 'today':
         // Set to start of today
         cutoffDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -870,11 +791,11 @@ function ArchiveDoneModal({ open, onClose, onArchive }: ArchiveDoneModalProps) {
         cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
         break
       case 'custom':
-        if (!customDate) {
+        if (!isArchiveFormValid) {
           notifications.show({ color: 'red', title: 'Validation', message: 'Please select a date.' })
           return
         }
-        cutoffDate = new Date(customDate)
+        cutoffDate = new Date(archiveCustomDate)
         if (isNaN(cutoffDate.getTime())) {
           notifications.show({ color: 'red', title: 'Validation', message: 'Invalid date selected.' })
           return
@@ -885,6 +806,7 @@ function ArchiveDoneModal({ open, onClose, onArchive }: ArchiveDoneModalProps) {
     setArchiving(true)
     try {
       await onArchive(cutoffDate.getTime())
+      setArchiveModalOpen(false)
     } finally {
       setArchiving(false)
     }
@@ -893,7 +815,7 @@ function ArchiveDoneModal({ open, onClose, onArchive }: ArchiveDoneModalProps) {
   return (
     <Modal
       opened={open}
-      onClose={onClose}
+      onClose={closeModal}
       title="Archive Done Tasks"
       centered
       size="md"
@@ -905,8 +827,8 @@ function ArchiveDoneModal({ open, onClose, onArchive }: ArchiveDoneModalProps) {
 
         <Select
           label="Archive tasks completed before"
-          value={mode}
-          onChange={(value) => setMode(value as 'today' | 'week' | 'custom')}
+          value={archiveMode}
+          onChange={(value) => setArchiveMode((value as 'today' | 'week' | 'custom') ?? 'week')}
           data={[
             { value: 'today', label: 'Today (older than today)' },
             { value: 'week', label: 'This week (older than 7 days)' },
@@ -914,18 +836,18 @@ function ArchiveDoneModal({ open, onClose, onArchive }: ArchiveDoneModalProps) {
           ]}
         />
 
-        {mode === 'custom' && (
+        {archiveMode === 'custom' && (
           <TextInput
             label="Archive tasks completed before this date"
             type="date"
-            value={customDate}
-            onChange={(event) => setCustomDate(event.currentTarget.value)}
+            value={archiveCustomDate}
+            onChange={(event) => setArchiveCustomDate(event.currentTarget.value)}
             max={new Date().toISOString().split('T')[0]}
           />
         )}
 
         <Group justify="flex-end" gap="sm">
-          <Button variant="default" onClick={onClose} disabled={archiving}>
+          <Button variant="default" onClick={closeModal} disabled={archiving}>
             Cancel
           </Button>
           <Button onClick={handleArchive} loading={archiving} color="blue">

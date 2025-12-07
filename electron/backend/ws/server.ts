@@ -21,6 +21,7 @@ import {
   createFlowEditorHandlers,
   createMiscHandlers,
   createSettingsHandlers,
+  createKanbanHandlers,
 } from './handlers/index.js'
 import { getWorkspaceService } from '../../services/index.js'
 
@@ -211,6 +212,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
       createFlowEditorHandlers(addMethod, connection)
       createMiscHandlers(addMethod, connection)
       createSettingsHandlers(addMethod)
+      createKanbanHandlers(addMethod)
 
       // Setup all event subscriptions for this connection
       const cleanupSubscriptions = setupEventSubscriptions(connection)
