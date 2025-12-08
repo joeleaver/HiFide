@@ -2,16 +2,7 @@ const { spawnSync } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
 
-function run(cmd, args, opts = {}) {
-  const r = spawnSync(cmd, args, {
-    stdio: 'inherit',
-    shell: !!opts.shell,
-    env: opts.env ? { ...process.env, ...opts.env } : process.env
-  })
-  if (r.status !== 0) {
-    process.exit(r.status || 1)
-  }
-}
+
 function tryRun(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, {
     stdio: 'inherit',
@@ -20,6 +11,7 @@ function tryRun(cmd, args, opts = {}) {
   })
   return r.status === 0
 }
+
 
 function buildEnv() {
   const env = { ...process.env, ELECTRON_BUILDER_DISABLE_NPM_REBUILD: 'true' }
@@ -48,6 +40,7 @@ try {
   } else {
     console.warn('[postinstall] Skipping electron-builder install-app-deps on Windows; native deps are rebuilt during packaging and via scripts/rebuild if needed.')
   }
+
 
   process.exit(0)
 } catch (e) {

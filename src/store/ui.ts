@@ -15,7 +15,7 @@
 import { create } from 'zustand'
 import { loadUiState, saveUiState, saveUiStateDebounced } from './utils/uiPersistence'
 
-type ViewType = 'welcome' | 'flow' | 'explorer' | 'sourceControl' | 'knowledgeBase' | 'kanban' | 'settings'
+type ViewType = 'welcome' | 'flow' | 'explorer' | 'sourceControl' | 'knowledgeBase' | 'kanban' | 'settings' | 'mcp'
 
 interface UiStore {
   // Panel Resize State

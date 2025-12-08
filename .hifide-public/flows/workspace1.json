@@ -63,7 +63,8 @@
           "fsRemove",
           "fsTruncateFile",
           "fsTruncateDir",
-          "webFetchMarkdown"
+          "webFetchMarkdown",
+          "webSearchMarkdown"
         ]
       },
       "position": {

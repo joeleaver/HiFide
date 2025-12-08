@@ -126,10 +126,11 @@ export function createMiscHandlers(
   // Flow tools
   addMethod('flows.getTools', async () => {
     try {
-      const { agentTools } = await import('../../../tools/index.js')
+      const { getAgentToolSnapshot } = await import('../../../tools/agentToolRegistry.js')
       const { getToolsService } = await import('../../../services/index.js')
       const toolsService = getToolsService()
 
+      const agentTools = getAgentToolSnapshot()
       const tools = agentTools.map((t: any) => ({
         name: t.name,
         description: t.description || '',

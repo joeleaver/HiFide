@@ -7,6 +7,7 @@ import ExplorerView from './components/ExplorerView'
 import SourceControlView from './components/SourceControlView'
 import KnowledgeBaseView from './components/KnowledgeBaseView'
 import KanbanView from './components/KanbanView'
+import McpPane from './components/mcp/McpPane'
 import SettingsPane from './SettingsPane'
 import WelcomeScreen from './components/WelcomeScreen'
 import GlobalSessionPanel from './components/GlobalSessionPanel'
@@ -157,6 +158,8 @@ function App() {
         return <KnowledgeBaseView />
       case 'kanban':
         return <KanbanView />
+      case 'mcp':
+        return <McpPane />
       case 'settings':
         return (
           <div className={classes.settingsContainer}>

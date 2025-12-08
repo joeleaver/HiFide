@@ -9,7 +9,7 @@
 // ============================================================================
 
 
-export type ViewType = 'welcome' | 'flow' | 'explorer' | 'sourceControl' | 'terminal' | 'settings' | 'knowledgeBase' | 'kanban'
+export type ViewType = 'welcome' | 'flow' | 'explorer' | 'sourceControl' | 'terminal' | 'settings' | 'knowledgeBase' | 'kanban' | 'mcp'
 // ============================================================================
 
 // ============================================================================

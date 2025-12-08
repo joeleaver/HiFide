@@ -32,7 +32,7 @@ import { initializeServices, getAppService } from './services'
 
 // Agent dependencies
 import { initAgentSessionsCleanup } from './session/agentSessions'
-import { agentTools } from './tools'
+import { initializeAgentToolRegistry } from './tools/agentToolRegistry'
 
 // Environment setup
 const DIRNAME = path.dirname(fileURLToPath(import.meta.url))
@@ -127,15 +127,6 @@ providerCapabilities.openai = { tools: true, jsonSchema: true, vision: false, st
 providerCapabilities.anthropic = { tools: true, jsonSchema: false, vision: false, streaming: true }
 providerCapabilities.gemini = { tools: true, jsonSchema: true, vision: true, streaming: true }
 
-// ============================================================================
-// AGENT TOOLS REGISTRY
-// ============================================================================
-// Agent tools are now defined in individual files in electron/tools/
-// and aggregated in electron/tools/index.ts
-// ============================================================================
-
-// Expose agent tools via globalThis for llm-agent module
-;(globalThis as any).__agentTools = agentTools
 
 // ============================================================================
 // APPLICATION INITIALIZATION
@@ -149,6 +140,9 @@ async function initialize(): Promise<void> {
   console.time('[main] initializeServices')
   initializeServices()
   console.timeEnd('[main] initializeServices')
+
+  // Build initial agent tool registry (includes MCP-backed tools once available)
+  initializeAgentToolRegistry()
 
   // Create the window
   // Workspace attachment happens via handshake.init based on persisted window→workspace mapping

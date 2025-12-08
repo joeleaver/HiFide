@@ -29,7 +29,8 @@ module.exports = {
     '^\.\./store/index\.js$': '<rootDir>/electron/__mocks__/store-index.js',
     '^\.\./store/index$': '<rootDir>/electron/__mocks__/store-index.js',
     '^\.\./\.\./store/utils/kanban\.js$': '<rootDir>/electron/store/utils/kanban.ts',
-    '^\.\./store/utils/kanban\.js$': '<rootDir>/electron/store/utils/kanban.ts'
+    '^\.\./store/utils/kanban\.js$': '<rootDir>/electron/store/utils/kanban.ts',
+    '^\.\/base\/(.*)\.js$': '<rootDir>/electron/services/base/$1.ts'
   },
   setupFilesAfterEnv: ['<rootDir>/electron/__tests__/setup.ts'],
   collectCoverageFrom: [

@@ -13,4 +13,5 @@ export { createFlowEditorHandlers } from './flow-editor-handlers.js'
 export { createMiscHandlers } from './misc-handlers.js'
 export { createSettingsHandlers } from './settings-handlers.js'
 export { createKanbanHandlers } from './kanban-handlers.js'
+export { createMcpHandlers } from './mcp-handlers.js'
 

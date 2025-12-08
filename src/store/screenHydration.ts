@@ -154,4 +154,5 @@ export const useKanbanHydration = createScreenHydrationStore('kanban')
 export const useKnowledgeBaseHydration = createScreenHydrationStore('knowledgeBase')
 export const useSettingsHydration = createScreenHydrationStore('settings')
 export const useTerminalHydration = createScreenHydrationStore('terminal')
+export const useMcpHydration = createScreenHydrationStore('mcp')
 

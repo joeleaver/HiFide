@@ -15,6 +15,8 @@ import { initHydrationEvents, useHydration } from '../../store/hydration'
 import { initUiEvents, reloadUiStateForWorkspace } from '../../store/ui'
 import { useBackendBinding } from '../../store/binding'
 import { useLoadingOverlay } from '../../store/loadingOverlay'
+import { initMcpEvents } from '../../store/mcpServers'
+import { initFlowToolsEvents } from '../../store/flowTools'
 
 let client: BackendClient | null = null
 
@@ -63,8 +65,10 @@ export function bootstrapBackendFromPreload(): void {
   initChatTimelineEvents()
   initSessionUiEvents()
   initFlowContextsEvents()
+  initFlowToolsEvents()
   initWorkspaceUiEvents()
   initKnowledgeBaseEvents()
+  initMcpEvents()
   initKanbanEvents()
   initAppBootEvents()
   initTerminalTabsEvents()

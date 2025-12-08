@@ -15,6 +15,7 @@ import { SettingsService } from './SettingsService'
 import { KanbanService } from './KanbanService'
 import { KnowledgeBaseService } from './KnowledgeBaseService'
 import { AppService } from './AppService'
+import { McpService } from './McpService'
 
 import { SessionService } from './SessionService'
 import { FlowProfileService } from './FlowProfileService'
@@ -36,6 +37,7 @@ let settingsService: SettingsService | null = null
 let kanbanService: KanbanService | null = null
 let knowledgeBaseService: KnowledgeBaseService | null = null
 let appService: AppService | null = null
+let mcpService: McpService | null = null
 
 let sessionService: SessionService | null = null
 let flowProfileService: FlowProfileService | null = null
@@ -62,6 +64,7 @@ export function initializeServices(): void {
   settingsService = new SettingsService()
   kanbanService = new KanbanService()
   knowledgeBaseService = new KnowledgeBaseService()
+  mcpService = new McpService()
 
   // Phase 3: Session services (must come before terminal)
   sessionService = new SessionService()
@@ -87,6 +90,7 @@ export function initializeServices(): void {
   registry.register('kanban', kanbanService)
   registry.register('knowledgeBase', knowledgeBaseService)
   registry.register('app', appService)
+  registry.register('mcp', mcpService)
 
   registry.register('session', sessionService)
   registry.register('flowCache', flowCacheService)
@@ -161,6 +165,11 @@ export function getAppService(): AppService {
   return appService
 }
 
+export function getMcpService(): McpService {
+  if (!mcpService) throw new Error('[Services] McpService not initialized')
+  return mcpService
+}
+
 
 
 export function getSessionService(): SessionService {
@@ -207,6 +216,7 @@ export { SettingsService } from './SettingsService'
 export { KanbanService } from './KanbanService'
 export { KnowledgeBaseService } from './KnowledgeBaseService'
 export { AppService } from './AppService'
+export { McpService } from './McpService'
 
 export { SessionService } from './SessionService'
 export { FlowProfileService } from './FlowProfileService'

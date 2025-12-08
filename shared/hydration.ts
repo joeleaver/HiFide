@@ -186,6 +186,7 @@ export type ScreenId =
   | 'settings'
   | 'sourceControl'
   | 'terminal'
+  | 'mcp'
 
 /**
  * Screen-level hydration state

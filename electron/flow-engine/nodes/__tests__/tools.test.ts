@@ -76,6 +76,22 @@ describe('Tools Node', () => {
     })
   })
 
+  describe('MCP Tool Integration', () => {
+    it('should include MCP tools even when they are not explicitly selected', async () => {
+      const flow = createMockFlowAPI()
+      const mcpTool = createTestTool('mcp.server.weather')
+      flow.tools.list = jest.fn(() => [...mockTools, mcpTool])
+      const context = createMainFlowContext()
+      const config = createTestConfig({ tools: ['tool1'] })
+      const inputs = createMockNodeInputs()
+
+      const result = await toolsNode(flow, context, null, inputs, config)
+
+      expect(result.status).toBe('success')
+      expect(result.tools.map((t: any) => t.name)).toEqual(['tool1', 'mcp.server.weather'])
+    })
+  })
+
   describe('Dynamic Override', () => {
     it('should override config with dataIn', async () => {
       const flow = createMockFlowAPI()

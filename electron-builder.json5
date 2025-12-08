@@ -20,6 +20,7 @@
     "node_modules/@ast-grep/napi-win32-x64-msvc/**",
     "node_modules/@homebridge/node-pty-prebuilt-multiarch/**"
   ],
+
   "mac": {
     "target": [
       "dmg"

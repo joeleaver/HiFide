@@ -18,6 +18,8 @@
 
 import type { NodeFunction, NodeExecutionPolicy } from '../types'
 
+const MCP_TOOL_PREFIX = 'mcp.'
+
 /**
  * Node metadata
  */
@@ -86,10 +88,45 @@ export const toolsNode: NodeFunction = async (flow, context, dataIn, inputs, con
     }
   }
 
+  const outputTools = includeMcpTools(selectedTools, allTools)
+
   return {
     context: executionContext,
-    tools: selectedTools, // Array of tool objects for chat nodes
+    tools: outputTools, // Array of tool objects for chat nodes
     status: 'success'
   }
+}
+
+function includeMcpTools(selectedTools: any[], allTools: any[]): any[] {
+  if (!Array.isArray(allTools) || allTools.length === 0) {
+    return selectedTools
+  }
+
+  const result: any[] = []
+  const seen = new Set<string>()
+
+  const addTool = (tool: any) => {
+    if (!tool) return
+    const name = typeof tool?.name === 'string' ? tool.name : undefined
+    if (!name) {
+      result.push(tool)
+      return
+    }
+    if (seen.has(name)) return
+    seen.add(name)
+    result.push(tool)
+  }
+
+  selectedTools.forEach(addTool)
+
+  for (const tool of allTools) {
+    const name = typeof tool?.name === 'string' ? tool.name : undefined
+    if (!name || !name.startsWith(MCP_TOOL_PREFIX)) {
+      continue
+    }
+    addTool(tool)
+  }
+
+  return result
 }
 

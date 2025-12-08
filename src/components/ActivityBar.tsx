@@ -7,13 +7,14 @@ import {
   IconBook,
   IconLayoutKanban,
   IconChevronLeft,
+  IconPlugConnected,
 } from '@tabler/icons-react'
 import { useRerenderTrace } from '../utils/perf'
 import type { ReactNode, MouseEvent } from 'react'
 import { useUiStore } from '../store/ui'
 import { getBackendClient } from '../lib/backend/bootstrap'
 
-type ViewType = 'flow' | 'explorer' | 'sourceControl' | 'knowledgeBase' | 'kanban' | 'settings'
+type ViewType = 'flow' | 'explorer' | 'sourceControl' | 'knowledgeBase' | 'kanban' | 'settings' | 'mcp'
 
 const ACTIVITY_BAR_WIDTH = 48
 
@@ -228,6 +229,36 @@ export default function ActivityBar() {
     },
   ]
 
+  const mcpButton: ActivityButtonProps = {
+    icon: <IconPlugConnected size={24} stroke={1.5} />,
+    label: 'MCP',
+    view: 'mcp',
+    active: !mainCollapsed && currentView === 'mcp',
+    onClick: async () => {
+      setCurrentViewLocal('mcp')
+      if (mainCollapsed) {
+        try {
+          const client = getBackendClient()
+          const res: any = await client?.rpc('workspace.getSettings', {})
+          const prev = (res && res.settings) || {}
+          const prevLayout = prev.layout || {}
+          const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
+          const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
+
+          setMainCollapsed(false)
+          try { setSessionPanelWidth(persistedSessionWidth) } catch {}
+          await client?.rpc('workspace.setSetting', { key: 'layout', value: { ...prevLayout, mainCollapsed: false } })
+          await new Promise((r) => setTimeout(r, 0))
+
+          const currentContentWidth = Math.max(0, window.innerWidth || 0)
+          const currentContentHeight = Math.max(0, window.innerHeight || 0)
+          const targetWidth = Math.max(800, Math.floor(prevExpandedWidth || currentContentWidth))
+          await getBackendClient()?.rpc('window.setContentSize', { width: targetWidth, height: currentContentHeight })
+        } catch {}
+      }
+    },
+  }
+
   return (
     <Stack
       gap={0}
@@ -295,6 +326,8 @@ export default function ActivityBar() {
       ))}
 
       <div style={{ flex: 1 }} />
+
+      <ActivityButton {...mcpButton} />
 
       <ActivityButton
         icon={<IconSettings size={24} stroke={1.5} />}

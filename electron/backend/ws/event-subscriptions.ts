@@ -16,6 +16,7 @@ import {
   getProviderService,
   getFlowContextsService,
   getSettingsService,
+  getMcpService,
 } from '../../services/index.js'
 
 /**
@@ -133,6 +134,16 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
     modelsByProvider: data.modelsByProvider || {},
     fireworksAllowedModels: Array.isArray(data.fireworksAllowedModels) ? data.fireworksAllowedModels : [],
     defaultModels: data.defaultModels || {},
+  }))
+
+  const mcpService = getMcpService()
+  addGlobalSubscription(mcpService, 'mcp:servers:changed', 'mcp.servers.changed', (data) => ({
+    servers: Array.isArray(data?.servers) ? data.servers : [],
+  }))
+
+  addGlobalSubscription(mcpService, 'mcp:tools:changed', 'flow.tools.changed', (data) => ({
+    version: typeof data?.version === 'number' ? data.version : Date.now(),
+    servers: Array.isArray(data?.servers) ? data.servers : [],
   }))
 
   const settingsService = getSettingsService()
