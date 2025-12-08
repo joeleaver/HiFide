@@ -4,7 +4,7 @@ title: McpService backend implementation
 tags: [mcp, backend, services]
 files: [electron/services/McpService.ts, electron/backend/ws/event-subscriptions.ts, electron/backend/ws/handlers/misc-handlers.ts, electron/tools/agentToolRegistry.ts, src/store/flowTools.ts, src/lib/backend/bootstrap.ts, electron/flow-engine/nodes/tools.ts, electron/flow-engine/nodes/__tests__/tools.test.ts]
 createdAt: 2025-12-08T19:11:40.010Z
-updatedAt: 2025-12-08T21:02:06.345Z
+updatedAt: 2025-12-08T22:37:19.580Z
 ---
 
 ## MCP backend service
@@ -14,6 +14,7 @@ updatedAt: 2025-12-08T21:02:06.345Z
 - Maintain runtime state (status, lastSeen, pid, tool/resource metadata) and auto-reconnect when `autoStart` is enabled.
 - Surface MCP tools as HiFide `AgentTool` implementations via `getAgentTools()` so providers can call them like any other tool.
 - Emit high-fidelity events that hydrate both renderer stores (`mcp.servers.changed`) and the tool registry (`mcp:tools:changed`).
+- Normalize stdio transports by expanding `~`, `${VAR}`/`$VAR`, and `%VAR%` placeholders plus platform separators before spawning child processes so Windows/Linux snippets paste cleanly.
 
 ### New event lifecycle
 - Every state mutation (config or runtime) still emits `mcp:servers:changed` for UI snapshots.
@@ -41,6 +42,7 @@ updatedAt: 2025-12-08T21:02:06.345Z
   - HTTP transport normalization + Streamable HTTP transport wiring.
   - Tool registry emissions (`mcp:tools:changed`) by connecting/disabling a server and asserting both the emitted events and the presence of `mcp.*`-namespaced tools from `getAgentTools()`.
   - Existing CRUD / snapshot behaviors.
+  - Stdio placeholder expansion + normalization (see `pathExpansion.test.ts` and the new `createServer` regression) so Windows users can rely on `%USERPROFILE%`, `${HOME}`, or `~` snippets.
 - Jest config maps the MCP SDK ESM entrypoints to their TS sources so the new tests compile.
 
 ### Downstream usage

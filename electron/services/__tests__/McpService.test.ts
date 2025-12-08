@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals'
 import { McpService } from '../McpService'
 
@@ -192,5 +193,27 @@ describe('McpService', () => {
 
     await service.toggleServer(created.id, false)
     expect(events.length).toBeGreaterThan(1)
+  })
+
+  it('expands stdio command and cwd placeholders', async () => {
+    const homeBefore = process.env.HOME
+    process.env.HOME = 'C:/Users/mcp'
+
+    try {
+      const service = new McpService({ autoStart: false })
+      const snapshot = await service.createServer({
+        label: 'Expandable',
+        transport: {
+          type: 'stdio',
+          command: '"~/bin/my-mcp"',
+          cwd: '${HOME}/projects/mcp',
+        },
+      })
+
+      expect(snapshot.transport.command).toBe(path.resolve('C:/Users/mcp', 'bin/my-mcp'))
+      expect(snapshot.transport.cwd).toBe(path.resolve('C:/Users/mcp', 'projects/mcp'))
+    } finally {
+      process.env.HOME = homeBefore
+    }
   })
 })

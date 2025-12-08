@@ -8,6 +8,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import packageJson from '../../package.json'
 import type { AgentTool } from '../providers/provider'
 import { Service } from './base/Service.js'
+import { expandPathPlaceholders } from './utils/pathExpansion'
 import type {
   CreateMcpServerInput,
   McpResourceSummary,
@@ -570,12 +571,16 @@ export class McpService extends Service<McpServiceState> {
   private normalizeTransport(transport: McpTransportConfig): McpTransportConfig {
     if (!transport) throw new Error('Transport configuration is required')
     if (transport.type === 'stdio') {
-      const command = transport.command?.trim()
-      if (!command) throw new Error('Stdio transport requires a command')
+      const rawCommand = transport.command?.trim()
+      if (!rawCommand) throw new Error('Stdio transport requires a command')
+      const command = expandPathPlaceholders(rawCommand)
       const args = Array.isArray(transport.args)
-        ? transport.args.map((value) => String(value)).filter((value) => value.length > 0)
+        ? transport.args
+            .map((value) => String(value).trim())
+            .filter((value) => value.length > 0)
         : undefined
-      const cwd = transport.cwd?.trim()
+      const cwdInput = transport.cwd?.trim()
+      const cwd = cwdInput ? expandPathPlaceholders(cwdInput) : undefined
       return { type: 'stdio', command, args, cwd }
     }
 
