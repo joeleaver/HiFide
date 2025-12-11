@@ -1,0 +1,15 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`markdown plugin registry orders plugins deterministically 1`] = `
+[
+  "toolbar",
+  "headings",
+  "lists",
+  "quote",
+  "shortcuts",
+  "codeblock",
+  "codemirror",
+  "thematic-break",
+  "frontmatter",
+]
+`;

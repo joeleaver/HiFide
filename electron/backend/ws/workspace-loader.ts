@@ -7,7 +7,9 @@
  * 3. Opening workspace in new window (via workspace.open)
  */
 
+import { BrowserWindow } from 'electron'
 import { getWorkspaceService, getSessionService, getFlowProfileService, getKanbanService, getKnowledgeBaseService } from '../../services/index.js'
+import { getWorkspaceManager } from '../../core/workspaceManager.js'
 import { sendWorkspaceSnapshot } from './snapshot.js'
 import { setConnectionSelectedSessionId, transitionConnectionPhase } from './broadcast.js'
 import type { RpcConnection } from './types.js'
@@ -58,6 +60,16 @@ export async function loadWorkspace(options: WorkspaceLoadOptions): Promise<{ ok
 
       // 1. Open workspace folder
       await workspaceService.openFolder(workspaceId, Number(windowId))
+
+      try {
+        const win = BrowserWindow.fromId(Number(windowId))
+        if (win) {
+          const manager = getWorkspaceManager()
+          await manager.bindWindowToWorkspace(win, workspaceId)
+        }
+      } catch (err) {
+        console.error('[workspace-loader] Failed to bind workspace manager:', err)
+      }
 
       // 2. Load flow profiles for this workspace
       try {

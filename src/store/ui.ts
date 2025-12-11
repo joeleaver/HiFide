@@ -13,9 +13,9 @@
  */
 
 import { create } from 'zustand'
+import type { ViewType } from '../../electron/store/types'
 import { loadUiState, saveUiState, saveUiStateDebounced } from './utils/uiPersistence'
-
-type ViewType = 'welcome' | 'flow' | 'explorer' | 'sourceControl' | 'knowledgeBase' | 'kanban' | 'settings' | 'mcp'
+import { MIN_SESSION_PANEL_WIDTH } from '../constants/layout'
 
 interface UiStore {
   // Panel Resize State
@@ -104,9 +104,14 @@ interface UiStore {
 // Load persisted UI state from localStorage (workspace-scoped)
 const persisted = loadUiState()
 
+const clampSessionPanelWidth = (width?: number | null) => {
+  const numeric = typeof width === 'number' && Number.isFinite(width) ? width : MIN_SESSION_PANEL_WIDTH
+  return Math.max(MIN_SESSION_PANEL_WIDTH, numeric)
+}
+
 export const useUiStore = create<UiStore>((set) => ({
   // Persisted state - initialized from localStorage with fallback to defaults
-  sessionPanelWidth: persisted.sessionPanelWidth ?? 300,
+  sessionPanelWidth: clampSessionPanelWidth(persisted.sessionPanelWidth),
   metaPanelWidth: persisted.metaPanelWidth ?? 300,
   metaPanelOpen: persisted.metaPanelOpen ?? false,
   debugPanelCollapsed: persisted.debugPanelCollapsed ?? false,
@@ -144,8 +149,9 @@ export const useUiStore = create<UiStore>((set) => ({
 
   // Actions with localStorage persistence
   setSessionPanelWidth: (width) => {
-    set({ sessionPanelWidth: width })
-    saveUiStateDebounced({ sessionPanelWidth: width })
+    const nextWidth = clampSessionPanelWidth(width)
+    set({ sessionPanelWidth: nextWidth })
+    saveUiStateDebounced({ sessionPanelWidth: nextWidth })
   },
   setMetaPanelWidth: (width) => {
     set({ metaPanelWidth: width })
@@ -249,7 +255,7 @@ export const useUiStore = create<UiStore>((set) => ({
 export function reloadUiStateForWorkspace(): void {
   const persisted = loadUiState()
   useUiStore.setState({
-    sessionPanelWidth: persisted.sessionPanelWidth ?? 300,
+    sessionPanelWidth: clampSessionPanelWidth(persisted.sessionPanelWidth),
     metaPanelWidth: persisted.metaPanelWidth ?? 300,
     metaPanelOpen: persisted.metaPanelOpen ?? false,
     debugPanelCollapsed: persisted.debugPanelCollapsed ?? false,

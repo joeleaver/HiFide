@@ -16,6 +16,9 @@ import { KanbanService } from './KanbanService'
 import { KnowledgeBaseService } from './KnowledgeBaseService'
 import { AppService } from './AppService'
 import { McpService } from './McpService'
+import { LanguageServerService } from './LanguageServerService'
+import { GitStatusService } from './GitStatusService'
+import { WorkspaceSearchService } from './WorkspaceSearchService'
 
 import { SessionService } from './SessionService'
 import { FlowProfileService } from './FlowProfileService'
@@ -38,6 +41,9 @@ let kanbanService: KanbanService | null = null
 let knowledgeBaseService: KnowledgeBaseService | null = null
 let appService: AppService | null = null
 let mcpService: McpService | null = null
+let languageServerService: LanguageServerService | null = null
+let gitStatusService: GitStatusService | null = null
+let workspaceSearchService: WorkspaceSearchService | null = null
 
 let sessionService: SessionService | null = null
 let flowProfileService: FlowProfileService | null = null
@@ -60,11 +66,19 @@ export function initializeServices(): void {
   toolsService = new ToolsService()
   workspaceService = new WorkspaceService()
   explorerService = new ExplorerService()
+  gitStatusService = new GitStatusService()
+  workspaceSearchService = new WorkspaceSearchService()
+  try {
+    gitStatusService.attachExplorerService(explorerService)
+  } catch (error) {
+    console.error('[Services] Failed to attach explorer to GitStatusService:', error)
+  }
   providerService = new ProviderService()
   settingsService = new SettingsService()
   kanbanService = new KanbanService()
   knowledgeBaseService = new KnowledgeBaseService()
   mcpService = new McpService()
+  languageServerService = new LanguageServerService()
 
   // Phase 3: Session services (must come before terminal)
   sessionService = new SessionService()
@@ -91,6 +105,9 @@ export function initializeServices(): void {
   registry.register('knowledgeBase', knowledgeBaseService)
   registry.register('app', appService)
   registry.register('mcp', mcpService)
+  registry.register('languageServer', languageServerService)
+  registry.register('gitStatus', gitStatusService)
+  registry.register('workspaceSearch', workspaceSearchService)
 
   registry.register('session', sessionService)
   registry.register('flowCache', flowCacheService)
@@ -170,7 +187,20 @@ export function getMcpService(): McpService {
   return mcpService
 }
 
+export function getLanguageServerService(): LanguageServerService {
+  if (!languageServerService) throw new Error('[Services] LanguageServerService not initialized')
+  return languageServerService
+}
 
+export function getGitStatusService(): GitStatusService {
+  if (!gitStatusService) throw new Error('[Services] GitStatusService not initialized')
+  return gitStatusService
+}
+
+export function getWorkspaceSearchService(): WorkspaceSearchService {
+  if (!workspaceSearchService) throw new Error('[Services] WorkspaceSearchService not initialized')
+  return workspaceSearchService
+}
 
 export function getSessionService(): SessionService {
   if (!sessionService) throw new Error('[Services] SessionService not initialized')
@@ -217,6 +247,8 @@ export { KanbanService } from './KanbanService'
 export { KnowledgeBaseService } from './KnowledgeBaseService'
 export { AppService } from './AppService'
 export { McpService } from './McpService'
+export { LanguageServerService } from './LanguageServerService'
+export { WorkspaceSearchService } from './WorkspaceSearchService'
 
 export { SessionService } from './SessionService'
 export { FlowProfileService } from './FlowProfileService'

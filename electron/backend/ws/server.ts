@@ -23,6 +23,7 @@ import {
   createSettingsHandlers,
   createKanbanHandlers,
   createMcpHandlers,
+  createLanguageHandlers,
 } from './handlers/index.js'
 import { getWorkspaceService } from '../../services/index.js'
 
@@ -215,6 +216,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
       createSettingsHandlers(addMethod)
       createKanbanHandlers(addMethod)
       createMcpHandlers(addMethod)
+      createLanguageHandlers(addMethod, connection)
 
       // Setup all event subscriptions for this connection
       const cleanupSubscriptions = setupEventSubscriptions(connection)

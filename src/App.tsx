@@ -11,10 +11,12 @@ import McpPane from './components/mcp/McpPane'
 import SettingsPane from './SettingsPane'
 import WelcomeScreen from './components/WelcomeScreen'
 import GlobalSessionPanel from './components/GlobalSessionPanel'
+import RendererDialogs from './components/RendererDialogs'
 
 import LoadingScreen from './components/LoadingScreen'
 import { useRerenderTrace } from './utils/perf'
 import { useUiStore } from './store/ui'
+import { MIN_SESSION_PANEL_WIDTH } from './constants/layout'
 import { getBackendClient } from './lib/backend/bootstrap'
 
 import { useAppBoot } from './store/appBoot'
@@ -119,18 +121,18 @@ function App() {
         const res: any = await client?.rpc('workspace.getSettings', {})
         const layout = (res && res.settings && res.settings.layout) || {}
         // Restore Session Panel width first
-        let spw = 300
+        let spw = MIN_SESSION_PANEL_WIDTH
         if (typeof layout.sessionPanelWidth === 'number') {
-          spw = Math.max(240, layout.sessionPanelWidth)
-          setSessionPanelWidth(spw)
+          spw = Math.max(MIN_SESSION_PANEL_WIDTH, layout.sessionPanelWidth)
         }
+        setSessionPanelWidth(spw)
         // Restore collapsed state
         if (typeof layout.mainCollapsed === 'boolean') {
           setMainCollapsed(layout.mainCollapsed)
           // If starting collapsed, shrink the window right away to Session + Nav width
           if (layout.mainCollapsed) {
             const NAV_W = 48
-            const targetW = Math.max(300, Math.floor(spw + NAV_W))
+            const targetW = Math.max(MIN_SESSION_PANEL_WIDTH + NAV_W, Math.floor(spw + NAV_W))
             const targetH = Math.max(300, Math.floor(window.innerHeight || 600))
             try { await getBackendClient()?.rpc('window.setContentSize', { width: targetW, height: targetH }) } catch { }
           }
@@ -272,6 +274,7 @@ function App() {
         </div>
       )}
 
+      <RendererDialogs />
 
     </Profiler>
   )

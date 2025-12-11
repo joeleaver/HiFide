@@ -1,8 +1,8 @@
-import { Group, Text, UnstyledButton, Badge } from '@mantine/core'
-import { IconPlus, IconX, IconChevronUp, IconChevronDown } from '@tabler/icons-react'
+import { Group, Text, UnstyledButton, Badge, ActionIcon, Popover, TextInput, Stack, Button, Tooltip } from '@mantine/core'
+import { IconPlus, IconX, IconChevronUp, IconChevronDown, IconCopy, IconEdit, IconSettings } from '@tabler/icons-react'
 import { useEffect, useState } from 'react'
 import { useTerminalStore } from '../store/terminal'
-import { useTerminalTabs } from '../store/terminalTabs'
+import { useTerminalTabs, type TerminalTabModel } from '../store/terminalTabs'
 import { usePanelResize } from '../hooks/usePanelResize'
 import TerminalView from './TerminalView'
 import { getBackendClient } from '../lib/backend/bootstrap'
@@ -12,13 +12,22 @@ export default function TerminalPanel() {
   const tabs = useTerminalTabs((s) => s.explorerTabs)
   const activeTab = useTerminalTabs((s) => s.explorerActive)
   const hydrateTabs = useTerminalTabs((s) => s.hydrateTabs)
+  const addExplorerTab = useTerminalTabs((s) => s.addExplorerTab)
+  const closeExplorerTab = useTerminalTabs((s) => s.closeExplorerTab)
+  const setExplorerActive = useTerminalTabs((s) => s.setExplorerActive)
+  const renameExplorerTab = useTerminalTabs((s) => s.renameExplorerTab)
+  const duplicateExplorerTab = useTerminalTabs((s) => s.duplicateExplorerTab)
+  const updateExplorerMetadata = useTerminalTabs((s) => s.updateExplorerMetadata)
 
   const [panelHeight, setPanelHeight] = useState<number>(300)
+  const [renameState, setRenameState] = useState<{ tabId: string; value: string } | null>(null)
+  const [settingsState, setSettingsState] = useState<{ tabId: string; cwd: string; shell: string } | null>(null)
 
   // Use renderer-local terminal store for xterm operations and UI state
   const fitTerminal = useTerminalStore((s) => s.fitTerminal)
   const open = useTerminalStore((s) => s.explorerTerminalPanelOpen)
   const setTerminalPanelOpen = useTerminalStore((s) => s.setTerminalPanelOpen)
+  const disposeSession = useTerminalStore((s) => s.disposeSession)
 
   // Hydrate tabs and height on mount
   useEffect(() => {
@@ -34,12 +43,38 @@ export default function TerminalPanel() {
     })()
   }, [hydrateTabs])
 
-  const addTab = async () => {
-    try { await getBackendClient()?.rpc('terminal.addTab', { context: 'explorer' }) } catch {}
-  }
+  const addTab = () => { addExplorerTab() }
 
   const closeTab = async (id: string) => {
-    try { await getBackendClient()?.rpc('terminal.removeTab', { context: 'explorer', tabId: id }) } catch {}
+    try { await disposeSession(id) } catch {}
+    closeExplorerTab(id)
+  }
+
+  const startRename = (tab: TerminalTabModel) => {
+    setRenameState({ tabId: tab.id, value: tab.title })
+  }
+
+  const commitRename = () => {
+    if (!renameState) return
+    renameExplorerTab(renameState.tabId, renameState.value)
+    setRenameState(null)
+  }
+
+  const cancelRename = () => {
+    setRenameState(null)
+  }
+
+  const openSettings = (tab: TerminalTabModel) => {
+    setSettingsState({ tabId: tab.id, cwd: tab.cwd || '', shell: tab.shell || '' })
+  }
+
+  const closeSettings = () => setSettingsState(null)
+
+  const saveSettings = async () => {
+    if (!settingsState) return
+    updateExplorerMetadata(settingsState.tabId, { cwd: settingsState.cwd, shell: settingsState.shell })
+    try { await disposeSession(settingsState.tabId) } catch {}
+    setSettingsState(null)
   }
 
   const onToggleClick = () => {
@@ -61,7 +96,7 @@ export default function TerminalPanel() {
     handlePosition: 'top',
     onEnd: () => {
       // Fit all terminals after resize
-      tabs.forEach((tabId) => fitTerminal(tabId))
+      tabs.forEach((tab) => fitTerminal(tab.id))
     },
   })
 
@@ -184,12 +219,14 @@ export default function TerminalPanel() {
               paddingLeft: '12px',
             }}
           >
-            {tabs.map((id) => (
+            {tabs.map((tab) => {
+              const isActive = activeTab === tab.id
+              const isRenaming = renameState?.tabId === tab.id
+              const isSettingsOpen = settingsState?.tabId === tab.id
+              return (
               <div
-                key={id}
-                onClick={async () => {
-                  try { await getBackendClient()?.rpc('terminal.setActive', { context: 'explorer', tabId: id }) } catch {}
-                }}
+                key={tab.id}
+                onClick={() => setExplorerActive(tab.id)}
                 style={{
                   height: '32px',
                   padding: '0 12px',
@@ -197,37 +234,140 @@ export default function TerminalPanel() {
                   alignItems: 'center',
                   gap: '8px',
                   cursor: 'pointer',
-                  backgroundColor: activeTab === id ? '#1e1e1e' : 'transparent',
-                  borderTop: activeTab === id ? '1px solid #007acc' : '1px solid transparent',
+                  backgroundColor: isActive ? '#1e1e1e' : 'transparent',
+                  borderTop: isActive ? '1px solid #007acc' : '1px solid transparent',
                   borderLeft: '1px solid #3e3e42',
                   borderRight: '1px solid #3e3e42',
-                  color: activeTab === id ? '#ffffff' : '#888888',
+                  color: isActive ? '#ffffff' : '#888888',
                   fontSize: '13px',
                 }}
               >
-                <span>{id}</span>
-                <div
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    closeTab(id)
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    padding: '2px',
-                    color: '#888',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.color = '#fff'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = '#888'
-                  }}
-                >
-                  <IconX size={12} />
-                </div>
+                {isRenaming ? (
+                  <TextInput
+                    value={renameState?.value || ''}
+                    autoFocus
+                    size="xs"
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => setRenameState((prev) => (prev ? { ...prev, value: e.currentTarget.value } : prev))}
+                    onBlur={commitRename}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); commitRename() }
+                      if (e.key === 'Escape') { e.preventDefault(); cancelRename() }
+                    }}
+                    styles={{
+                      input: {
+                        backgroundColor: '#1e1e1e',
+                        color: '#fff',
+                        height: 22,
+                      },
+                    }}
+                  />
+                ) : (
+                  <span
+                    onDoubleClick={(e) => {
+                      e.stopPropagation()
+                      startRename(tab)
+                    }}
+                  >
+                    {tab.title}
+                  </span>
+                )}
+                <Group gap={4} align="center">
+                  <Tooltip label="Rename" withinPortal>
+                    <ActionIcon
+                      variant="subtle"
+                      size="xs"
+                      color="gray"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        startRename(tab)
+                      }}
+                    >
+                      <IconEdit size={12} />
+                    </ActionIcon>
+                  </Tooltip>
+                  <Tooltip label="Duplicate" withinPortal>
+                    <ActionIcon
+                      variant="subtle"
+                      size="xs"
+                      color="gray"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        duplicateExplorerTab(tab.id)
+                      }}
+                    >
+                      <IconCopy size={12} />
+                    </ActionIcon>
+                  </Tooltip>
+                  <Popover
+                    opened={isSettingsOpen}
+                    onChange={(opened) => {
+                      if (!opened) setSettingsState((prev) => (prev?.tabId === tab.id ? null : prev))
+                    }}
+                    withinPortal
+                    position="bottom-start"
+                    shadow="md"
+                  >
+                    <Popover.Target>
+                      <ActionIcon
+                        variant="subtle"
+                        size="xs"
+                        color="gray"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (isSettingsOpen) {
+                            closeSettings()
+                          } else {
+                            openSettings(tab)
+                          }
+                        }}
+                      >
+                        <IconSettings size={12} />
+                      </ActionIcon>
+                    </Popover.Target>
+                    <Popover.Dropdown bg="#1e1e1e" px="md" py="sm" w={260}>
+                      <Stack gap="xs">
+                        <Text size="xs" fw={600} c="dimmed">
+                          Terminal settings
+                        </Text>
+                        <TextInput
+                          label="Working directory"
+                          value={settingsState?.cwd || ''}
+                          placeholder="Workspace root"
+                          onChange={(e) => setSettingsState((prev) => (prev?.tabId === tab.id ? { ...prev, cwd: e.currentTarget.value } : prev))}
+                        />
+                        <TextInput
+                          label="Shell"
+                          value={settingsState?.shell || ''}
+                          placeholder="Default"
+                          onChange={(e) => setSettingsState((prev) => (prev?.tabId === tab.id ? { ...prev, shell: e.currentTarget.value } : prev))}
+                        />
+                        <Group justify="space-between" mt="xs">
+                          <Button variant="subtle" size="xs" color="gray" onClick={closeSettings}>
+                            Cancel
+                          </Button>
+                          <Button size="xs" onClick={saveSettings}>
+                            Save
+                          </Button>
+                        </Group>
+                      </Stack>
+                    </Popover.Dropdown>
+                  </Popover>
+                  <ActionIcon
+                    variant="subtle"
+                    size="xs"
+                    color="gray"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void closeTab(tab.id)
+                    }}
+                  >
+                    <IconX size={12} />
+                  </ActionIcon>
+                </Group>
               </div>
-            ))}
+              )
+            })}
           </div>
 
           {/* Terminal views */}
@@ -237,19 +377,19 @@ export default function TerminalPanel() {
                 <Text size="sm">No terminals open. Click + to create one.</Text>
               </div>
             ) : (
-              tabs.map((id) => (
+              tabs.map((tab) => (
                 <div
-                  key={id}
+                  key={tab.id}
                   style={{
                     position: 'absolute',
                     top: 0,
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    display: activeTab === id ? 'block' : 'none',
+                    display: activeTab === tab.id ? 'block' : 'none',
                   }}
                 >
-                  <TerminalView tabId={id} />
+                  <TerminalView tabId={tab.id} />
                 </div>
               ))
             )}

@@ -154,6 +154,57 @@ export function createWorkspaceHandlers(
     }
   })
 
+  addMethod('workspace.openFileDialog', async ({ allowMultiple }: { allowMultiple?: boolean } = {}) => {
+    try {
+      const workspaceRoot = await getConnectionWorkspaceId(connection)
+      const result = await dialog.showOpenDialog({
+        properties: allowMultiple ? ['openFile', 'multiSelections'] : ['openFile'],
+        title: 'Open File',
+        buttonLabel: 'Open',
+        defaultPath: workspaceRoot ?? undefined,
+      })
+
+      if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+        return { ok: false, canceled: true }
+      }
+
+      return { ok: true, paths: result.filePaths }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('workspace.saveFileDialog', async ({ defaultPath, suggestedName }: { defaultPath?: string; suggestedName?: string } = {}) => {
+    try {
+      const workspaceRoot = await getConnectionWorkspaceId(connection)
+      let resolvedDefault = defaultPath
+      if (!resolvedDefault && workspaceRoot) {
+        resolvedDefault = workspaceRoot
+      }
+      if (resolvedDefault && suggestedName) {
+        try {
+          resolvedDefault = path.join(resolvedDefault, suggestedName)
+        } catch {}
+      } else if (!resolvedDefault && suggestedName && workspaceRoot) {
+        resolvedDefault = path.join(workspaceRoot, suggestedName)
+      }
+
+      const result = await dialog.showSaveDialog({
+        title: 'Save File',
+        buttonLabel: 'Save',
+        defaultPath: resolvedDefault ?? suggestedName ?? workspaceRoot ?? undefined,
+      })
+
+      if (result.canceled || !result.filePath) {
+        return { ok: false, canceled: true }
+      }
+
+      return { ok: true, path: result.filePath }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
   // Workspace settings
   addMethod('workspace.getSettings', async () => {
     try {

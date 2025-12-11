@@ -13,6 +13,13 @@
 import { create } from 'zustand'
 import * as ptySvc from '../services/pty'
 import * as terminalInstances from '../services/terminalInstances'
+import { useTerminalTabs } from './terminalTabs'
+
+const sanitizeWorkspaceInput = (value?: string | null): string | undefined => {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
 
 interface TerminalStore {
   // Event infrastructure
@@ -30,10 +37,11 @@ interface TerminalStore {
 
   // Actions
   initEvents: () => void
-  mountTerminal: (params: { tabId: string; container: HTMLElement; context: 'agent' | 'explorer'; sessionId?: string }) => Promise<void>
+  mountTerminal: (params: { tabId: string; container: HTMLElement; context: 'agent' | 'explorer'; sessionId?: string; cwd?: string | null; shell?: string | null }) => Promise<void>
   unmountTerminal: (tabId: string) => void
   fitTerminal: (tabId: string) => void
   setTerminalPanelOpen: (context: 'agent' | 'explorer', open: boolean) => void
+  disposeSession: (tabId: string) => Promise<void>
 }
 
 export const useTerminalStore = create<TerminalStore>((set, get) => ({
@@ -73,7 +81,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   },
 
   // Mount terminal for either agent (attach to agent PTY) or explorer (create a new PTY)
-  mountTerminal: async ({ tabId, container, context, sessionId }) => {
+  mountTerminal: async ({ tabId, container, context, sessionId, cwd, shell }) => {
     get().initEvents()
 
     // Create xterm instance but delay opening until fonts and layout are ready
@@ -141,15 +149,15 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         // Explorer terminal: create or reuse a PTY session
         let sid = get().sessionIds[tabId]
         if (!sid) {
-          // Use workspace root as cwd if available
+          // Use configured cwd (falling back to workspace root)
           try {
             const { getBackendClient } = await import('../lib/backend/bootstrap')
             const cli = getBackendClient()
-            let cwd: string | undefined = undefined
-            if (cli) {
-              try { const w: any = await cli.rpc('workspace.get', {}); cwd = w?.root || undefined } catch {}
+            let resolvedCwd = sanitizeWorkspaceInput(cwd)
+            if (!resolvedCwd && cli) {
+              try { const w: any = await cli.rpc('workspace.get', {}); resolvedCwd = sanitizeWorkspaceInput(w?.root) } catch {}
             }
-            const res = await ptySvc.create({ cols: cols || 80, rows: rows || 24, cwd })
+            const res = await ptySvc.create({ cols: cols || 80, rows: rows || 24, cwd: resolvedCwd, shell: sanitizeWorkspaceInput(shell) })
             if (!res || !res.sessionId) throw new Error('Failed to create PTY')
             sid = res.sessionId
           } catch (e: any) {
@@ -203,6 +211,13 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     const sessionId = get().sessionIds[tabId]
     if (instance && sessionId) {
       ptySvc.resize(sessionId, instance.terminal.cols, instance.terminal.rows)
+      const cols = instance.terminal.cols
+      const rows = instance.terminal.rows
+      if (cols && rows) {
+        try {
+          useTerminalTabs.getState().updateExplorerMetadata(tabId, { lastDimensions: { cols, rows } })
+        } catch {}
+      }
     }
   },
 
@@ -212,6 +227,17 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     } else {
       set({ explorerTerminalPanelOpen: open })
     }
+  },
+
+  disposeSession: async (tabId) => {
+    const sessionId = get().sessionIds[tabId]
+    if (sessionId) {
+      try { await ptySvc.dispose(sessionId) } catch {}
+    }
+    try { terminalInstances.unmountTerminalInstance(tabId) } catch {}
+    const { [tabId]: __, ...restSubs } = get().dataSubscribers
+    const { [tabId]: ___, ...restSessions } = get().sessionIds
+    set({ dataSubscribers: restSubs, sessionIds: restSessions })
   },
 }))
 

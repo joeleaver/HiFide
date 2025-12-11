@@ -6,6 +6,7 @@
  */
 
 import { getConnectionWorkspaceId } from './broadcast.js'
+import path from 'node:path'
 import type { RpcConnection } from './types'
 import {
   getSessionService,
@@ -17,7 +18,12 @@ import {
   getFlowContextsService,
   getSettingsService,
   getMcpService,
+  getExplorerService,
+  getLanguageServerService,
 } from '../../services/index.js'
+import type { ExplorerFsEvent } from '../../store/types.js'
+import type { LspDiagnosticsEvent, LspLanguageStatusPayload } from '../../../shared/lsp.js'
+import { LSP_NOTIFICATION_DIAGNOSTICS, LSP_NOTIFICATION_LANGUAGE_STATUS } from '../../../shared/lsp.js'
 
 /**
  * Subscription configuration
@@ -34,6 +40,15 @@ interface Subscription {
  */
 export function setupEventSubscriptions(connection: RpcConnection): () => void {
   const subscriptions: Subscription[] = []
+
+  const samePath = (a?: string | null, b?: string | null): boolean => {
+    if (!a || !b) return false
+    try {
+      return path.resolve(a) === path.resolve(b)
+    } catch {
+      return a === b
+    }
+  }
 
   // Helper to check if connection is bound to a workspace
   const isActiveWorkspace = async (): Promise<boolean> => {
@@ -103,6 +118,39 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
   addWorkspaceSubscription(kbService, 'kb:workspaceFiles:changed', 'kb.files.changed', (data) => ({
     files: Array.isArray(data.files) ? data.files : [],
   }))
+
+  // Explorer filesystem events
+  const explorerService = getExplorerService()
+  const explorerFsHandler = async (payload: ExplorerFsEvent) => {
+    try {
+      const workspaceRoot = await getConnectionWorkspaceId(connection)
+      if (!workspaceRoot) return
+      if (!samePath(workspaceRoot, payload.workspaceRoot)) return
+      connection.sendNotification('explorer.fs.event', payload)
+    } catch {}
+  }
+  explorerService.on('explorer:fs:event', explorerFsHandler)
+  subscriptions.push({ service: explorerService, event: 'explorer:fs:event', handler: explorerFsHandler, workspaceScoped: true })
+
+  const languageServerService = getLanguageServerService()
+  const lspDiagnosticsHandler = async (payload: LspDiagnosticsEvent) => {
+    try {
+      const workspaceRoot = await getConnectionWorkspaceId(connection)
+      if (!workspaceRoot) return
+      if (!samePath(workspaceRoot, payload.workspaceRoot)) return
+      connection.sendNotification(LSP_NOTIFICATION_DIAGNOSTICS, payload)
+    } catch {}
+  }
+  languageServerService.on('lsp:diagnostics', lspDiagnosticsHandler)
+  subscriptions.push({ service: languageServerService, event: 'lsp:diagnostics', handler: lspDiagnosticsHandler, workspaceScoped: true })
+
+  const lspLanguageStatusHandler = (payload: LspLanguageStatusPayload) => {
+    try {
+      connection.sendNotification(LSP_NOTIFICATION_LANGUAGE_STATUS, payload)
+    } catch {}
+  }
+  languageServerService.on('lsp:languageStatus', lspLanguageStatusHandler)
+  subscriptions.push({ service: languageServerService, event: 'lsp:languageStatus', handler: lspLanguageStatusHandler, workspaceScoped: false })
 
   // App boot status (global - no workspace check)
   const appService = getAppService()

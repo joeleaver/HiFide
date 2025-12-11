@@ -11,12 +11,18 @@ import { initAppBootEvents } from '../../store/appBoot'
 import { initTerminalTabsEvents } from '../../store/terminalTabs'
 import { initFlowEditorEvents } from '../../store/flowEditor'
 import { initFlowEditorLocalEvents } from '../../store/flowEditorLocal'
+import { initExplorerEvents } from '../../store/explorer'
+import { initExplorerScreenController } from '../../store/explorerScreenController'
 import { initHydrationEvents, useHydration } from '../../store/hydration'
+import { initWorkspaceSearchEvents } from '../../store/workspaceSearch'
 import { initUiEvents, reloadUiStateForWorkspace } from '../../store/ui'
 import { useBackendBinding } from '../../store/binding'
 import { useLoadingOverlay } from '../../store/loadingOverlay'
 import { initMcpEvents } from '../../store/mcpServers'
 import { initFlowToolsEvents } from '../../store/flowTools'
+import { initLspEvents } from '../../store/lspDiagnostics'
+import { initLanguageSupportEvents } from '../../store/languageSupport'
+import { initViewStateController, requestMenuStatePublish } from '../../store/viewState'
 
 let client: BackendClient | null = null
 
@@ -43,6 +49,7 @@ export function bootstrapBackendFromPreload(): void {
       useBackendBinding.setState({ windowId })
       // Transition hydration from connecting → connected
       useHydration.getState().setPhase('connected')
+      requestMenuStatePublish({ immediate: true })
     },
     onClose: () => {
       // Transition hydration to disconnected
@@ -73,6 +80,12 @@ export function bootstrapBackendFromPreload(): void {
   initAppBootEvents()
   initTerminalTabsEvents()
   initFlowEditorEvents()
+  initExplorerEvents()
+  initWorkspaceSearchEvents()
+  initLspEvents()
+  initLanguageSupportEvents()
+  initExplorerScreenController()
+  initViewStateController()
   initUiEvents()
 
   // Initialize flow editor local events (async - waits for client ready)
@@ -97,6 +110,8 @@ export function bootstrapBackendFromPreload(): void {
       console.log('[bootstrap] Forcing loadingOverlay recompute')
       useLoadingOverlay.getState()._recompute()
     }, 100)
+
+    requestMenuStatePublish()
   })
 
   client.connect()

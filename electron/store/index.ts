@@ -35,6 +35,8 @@ export type {
   RecentFolder,
   ExplorerEntry,
   OpenedFile,
+  ExplorerFsEvent,
+  ExplorerFsEventKind,
   AgentMetrics,
   ActivityEvent,
   KanbanStatus,

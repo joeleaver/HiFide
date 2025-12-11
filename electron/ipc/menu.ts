@@ -7,9 +7,30 @@ import { BrowserWindow, Menu, shell, app } from 'electron'
 import { getWindow, windowStateStore } from '../core/state'
 import { createWindow } from '../core/window'
 import type { ViewType } from '../store/types'
+import type { RendererMenuStatePayload } from '../../shared/menu.js'
+import { DEFAULT_RENDERER_MENU_STATE } from '../../shared/menu.js'
 import { getWorkspaceService } from '../services/index.js'
 
-let currentViewForMenu: ViewType = 'flow'
+function normalizeMenuState(state?: RendererMenuStatePayload): RendererMenuStatePayload {
+  const base = state ?? DEFAULT_RENDERER_MENU_STATE
+  return {
+    view: (base.view as ViewType) ?? 'flow',
+    workspaceAttached: !!base.workspaceAttached,
+    hasOpenTab: !!base.hasOpenTab,
+    hasDirtyTab: !!base.hasDirtyTab,
+    windowId: typeof base.windowId === 'number' ? base.windowId : base.windowId ?? null,
+    fileActions: {
+      visible: !!base.fileActions?.visible,
+      canCreateFile: !!base.fileActions?.canCreateFile,
+      canOpenFile: !!base.fileActions?.canOpenFile,
+      canSave: !!base.fileActions?.canSave,
+      canSaveAs: !!base.fileActions?.canSaveAs,
+    },
+  }
+}
+
+let rendererMenuState: RendererMenuStatePayload = normalizeMenuState()
+let rendererMenuStateJson = JSON.stringify(rendererMenuState)
 
 const menuRefs: {
   file?: Electron.Menu
@@ -31,8 +52,21 @@ function sendMenuEvent(channel: string, ...args: any[]) {
   wc?.send(channel, ...args)
 }
 
+export function updateRendererMenuState(next: RendererMenuStatePayload): void {
+  const normalized = normalizeMenuState(next)
+  const json = JSON.stringify(normalized)
+  if (json === rendererMenuStateJson) return
+  rendererMenuState = normalized
+  rendererMenuStateJson = json
+  buildMenu()
+}
+
 export function setCurrentViewForMenu(view: ViewType) {
-  currentViewForMenu = view
+  updateRendererMenuState({
+    ...rendererMenuState,
+    view,
+    fileActions: { ...rendererMenuState.fileActions },
+  })
 }
 
 export function buildMenu(): void {
@@ -59,37 +93,71 @@ export function buildMenu(): void {
     }
   } catch {}
 
+  const explorerFileActions: MenuItemConstructorOptions[] = rendererMenuState.fileActions.visible
+    ? [
+        {
+          label: 'New File',
+          accelerator: isMac ? 'Cmd+N' : 'Ctrl+N',
+          enabled: rendererMenuState.fileActions.canCreateFile,
+          click: () => sendMenuEvent('menu:new-file'),
+        },
+        {
+          label: 'Open File…',
+          accelerator: isMac ? 'Cmd+O' : 'Ctrl+O',
+          enabled: rendererMenuState.fileActions.canOpenFile,
+          click: () => sendMenuEvent('menu:open-file'),
+        },
+        {
+          label: 'Save',
+          accelerator: isMac ? 'Cmd+S' : 'Ctrl+S',
+          enabled: rendererMenuState.fileActions.canSave,
+          click: () => sendMenuEvent('menu:save-file'),
+        },
+        {
+          label: 'Save As…',
+          accelerator: isMac ? 'Cmd+Shift+S' : 'Ctrl+Shift+S',
+          enabled: rendererMenuState.fileActions.canSaveAs,
+          click: () => sendMenuEvent('menu:save-file-as'),
+        },
+      ]
+    : []
+
+  const workspaceActions: MenuItemConstructorOptions[] = [
+    {
+      label: 'New Window',
+      accelerator: isMac ? 'Cmd+Shift+N' : 'Ctrl+Shift+N',
+      click: () => createWindow({ offsetFromCurrent: true }),
+    },
+    {
+      label: 'Open Folder…',
+      accelerator: isMac ? 'Cmd+Shift+O' : 'Ctrl+Shift+O',
+      click: () => sendMenuEvent('menu:open-folder'),
+    },
+    {
+      label: 'Open Recent',
+      submenu:
+        recentFolders.length > 0
+          ? (recentFolders.map((folder) => ({
+              label: folder.path,
+              click: () => sendMenuEvent('menu:open-recent-folder', folder.path),
+            })) as MenuItemConstructorOptions[])
+          : ([{ label: 'No Recent Folders', enabled: false }] as MenuItemConstructorOptions[]),
+    },
+    {
+      label: 'Close Workspace',
+      accelerator: isMac ? 'Cmd+Shift+W' : 'Ctrl+Shift+W',
+      click: () => sendMenuEvent('menu:close-workspace'),
+    },
+  ]
+
   const template: MenuItemConstructorOptions[] = [
     ...(isMac ? ([{ role: 'appMenu' as const }] as MenuItemConstructorOptions[]) : []),
     {
       label: 'File',
       submenu: [
-        {
-          label: 'New Window',
-          accelerator: isMac ? 'Cmd+Shift+N' : 'Ctrl+Shift+N',
-          click: () => createWindow({ offsetFromCurrent: true }),
-        },
-        {
-          label: 'Open Folder…',
-          accelerator: isMac ? 'Cmd+O' : 'Ctrl+O',
-          click: () => sendMenuEvent('menu:open-folder'),
-        },
-        {
-          label: 'Open Recent',
-          submenu:
-            recentFolders.length > 0
-              ? (recentFolders.map((folder) => ({
-                  label: folder.path,
-                  click: () => sendMenuEvent('menu:open-recent-folder', folder.path),
-                })) as MenuItemConstructorOptions[])
-              : ([{ label: 'No Recent Folders', enabled: false }] as MenuItemConstructorOptions[]),
-        },
-        { type: 'separator' },
-        {
-          label: 'Close Workspace',
-          accelerator: isMac ? 'Cmd+Shift+W' : 'Ctrl+Shift+W',
-          click: () => sendMenuEvent('menu:close-workspace'),
-        },
+        ...explorerFileActions,
+        ...(explorerFileActions.length ? ([{ type: 'separator' as const }] as MenuItemConstructorOptions[]) : []),
+        ...workspaceActions,
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' },
       ] as MenuItemConstructorOptions[],
@@ -104,6 +172,19 @@ export function buildMenu(): void {
         { role: 'copy' },
         { role: 'paste' },
         { role: 'selectAll' },
+        { type: 'separator' },
+        {
+          label: 'Find in Files…',
+          accelerator: isMac ? 'Cmd+Shift+F' : 'Ctrl+Shift+F',
+          enabled: rendererMenuState.view === 'explorer',
+          click: () => sendMenuEvent('menu:find-in-files'),
+        },
+        {
+          label: 'Replace in Files…',
+          accelerator: isMac ? 'Cmd+Shift+H' : 'Ctrl+Shift+H',
+          enabled: rendererMenuState.view === 'explorer',
+          click: () => sendMenuEvent('menu:replace-in-files'),
+        },
       ] as MenuItemConstructorOptions[],
     },
     {
@@ -113,14 +194,14 @@ export function buildMenu(): void {
           label: entry.label,
           accelerator: entry.accelerator,
           type: 'checkbox' as const,
-          checked: currentViewForMenu === entry.view,
+          checked: rendererMenuState.view === entry.view,
           click: () => sendMenuEvent(entry.channel),
         })),
         { type: 'separator' },
         {
           label: 'Toggle Terminal Panel',
           accelerator: isMac ? 'Cmd+`' : 'Ctrl+`',
-          enabled: currentViewForMenu === 'explorer',
+          enabled: rendererMenuState.view === 'explorer',
           click: () => sendMenuEvent('menu:toggle-terminal-panel'),
         },
         { type: 'separator' },
@@ -173,10 +254,10 @@ export function buildMenu(): void {
 }
 
 export function registerMenuHandlers(ipc: IpcMain) {
-  ipc.handle('menu:get-current-view', () => currentViewForMenu)
+  ipc.handle('menu:get-current-view', () => rendererMenuState.view)
   ipc.handle('menu:set-view', (_event, view: ViewType) => {
     setCurrentViewForMenu(view)
-    buildMenu()
+    return rendererMenuState.view
   })
 
   // app:set-view IPC handler removed - view changes now handled via WebSocket RPC (view.set)

@@ -11,10 +11,10 @@ import {
 } from '@tabler/icons-react'
 import { useRerenderTrace } from '../utils/perf'
 import type { ReactNode, MouseEvent } from 'react'
+import type { ViewType } from '../../electron/store/types'
 import { useUiStore } from '../store/ui'
 import { getBackendClient } from '../lib/backend/bootstrap'
-
-type ViewType = 'flow' | 'explorer' | 'sourceControl' | 'knowledgeBase' | 'kanban' | 'settings' | 'mcp'
+import { MIN_SESSION_PANEL_WIDTH } from '../constants/layout'
 
 const ACTIVITY_BAR_WIDTH = 48
 
@@ -65,6 +65,11 @@ function ActivityButton({ icon, label, active, onClick }: ActivityButtonProps) {
 }
 
 
+const clampSessionPanelWidth = (layout: Record<string, any>) => {
+  const raw = Math.floor(Number(layout?.sessionPanelWidth) || MIN_SESSION_PANEL_WIDTH)
+  return Math.max(MIN_SESSION_PANEL_WIDTH, raw)
+}
+
 export default function ActivityBar() {
   const currentView = useUiStore((s) => s.currentView)
   const setCurrentViewLocal = useUiStore((s) => (s as any).setCurrentViewLocal)
@@ -91,7 +96,7 @@ export default function ActivityBar() {
             const prev = (res && res.settings) || {}
             const prevLayout = prev.layout || {}
             const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
-            const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
+            const persistedSessionWidth: number = clampSessionPanelWidth(prevLayout)
 
             // Exit collapsed first and restore prior panel width locally
             setMainCollapsed(false)
@@ -125,7 +130,7 @@ export default function ActivityBar() {
             const prev = (res && res.settings) || {}
             const prevLayout = prev.layout || {}
             const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
-            const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
+            const persistedSessionWidth: number = clampSessionPanelWidth(prevLayout)
 
             setMainCollapsed(false)
             try { setSessionPanelWidth(persistedSessionWidth) } catch {}
@@ -154,7 +159,7 @@ export default function ActivityBar() {
             const prev = (res && res.settings) || {}
             const prevLayout = prev.layout || {}
             const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
-            const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
+            const persistedSessionWidth: number = clampSessionPanelWidth(prevLayout)
 
             setMainCollapsed(false)
             try { setSessionPanelWidth(persistedSessionWidth) } catch {}
@@ -183,7 +188,7 @@ export default function ActivityBar() {
             const prev = (res && res.settings) || {}
             const prevLayout = prev.layout || {}
             const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
-            const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
+            const persistedSessionWidth: number = clampSessionPanelWidth(prevLayout)
 
             setMainCollapsed(false)
             try { setSessionPanelWidth(persistedSessionWidth) } catch {}
@@ -212,7 +217,7 @@ export default function ActivityBar() {
             const prev = (res && res.settings) || {}
             const prevLayout = prev.layout || {}
             const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
-            const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
+            const persistedSessionWidth: number = clampSessionPanelWidth(prevLayout)
 
             setMainCollapsed(false)
             try { setSessionPanelWidth(persistedSessionWidth) } catch {}
@@ -243,7 +248,7 @@ export default function ActivityBar() {
           const prev = (res && res.settings) || {}
           const prevLayout = prev.layout || {}
           const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
-          const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
+          const persistedSessionWidth: number = clampSessionPanelWidth(prevLayout)
 
           setMainCollapsed(false)
           try { setSessionPanelWidth(persistedSessionWidth) } catch {}
@@ -277,7 +282,7 @@ export default function ActivityBar() {
               setMainCollapsed(next)
 
               const uiState: any = (useUiStore as any).getState?.() || {}
-              const sessionWidth: number = Number(uiState.sessionPanelWidth) || 300
+              const sessionWidth: number = Math.max(MIN_SESSION_PANEL_WIDTH, Number(uiState.sessionPanelWidth) || MIN_SESSION_PANEL_WIDTH)
               const currentContentWidth = Math.max(0, window.innerWidth || 0)
               const currentContentHeight = Math.max(0, window.innerHeight || 0)
 
@@ -298,7 +303,7 @@ export default function ActivityBar() {
                 try {
                   const client = getBackendClient()
                   if (client) {
-                    const targetWidth = Math.max(300, Math.floor(sessionWidth + ACTIVITY_BAR_WIDTH))
+                    const targetWidth = Math.max(MIN_SESSION_PANEL_WIDTH + ACTIVITY_BAR_WIDTH, Math.floor(sessionWidth + ACTIVITY_BAR_WIDTH))
                     await client.rpc('window.setContentSize', { width: targetWidth, height: currentContentHeight })
                   }
                 } catch {}
@@ -343,7 +348,7 @@ export default function ActivityBar() {
               const prev = (res && res.settings) || {}
               const prevLayout = prev.layout || {}
               const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
-              const persistedSessionWidth: number = Math.max(240, Math.floor(Number(prevLayout.sessionPanelWidth) || 300))
+              const persistedSessionWidth: number = clampSessionPanelWidth(prevLayout)
 
               setMainCollapsed(false)
               try { setSessionPanelWidth(persistedSessionWidth) } catch {}

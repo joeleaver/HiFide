@@ -1,6 +1,7 @@
 import { useRef, useLayoutEffect } from 'react'
 import '@xterm/xterm/css/xterm.css'
 import { useTerminalStore } from '../store/terminal'
+import { useTerminalTabs } from '../store/terminalTabs'
 import * as terminalInstances from '../services/terminalInstances'
 
 export default function TerminalView({ tabId }: { tabId: string }) {
@@ -10,6 +11,7 @@ export default function TerminalView({ tabId }: { tabId: string }) {
   const mountTerminal = useTerminalStore((s) => s.mountTerminal)
   const fitTerminal = useTerminalStore((s) => s.fitTerminal)
   const trackedSessionId = useTerminalStore((s) => s.sessionIds[tabId])
+  const tabMetadata = useTerminalTabs((s) => s.explorerTabs.find((tab) => tab.id === tabId))
 
   useLayoutEffect(() => {
     const container = containerRef.current
@@ -28,10 +30,10 @@ export default function TerminalView({ tabId }: { tabId: string }) {
       // Explorer terminals: ensure a PTY exists for this tab
       if (!trackedSessionId) {
         console.log('[TerminalView] Mounting explorer terminal:', { tabId })
-        void mountTerminal({ tabId, container, context: 'explorer' })
+        void mountTerminal({ tabId, container, context: 'explorer', cwd: tabMetadata?.cwd, shell: tabMetadata?.shell })
       } else if (!existing) {
         // Re-mount terminal instance for existing PTY session
-        void mountTerminal({ tabId, container, context: 'explorer' })
+        void mountTerminal({ tabId, container, context: 'explorer', cwd: tabMetadata?.cwd, shell: tabMetadata?.shell })
       }
 
       didMountOrBind = true
@@ -61,7 +63,7 @@ export default function TerminalView({ tabId }: { tabId: string }) {
       try { terminalInstances.unmountTerminalInstance(tabId) } catch {}
       try { ro.disconnect() } catch {}
     }
-  }, [tabId, trackedSessionId, mountTerminal, fitTerminal])
+  }, [tabId, trackedSessionId, mountTerminal, fitTerminal, tabMetadata?.cwd, tabMetadata?.shell])
 
   return (
     <div

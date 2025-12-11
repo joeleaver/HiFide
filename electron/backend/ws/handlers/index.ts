@@ -14,4 +14,5 @@ export { createMiscHandlers } from './misc-handlers.js'
 export { createSettingsHandlers } from './settings-handlers.js'
 export { createKanbanHandlers } from './kanban-handlers.js'
 export { createMcpHandlers } from './mcp-handlers.js'
+export { createLanguageHandlers } from './language-handlers.js'
 

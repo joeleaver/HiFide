@@ -6,9 +6,9 @@ import { useSessionUi } from '../store/sessionUi'
 import { useChatTimeline } from '../store/chatTimeline'
 import SessionPane from '../SessionPane'
 import { getBackendClient } from '../lib/backend/bootstrap'
+import { MIN_SESSION_PANEL_WIDTH } from '../constants/layout'
 
 const NAV_WIDTH = 48
-const MIN_SESSION_WIDTH = 240
 
 export default function GlobalSessionPanel() {
   const sessions = useSessionUi((s: any) => s.sessions)
@@ -42,7 +42,7 @@ export default function GlobalSessionPanel() {
   useEffect(() => {
     if (!mainCollapsed) return
     const recompute = () => {
-      const target = Math.max(MIN_SESSION_WIDTH, (window.innerWidth || 0) - NAV_WIDTH)
+      const target = Math.max(MIN_SESSION_PANEL_WIDTH, (window.innerWidth || 0) - NAV_WIDTH)
       const current = useUiStore.getState().sessionPanelWidth
       if (Math.abs(target - current) > 1) {
         setSessionPanelWidth(target)
@@ -60,8 +60,8 @@ export default function GlobalSessionPanel() {
 
     const handleMouseMove = (ev: MouseEvent) => {
       const newWidth = ev.clientX
-      const maxWidth = Math.max(MIN_SESSION_WIDTH, window.innerWidth - NAV_WIDTH - 200)
-      if (newWidth >= MIN_SESSION_WIDTH && newWidth <= maxWidth) {
+      const maxWidth = Math.max(MIN_SESSION_PANEL_WIDTH, window.innerWidth - NAV_WIDTH - 200)
+      if (newWidth >= MIN_SESSION_PANEL_WIDTH && newWidth <= maxWidth) {
         setSessionPanelWidth(newWidth)
       }
     }
@@ -82,7 +82,7 @@ export default function GlobalSessionPanel() {
       style={{
         width: sessionPanelWidth,
         // keep fixed width even when main is collapsed
-        minWidth: MIN_SESSION_WIDTH,
+        minWidth: MIN_SESSION_PANEL_WIDTH,
         display: 'flex',
         flexDirection: 'column',
         height: '100%',

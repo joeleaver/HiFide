@@ -5,6 +5,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import path from 'node:path'
 
 import { getConnectionWorkspaceId } from '../broadcast.js'
 import { createRequire } from 'node:module'
@@ -13,6 +14,29 @@ import { redactOutput } from '../../../utils/security'
 import type { RpcConnection } from '../types'
 
 const require = createRequire(import.meta.url)
+
+const resolveCwd = (workspaceRoot: string | null, requested?: string): string | null => {
+  const normalizedRoot = workspaceRoot ? path.resolve(workspaceRoot) : null
+  if (!requested || typeof requested !== 'string' || requested.trim().length === 0) {
+    return normalizedRoot
+  }
+
+  const trimmed = requested.trim()
+  const candidate = path.isAbsolute(trimmed)
+    ? path.resolve(trimmed)
+    : normalizedRoot
+      ? path.resolve(normalizedRoot, trimmed)
+      : path.resolve(trimmed)
+
+  if (normalizedRoot) {
+    const rel = path.relative(normalizedRoot, candidate)
+    if (rel && rel.startsWith('..')) {
+      return normalizedRoot
+    }
+  }
+
+  return candidate
+}
 
 // Minimal PTY interface
 type IPty = {
@@ -54,7 +78,7 @@ export function createTerminalHandlers(
     if (!opts.cwd && !boundCwd) {
       throw new Error('No workspace bound to connection and no cwd provided')
     }
-    const cwd = opts.cwd || boundCwd!
+    const cwd = resolveCwd(boundCwd || null, opts.cwd) || boundCwd || process.cwd()
 
     const ptyModule = loadPtyModule()
     if (!ptyModule) throw new Error('pty-unavailable')

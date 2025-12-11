@@ -1,0 +1,1 @@
+export const MIN_SESSION_PANEL_WIDTH = 480

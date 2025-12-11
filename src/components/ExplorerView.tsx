@@ -1,89 +1,55 @@
-import { Group, Stack, Text, ScrollArea, UnstyledButton, Center, Skeleton, Button, Box } from '@mantine/core'
-import { IconFile, IconFolder, IconChevronRight, IconChevronDown, IconRefresh, IconAlertTriangle } from '@tabler/icons-react'
+import { Group, Stack, Text, Center, Skeleton, Button, Box, ActionIcon, Tooltip, SegmentedControl, Alert } from '@mantine/core'
+import { IconRefresh, IconAlertTriangle, IconX } from '@tabler/icons-react'
 import Editor from '@monaco-editor/react'
-import { Profiler, useEffect, useState, useCallback } from 'react'
+import { MDXEditor } from '@mdxeditor/editor'
+import { Profiler, useEffect, useCallback, useMemo, useRef } from 'react'
+import type { ComponentProps, MouseEvent as ReactMouseEvent } from 'react'
+
+import ExplorerContextMenu from './explorer/ExplorerContextMenu'
+import ExplorerTree from './explorer/ExplorerTree'
+import OpenFilesPane from './explorer/OpenFilesPane'
 import TerminalPanel from './TerminalPanel'
-import { getBackendClient } from '../lib/backend/bootstrap'
-import { useTerminalStore } from '../store/terminal'
-import { useTerminalTabs } from '../store/terminalTabs'
-import { useExplorerHydration } from '../store/screenHydration'
+import WorkspaceSearchPane from './explorer/WorkspaceSearchPane'
+import { registerMonacoInstance, withMonaco } from '@/lib/editor/monacoInstance'
+import { registerLspProviders } from '@/lib/lsp/providers'
+import { markdownPlugins } from '@/lib/editor/markdownPlugins'
+import { useExplorerHydration } from '@/store/screenHydration'
+import { useEditorStore, type EditorViewMode, type EditorTab, type EditorSelectionRange } from '@/store/editor'
+import { useExplorerStore } from '@/store/explorer'
+import { reloadExplorerScreen } from '@/store/explorerScreenController'
+import { useLanguageSupportStore } from '@/store/languageSupport'
 
-interface FileTreeItemProps {
-  name: string
-  type: 'file' | 'folder'
-  level: number
-  path?: string
-  isOpen?: boolean
-  onToggle?: () => void
-  onFileClick?: (path: string, name: string) => void
+import './ExplorerView.css'
+
+type MonacoBeforeMount = Parameters<NonNullable<ComponentProps<typeof Editor>['beforeMount']>>[0]
+type MonacoOnMountEditor = Parameters<NonNullable<ComponentProps<typeof Editor>['onMount']>>[0]
+
+function resolveTabLanguageId(tab: EditorTab | null): string | null {
+  if (!tab) return null
+  const lowerPath = tab.path?.toLowerCase?.() ?? ''
+  if (lowerPath.endsWith('.tsx')) return 'typescriptreact'
+  if (lowerPath.endsWith('.jsx')) return 'javascriptreact'
+  if (lowerPath.endsWith('.py')) return 'python'
+  if (lowerPath.endsWith('.yaml') || lowerPath.endsWith('.yml')) return 'yaml'
+  return (tab.language ?? '').toLowerCase() || null
 }
 
-function FileTreeItem({ name, type, level, path, isOpen, onToggle, onFileClick }: FileTreeItemProps) {
-  const handleClick = () => {
-    if (type === 'folder') {
-      onToggle?.()
-    } else if (type === 'file' && path && onFileClick) {
-      onFileClick(path, name)
-    }
-  }
-
-  return (
-    <UnstyledButton
-      onClick={handleClick}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '4px 8px',
-        paddingLeft: 8 + level * 16,
-        width: '100%',
-        color: '#cccccc',
-        cursor: 'pointer',
-        fontSize: '13px',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.backgroundColor = '#2a2d2e'
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.backgroundColor = 'transparent'
-      }}
-    >
-      {type === 'folder' && (
-        <>
-          {isOpen ? (
-            <IconChevronDown size={14} stroke={2} />
-          ) : (
-            <IconChevronRight size={14} stroke={2} />
-          )}
-          <IconFolder size={16} stroke={1.5} />
-        </>
-      )}
-      {type === 'file' && (
-        <>
-          <div style={{ width: 14 }} />
-          <IconFile size={16} stroke={1.5} />
-        </>
-      )}
-      <Text size="sm">{name}</Text>
-    </UnstyledButton>
-  )
+function toMonacoLanguageId(languageId: string | null | undefined): string {
+  const normalized = languageId?.toLowerCase?.() ?? ''
+  if (normalized === 'typescriptreact') return 'typescript'
+  if (normalized === 'javascriptreact') return 'javascript'
+  return normalized || 'plaintext'
 }
 
-
-/**
- * Skeleton for Explorer while loading
- */
 function ExplorerSkeleton() {
   return (
     <Group gap={0} style={{ flex: 1, height: '100%', overflow: 'hidden' }} align="stretch">
-      {/* Sidebar skeleton */}
       <Box style={{ width: 260, backgroundColor: '#252526', borderRight: '1px solid #3e3e42', padding: 8 }}>
         <Skeleton width="100%" height={20} radius="sm" mb={12} />
         {Array.from({ length: 12 }).map((_, i) => (
           <Skeleton key={i} width={`${70 + Math.random() * 30}%`} height={20} radius="sm" mb={4} ml={i % 3 * 16} />
         ))}
       </Box>
-      {/* Editor skeleton */}
       <Box style={{ flex: 1, backgroundColor: '#1e1e1e', display: 'flex', flexDirection: 'column', gap: 8, padding: 16 }}>
         <Skeleton width={200} height={24} radius="sm" />
         <Skeleton width="100%" height="100%" radius="sm" />
@@ -93,132 +59,219 @@ function ExplorerSkeleton() {
 }
 
 export default function ExplorerView() {
-  // Screen hydration state
   const screenPhase = useExplorerHydration((s) => s.phase)
   const screenError = useExplorerHydration((s) => s.error)
-  const startLoading = useExplorerHydration((s) => s.startLoading)
-  const setReady = useExplorerHydration((s) => s.setReady)
-  const setScreenError = useExplorerHydration((s) => s.setError)
 
-  // Local explorer state (hydrated via WS RPC)
-  const [openedFile, setOpenedFile] = useState<any>(null)
-  const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(null)
-  const [openFolders, setOpenFolders] = useState<string[]>([])
-  const [childrenByDir, setChildrenByDir] = useState<Record<string, any[]>>({})
+  const sidebarWidth = useExplorerStore((s) => s.sidebarWidth)
+  const setSidebarWidth = useExplorerStore((s) => s.setSidebarWidth)
+  const openFilesPaneHeight = useExplorerStore((s) => s.openFilesPaneHeight)
+  const setOpenFilesPaneHeight = useExplorerStore((s) => s.setOpenFilesPaneHeight)
+  const sidebarMode = useExplorerStore((s) => s.sidebarMode)
+  const setSidebarMode = useExplorerStore((s) => s.setSidebarMode)
+  const explorerError = useExplorerStore((s) => s.lastError)
 
-  // Get terminal tabs from store (not local state!)
-  const explorerTerminalTabs = useTerminalTabs((s) => s.explorerTabs)
-  const explorerActiveTerminal = useTerminalTabs((s) => s.explorerActive)
-  const hydrateTabs = useTerminalTabs((s) => s.hydrateTabs)
+  const editorTabs = useEditorStore((s) => s.tabs)
+  const activeTabId = useEditorStore((s) => s.activeTabId)
+  const setActiveTab = useEditorStore((s) => s.setActiveTab)
+  const closeTab = useEditorStore((s) => s.closeTab)
+  const updateTabContent = useEditorStore((s) => s.updateContent)
+  const toggleMarkdownView = useEditorStore((s) => s.toggleMarkdownView)
+  const editorError = useEditorStore((s) => s.lastError)
 
-  // Load explorer data
-  const loadExplorer = useCallback(async () => {
-    try {
-      const client = getBackendClient()
-      if (!client) throw new Error('No backend connection')
+  const activeTab = editorTabs.find((tab) => tab.id === activeTabId) || null
+  const activeLanguageId = useMemo(() => resolveTabLanguageId(activeTab), [activeTab])
+  const activeLanguageStatus = useLanguageSupportStore(
+    useCallback((state) => (activeLanguageId ? state.languages[activeLanguageId] : undefined), [activeLanguageId])
+  )
+  const autoInstallPreference = useLanguageSupportStore((state) => state.autoInstall)
+  const installingLanguage = useLanguageSupportStore((state) => state.installingLanguage)
+  const requestProvision = useLanguageSupportStore((state) => state.requestProvision)
+  const enableAutoInstall = useLanguageSupportStore((state) => state.enableAutoInstall)
+  const dismissLanguage = useLanguageSupportStore((state) => state.dismissLanguage)
+  const dismissedActiveLanguage = useLanguageSupportStore(
+    useCallback((state) => (activeLanguageId ? !!state.dismissed[activeLanguageId] : false), [activeLanguageId])
+  )
 
-      // Load explorer state and tabs in parallel
-      const [explorerRes] = await Promise.all([
-        client.rpc('explorer.getState', {}),
-        hydrateTabs(),
-      ])
+  const editorRef = useRef<MonacoOnMountEditor | null>(null)
+  const monacoLanguageId = useMemo(
+    () => toMonacoLanguageId(activeLanguageId ?? activeTab?.language),
+    [activeLanguageId, activeTab?.language]
+  )
 
-      if ((explorerRes as any)?.ok) {
-        const res = explorerRes as any
-        setWorkspaceRoot(res.workspaceRoot || null)
-        setOpenFolders(Array.isArray(res.openFolders) ? res.openFolders : [])
-        setChildrenByDir(res.childrenByDir || {})
-        setOpenedFile(res.openedFile || null)
-        setReady()
-      } else {
-        throw new Error('Failed to load explorer state')
+  const showInstallPrompt = Boolean(
+    activeLanguageId &&
+      activeLanguageStatus &&
+      activeLanguageStatus.status === 'disabled' &&
+      activeLanguageStatus.autoInstallable &&
+      !autoInstallPreference &&
+      !dismissedActiveLanguage
+  )
+
+  const handleDismissLanguage = useCallback(
+    (languageId: string | null) => {
+      if (!languageId) return
+      dismissLanguage(languageId)
+    },
+    [dismissLanguage]
+  )
+
+  const handleInstallLanguage = useCallback(
+    async (languageId: string | null) => {
+      if (!languageId) return
+      await requestProvision(languageId, 'user')
+    },
+    [requestProvision]
+  )
+
+  const handleAlwaysInstall = useCallback(
+    async (languageId: string | null) => {
+      if (!languageId) return
+      await enableAutoInstall(languageId)
+    },
+    [enableAutoInstall]
+  )
+
+  const isInstallingActiveLanguage = Boolean(
+    activeLanguageId &&
+      (installingLanguage === activeLanguageId || activeLanguageStatus?.status === 'installing')
+  )
+
+  const ensureMonacoLanguage = useCallback(
+    (monacoInstance: MonacoBeforeMount, targetEditor?: MonacoOnMountEditor | null) => {
+      if (!activeTab) return
+      let model = targetEditor?.getModel?.() ?? null
+      if (!model) {
+        try {
+          const uri = monacoInstance.Uri.parse(activeTab.uri)
+          model = monacoInstance.editor.getModel(uri)
+        } catch {
+          model = null
+        }
       }
-    } catch (e) {
-      setScreenError(e instanceof Error ? e.message : 'Failed to load explorer')
-    }
-  }, [hydrateTabs, setReady, setScreenError])
-
-  // Auto-load on mount
-  // Note: We need to load every time the component mounts because local useState
-  // resets on unmount, but the hydration store persists. So if phase is 'ready'
-  // but workspaceRoot is null, we need to reload.
-  useEffect(() => {
-    if (screenPhase === 'idle') {
-      startLoading()
-      loadExplorer()
-    } else if (screenPhase === 'ready' && workspaceRoot === null) {
-      // Component remounted - local state was lost, reload silently
-      loadExplorer()
-    }
-  }, [screenPhase, startLoading, loadExplorer, workspaceRoot])
-
-  // Fit active explorer terminal when it changes and panel is open
-  const fitTerminal = useTerminalStore((s) => s.fitTerminal)
-  const explorerOpen = useTerminalStore((s) => s.explorerTerminalPanelOpen)
-  useEffect(() => {
-    if (!explorerOpen) return
-    if (!explorerActiveTerminal) return
-    const id = requestAnimationFrame(() => fitTerminal(explorerActiveTerminal))
-    return () => cancelAnimationFrame(id)
-  }, [explorerActiveTerminal, explorerOpen, fitTerminal])
-  // When explorer tabs list changes, ensure each tab is fitted if panel is open
-  useEffect(() => {
-    if (!explorerOpen) return
-    if (!explorerTerminalTabs || explorerTerminalTabs.length === 0) return
-    const raf = requestAnimationFrame(() => explorerTerminalTabs.forEach((tid) => fitTerminal(tid)))
-    return () => cancelAnimationFrame(raf)
-  }, [explorerTerminalTabs, explorerOpen, fitTerminal])
-
-  // Render a directory's entries recursively
-  const renderDir = (dirPath: string, level: number) => {
-    const entries = childrenByDir[dirPath] || []
-    return entries.map((entry) => {
-      if (entry.isDirectory) {
-        const isOpen = openFolders.includes(entry.path)
-        return (
-          <div key={entry.path}>
-            <FileTreeItem
-              name={entry.name}
-              type="folder"
-              level={level}
-              isOpen={isOpen}
-              onToggle={async () => {
-                try {
-                  const res: any = await getBackendClient()?.rpc('explorer.toggleFolder', { path: entry.path })
-                  if (res?.ok) {
-                    setOpenFolders(Array.isArray(res.openFolders) ? res.openFolders : [])
-                    setChildrenByDir(res.childrenByDir || {})
-                  }
-                } catch {}
-              }}
-            />
-            {isOpen && <>{renderDir(entry.path, level + 1)}</>}
-          </div>
-        )
+      if (!model) return
+      const currentLanguage = model.getLanguageId()
+      if (currentLanguage !== monacoLanguageId) {
+        monacoInstance.editor.setModelLanguage(model, monacoLanguageId)
       }
-      return (
-        <FileTreeItem
-          key={entry.path}
-          name={entry.name}
-          type="file"
-          level={level}
-          path={entry.path}
-          onFileClick={handleFileClick}
-        />
-      )
+      try {
+        const totalLines = model.getLineCount()
+        const forceTokenize = (model as any).forceTokenization || (model as any).tokenization?.forceTokenization
+        if (typeof forceTokenize === 'function') {
+          forceTokenize.call(model, totalLines)
+        }
+      } catch {}
+    },
+    [activeTab, monacoLanguageId]
+  )
+
+  const handleBeforeMount = useCallback((monacoInstance: MonacoBeforeMount) => {
+    registerMonacoInstance(monacoInstance)
+    registerLspProviders(monacoInstance)
+  }, [])
+
+  const handleEditorMount = useCallback(
+    (editorInstance: MonacoOnMountEditor, monacoInstance: MonacoBeforeMount) => {
+      editorRef.current = editorInstance
+      requestAnimationFrame(() => {
+        editorInstance.layout()
+        ensureMonacoLanguage(monacoInstance, editorInstance)
+      })
+    },
+    [ensureMonacoLanguage]
+  )
+
+  const pendingReveal = useEditorStore(
+    useCallback(
+      (state) => (state.activeTabId ? state.pendingReveals[state.activeTabId] ?? null : null),
+      []
+    )
+  )
+  const consumePendingReveal = useEditorStore((s) => s.consumePendingReveal)
+
+  useEffect(() => {
+    if (!activeTab) return
+    withMonaco((monacoInstance) => {
+      ensureMonacoLanguage(monacoInstance, editorRef.current)
+      requestAnimationFrame(() => {
+        editorRef.current?.layout()
+      })
     })
-  }
+  }, [activeTab, monacoLanguageId, ensureMonacoLanguage])
+
+  useEffect(() => {
+    if (!pendingReveal || !activeTabId) return
+    const editorInstance = editorRef.current
+    if (!editorInstance) return
+    editorInstance.setSelection(pendingReveal as EditorSelectionRange)
+    editorInstance.revealRangeInCenter(pendingReveal as EditorSelectionRange)
+    consumePendingReveal(activeTabId)
+  }, [pendingReveal, consumePendingReveal, activeTabId])
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      editorRef.current?.layout()
+    })
+  }, [sidebarWidth, openFilesPaneHeight])
+
+  useEffect(() => () => {
+    editorRef.current = null
+  }, [])
+
+  const handleSidebarResizeStart = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const startX = event.clientX
+      const startWidth = sidebarWidth
+
+      const handleMove = (moveEvent: MouseEvent) => {
+        const delta = moveEvent.clientX - startX
+        setSidebarWidth(startWidth + delta)
+      }
+
+      const cleanup = () => {
+        window.removeEventListener('mousemove', handleMove)
+        window.removeEventListener('mouseup', cleanup)
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+      }
+
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+      window.addEventListener('mousemove', handleMove)
+      window.addEventListener('mouseup', cleanup)
+    },
+    [sidebarWidth, setSidebarWidth]
+  )
 
 
+  const handleOpenFilesPaneResizeStart = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const startY = event.clientY
+      const startHeight = openFilesPaneHeight
 
-  const handleFileClick = async (filePath: string, _fileName: string) => {
-    try {
-      const res: any = await getBackendClient()?.rpc('editor.openFile', { path: filePath })
-      if (res?.ok && res.openedFile) setOpenedFile(res.openedFile)
-    } catch {}
-  }
+      const handleMove = (moveEvent: MouseEvent) => {
+        const delta = moveEvent.clientY - startY
+        setOpenFilesPaneHeight(startHeight + delta)
+      }
 
-  // Render based on screen phase
+      const cleanup = () => {
+        window.removeEventListener('mousemove', handleMove)
+        window.removeEventListener('mouseup', cleanup)
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+      }
+
+      document.body.style.cursor = 'row-resize'
+      document.body.style.userSelect = 'none'
+      window.addEventListener('mousemove', handleMove)
+      window.addEventListener('mouseup', cleanup)
+    },
+    [openFilesPaneHeight, setOpenFilesPaneHeight]
+  )
+
   if (screenPhase === 'idle' || screenPhase === 'loading') {
     return <ExplorerSkeleton />
   }
@@ -229,15 +282,14 @@ export default function ExplorerView() {
         <Stack align="center" gap="md">
           <IconAlertTriangle size={48} color="var(--mantine-color-red-6)" />
           <Text size="sm" c="dimmed" ta="center">
-            {screenError ?? 'Failed to load explorer'}
+            {screenError ?? explorerError ?? 'Failed to load explorer'}
           </Text>
           <Button
             variant="light"
             size="sm"
             leftSection={<IconRefresh size={16} />}
             onClick={() => {
-              startLoading()
-              loadExplorer()
+              void reloadExplorerScreen()
             }}
           >
             Retry
@@ -248,146 +300,270 @@ export default function ExplorerView() {
   }
 
   return (
-    <Profiler
-      id="ExplorerView"
-      onRender={(_id, _phase, actualDuration) => {
-        if (actualDuration > 16) {
-        }
-      }}
-    >
-      <Group
-        gap={0}
-        style={{
-          flex: 1,
-          height: '100%',
-          overflow: 'hidden',
-        }}
-        align="stretch"
-      >
-      {/* File Tree Sidebar */}
-      <div
-        style={{
-          width: 260,
-          height: '100%',
-          backgroundColor: '#252526',
-          borderRight: '1px solid #3e3e42',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-      >
-        {/* Sidebar Header */}
-        <div
-          style={{
-            padding: '8px 12px',
-            borderBottom: '1px solid #3e3e42',
-            backgroundColor: '#2d2d30',
-          }}
+    <Profiler id="ExplorerView" onRender={() => {}}>
+      <>
+        <Group
+          gap={0}
+          style={{ flex: 1, height: '100%', overflow: 'hidden' }}
+          align="stretch"
         >
-          <Text size="xs" fw={600} tt="uppercase" c="dimmed">
-            Explorer
-          </Text>
-        </div>
-
-        {/* File Tree */}
-        <ScrollArea style={{ flex: 1 }}>
-          <Stack gap={0} p="xs">
-            {workspaceRoot ? (
-              <>
-                <FileTreeItem
-                  name={(workspaceRoot.split(/[\/\\]/).pop() || workspaceRoot)}
-                  type="folder"
-                  level={0}
-                  isOpen={openFolders.includes(workspaceRoot)}
-                  onToggle={async () => {
-                    const root = workspaceRoot
-                    if (!root) return
-                    try {
-                      const res: any = await getBackendClient()?.rpc('explorer.toggleFolder', { path: root })
-                      if (res?.ok) {
-                        setOpenFolders(Array.isArray(res.openFolders) ? res.openFolders : [])
-                        setChildrenByDir(res.childrenByDir || {})
-                      }
-                    } catch {}
-                  }}
-                />
-                {openFolders.includes(workspaceRoot) && (
-                  <>
-                    {renderDir(workspaceRoot, 1)}
-                  </>
-                )}
-              </>
-            ) : (
-              <Text size="sm" c="dimmed" p="md">
-                No folder selected
-              </Text>
-            )}
-          </Stack>
-        </ScrollArea>
-      </div>
-
-      {/* Editor Area */}
-      <div
-        style={{
-          flex: 1,
-          height: '100%',
-          backgroundColor: '#1e1e1e',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-      >
-        {/* Editor Tab Bar */}
-        {openedFile && (
           <div
             style={{
-              height: 35,
-              backgroundColor: '#2d2d30',
-              borderBottom: '1px solid #3e3e42',
+              width: sidebarWidth,
+              minWidth: 180,
+              maxWidth: 520,
+              height: '100%',
+              backgroundColor: '#252526',
+              borderRight: '1px solid #3e3e42',
               display: 'flex',
-              alignItems: 'center',
-              padding: '0 8px',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            <div className="explorer-sidebar-header">
+              <SegmentedControl
+                size="xs"
+                value={sidebarMode}
+                onChange={(value) => setSidebarMode(value as 'workspace' | 'search')}
+                data={[
+                  { label: 'Workspace', value: 'workspace' },
+                  { label: 'Search', value: 'search' },
+                ]}
+                styles={{ root: { width: '100%' } }}
+              />
+            </div>
+            <div className="explorer-sidebar-body">
+              {sidebarMode === 'workspace' ? (
+                <>
+                  <div className="open-files-pane" style={{ flexShrink: 0, height: openFilesPaneHeight }}>
+                    <div className="open-files-header">
+                      <Text size="xs" fw={600} tt="uppercase" c="dimmed">
+                        Open Files
+                      </Text>
+                      <Text size="xs" c="dimmed">
+                        {editorTabs.length}
+                      </Text>
+                    </div>
+                    <OpenFilesPane />
+                  </div>
+                  <div
+                    role="separator"
+                    aria-orientation="horizontal"
+                    className="open-files-resizer"
+                    onMouseDown={handleOpenFilesPaneResizeStart}
+                  />
+                  <div style={{ flex: 1, minHeight: 0 }}>
+                    <ExplorerTree />
+                  </div>
+                </>
+              ) : (
+                <WorkspaceSearchPane />
+              )}
+            </div>
+          </div>
+
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            onMouseDown={handleSidebarResizeStart}
+            style={{
+              width: 4,
+              cursor: 'col-resize',
+              backgroundColor: '#2a2a2a',
+              borderRight: '1px solid #1f1f1f',
+              borderLeft: '1px solid #1f1f1f',
+              flexShrink: 0,
+            }}
+          />
+
+          <div
+            style={{
+              flex: 1,
+              height: '100%',
+              backgroundColor: '#1e1e1e',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
             }}
           >
             <div
               style={{
-                padding: '6px 12px',
-                backgroundColor: '#1e1e1e',
-                borderRight: '1px solid #3e3e42',
-                fontSize: '13px',
-                color: '#ffffff',
+                minHeight: 38,
+                backgroundColor: '#2d2d30',
+                borderBottom: '1px solid #3e3e42',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                paddingRight: 8,
               }}
             >
-              {openedFile.path.split(/[/\\]/).pop()}
+              {editorTabs.length > 0 ? (
+                <div style={{ display: 'flex', gap: 6, padding: '0 8px', overflowX: 'auto', flex: 1 }}>
+                  {editorTabs.map((tab) => {
+                    const isActive = tab.id === activeTabId
+                    return (
+                      <div
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '6px 10px',
+                          backgroundColor: isActive ? '#1e1e1e' : 'transparent',
+                          borderRadius: 4,
+                          border: isActive ? '1px solid #3e3e42' : '1px solid transparent',
+                          cursor: 'pointer',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Tooltip label={tab.path} position="bottom-start" withinPortal>
+                          <Text size="sm" c="#fff" style={{ whiteSpace: 'nowrap', fontStyle: tab.isPreview ? 'italic' : 'normal' }}>
+                            {tab.name}
+                          </Text>
+                        </Tooltip>
+                        {tab.isDirty && <span style={{ color: '#f7c948', fontSize: 12 }}>•</span>}
+                        <ActionIcon
+                          size="sm"
+                          variant="subtle"
+                          color="gray"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            closeTab(tab.id)
+                          }}
+                        >
+                          <IconX size={12} />
+                        </ActionIcon>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <Text size="sm" c="dimmed" px="md" style={{ flex: 1 }}>
+                  Open a file to start editing
+                </Text>
+              )}
+
+              {activeTab?.isMarkdown && (
+                <SegmentedControl
+                  size="xs"
+                  value={activeTab.viewMode}
+                  onChange={(value) => activeTab && toggleMarkdownView(activeTab.id, value as EditorViewMode)}
+                  data={[
+                    { label: 'Markdown', value: 'rich' },
+                    { label: 'Source', value: 'source' },
+                  ]}
+                  styles={{ root: { flexShrink: 0 } }}
+                />
+              )}
+            </div>
+
+            {editorError && (
+              <Alert color="red" variant="light" radius={0} py={8} px={12} styles={{ message: { color: '#fff' } }}>
+                {editorError}
+              </Alert>
+            )}
+
+            {showInstallPrompt && activeLanguageStatus && activeLanguageId && (
+              <Alert color="blue" variant="light" radius={0} py={8} px={12} styles={{ message: { color: '#e0f2ff' } }}>
+                <Group justify="space-between" align="center">
+                  <div>
+                    <Text size="sm" fw={600} c="#fff">
+                      Enable {activeLanguageStatus.displayName} language tools
+                    </Text>
+                    <Text size="xs" c="var(--mantine-color-blue-1)">
+                      We can download {activeLanguageStatus.masonPackage ?? 'its language server'} automatically so completions and diagnostics work in this tab.
+                    </Text>
+                  </div>
+                  <Group gap="xs">
+                    <Button size="xs" loading={isInstallingActiveLanguage} onClick={() => handleInstallLanguage(activeLanguageId)}>
+                      Install support
+                    </Button>
+                    <Button size="xs" variant="light" color="gray" onClick={() => handleAlwaysInstall(activeLanguageId)}>
+                      Always auto-install
+                    </Button>
+                    <Button size="xs" variant="subtle" color="gray" onClick={() => handleDismissLanguage(activeLanguageId)}>
+                      Not now
+                    </Button>
+                  </Group>
+                </Group>
+              </Alert>
+            )}
+
+            {activeLanguageStatus && activeLanguageStatus.status === 'installing' && (
+              <Alert color="blue" variant="light" radius={0} py={6} px={12} styles={{ message: { color: '#e0f2ff' } }}>
+                <Text size="xs" c="#e0f2ff">
+                  Installing {activeLanguageStatus.displayName} language tools…
+                </Text>
+              </Alert>
+            )}
+
+            {activeLanguageStatus && activeLanguageStatus.status === 'error' && (
+              <Alert color="red" variant="light" radius={0} py={6} px={12} styles={{ message: { color: '#fff' } }}>
+                <Text size="sm" fw={600} c="#fff">
+                  {activeLanguageStatus.displayName} language tools failed to start
+                </Text>
+                {activeLanguageStatus.lastError && (
+                  <Text size="xs" c="#fee2e2">
+                    {activeLanguageStatus.lastError}
+                  </Text>
+                )}
+              </Alert>
+            )}
+
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+              <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+                {activeTab ? (
+                  activeTab.isMarkdown && activeTab.viewMode === 'rich' ? (
+                    <div data-theme="dark" style={{ height: '100%', overflow: 'auto' }}>
+                      <MDXEditor
+                        key={`${activeTab.id}:${activeTab.viewMode}:${activeTab.lastLoadedAt}`}
+                        markdown={activeTab.content}
+                        onChange={(value) => updateTabContent(activeTab.id, value)}
+                        contentEditableClassName="markdown-body kb-mdx-content"
+                        className="kb-mdx-root"
+                        plugins={markdownPlugins}
+                      />
+                    </div>
+                  ) : (
+                    <Editor
+                      height="100%"
+                      language={monacoLanguageId}
+                      path={activeTab.uri}
+                      value={activeTab.content}
+                      theme="vs-dark"
+                      beforeMount={handleBeforeMount}
+                      onMount={handleEditorMount}
+                      onChange={(value) => updateTabContent(activeTab.id, value ?? '')}
+                      options={{
+                        minimap: { enabled: true },
+                        fontSize: 14,
+                        lineNumbers: 'on',
+                        scrollBeyondLastLine: false,
+                        automaticLayout: true,
+                        smoothScrolling: true,
+                        tabSize: 2,
+                      }}
+                    />
+                  )
+                ) : (
+                  <Center h="100%">
+                    <Stack align="center" gap="xs">
+                      <Text size="sm" c="dimmed" ta="center">
+                        Select a file from the explorer to start editing.
+                      </Text>
+                    </Stack>
+                  </Center>
+                )}
+              </div>
+              <div style={{ borderTop: '1px solid #3e3e42', flexShrink: 0 }}>
+                <TerminalPanel />
+              </div>
             </div>
           </div>
-        )}
-
-        {/* Monaco Editor + Terminal Panel (explorer context) */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
-          <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
-            <Editor
-              height="100%"
-              language={openedFile?.language || 'typescript'}
-              value={openedFile?.content || '// HiFide: Select a file to edit'}
-              theme="vs-dark"
-              options={{
-                minimap: { enabled: true },
-                fontSize: 14,
-                lineNumbers: 'on',
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                readOnly: false,
-              }}
-            />
-          </div>
-          <div style={{ borderTop: '1px solid #3e3e42', flexShrink: 0 }}>
-            <TerminalPanel />
-          </div>
-        </div>
-      </div>
-    </Group>
+        </Group>
+        <ExplorerContextMenu />
+      </>
     </Profiler>
   )
 }
-

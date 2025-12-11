@@ -9,7 +9,17 @@
 // ============================================================================
 
 
-export type ViewType = 'welcome' | 'flow' | 'explorer' | 'sourceControl' | 'terminal' | 'settings' | 'knowledgeBase' | 'kanban' | 'mcp'
+export type ViewType =
+  | 'welcome'
+  | 'flow'
+  | 'flowEditor'
+  | 'explorer'
+  | 'sourceControl'
+  | 'terminal'
+  | 'settings'
+  | 'knowledgeBase'
+  | 'kanban'
+  | 'mcp'
 // ============================================================================
 
 // ============================================================================
@@ -446,12 +456,32 @@ export type ExplorerEntry = {
   name: string
   isDirectory: boolean
   path: string
+  relativePath?: string
+  size?: number
+  mtimeMs?: number
 }
 
 export type OpenedFile = {
   path: string
+  relativePath: string
   content: string
   language: string
+  encoding: string
+  size: number
+  mtimeMs: number
+}
+
+export type ExplorerFsEventKind = 'file-added' | 'file-updated' | 'file-removed' | 'dir-added' | 'dir-removed'
+
+export type ExplorerFsEvent = {
+  workspaceRoot: string
+  path: string
+  relativePath: string
+  kind: ExplorerFsEventKind
+  isDirectory: boolean
+  size?: number
+  mtimeMs?: number
+  updatedAt: number
 }
 
 // ============================================================================

@@ -2,10 +2,19 @@ import { useEffect } from 'react'
 import { notifications } from '@mantine/notifications'
 import { getBackendClient } from '../lib/backend/bootstrap'
 import { useUiStore } from '../store/ui'
+import { useEditorStore } from '../store/editor'
+import { useWorkspaceSearchStore } from '../store/workspaceSearch'
 
 let handlersRegistered = false
 
 const menuHandlers = {
+    newFile: async () => {
+        try {
+            useEditorStore.getState().createUntitledTab()
+        } catch (error: any) {
+            notifications.show({ color: 'red', title: 'New file failed', message: error?.message || 'Unable to create file' })
+        }
+    },
     openSettings: async () => {
         try { await getBackendClient()?.rpc('view.set', { view: 'settings' }) } catch { }
         try { useUiStore.setState({ currentView: 'settings' }) } catch { }
@@ -27,6 +36,32 @@ const menuHandlers = {
             await getBackendClient()?.rpc('ui.toggleWindowState', { key: 'explorerTerminalPanelOpen' })
         } catch (e) {
             // Silently ignore menu toggle errors; user can retry from UI
+        }
+    },
+    openFile: async () => {
+        const client = getBackendClient()
+        if (!client) return
+        try {
+            await client.whenReady(7000)
+        } catch { }
+        try {
+            const result: any = await client.rpc('workspace.openFileDialog', {})
+            const paths: string[] = Array.isArray(result?.paths)
+                ? result.paths
+                : result?.path
+                    ? [result.path]
+                    : []
+            if (result?.ok && paths.length > 0) {
+                for (const filePath of paths) {
+                    try {
+                        await useEditorStore.getState().openFile(filePath, { mode: 'pinned' })
+                    } catch (error: any) {
+                        notifications.show({ color: 'red', title: 'Open file failed', message: error?.message || 'Unable to open file' })
+                    }
+                }
+            }
+        } catch (error: any) {
+            notifications.show({ color: 'red', title: 'Open file failed', message: error?.message || 'Unable to open file' })
         }
     },
     openFolder: async () => {
@@ -62,6 +97,26 @@ const menuHandlers = {
         try { await getBackendClient()?.rpc('workspace.clearRecentFolders', {}) } catch (e) {
             // Silently ignore clearRecentFolders failures
         }
+    },
+    saveFile: async () => {
+        try {
+            await useEditorStore.getState().saveActiveTab()
+        } catch (error: any) {
+            notifications.show({ color: 'red', title: 'Save failed', message: error?.message || 'Unable to save file' })
+        }
+    },
+    saveFileAs: async () => {
+        try {
+            await useEditorStore.getState().saveActiveTabAs()
+        } catch (error: any) {
+            notifications.show({ color: 'red', title: 'Save As failed', message: error?.message || 'Unable to save file' })
+        }
+    },
+    findInFiles: () => {
+        useWorkspaceSearchStore.getState().requestFocus('query')
+    },
+    replaceInFiles: () => {
+        useWorkspaceSearchStore.getState().requestFocus('replace')
     },
     exportFlow: async () => {
         try {
@@ -111,9 +166,15 @@ export function useMenuHandlers() {
         window.menu.on('open-flow-editor', menuHandlers.openFlowEditor)
         window.menu.on('open-kanban', menuHandlers.openKanban)
         window.menu.on('toggle-terminal-panel', menuHandlers.toggleTerminalPanel)
+        window.menu.on('new-file', menuHandlers.newFile)
+        window.menu.on('open-file', menuHandlers.openFile)
         window.menu.on('open-folder', menuHandlers.openFolder)
         window.menu.on('open-recent-folder', menuHandlers.openRecentFolder)
         window.menu.on('clear-recent-folders', menuHandlers.clearRecentFolders)
+        window.menu.on('save-file', menuHandlers.saveFile)
+        window.menu.on('save-file-as', menuHandlers.saveFileAs)
+        window.menu.on('find-in-files', menuHandlers.findInFiles)
+        window.menu.on('replace-in-files', menuHandlers.replaceInFiles)
         window.menu.on('export-flow', menuHandlers.exportFlow)
         window.menu.on('import-flow', menuHandlers.importFlow)
 
@@ -128,9 +189,15 @@ export function useMenuHandlers() {
             window.menu.off('open-flow-editor', menuHandlers.openFlowEditor)
             window.menu.off('open-kanban', menuHandlers.openKanban)
             window.menu.off('toggle-terminal-panel', menuHandlers.toggleTerminalPanel)
+            window.menu.off('new-file', menuHandlers.newFile)
+            window.menu.off('open-file', menuHandlers.openFile)
             window.menu.off('open-folder', menuHandlers.openFolder)
             window.menu.off('open-recent-folder', menuHandlers.openRecentFolder)
             window.menu.off('clear-recent-folders', menuHandlers.clearRecentFolders)
+            window.menu.off('save-file', menuHandlers.saveFile)
+            window.menu.off('save-file-as', menuHandlers.saveFileAs)
+            window.menu.off('find-in-files', menuHandlers.findInFiles)
+            window.menu.off('replace-in-files', menuHandlers.replaceInFiles)
             window.menu.off('export-flow', menuHandlers.exportFlow)
             window.menu.off('import-flow', menuHandlers.importFlow)
 

@@ -4,6 +4,7 @@ import path from 'node:path'
 import ignore from 'ignore'
 import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot } from '../utils'
 import { discoverWorkspaceFiles, DEFAULT_EXCLUDE_PATTERNS } from '../../utils/fileDiscovery'
+import { preferUnpackedRipgrepPath } from '../../utils/ripgrep.js'
 
 function escapeRegExp(str: string) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -83,6 +84,7 @@ async function tryRipgrepSearch({ root, pattern, includeGlobs, excludeGlobs, opt
     const mod: any = await import('vscode-ripgrep').catch(() => null)
     const rgPath: string | undefined = mod?.rgPath || mod?.default?.rgPath
     if (!rgPath) return null
+    const resolvedRgPath = preferUnpackedRipgrepPath(rgPath)
     const { spawn } = await import('node:child_process')
 
     const beforeN = Math.max(0, options.before ?? (options.context ?? 0))
@@ -118,7 +120,7 @@ async function tryRipgrepSearch({ root, pattern, includeGlobs, excludeGlobs, opt
     // Search root (current dir)
     args.push('--', '.')
 
-    const child = spawn(rgPath, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(resolvedRgPath, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
 
     const filesSearched = new Set<string>()
     const filesMatched = new Set<string>()
