@@ -192,7 +192,7 @@ export function createMiscHandlers(
       } else if (executedFlowId) {
         // Different flow - load fresh from disk
         console.log('[flow.start] Loading from disk (different flow):', executedFlowId, 'editor has:', editorTemplateId)
-        const profile = await flowProfileService.loadTemplate({ templateId: executedFlowId })
+        const profile = await flowProfileService.loadTemplate({ templateId: executedFlowId, workspaceId })
         if (!profile) {
           console.error('[flow.start] Failed to load flow template:', executedFlowId)
           return { ok: false, error: 'Failed to load flow template', code: 'template-not-found' }

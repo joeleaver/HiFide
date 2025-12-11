@@ -69,7 +69,10 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
   ) => {
     const handler = async (data: any) => {
       try {
-        if (!(await isActiveWorkspace())) return
+        const boundWorkspace = await getConnectionWorkspaceId(connection)
+        if (!boundWorkspace) return
+        const eventWorkspace = data?.workspaceId
+        if (eventWorkspace && !samePath(boundWorkspace, eventWorkspace)) return
         const payload = transform(data)
         connection.sendNotification(notificationName, payload)
       } catch { }

@@ -213,18 +213,19 @@ export function createFlowEditorHandlers(
       const flowProfileService = getFlowProfileService()
       const flowGraphService = getFlowGraphService()
 
-      const profile = await flowProfileService.loadTemplate({ templateId })
+
+      const workspaceId = await getConnectionWorkspaceId(connection)
+      if (!workspaceId) {
+        return { ok: false, error: 'No workspace bound' }
+      }
+
+      const profile = await flowProfileService.loadTemplate({ templateId, workspaceId })
       if (!profile) return { ok: false, error: 'template-not-found' }
 
       // profile.nodes and profile.edges are already in ReactFlow format
       // (deserialized by loadFlowTemplate in flowProfiles.ts)
       // DO NOT re-deserialize - that loses data.nodeType and data.config!
       const { nodes, edges } = profile
-
-      const workspaceId = await getConnectionWorkspaceId(connection)
-      if (!workspaceId) {
-        return { ok: false, error: 'No workspace bound' }
-      }
 
       // Update the graph in FlowGraphService and track which template is loaded
       flowGraphService.setGraph({ workspaceId, nodes, edges, templateId })

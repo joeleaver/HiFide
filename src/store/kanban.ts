@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { notifications } from '@mantine/notifications'
 import { getBackendClient } from '@/lib/backend/bootstrap'
 import { useKanbanHydration } from './screenHydration'
+import { useBackendBinding } from './binding'
 
 // Re-export shared types for convenience
 export type { KanbanBoard, KanbanTask, KanbanEpic, KanbanStatus } from '../../electron/store/types'
@@ -78,9 +79,14 @@ export const useKanban = create<KanbanStore>((set, get) => ({
   hydrateBoard: async () => {
     const client = getBackendClient()
     if (!client) return
+    const workspaceId = useBackendBinding.getState().workspaceId
+    if (!workspaceId) {
+      console.warn('[kanban] hydrateBoard skipped - no workspace bound')
+      return
+    }
 
     try {
-      const res: any = await client.rpc('kanban.getBoard', {})
+      const res: any = await client.rpc('kanban.getBoard', { workspaceId })
       if (res?.ok) {
         set({
           board: res.board || null,

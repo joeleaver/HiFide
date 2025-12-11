@@ -110,9 +110,20 @@ export function createKanbanHandlers(addMethod: (method: string, handler: (param
   })
 
   // Get current board
-  addMethod('kanban.getBoard', async () => {
-    const board = kanbanService.getBoard()
-    return { ok: true, board }
+  addMethod('kanban.getBoard', async (params: any) => {
+    const { workspaceId } = params || {}
+    if (!workspaceId) {
+      throw new Error('Missing required parameter: workspaceId')
+    }
+    const board = kanbanService.getBoard(workspaceId)
+    return {
+      ok: true,
+      board,
+      loading: kanbanService.isLoading(workspaceId),
+      saving: kanbanService.isSaving(workspaceId),
+      error: kanbanService.getError(workspaceId),
+      lastLoadedAt: kanbanService.getLastLoadedAt(workspaceId),
+    }
   })
 
   // Refresh board from disk

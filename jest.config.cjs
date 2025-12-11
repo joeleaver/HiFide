@@ -30,6 +30,7 @@ module.exports = {
     '^\.\./store/index$': '<rootDir>/electron/__mocks__/store-index.js',
     '^\.\./\.\./store/utils/kanban\.js$': '<rootDir>/electron/store/utils/kanban.ts',
     '^\.\./store/utils/kanban\.js$': '<rootDir>/electron/store/utils/kanban.ts',
+    '^\.\./utils/workspace\.js$': '<rootDir>/electron/utils/workspace.ts',
     '^\.\/base\/(.*)\.js$': '<rootDir>/electron/services/base/$1.ts'
   },
   setupFilesAfterEnv: ['<rootDir>/electron/__tests__/setup.ts'],

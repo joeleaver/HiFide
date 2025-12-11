@@ -77,7 +77,7 @@ export async function buildWorkspaceSnapshot(workspaceId: string): Promise<Works
     let edges: any[] = []
     try {
       console.log('[snapshot] Loading flow template:', selectedTemplateId)
-      const templateGraph = await flowProfileService.loadTemplate({ templateId: selectedTemplateId })
+      const templateGraph = await flowProfileService.loadTemplate({ templateId: selectedTemplateId, workspaceId })
       if (templateGraph) {
         nodes = templateGraph.nodes || []
         edges = templateGraph.edges || []
@@ -114,7 +114,7 @@ export async function buildWorkspaceSnapshot(workspaceId: string): Promise<Works
 
     // Get kanban board for this workspace
     const kanban = {
-      board: kanbanService.getBoard() || null,
+      board: kanbanService.getBoard(workspaceId) || null,
     }
 
     // Get provider/model settings

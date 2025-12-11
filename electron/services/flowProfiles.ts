@@ -374,7 +374,8 @@ export async function saveWorkspaceFlowProfile(
   nodes: Node[],
   edges: Edge[],
   profileName: string,
-  description: string = ''
+  description: string = '',
+  workspaceId?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
     // Prevent overwriting system templates
@@ -386,7 +387,7 @@ export async function saveWorkspaceFlowProfile(
       }
     }
 
-    const root = await getWorkspaceRoot()
+    const root = await getWorkspaceRoot(workspaceId)
     const absRoot = path.resolve(root)
     const flowsDir = path.join(absRoot, '.hifide-public', 'flows')
 
@@ -422,7 +423,8 @@ export async function saveWorkspaceFlowProfile(
  * Note: Cannot delete system templates.
  */
 export async function deleteWorkspaceFlowProfile(
-  profileName: string
+  profileName: string,
+  workspaceId?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const isSystem = await isSystemTemplate(profileName)
@@ -433,7 +435,7 @@ export async function deleteWorkspaceFlowProfile(
       }
     }
 
-    const root = await getWorkspaceRoot()
+    const root = await getWorkspaceRoot(workspaceId)
     const absRoot = path.resolve(root)
     const flowsDir = path.join(absRoot, '.hifide-public', 'flows')
     const filePath = path.join(flowsDir, `${profileName}.json`)

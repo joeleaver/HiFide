@@ -118,15 +118,19 @@ export const sessionHandlers = {
 
 // Kanban handlers
 export const kanbanHandlers = {
-  async getBoard() {
+  async getBoard(connection: RpcConnection) {
+    const workspaceId = await getConnectionWorkspaceId(connection)
+    if (!workspaceId) {
+      return { ok: false, error: 'No workspace bound to connection' }
+    }
     const kanbanService = getKanbanService()
     return {
       ok: true,
-      board: kanbanService.getBoard(),
-      loading: kanbanService.isLoading(),
-      saving: kanbanService.isSaving(),
-      error: kanbanService.getError(),
-      lastLoadedAt: kanbanService.getLastLoadedAt(),
+      board: kanbanService.getBoard(workspaceId),
+      loading: kanbanService.isLoading(workspaceId),
+      saving: kanbanService.isSaving(workspaceId),
+      error: kanbanService.getError(workspaceId),
+      lastLoadedAt: kanbanService.getLastLoadedAt(workspaceId),
     }
   },
 

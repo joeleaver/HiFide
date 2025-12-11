@@ -150,13 +150,13 @@ export class FlowProfileService extends Service<FlowProfileState> {
   /**
    * Load a flow template
    */
-  async loadTemplate(params: { templateId: string }): Promise<{ nodes: any[]; edges: any[] } | null> {
-    const { templateId } = params
+  async loadTemplate(params: { templateId: string; workspaceId?: string }): Promise<{ nodes: any[]; edges: any[] } | null> {
+    const { templateId, workspaceId } = params
 
     console.log('[FlowProfile] Loading template:', templateId)
 
     try {
-      const result = await loadFlowTemplate(templateId)
+      const result = await loadFlowTemplate(templateId, workspaceId)
       return result
     } catch (error) {
       console.error('[FlowProfile] Failed to load template:', error)
@@ -180,7 +180,7 @@ export class FlowProfileService extends Service<FlowProfileState> {
 
     try {
       if (library === 'workspace') {
-        await saveWorkspaceFlowProfile(nodes, edges, name, '')
+        await saveWorkspaceFlowProfile(nodes, edges, name, '', workspaceId)
       } else {
         await saveFlowProfile(nodes, edges, name, '')
       }
@@ -203,7 +203,7 @@ export class FlowProfileService extends Service<FlowProfileState> {
     try {
       // Try workspace library first, then user library
       try {
-        await deleteWorkspaceFlowProfile(name)
+        await deleteWorkspaceFlowProfile(name, workspaceId)
       } catch {
         await deleteFlowProfile(name)
       }

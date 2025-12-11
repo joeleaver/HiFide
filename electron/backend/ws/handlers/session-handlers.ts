@@ -325,7 +325,7 @@ export function createSessionHandlers(
       } else {
         // Different flow - load fresh from disk
         console.log('[session.setExecutedFlow] Loading from disk (different flow):', flowId, 'editor has:', editorTemplateId)
-        const profile = await flowProfileService.loadTemplate({ templateId: flowId })
+        const profile = await flowProfileService.loadTemplate({ templateId: flowId, workspaceId })
         if (!profile) {
           console.warn('[session.setExecutedFlow] Failed to load flow template:', flowId)
           return { ok: false, error: 'Failed to load flow template' }
