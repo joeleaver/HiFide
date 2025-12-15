@@ -13,6 +13,7 @@ import WorkspaceSearchPane from './explorer/WorkspaceSearchPane'
 import { registerMonacoInstance, withMonaco } from '@/lib/editor/monacoInstance'
 import { registerLspProviders } from '@/lib/lsp/providers'
 import { markdownPlugins } from '@/lib/editor/markdownPlugins'
+import { normalizeReferenceLinks } from '@/lib/editor/markdownLinkNormalizer'
 import { useExplorerHydration } from '@/store/screenHydration'
 import { useEditorStore, type EditorViewMode, type EditorTab, type EditorSelectionRange } from '@/store/editor'
 import { useExplorerStore } from '@/store/explorer'
@@ -96,6 +97,10 @@ export default function ExplorerView() {
   const monacoLanguageId = useMemo(
     () => toMonacoLanguageId(activeLanguageId ?? activeTab?.language),
     [activeLanguageId, activeTab?.language]
+  )
+  const normalizedMarkdown = useMemo(
+    () => normalizeReferenceLinks(activeTab?.content ?? ''),
+    [activeTab?.content]
   )
 
   const showInstallPrompt = Boolean(
@@ -518,7 +523,7 @@ export default function ExplorerView() {
                     <div data-theme="dark" style={{ height: '100%', overflow: 'auto' }}>
                       <MDXEditor
                         key={`${activeTab.id}:${activeTab.viewMode}:${activeTab.lastLoadedAt}`}
-                        markdown={activeTab.content}
+                        markdown={normalizedMarkdown}
                         onChange={(value) => updateTabContent(activeTab.id, value)}
                         contentEditableClassName="markdown-body kb-mdx-content"
                         className="kb-mdx-root"

@@ -23,6 +23,16 @@ describe('formatMessagesForOpenAI', () => {
     const assistant = messages.find((msg) => msg.role === 'assistant')
     expect(assistant?.content).toBe('Final output')
   })
+
+  it('includes system instructions when present', () => {
+    const ctx: MainFlowContext = {
+      ...baseContext,
+      systemInstructions: 'Base rules',
+    }
+    const messages = formatMessagesForOpenAI(ctx, { provider: 'openai' })
+    const system = messages.find((msg) => msg.role === 'system')
+    expect(system?.content).toBe('Base rules')
+  })
 })
 
 describe('formatMessagesForGemini', () => {
@@ -40,5 +50,18 @@ describe('formatMessagesForGemini', () => {
     const first = payload.contents[0]
     expect(first.parts[0].text).toContain('<think>Inspecting tools</think>')
     expect(first.parts[1].text).toBe('Ready to assist')
+  })
+
+  it('passes system instructions straight through to Gemini payloads', () => {
+    const ctx: MainFlowContext = {
+      contextId: 'ctx-g2',
+      provider: 'gemini',
+      model: 'gemini-2.0-flash-thinking',
+      systemInstructions: 'Do work',
+      messageHistory: []
+    }
+
+    const payload = formatMessagesForGemini(ctx)
+    expect(payload.systemInstruction).toBe('Do work')
   })
 })

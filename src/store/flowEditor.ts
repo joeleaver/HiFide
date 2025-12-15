@@ -1,17 +1,18 @@
 import { create } from 'zustand'
 import { getBackendClient } from '@/lib/backend/bootstrap'
+import { shouldHydrateFlowGraphChange, type FlowGraphChangedEventPayload } from '../../shared/flowGraph'
 
 interface FlowEditorStore {
   availableTemplates: any[]
   templatesLoaded: boolean
   selectedTemplate: string
-  graphVersion: number // Increment to trigger re-hydration in components
+
 
   setTemplates: (templates: any[], loaded: boolean, selected: string) => void
-  incrementGraphVersion: () => void
+
   hydrateTemplates: () => Promise<void>
-  fetchGraph: () => Promise<{ ok: boolean; nodes?: any[]; edges?: any[] }>
-  requestGraphHydration: () => void
+
+
 
   // All flow editor actions - components should call these instead of RPC
   loadTemplate: (templateId: string) => Promise<{ ok: boolean }>
@@ -25,7 +26,7 @@ export const useFlowEditor = create<FlowEditorStore>((set, get) => ({
   availableTemplates: [],
   templatesLoaded: false,
   selectedTemplate: '',
-  graphVersion: 0,
+
 
   setTemplates: (templates, loaded, selected) => set({
     availableTemplates: templates,
@@ -33,7 +34,6 @@ export const useFlowEditor = create<FlowEditorStore>((set, get) => ({
     selectedTemplate: selected
   }),
 
-  incrementGraphVersion: () => set((s) => ({ graphVersion: s.graphVersion + 1 })),
 
   hydrateTemplates: async () => {
     const client = getBackendClient()
@@ -51,57 +51,7 @@ export const useFlowEditor = create<FlowEditorStore>((set, get) => ({
     } catch {}
   },
 
-  // Fetch graph from main store - components should call this instead of RPC directly
-  fetchGraph: async () => {
-    const client = getBackendClient()
-    if (!client) return { ok: false }
 
-    // Use timeout to prevent infinite hangs
-    const RPC_TIMEOUT = 5000
-    const withTimeout = <T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> => {
-      return Promise.race([
-        promise,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs))
-      ])
-    }
-
-    try {
-      console.log('[flowEditor] Fetching graph from main store')
-      const g: any = await withTimeout(client.rpc('flowEditor.getGraph', {}), RPC_TIMEOUT)
-
-      if (g === null) {
-        console.warn('[flowEditor] Graph fetch timed out')
-        return { ok: false }
-      }
-
-      console.log('[flowEditor] Graph response:', { ok: g?.ok, nodeCount: g?.nodes?.length, edgeCount: g?.edges?.length })
-
-      if (g?.ok) {
-        const nodes = Array.isArray(g.nodes) ? g.nodes : []
-        const edges = Array.isArray(g.edges) ? g.edges : []
-
-        // Log nodes with config
-        const nodesWithConfig = nodes.filter((n: any) => n.data?.config && Object.keys(n.data.config).length > 0)
-        console.log('[flowEditor] Received nodes with config:', nodesWithConfig.map((n: any) => ({
-          id: n.id,
-          nodeType: n.data?.nodeType,
-          config: n.data?.config
-        })))
-
-        // Don't cache - just return
-        return { ok: true, nodes, edges }
-      }
-      return { ok: false }
-    } catch (e) {
-      console.error('[flowEditor] Error fetching graph:', e)
-      return { ok: false }
-    }
-  },
-
-  // Trigger graph hydration - components should call this instead of RPC directly
-  requestGraphHydration: () => {
-    set((s) => ({ graphVersion: s.graphVersion + 1 }))
-  },
 
   // Load a template and refresh state
   loadTemplate: async (templateId: string) => {
@@ -113,8 +63,8 @@ export const useFlowEditor = create<FlowEditorStore>((set, get) => ({
       if (res?.ok) {
         // Refresh templates and graph
         await get().hydrateTemplates()
-        await get().fetchGraph()
-        set((s) => ({ graphVersion: s.graphVersion + 1 }))
+
+
       }
       return res
     } catch {
@@ -151,8 +101,8 @@ export const useFlowEditor = create<FlowEditorStore>((set, get) => ({
       if (res?.ok) {
         // Refresh templates and graph
         await get().hydrateTemplates()
-        await get().fetchGraph()
-        set((s) => ({ graphVersion: s.graphVersion + 1 }))
+
+
       }
       return res
     } catch {
@@ -170,8 +120,8 @@ export const useFlowEditor = create<FlowEditorStore>((set, get) => ({
       if (res?.ok) {
         // Refresh templates and graph
         await get().hydrateTemplates()
-        await get().fetchGraph()
-        set((s) => ({ graphVersion: s.graphVersion + 1 }))
+
+
       }
       return res
     } catch {
@@ -223,11 +173,15 @@ export function initFlowEditorEvents(): void {
   setTimeout(() => hydrateFromBackend('initial-500ms'), 500)
   setTimeout(() => hydrateFromBackend('initial-1500ms'), 1500)
 
-  // Graph changed - increment version to trigger component re-hydration
-  client.subscribe('flowEditor.graph.changed', async () => {
-    await hydrateFromBackend('graph-changed')
-    // Increment version to signal components to re-hydrate graph
-    useFlowEditor.getState().incrementGraphVersion()
+  // Graph changed - templates may also change (e.g., template load/save/delete)
+  client.subscribe('flowEditor.graph.changed', async (payload: FlowGraphChangedEventPayload) => {
+    const reason = payload?.reason ?? 'unknown'
+    if (!shouldHydrateFlowGraphChange(reason)) {
+      console.log('[flowEditor] Ignoring flowEditor.graph.changed event with reason:', reason)
+      return
+    }
+    await hydrateFromBackend(`graph-changed:${reason}`)
+
   })
 }
 

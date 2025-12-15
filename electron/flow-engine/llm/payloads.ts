@@ -57,11 +57,15 @@ export function estimateInputTokens(provider: string, formattedMessages: any): n
   }
 }
 
-export function formatMessagesForOpenAI(context: MainFlowContext, options?: { provider?: string }): ChatMessage[] {
+export function formatMessagesForOpenAI(
+  context: MainFlowContext,
+  options?: { provider?: string }
+): ChatMessage[] {
   const history = Array.isArray(context.messageHistory) ? context.messageHistory : []
   const messages: ChatMessage[] = []
-  if (context.systemInstructions) {
-    messages.push({ role: 'system', content: context.systemInstructions })
+  const systemText = context.systemInstructions
+  if (systemText) {
+    messages.push({ role: 'system', content: systemText })
   }
   const shouldEmbedReasoning = options?.provider ? OPENAI_REASONING_PROVIDERS.has(options.provider) : false
   for (const msg of history) {
@@ -78,7 +82,9 @@ export function formatMessagesForOpenAI(context: MainFlowContext, options?: { pr
   return messages
 }
 
-export function formatMessagesForAnthropic(context: MainFlowContext): {
+export function formatMessagesForAnthropic(
+  context: MainFlowContext
+): {
   system?: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>
   messages: Array<{ role: 'user' | 'assistant'; content: any }>
 } {
@@ -94,7 +100,9 @@ export function formatMessagesForAnthropic(context: MainFlowContext): {
   return { system, messages }
 }
 
-export function formatMessagesForGemini(context: MainFlowContext): {
+export function formatMessagesForGemini(
+  context: MainFlowContext
+): {
   systemInstruction: string
   contents: Array<{ role: string; parts: Array<{ text: string }> }>
 } {

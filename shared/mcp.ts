@@ -26,6 +26,7 @@ export interface McpServerConfig {
   enabled: boolean
   createdAt: number
   updatedAt: number
+  workspaceId?: string | null
 }
 
 export interface McpToolDefinition {

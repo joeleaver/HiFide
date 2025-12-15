@@ -84,7 +84,7 @@ export async function buildWorkspaceSnapshot(workspaceId: string): Promise<Works
         console.log('[snapshot] Loaded template graph:', { nodeCount: nodes.length, edgeCount: edges.length })
         console.log('[snapshot] Node types:', nodes.map((n: any) => ({ id: n.id, nodeType: n.nodeType, type: n.type, dataNodeType: n.data?.nodeType })))
         // Also update the FlowGraphService so the scheduler has the graph
-        flowGraphService.setGraph({ workspaceId, nodes, edges, templateId: selectedTemplateId })
+        flowGraphService.setGraph({ workspaceId, nodes, edges, templateId: selectedTemplateId, reason: 'workspace-snapshot' })
       } else {
         console.warn('[snapshot] Template not found:', selectedTemplateId)
       }

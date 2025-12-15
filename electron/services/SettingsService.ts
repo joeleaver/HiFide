@@ -6,7 +6,7 @@
 
 import { Service } from './base/Service.js'
 import type { ApiKeys, ModelPricing, PricingConfig, TokenUsage, TokenCost } from '../store/types.js'
-import { DEFAULT_PRICING } from '../data/defaultPricing.js'
+import { getDefaultPricingConfig } from '../data/defaultModelSettings.js'
 import { getProviderService, getAppService } from './index.js'
 import { computeTokenCost } from './settings-cost-utils.js'
 
@@ -22,6 +22,7 @@ interface SettingsState {
 
 export class SettingsService extends Service<SettingsState> {
   constructor() {
+    const DEFAULT_PRICING = getDefaultPricingConfig()
     super(
       {
         settingsApiKeys: {
@@ -51,6 +52,7 @@ export class SettingsService extends Service<SettingsState> {
   private mergeDefaultsIntoActivePricing(): void {
     let changed = false
     const active = { ...this.state.pricingConfig }
+    const DEFAULT_PRICING = getDefaultPricingConfig()
 
     for (const provider of Object.keys(DEFAULT_PRICING)) {
       const defaultModels = DEFAULT_PRICING[provider as keyof PricingConfig]
@@ -404,10 +406,11 @@ export class SettingsService extends Service<SettingsState> {
   }
 
   resetPricingToDefaults(): void {
-    this.setState({ pricingConfig: DEFAULT_PRICING })
+    this.setState({ pricingConfig: getDefaultPricingConfig() })
   }
 
   resetProviderPricing(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai'): void {
+    const DEFAULT_PRICING = getDefaultPricingConfig()
     const newConfig = {
       ...this.state.pricingConfig,
       [provider]: DEFAULT_PRICING[provider as keyof typeof DEFAULT_PRICING],

@@ -3,7 +3,7 @@ import { useUiStore } from '../store/ui'
 import { useFlowRuntime } from '../store/flowRuntime'
 import { FlowService } from '../services/flow'
 import '../styles/mdx-dark.css'
-import { MDXEditor, BoldItalicUnderlineToggles, ListsToggle, markdownShortcutPlugin, listsPlugin, toolbarPlugin, MDXEditorMethods } from '@mdxeditor/editor'
+import { MDXEditor, BoldItalicUnderlineToggles, CreateLink, InsertTable, ListsToggle, markdownShortcutPlugin, listsPlugin, toolbarPlugin, MDXEditorMethods, linkPlugin, linkDialogPlugin, tablePlugin } from '@mdxeditor/editor'
 
 export default memo(function SessionInput() {
   const inputValue = useUiStore((s) => s.sessionInputValue || '')
@@ -101,11 +101,16 @@ export default memo(function SessionInput() {
               <>
                 <BoldItalicUnderlineToggles options={['Bold', 'Italic']} />
                 <ListsToggle options={['bullet', 'number']} />
+                <CreateLink />
+                <InsertTable />
               </>
             )
           }),
           listsPlugin(),
-          markdownShortcutPlugin()
+          tablePlugin(),
+          markdownShortcutPlugin(),
+          linkPlugin(),
+          linkDialogPlugin()
         ]}
       />
     </div>

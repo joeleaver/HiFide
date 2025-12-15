@@ -1,4 +1,5 @@
 import type { MainFlowContext } from '../types'
+import { getDefaultModelOverrides } from '../../data/defaultModelSettings'
 
 export interface SamplingControls {
   temperature?: number
@@ -17,6 +18,7 @@ interface SamplingOptionsInput {
 
 export function resolveSamplingControls(options: SamplingOptionsInput): SamplingControls {
   const { provider, model, workingContext, requestReasoningEffort } = options
+  const jsonDefaults = getDefaultModelOverrides(provider, model)
   const modelOverrides: Array<{
     model: string
     temperature?: number
@@ -37,12 +39,15 @@ export function resolveSamplingControls(options: SamplingOptionsInput): Sampling
     } else {
       temperature = normalized * 2
     }
+  } else if (typeof jsonDefaults?.temperature === 'number') {
+    temperature = jsonDefaults.temperature
   }
 
   const reasoningEffort =
     requestReasoningEffort ??
     modelOverride?.reasoningEffort ??
-    (workingContext as any)?.reasoningEffort
+    (workingContext as any)?.reasoningEffort ??
+    jsonDefaults?.reasoningEffort
 
   const isGeminiWithThinking = provider === 'gemini' && /(2\.5|[^0-9]3[.-])/i.test(model)
   const isAnthropicWithThinking = provider === 'anthropic' && (
@@ -61,7 +66,11 @@ export function resolveSamplingControls(options: SamplingOptionsInput): Sampling
   const includeThoughtsDefault = (workingContext as any)?.includeThoughts
   const includeThoughts = includeThoughtsOverride === true ||
     (includeThoughtsOverride !== false && includeThoughtsDefault === true) ||
-    (includeThoughtsOverride === undefined && includeThoughtsDefault !== false && modelSupportsThinking)
+    (includeThoughtsOverride === undefined && includeThoughtsDefault !== false
+      ? includeThoughtsDefault === true
+      : (jsonDefaults?.includeThoughts === true) ||
+        (jsonDefaults?.includeThoughts !== false && modelSupportsThinking)
+    )
 
   const thinkingBudgetOverride = modelOverride?.thinkingBudget
   const thinkingBudgetDefault = (workingContext as any)?.thinkingBudget
@@ -69,7 +78,9 @@ export function resolveSamplingControls(options: SamplingOptionsInput): Sampling
     ? thinkingBudgetOverride
     : (typeof thinkingBudgetDefault === 'number'
       ? thinkingBudgetDefault
-      : (includeThoughts && modelSupportsThinking ? 2048 : undefined))
+      : (typeof jsonDefaults?.thinkingBudget === 'number'
+        ? jsonDefaults.thinkingBudget
+        : (includeThoughts && modelSupportsThinking ? 2048 : undefined)))
 
   return {
     temperature,

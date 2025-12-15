@@ -10,17 +10,13 @@ interface WorkspaceSearchViewerProps {
 }
 
 export function WorkspaceSearchViewer({ badge }: WorkspaceSearchViewerProps) {
-  // Use existing BadgeWorkspaceSearchContent component
-  if (badge.interactive?.data?.key) {
-    return (
-      <BadgeWorkspaceSearchContent
-        badgeId={badge.id}
-        searchKey={badge.interactive.data.key}
-        fullParams={badge.metadata?.fullParams}
-      />
-    )
-  }
-
-  return null
+  return (
+    <BadgeWorkspaceSearchContent
+      badgeId={badge.id}
+      searchKey={badge.interactive?.data?.key}
+      fullParams={badge.metadata?.fullParams ?? badge.args}
+      llmResult={badge.result}
+    />
+  )
 }
 

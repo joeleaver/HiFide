@@ -1,4 +1,5 @@
 import { Text } from '@mantine/core'
+import { useDraftField } from '../../../hooks/useDraftField'
 
 interface ManualInputConfigProps {
   config: any
@@ -19,6 +20,9 @@ export function UserInputInfo() {
 }
 
 export function ManualInputConfig({ config, onConfigChange }: ManualInputConfigProps) {
+  const external = config.message || ''
+  const message = useDraftField(external, (v) => onConfigChange({ message: v }), { debounceMs: 250 })
+
   return (
     <div style={sectionStyle}>
       <Text size="xs" c="dimmed" style={descriptionStyle}>
@@ -27,8 +31,10 @@ export function ManualInputConfig({ config, onConfigChange }: ManualInputConfigP
       <label style={fieldStyle}>
         <span style={labelStyle}>Message:</span>
         <textarea
-          value={config.message || ''}
-          onChange={(e) => onConfigChange({ message: e.target.value })}
+          value={message.draft}
+          onChange={(e) => message.onChange(e.target.value)}
+          onFocus={message.onFocus}
+          onBlur={message.onBlur}
           placeholder="Enter the user message to send (e.g., 'Now explain that in simpler terms...')"
           rows={3}
           style={textareaStyle}

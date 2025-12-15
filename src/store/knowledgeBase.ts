@@ -6,10 +6,12 @@ export interface KnowledgeBaseStore {
   workspaceFiles: string[]
   loading: boolean
   workspaceFilesLoading: boolean
+  activeItemId: string | null
 
   setItemsMap: (items: Record<string, any>) => void
   setWorkspaceFiles: (files: string[]) => void
   setLoading: (loading: boolean) => void
+  setActiveItemId: (id: string | null) => void
   refreshWorkspaceFiles: () => Promise<void>
   reloadIndex: () => Promise<void>
 }
@@ -19,10 +21,12 @@ export const useKnowledgeBase = create<KnowledgeBaseStore>((set, get) => ({
   workspaceFiles: [],
   loading: false,
   workspaceFilesLoading: false,
+  activeItemId: null,
 
   setItemsMap: (items) => set({ itemsMap: items }),
   setWorkspaceFiles: (files) => set({ workspaceFiles: files }),
   setLoading: (loading) => set({ loading }),
+  setActiveItemId: (id) => set({ activeItemId: id }),
 
   refreshWorkspaceFiles: async () => {
     const client = getBackendClient()

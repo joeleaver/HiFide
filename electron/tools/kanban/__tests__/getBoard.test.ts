@@ -18,6 +18,7 @@ const buildTask = (overrides: Partial<KanbanTask> = {}): KanbanTask => ({
   order: overrides.order ?? 0,
   description: overrides.description,
   epicId: overrides.epicId,
+  kbArticleId: overrides.kbArticleId,
   assignees: overrides.assignees,
   tags: overrides.tags,
   createdAt: overrides.createdAt ?? Date.now(),
@@ -25,7 +26,6 @@ const buildTask = (overrides: Partial<KanbanTask> = {}): KanbanTask => ({
   archived: overrides.archived,
   archivedAt: overrides.archivedAt,
 })
-
 const buildBoard = (tasks: KanbanTask[]): KanbanBoard => ({
   version: 1,
   columns: DEFAULT_COLUMNS,

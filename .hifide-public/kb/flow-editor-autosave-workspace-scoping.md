@@ -2,23 +2,28 @@
 id: 1555924f-0c3b-47dc-a622-927ec332b749
 title: Flow editor autosave workspace scoping
 tags: [flows, autosave, workspace-scope]
-files: [src/store/flowEditorLocal.ts, electron/backend/ws/handlers/flow-editor-handlers.ts, electron/services/FlowProfileService.ts, electron/services/flowProfiles.ts]
+files: [src/store/flowEditorLocal.ts, electron/backend/ws/handlers/flow-editor-handlers.ts, electron/services/FlowProfileService.ts, electron/services/flowProfiles.ts, electron/services/flowAutosave.ts, electron/services/__tests__/flowAutosave.test.ts, electron/services/__tests__/FlowProfileService.test.ts]
 createdAt: 2025-12-11T01:16:28.152Z
-updatedAt: 2025-12-11T01:16:28.152Z
+updatedAt: 2025-12-15T16:50:10.850Z
 ---
 
 ## Overview
-Flow edits are managed locally inside `useFlowEditorLocal`. The renderer stores a real-time graph, subscribes to node/edge mutations, and debounces RPC calls to `flowEditor.setGraph`. The backend handler (`electron/backend/ws/handlers/flow-editor-handlers.ts`) records the graph inside `FlowGraphService` and, for user/workspace flows, calls `FlowProfileService.saveProfile` to persist `.hifide-public/flows/<template>.json`.
+Flow edits are managed locally inside `useFlowEditorLocal`. The renderer keeps a real-time graph, debounces RPC calls to `flowEditor.setGraph`, and the backend handler persists the graph via `FlowGraphService` plus optional template writes handled by `FlowProfileService`.
 
-## Required workspace context
-Every renderer connection is bound to a workspace, so RPC handlers always call `getConnectionWorkspaceId` before reading or writing flow state. `FlowGraphService` and the autosave handler both scope to that ID, but `FlowProfileService` previously called `saveWorkspaceFlowProfile` / `deleteWorkspaceFlowProfile` without passing the workspace ID. These helpers defaulted to `process.cwd()` via `resolveWorkspaceRootAsync()`, so autosaves silently targeted the application root instead of the active project.
+## Workspace scoping
+Each renderer connection is bound to a workspace (resolved with `getConnectionWorkspaceId`). Autosave handlers must pass that workspace ID through `flowEditor.setGraph` so `FlowGraphService` and any persistence helpers write into the correct `.hifide-public/flows` directory. `saveWorkspaceFlowProfile`/`deleteWorkspaceFlowProfile` therefore always receive the explicit workspace ID instead of falling back to `process.cwd()`.
 
-## Impact
-When two projects are open, user edits in one window can overwrite `.hifide-public/flows` under the other project (or never appear in the intended workspace). This presents as "autosave not working" because reloading the workspace rehydrates from `.hifide-public/flows` in the wrong directory.
+## Autosave persistence helper (2025-12-15)
+Autosave no longer routes through `FlowProfileService.saveProfile`, which always reloads the full template roster. Instead, `flowEditor.setGraph` calls `persistAutosaveSnapshot` (see `electron/services/flowAutosave.ts`), which writes directly via `saveWorkspaceFlowProfile` or `saveFlowProfile` depending on the template library and skips system templates entirely. This keeps template caches intact while avoiding the save→reload loop that re-mounted the React Flow canvas after every keystroke. Manual Save As/Delete/Import still use `FlowProfileService` so user-driven template changes continue to refresh the roster.
 
-## Fix strategy
-* Thread the current `workspaceId` through every path that loads or saves workspace flow profiles:
-  * Extend `saveWorkspaceFlowProfile` / `deleteWorkspaceFlowProfile` to accept a workspace hint and resolve the correct `.hifide-public/flows` directory.
-  * Pass the workspace ID from `FlowProfileService.saveProfile`, `.deleteProfile`, and `.loadTemplate`.
-  * Ensure all backend RPC sites (`snapshot`, `session.setExecutedFlow`, `flow.start`, `flowEditor.loadTemplate`, etc.) forward their `workspaceId` into `FlowProfileService`.
-* After changes, autosave persists to the workspace-specific flows directory, matching how kanban/knowledge-base data is scoped.
+## Autosave reload suppression
+`FlowProfileService.saveProfile` still exposes an optional `reloadTemplates` flag (default `true`). Although autosave now bypasses the service, UI-driven operations (Save, Save As, Import, Delete) can set `reloadTemplates: false` when they only need to update an existing template without rescanning `.hifide-public/flows`. The default remains `true` so template pickers refresh automatically after structural changes such as renames or new template creation.
+
+## Related files
+- `src/store/flowEditorLocal.ts`
+- `electron/backend/ws/handlers/flow-editor-handlers.ts`
+- `electron/services/FlowProfileService.ts`
+- `electron/services/flowProfiles.ts`
+- `electron/services/flowAutosave.ts`
+- `electron/services/__tests__/flowAutosave.test.ts`
+- `electron/services/__tests__/FlowProfileService.test.ts`

@@ -1,6 +1,8 @@
 import { createEventEmitter } from './execution-events'
 import { emitFlowEvent } from './events'
-import type { FlowAPI, Badge, UsageReport } from './flow-api'
+import type { FlowAPI, Badge, UsageReport, Tool } from './flow-api'
+import { getAgentToolSnapshot } from '../tools/agentToolRegistry.js'
+import type { AgentTool } from '../providers/provider'
 import type { ContextBinding, ContextRegistry } from './contextRegistry'
 import type { CreateIsolatedContextOptions } from './context-options'
 import type { ExecutionEventRouter } from './execution-event-router'
@@ -93,7 +95,7 @@ export function createFlowApiFactory(deps: FlowApiFactoryDeps): FlowApiFactory {
           console.log(`[Tool] ${nodeId}: ${toolName}`, args)
           return {}
         },
-        list: () => (globalThis as any).__agentTools || [],
+        list: (): Tool[] => mapAgentToolsToFlowTools(getAgentToolSnapshot(workspaceId)),
       },
       usage: {
         report: (usage: UsageReport) => {
@@ -154,4 +156,12 @@ function buildContextsHelper(deps: ContextsHelperDeps): FlowAPI['contexts'] {
     createIsolated: (options) => createIsolatedContext({ ...options, createdByNodeId: nodeId }, binding),
     release: (contextId: string) => releaseContext(contextId),
   }
+}
+
+function mapAgentToolsToFlowTools(agentTools: AgentTool[]): Tool[] {
+  return agentTools.map((tool) => ({
+    name: tool.name,
+    description: tool.description ?? '',
+    parameters: tool.parameters ?? {},
+  }))
 }

@@ -1,3 +1,5 @@
+import { useDraftField } from '../../../hooks/useDraftField'
+
 interface ConfigProps {
   config: any
   onConfigChange: (patch: any) => void
@@ -27,6 +29,9 @@ export function RedactorConfig({ config, onConfigChange }: ConfigProps) {
 }
 
 export function ErrorDetectionConfig({ config, onConfigChange }: ConfigProps) {
+  const external = (config.patterns || []).join('\n')
+  const patterns = useDraftField(external, (v) => onConfigChange({ patterns: v.split('\n').filter(Boolean) }), { debounceMs: 250 })
+
   return (
     <div style={containerStyle}>
       <label style={checkboxRow}>
@@ -40,8 +45,10 @@ export function ErrorDetectionConfig({ config, onConfigChange }: ConfigProps) {
       <label style={{ ...fieldStyle, color: '#cccccc' }}>
         <span style={labelStyle}>Error patterns (one per line):</span>
         <textarea
-          value={(config.patterns || []).join('\n')}
-          onChange={(e) => onConfigChange({ patterns: e.target.value.split('\n').filter(Boolean) })}
+          value={patterns.draft}
+          onChange={(e) => patterns.onChange(e.target.value)}
+          onFocus={patterns.onFocus}
+          onBlur={patterns.onBlur}
           placeholder={"error\nexception\nfailed"}
           rows={3}
           style={textareaStyle}

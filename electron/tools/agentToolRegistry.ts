@@ -1,18 +1,47 @@
+import path from 'node:path'
 import type { AgentTool } from '../providers/provider'
 import { agentTools as builtinAgentTools } from './index.js'
 import { getMcpService } from '../services/index.js'
 
-let initialized = false
-let cachedTools: AgentTool[] = [...builtinAgentTools]
+const GLOBAL_WORKSPACE_KEY = '__global__'
 
-function setGlobalTools(next: AgentTool[]): void {
-  cachedTools = next
-  ;(globalThis as any).__agentTools = next
+const workspaceToolCache = new Map<string, AgentTool[]>()
+let initialized = false
+
+const normalizeWorkspaceId = (workspaceId?: string | null): string | null => {
+  if (!workspaceId) return null
+  try {
+    return path.resolve(String(workspaceId))
+  } catch {
+    return String(workspaceId)
+  }
 }
 
-// Ensure built-in tools are available immediately
-if (!(globalThis as any).__agentTools) {
-  setGlobalTools([...builtinAgentTools])
+const workspaceKey = (workspaceId?: string | null): string => {
+  return normalizeWorkspaceId(workspaceId) ?? GLOBAL_WORKSPACE_KEY
+}
+
+const setWorkspaceTools = (workspaceId: string | null, tools: AgentTool[]): void => {
+  const key = workspaceKey(workspaceId)
+  workspaceToolCache.set(key, tools)
+  ;(globalThis as any).__agentToolsByWorkspace = Object.fromEntries(workspaceToolCache)
+  if (workspaceId === null) {
+    ;(globalThis as any).__agentTools = tools
+  }
+}
+
+const getCachedTools = (workspaceId?: string | null): AgentTool[] | undefined => {
+  return workspaceToolCache.get(workspaceKey(workspaceId))
+}
+
+const rebuildWorkspaceTools = (workspaceId: string | null, service: ReturnType<typeof getMcpService>): void => {
+  try {
+    const mcpTools = service.getAgentTools({ workspaceId })
+    setWorkspaceTools(workspaceId, [...builtinAgentTools, ...mcpTools])
+  } catch (error) {
+    console.error('[agent-tools] Failed to rebuild registry from MCP tools', error)
+    setWorkspaceTools(workspaceId, [...builtinAgentTools])
+  }
 }
 
 export function initializeAgentToolRegistry(): void {
@@ -24,28 +53,38 @@ export function initializeAgentToolRegistry(): void {
     mcpService = getMcpService()
   } catch (error) {
     console.error('[agent-tools] MCP service unavailable during registry init', error)
-    setGlobalTools([...builtinAgentTools])
+    setWorkspaceTools(null, [...builtinAgentTools])
     return
   }
 
-  const rebuild = () => {
-    try {
-      const mcpTools = mcpService.getAgentTools()
-      setGlobalTools([...builtinAgentTools, ...mcpTools])
-    } catch (error) {
-      console.error('[agent-tools] Failed to rebuild registry from MCP tools', error)
-      setGlobalTools([...builtinAgentTools])
-    }
+  // Prime global cache with built-in tools
+  setWorkspaceTools(null, [...builtinAgentTools])
+
+  const handleChange = (payload: any) => {
+    const workspaceId = (payload?.workspaceId ?? null) as string | null
+    rebuildWorkspaceTools(workspaceId, mcpService)
   }
 
-  rebuild()
-  mcpService.on('mcp:tools:changed', rebuild)
+  rebuildWorkspaceTools(null, mcpService)
+  mcpService.on('mcp:tools:changed', handleChange)
 }
 
-export function getAgentToolSnapshot(): AgentTool[] {
-  const current = (globalThis as any).__agentTools
-  if (Array.isArray(current)) {
-    return current as AgentTool[]
+export function getAgentToolSnapshot(workspaceId?: string | null): AgentTool[] {
+  const cached = getCachedTools(workspaceId)
+  if (cached) {
+    return cached
   }
-  return cachedTools
+
+  try {
+    const service = getMcpService()
+    rebuildWorkspaceTools(workspaceId ?? null, service)
+    const refreshed = getCachedTools(workspaceId)
+    if (refreshed) {
+      return refreshed
+    }
+  } catch (error) {
+    console.error('[agent-tools] Failed to refresh workspace tool cache', error)
+  }
+
+  return getCachedTools(null) ?? [...builtinAgentTools]
 }

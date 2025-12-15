@@ -16,6 +16,7 @@ export type TaskFormValues = {
   title: string
   status: KanbanStatus
   epicId: string | null
+  kbArticleId: string | null
   description: string
 }
 
@@ -75,6 +76,7 @@ const DEFAULT_TASK_FORM: TaskFormValues = {
   title: '',
   status: 'backlog',
   epicId: null,
+  kbArticleId: null,
   description: ''
 }
 
@@ -110,6 +112,7 @@ export const useKanbanUI = create<KanbanUIStore>((set, get) => ({
         title: task.title,
         status: task.status,
         epicId: task.epicId ?? null,
+        kbArticleId: task.kbArticleId ?? null,
         description: task.description ?? ''
       }
     })

@@ -14,9 +14,7 @@ import type { ReactNode, MouseEvent } from 'react'
 import type { ViewType } from '../../electron/store/types'
 import { useUiStore } from '../store/ui'
 import { getBackendClient } from '../lib/backend/bootstrap'
-import { MIN_SESSION_PANEL_WIDTH } from '../constants/layout'
-
-const ACTIVITY_BAR_WIDTH = 48
+import { MIN_SESSION_PANEL_WIDTH, ACTIVITY_BAR_WIDTH } from '../constants/layout'
 
 interface ActivityButtonProps {
   icon: ReactNode

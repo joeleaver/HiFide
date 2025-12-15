@@ -215,9 +215,8 @@ export function startWsBackend(): Promise<WsBootstrap> {
       createMiscHandlers(addMethod, connection)
       createSettingsHandlers(addMethod)
       createKanbanHandlers(addMethod)
-      createMcpHandlers(addMethod)
+      createMcpHandlers(addMethod, connection)
       createLanguageHandlers(addMethod, connection)
-
       // Setup all event subscriptions for this connection
       const cleanupSubscriptions = setupEventSubscriptions(connection)
 

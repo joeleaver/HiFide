@@ -15,6 +15,7 @@ export type ToolCategory =
   | 'index'
   | 'terminal'
   | 'code'
+  | 'mcp'
   | 'other'
 
 interface ToolsState {
@@ -97,6 +98,7 @@ export class ToolsService extends Service<ToolsState> {
     if (name.startsWith('terminal') || name.startsWith('session')) return 'terminal'
     if (name.startsWith('workspace') || name.startsWith('knowledgeBase')) return 'workspace'
     if (name.startsWith('agent')) return 'agent'
+    if (name.startsWith('mcp')) return 'mcp'
     if (name.startsWith('code') || name.startsWith('search') || name.startsWith('replace')) return 'code'
     if (name.startsWith('index') || name.startsWith('text')) return 'index'
 

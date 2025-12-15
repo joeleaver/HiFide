@@ -75,6 +75,8 @@ export class McpService extends Service<McpServiceState> {
       PERSIST_KEY
     )
 
+    this.sanitizeLegacyWorkspaceScopes()
+
     this.autoStartEnabled = options?.autoStart !== false
     if (this.autoStartEnabled) {
       queueMicrotask(() => {
@@ -105,23 +107,25 @@ export class McpService extends Service<McpServiceState> {
     }
   }
 
-  listServers(): McpServerSnapshot[] {
+  listServers(_options?: { workspaceId?: string | null }): McpServerSnapshot[] {
     return Object.values(this.state.configs)
       .map((config) => this.buildSnapshot(config))
       .sort((a, b) => a.label.localeCompare(b.label))
   }
 
-  getServer(serverId: string): McpServerSnapshot | null {
+  getServer(serverId: string, _options?: { workspaceId?: string | null }): McpServerSnapshot | null {
     const config = this.state.configs[serverId]
     if (!config) return null
+
     return this.buildSnapshot(config)
   }
 
-  async createServer(input: CreateMcpServerInput): Promise<McpServerSnapshot> {
+  async createServer(input: CreateMcpServerInput, _options?: { workspaceId?: string | null }): Promise<McpServerSnapshot> {
     const label = normalizeLabel(input.label)
     if (!label) {
       throw new Error('Server label is required')
     }
+
 
     const transport = this.normalizeTransport(input.transport)
     const env = normalizeEnv(input.env)
@@ -139,6 +143,7 @@ export class McpService extends Service<McpServiceState> {
       enabled: input.enabled ?? true,
       createdAt: now,
       updatedAt: now,
+      workspaceId: null,
     }
 
     this.setState({ configs: { ...this.state.configs, [config.id]: config } })
@@ -153,11 +158,12 @@ export class McpService extends Service<McpServiceState> {
     return this.buildSnapshot(config)
   }
 
-  async updateServer(serverId: string, patch: UpdateMcpServerInput): Promise<McpServerSnapshot> {
-    const existing = this.state.configs[serverId]
-    if (!existing) {
-      throw new Error(`Server not found: ${serverId}`)
-    }
+  async updateServer(
+    serverId: string,
+    patch: UpdateMcpServerInput,
+    _options?: { workspaceId?: string | null }
+  ): Promise<McpServerSnapshot> {
+    const existing = this.requireServer(serverId)
 
     const updatedTransport = patch.transport ? this.normalizeTransport(patch.transport) : existing.transport
     const updatedEnv = patch.env ? normalizeEnv(patch.env) : existing.env
@@ -177,6 +183,7 @@ export class McpService extends Service<McpServiceState> {
       autoStart,
       enabled,
       updatedAt: Date.now(),
+      workspaceId: null,
     }
 
     this.setState({ configs: { ...this.state.configs, [serverId]: config } })
@@ -203,10 +210,11 @@ export class McpService extends Service<McpServiceState> {
     return this.buildSnapshot(config)
   }
 
-  async deleteServer(serverId: string): Promise<boolean> {
-    const configs = { ...this.state.configs }
-    if (!configs[serverId]) return false
+  async deleteServer(serverId: string, _options?: { workspaceId?: string | null }): Promise<boolean> {
+    if (!this.state.configs[serverId]) return false
+    this.requireServer(serverId)
 
+    const configs = { ...this.state.configs }
     delete configs[serverId]
     this.setState({ configs })
 
@@ -219,21 +227,23 @@ export class McpService extends Service<McpServiceState> {
     return true
   }
 
-  async refreshServer(serverId: string): Promise<McpServerSnapshot> {
-    const config = this.state.configs[serverId]
-    if (!config) throw new Error(`Server not found: ${serverId}`)
+  async refreshServer(serverId: string, _options?: { workspaceId?: string | null }): Promise<McpServerSnapshot> {
+    const config = this.requireServer(serverId)
     if (!config.enabled) throw new Error('Server is disabled')
 
     await this.ensureConnection(serverId, { refreshMetadata: true })
-    return this.buildSnapshot(config)
+    return this.buildSnapshot(this.state.configs[serverId])
   }
 
-  async toggleServer(serverId: string, enabled: boolean): Promise<McpServerSnapshot> {
-    return this.updateServer(serverId, { enabled })
+  async toggleServer(serverId: string, enabled: boolean, options?: { workspaceId?: string | null }): Promise<McpServerSnapshot> {
+    return this.updateServer(serverId, { enabled }, options)
   }
 
-  async testServer(input: { server?: CreateMcpServerInput; serverId?: string }): Promise<McpTestResult> {
-    const config = input.serverId ? this.state.configs[input.serverId] : undefined
+  async testServer(
+    input: { server?: CreateMcpServerInput; serverId?: string },
+    _options?: { workspaceId?: string | null }
+  ): Promise<McpTestResult> {
+    const config = input.serverId ? this.requireServer(input.serverId) : undefined
 
     if (!config && !input.server) {
       throw new Error('Either serverId or server configuration is required')
@@ -271,15 +281,17 @@ export class McpService extends Service<McpServiceState> {
     return result
   }
 
-  getAgentTools(): AgentTool[] {
+  getAgentTools(_options?: { workspaceId?: string | null }): AgentTool[] {
     const snapshots = this.listServers()
     const tools: AgentTool[] = []
 
     for (const server of snapshots) {
-      if (!server.enabled || server.status !== 'connected') continue
-      for (const tool of server.tools) {
+      if (!server.enabled) continue
+      const serverTools = Array.isArray(server.tools) ? server.tools : []
+      if (serverTools.length === 0) continue
+      for (const tool of serverTools) {
         tools.push({
-          name: buildToolName(server.slug, tool.name),
+          name: buildMcpToolName(server.slug, tool.name),
           description: tool.description ?? `${tool.name} (MCP via ${server.label})`,
           parameters: tool.inputSchema ?? { type: 'object', properties: {} },
           run: async (input, meta) => this.invokeTool(server.id, tool.name, input, meta),
@@ -565,7 +577,7 @@ export class McpService extends Service<McpServiceState> {
       resources: [],
       pid: null,
     }
-    return { ...config, ...runtime }
+    return { ...config, workspaceId: null, ...runtime }
   }
 
   private normalizeTransport(transport: McpTransportConfig): McpTransportConfig {
@@ -611,10 +623,14 @@ export class McpService extends Service<McpServiceState> {
     throw new Error('Unsupported transport type')
   }
 
+
   private emitServersChanged(): void {
     try {
       const servers = this.listServers()
-      this.emit('mcp:servers:changed', { servers })
+      this.emit('mcp:servers:changed', {
+        workspaceId: null,
+        servers,
+      })
       this.maybeEmitToolsChanged(servers)
     } catch (error) {
       console.error('[mcp] Failed to emit servers changed event', error)
@@ -625,7 +641,7 @@ export class McpService extends Service<McpServiceState> {
     try {
       const servers = snapshots ?? this.listServers()
       const available = servers
-        .filter((server) => server.enabled && server.status === 'connected' && Array.isArray(server.tools) && server.tools.length > 0)
+        .filter((server) => server.enabled && Array.isArray(server.tools) && server.tools.length > 0)
         .map((server) => ({
           id: server.id,
           slug: server.slug,
@@ -653,6 +669,7 @@ export class McpService extends Service<McpServiceState> {
       }))
 
       this.emit('mcp:tools:changed', {
+        workspaceId: null,
         version: this.toolsVersion,
         servers: summary,
       })
@@ -660,22 +677,51 @@ export class McpService extends Service<McpServiceState> {
       console.error('[mcp] Failed to emit tools changed event', error)
     }
   }
+
+  private sanitizeLegacyWorkspaceScopes(): void {
+    const entries = Object.entries(this.state.configs)
+    if (entries.length === 0) return
+
+    let mutated = false
+    const configs: Record<string, McpServerConfig> = {}
+    for (const [id, config] of entries) {
+      if (config.workspaceId) {
+        mutated = true
+        configs[id] = { ...config, workspaceId: null }
+      } else {
+        configs[id] = config
+      }
+    }
+
+    if (mutated) {
+      this.setState({ configs })
+    }
+  }
+
+  private requireServer(serverId: string): McpServerConfig {
+    const config = this.state.configs[serverId]
+    if (!config) {
+      throw new Error(`Server not found: ${serverId}`)
+    }
+    return config
+  }
 }
+
 
 function normalizeLabel(label: string | undefined): string {
   return (label ?? '').trim()
 }
 
- function normalizeEnv(env?: Record<string, string | undefined | null>): Record<string, string> {
-   if (!env) return {}
-   const result: Record<string, string> = {}
-   for (const [key, value] of Object.entries(env)) {
-     if (!key?.trim()) continue
-     if (value === undefined || value === null) continue
-     result[key.trim()] = String(value)
-   }
-   return result
- }
+function normalizeEnv(env?: Record<string, string | undefined | null>): Record<string, string> {
+  if (!env) return {}
+  const result: Record<string, string> = {}
+  for (const [key, value] of Object.entries(env)) {
+    if (!key?.trim()) continue
+    if (value === undefined || value === null) continue
+    result[key.trim()] = String(value)
+  }
+  return result
+}
  
  function normalizeHeaders(headers?: Record<string, string | undefined | null>): Record<string, string> | undefined {
    if (!headers) return undefined
@@ -712,9 +758,12 @@ function createServerSlug(label: string, id: string): string {
   return `${base || 'mcp'}-${suffix}`
 }
 
-function buildToolName(slug: string, toolName: string): string {
-  const sanitized = toolName.replace(/\s+/g, '_')
-  return `${TOOL_NAME_PREFIX}.${slug}.${sanitized}`
+export function buildMcpToolName(slug: string, toolName: string): string {
+  const sanitized = toolName
+    .trim()
+    .replace(/\s+/g, '_')
+    .replace(/\./g, '_')
+  return `${TOOL_NAME_PREFIX}_${slug}_${sanitized}`
 }
 
 function extractPid(transport: Transport): number | null {

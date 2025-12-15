@@ -18,7 +18,7 @@
 
 import type { NodeFunction, NodeExecutionPolicy } from '../types'
 
-const MCP_TOOL_PREFIX = 'mcp.'
+const MCP_TOOL_PREFIX = 'mcp_'
 
 /**
  * Node metadata
@@ -36,6 +36,7 @@ export const toolsNode: NodeFunction = async (flow, context, dataIn, inputs, con
   const executionContext = context ?? (inputs.has('context') ? await inputs.pull('context') : null)
 
   const toolsConfig = config.tools || 'auto'
+  const isPluginEnabled = createMcpPluginEnabledChecker(config || {})
 
   // Get all available tools from FlowAPI
   const allTools = flow.tools.list()
@@ -88,7 +89,7 @@ export const toolsNode: NodeFunction = async (flow, context, dataIn, inputs, con
     }
   }
 
-  const outputTools = includeMcpTools(selectedTools, allTools)
+  const outputTools = mergeTools(selectedTools, allTools, { isPluginEnabled })
 
   return {
     context: executionContext,
@@ -97,17 +98,24 @@ export const toolsNode: NodeFunction = async (flow, context, dataIn, inputs, con
   }
 }
 
-function includeMcpTools(selectedTools: any[], allTools: any[]): any[] {
-  if (!Array.isArray(allTools) || allTools.length === 0) {
-    return selectedTools
-  }
-
-  const result: any[] = []
+function mergeTools(
+  selectedTools: any[],
+  allTools: any[],
+  options?: { isPluginEnabled?: (pluginId?: string | null) => boolean }
+): any[] {
+  const pluginEnabled = options?.isPluginEnabled || (() => true)
   const seen = new Set<string>()
+  const result: any[] = []
 
   const addTool = (tool: any) => {
     if (!tool) return
     const name = typeof tool?.name === 'string' ? tool.name : undefined
+    if (name) {
+      const pluginId = getMcpPluginId(name)
+      if (pluginId && !pluginEnabled(pluginId)) {
+        return
+      }
+    }
     if (!name) {
       result.push(tool)
       return
@@ -117,16 +125,46 @@ function includeMcpTools(selectedTools: any[], allTools: any[]): any[] {
     result.push(tool)
   }
 
-  selectedTools.forEach(addTool)
+  if (Array.isArray(selectedTools)) {
+    selectedTools.forEach(addTool)
+  }
 
-  for (const tool of allTools) {
-    const name = typeof tool?.name === 'string' ? tool.name : undefined
-    if (!name || !name.startsWith(MCP_TOOL_PREFIX)) {
-      continue
+  if (Array.isArray(allTools)) {
+    for (const tool of allTools) {
+      const name = typeof tool?.name === 'string' ? tool.name : undefined
+      const pluginId = getMcpPluginId(name)
+      if (!pluginId) continue
+      if (!pluginEnabled(pluginId)) continue
+      addTool(tool)
     }
-    addTool(tool)
   }
 
   return result
+}
+
+function createMcpPluginEnabledChecker(config: Record<string, any>): (pluginId?: string | null) => boolean {
+  const legacyEnabled = config?.mcpEnabled !== false
+  const overrides = isRecord(config?.mcpPlugins) ? (config.mcpPlugins as Record<string, any>) : undefined
+  return (pluginId?: string | null) => {
+    if (!pluginId) return true
+    if (overrides && Object.prototype.hasOwnProperty.call(overrides, pluginId)) {
+      return overrides[pluginId] !== false
+    }
+    return legacyEnabled
+  }
+}
+
+function getMcpPluginId(toolName?: string | null): string | null {
+  if (typeof toolName !== 'string') return null
+  if (!toolName.startsWith(MCP_TOOL_PREFIX)) return null
+  const remainder = toolName.slice(MCP_TOOL_PREFIX.length)
+  const separatorIndex = remainder.indexOf('_')
+  if (separatorIndex === -1) return null
+  const pluginId = remainder.slice(0, separatorIndex)
+  return pluginId || null
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 

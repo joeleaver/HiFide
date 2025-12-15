@@ -8,7 +8,8 @@ import { useKnowledgeBaseHydration } from '@/store/screenHydration'
 
 // MDX Editor (dark theme)
 import '../styles/mdx-dark.css'
-import { MDXEditor, MDXEditorMethods, UndoRedo, BoldItalicUnderlineToggles, BlockTypeSelect, ListsToggle, CodeToggle, toolbarPlugin, headingsPlugin, listsPlugin, quotePlugin, markdownShortcutPlugin, codeBlockPlugin, codeMirrorPlugin, InsertCodeBlock, ChangeCodeMirrorLanguage, ConditionalContents } from '@mdxeditor/editor'
+import { MDXEditor, MDXEditorMethods, UndoRedo, BoldItalicUnderlineToggles, BlockTypeSelect, ListsToggle, CodeToggle, toolbarPlugin, headingsPlugin, listsPlugin, quotePlugin, markdownShortcutPlugin, codeBlockPlugin, codeMirrorPlugin, InsertCodeBlock, ChangeCodeMirrorLanguage, ConditionalContents, CreateLink, InsertTable, linkPlugin, linkDialogPlugin, tablePlugin } from '@mdxeditor/editor'
+import { normalizeReferenceLinks } from '@/lib/editor/markdownLinkNormalizer'
 
 
 // Supported code languages for MDXEditor CodeMirror integration
@@ -102,7 +103,8 @@ function sanitizeUnknownCodeFences(md: string): string {
 function sanitizeMarkdownForEditor(text: string): string {
   if (!text) return ''
   const norm = text.replace(/\r\n?/g, '\n')
-  return sanitizeUnknownCodeFences(norm)
+  const normalizedLinks = normalizeReferenceLinks(norm)
+  return sanitizeUnknownCodeFences(normalizedLinks)
 }
 
 /**
@@ -146,7 +148,8 @@ export default function KnowledgeBaseView() {
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [query, setQuery] = useState('')
   const [tags, setTags] = useState<string[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const selectedId = useKnowledgeBase((s) => s.activeItemId)
+  const setSelectedId = useKnowledgeBase((s) => s.setActiveItemId)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [editTags, setEditTags] = useState<string[]>([])
@@ -384,6 +387,8 @@ export default function KnowledgeBaseView() {
                                   <BoldItalicUnderlineToggles />
                                   <CodeToggle />
                                   <ListsToggle />
+                                  <CreateLink />
+                                  <InsertTable />
                                   <InsertCodeBlock />
                                 </>
                               )
@@ -394,14 +399,18 @@ export default function KnowledgeBaseView() {
                     }),
                     headingsPlugin(),
                     listsPlugin(),
+                    tablePlugin(),
                     quotePlugin(),
                     markdownShortcutPlugin(),
                     /* Enable code blocks + syntax highlighting */
                     codeBlockPlugin({ defaultCodeBlockLanguage: 'txt' }),
                     codeMirrorPlugin({
                       codeBlockLanguages: KB_CODE_LANGUAGES
-                    })
+                    }),
+                    linkPlugin(),
+                    linkDialogPlugin()
                   ]}
+
                 />
               </div>
             </div>

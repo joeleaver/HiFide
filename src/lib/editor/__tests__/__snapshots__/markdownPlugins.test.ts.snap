@@ -9,7 +9,10 @@ exports[`markdown plugin registry orders plugins deterministically 1`] = `
   "shortcuts",
   "codeblock",
   "codemirror",
+  "table",
   "thematic-break",
   "frontmatter",
+  "links",
+  "link-dialog",
 ]
 `;

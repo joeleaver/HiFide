@@ -126,18 +126,43 @@ export function createMiscHandlers(
   // Flow tools
   addMethod('flows.getTools', async () => {
     try {
-      const { getAgentToolSnapshot } = await import('../../../tools/agentToolRegistry.js')
-      const { getToolsService } = await import('../../../services/index.js')
-      const toolsService = getToolsService()
+      const workspaceId = await getConnectionWorkspaceId(connection)
+      if (!workspaceId) {
+        return { ok: true, tools: [], mcpServers: [] }
+      }
 
-      const agentTools = getAgentToolSnapshot()
+      const { getAgentToolSnapshot } = await import('../../../tools/agentToolRegistry.js')
+      const { getToolsService, getMcpService } = await import('../../../services/index.js')
+      const { buildMcpToolName } = await import('../../../services/McpService.js')
+      const toolsService = getToolsService()
+      const mcpService = getMcpService()
+
+      const agentTools = getAgentToolSnapshot(workspaceId)
       const tools = agentTools.map((t: any) => ({
         name: t.name,
         description: t.description || '',
         category: toolsService.getToolCategory(t.name),
       }))
 
-      return { ok: true, tools }
+      const mcpServers = mcpService.listServers({ workspaceId }).map((server) => ({
+        id: server.id,
+        slug: server.slug,
+        label: server.label,
+        workspaceId: server.workspaceId ?? null,
+        status: server.status,
+        enabled: server.enabled,
+        autoStart: server.autoStart,
+        toolCount: Array.isArray(server.tools) ? server.tools.length : 0,
+        tools: Array.isArray(server.tools)
+          ? server.tools.map((tool) => ({
+              name: tool.name,
+              description: tool.description || null,
+              fullName: buildMcpToolName(server.slug, tool.name),
+            }))
+          : [],
+      }))
+
+      return { ok: true, tools, mcpServers }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
     }

@@ -4,8 +4,7 @@ import ReactFlow, {
   Controls,
   ControlButton,
   MiniMap,
-  applyNodeChanges,
-  applyEdgeChanges,
+
   useReactFlow,
   type Connection,
   type NodeChange,
@@ -69,7 +68,14 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   const localNodes = useFlowEditorLocal((s) => s.nodes) as FlowNode[]
   const setLocalNodes = useFlowEditorLocal((s) => s.setNodes)
   const localEdges = useFlowEditorLocal((s) => s.edges) as Edge[]
-  const setLocalEdges = useFlowEditorLocal((s) => s.setEdges)
+  const applyLocalNodeChanges = useFlowEditorLocal((s) => s.applyNodeChanges)
+  const applyLocalEdgeChanges = useFlowEditorLocal((s) => s.applyEdgeChanges)
+
+  const updateNodeData = useFlowEditorLocal((s) => s.updateNodeData)
+  const updateNodeConfig = useFlowEditorLocal((s) => s.updateNodeConfig)
+  const addEdgeToGraph = useFlowEditorLocal((s) => s.addEdge)
+  const addNodeToGraph = useFlowEditorLocal((s) => s.addNode)
+
 
   // ===== REMOTE STATE (Execution & Persistence) =====
   // Execution state (metadata only) - subscribe manually to avoid ref-only rerenders from IPC
@@ -237,48 +243,17 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
 
   // Handlers for node updates (passed to FlowNode components)
   const handleNodeLabelChange = useCallback((nodeId: string, newLabel: string) => {
-    const updated = localNodes.map(n =>
-      n.id === nodeId
-        ? { ...n, data: { ...n.data, labelBase: newLabel, label: newLabel } }
-        : n
-    )
-    setLocalNodes(updated as any)
-  }, [localNodes, setLocalNodes])
+    updateNodeData(nodeId, { labelBase: newLabel, label: newLabel })
+  }, [updateNodeData])
 
   const handleNodeConfigChange = useCallback((nodeId: string, patch: any) => {
-    console.log('[FlowCanvasPanel] handleNodeConfigChange:', { nodeId, patch })
-
-    // Find the original node to check its data
-    const originalNode = localNodes.find(n => n.id === nodeId)
-    console.log('[FlowCanvasPanel] Original node data:', {
-      id: originalNode?.id,
-      nodeType: originalNode?.data?.nodeType,
-      config: originalNode?.data?.config,
-      allDataKeys: originalNode?.data ? Object.keys(originalNode.data) : []
-    })
-
-    const updated = localNodes.map(n =>
-      n.id === nodeId
-        ? { ...n, data: { ...n.data, config: { ...(n.data?.config || {}), ...patch } } }
-        : n
-    )
-    const updatedNode = updated.find(n => n.id === nodeId)
-    console.log('[FlowCanvasPanel] Updated node:', {
-      id: updatedNode?.id,
-      nodeType: updatedNode?.data?.nodeType,
-      config: updatedNode?.data?.config
-    })
-    setLocalNodes(updated as any)
-  }, [localNodes, setLocalNodes])
+    updateNodeConfig(nodeId, patch)
+  }, [updateNodeConfig])
 
   const handleNodeExpandToggle = useCallback((nodeId: string) => {
-    const updated = localNodes.map(n =>
-      n.id === nodeId
-        ? { ...n, data: { ...n.data, expanded: !n.data?.expanded } }
-        : n
-    )
-    setLocalNodes(updated as any)
-  }, [localNodes, setLocalNodes])
+    const node = localNodes.find((n: any) => n?.id === nodeId)
+    updateNodeData(nodeId, { expanded: !node?.data?.expanded })
+  }, [localNodes, updateNodeData])
 
   // ===== MERGE: Execution state with local nodes for display =====
   const displayNodes = useMemo(() => {
@@ -319,7 +294,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
     setTimeout(() => {
       rfRef.current?.fitView({ padding: 0.2, duration: 300 })
     }, 50)
-  }, [localNodes, localEdges])
+  }, [localNodes, localEdges, addEdgeToGraph])
 
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
@@ -353,28 +328,18 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
       return true
     })
 
-    const updated = applyNodeChanges(filteredChanges, localNodes as FlowNode[]) as FlowNode[]
-    // Also update dimensions ref from the updated nodes
-    for (const node of updated) {
-      if (node.width !== undefined && node.width !== null && node.height !== undefined && node.height !== null) {
-        nodeDimensionsRef.current[node.id] = {
-          width: node.width,
-          height: node.height,
-        }
-      }
-    }
-    setLocalNodes(updated as any)
+    // Push changes through typed command API (single write surface)
+    applyLocalNodeChanges(filteredChanges as any)
 
     // Local state changes will trigger debounced sync to store automatically
-  }, [localNodes])
+  }, [localNodes, applyLocalNodeChanges])
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
-    // Apply changes to local state immediately
-    const updated = applyEdgeChanges(changes, localEdges as Edge[]) as Edge[]
-    setLocalEdges(updated as any)
+    // Push changes through typed command API (single write surface)
+    applyLocalEdgeChanges(changes as any)
 
     // Local state changes will trigger debounced sync to store automatically
-  }, [localEdges])
+  }, [applyLocalEdgeChanges])
 
   const onConnect = useCallback((connection: Connection) => {
     const sourceHandle = connection.sourceHandle
@@ -416,8 +381,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
       markerEnd: { type: 'arrowclosed' as any, color },
     }
 
-    // Add to local state immediately
-    setLocalEdges([...(localEdges as Edge[]), newEdge] as any)
+    addEdgeToGraph(newEdge as any)
 
     // Local state changes will trigger debounced sync to store automatically
   }, [localNodes, localEdges])
@@ -918,8 +882,7 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
               position,
             }
 
-            // Add to local state (will be synced to store when user executes/saves)
-            setLocalNodes([...(localNodes as FlowNode[]), newNode] as any)
+            addNodeToGraph(newNode as any)
           }}
           onDragOver={(event) => {
             event.preventDefault()

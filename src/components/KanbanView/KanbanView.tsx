@@ -1,5 +1,6 @@
-import { useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import {
+  Anchor,
   ActionIcon,
   Badge,
   Box,
@@ -25,7 +26,7 @@ import {
   Draggable,
   type DropResult,
 } from '@hello-pangea/dnd'
-import { IconPlus, IconEdit, IconTrash, IconColumns3, IconFolderPlus, IconRefresh, IconAlertTriangle, IconArchive } from '@tabler/icons-react'
+import { IconPlus, IconEdit, IconTrash, IconColumns3, IconFolderPlus, IconRefresh, IconAlertTriangle, IconArchive, IconBook } from '@tabler/icons-react'
 
 import { getBackendClient } from '../../lib/backend/bootstrap'
 import type { KanbanEpic, KanbanStatus, KanbanTask, KanbanBoard } from '../../../electron/store/types'
@@ -34,6 +35,8 @@ import { useKanbanHydration } from '@/store/screenHydration'
 import { useBackendBinding } from '@/store/binding'
 import { useKanbanUI } from '@/store/kanbanUI'
 import type { TaskFormValues, EpicFormValues } from '@/store/kanbanUI'
+import { useKnowledgeBase } from '@/store/knowledgeBase'
+import { useUiStore } from '@/store/ui'
 import StreamingMarkdown from '../StreamingMarkdown'
 
 const COLUMNS: { status: KanbanStatus; label: string }[] = [
@@ -94,6 +97,9 @@ export default function KanbanView() {
 
   const tasksByStatus = useKanban((s) => s.tasksByStatus)
   const epicMap = useKanban((s) => s.epicMap)
+  const knowledgeBaseItems = useKnowledgeBase((s) => s.itemsMap)
+  const setKnowledgeBaseActiveItem = useKnowledgeBase((s) => s.setActiveItemId)
+  const setCurrentViewLocal = useUiStore((s) => s.setCurrentViewLocal)
 
   const openCreateTask = useKanbanUI((s) => s.openCreateTask)
   const openEditTask = useKanbanUI((s) => s.openEditTask)
@@ -183,10 +189,16 @@ export default function KanbanView() {
       console.error('[kanban] move failed:', err)
       notifications.show({ color: 'red', title: 'Move failed', message: 'Unable to move task. Please try again.' })
     }
-  }
-
-
-  const handleDeleteTask = async (task: KanbanTask) => {
+   }
+ 
+   const handleOpenKnowledgeBase = useCallback((kbArticleId?: string | null) => {
+     const targetId = typeof kbArticleId === 'string' ? kbArticleId.trim() : kbArticleId ?? null
+     if (!targetId) return
+     setKnowledgeBaseActiveItem(targetId)
+     setCurrentViewLocal('knowledgeBase')
+   }, [setCurrentViewLocal, setKnowledgeBaseActiveItem])
+ 
+   const handleDeleteTask = async (task: KanbanTask) => {
     const confirmed = window.confirm(`Delete task "${task.title}"?`)
     if (!confirmed) return
 
@@ -201,6 +213,11 @@ export default function KanbanView() {
   }
 
   const handleSubmitTask = async (values: TaskFormValues, existingId?: string) => {
+    const sanitizedKbArticleId =
+      typeof values.kbArticleId === 'string'
+        ? values.kbArticleId.trim() || null
+        : null
+
     try {
       if (existingId) {
         const res: any = await getBackendClient()?.rpc('kanban.updateTask', {
@@ -211,6 +228,7 @@ export default function KanbanView() {
             status: values.status,
             epicId: values.epicId,
             description: values.description,
+            kbArticleId: sanitizedKbArticleId,
           }
         })
         if (!res?.ok || !res.task) throw new Error('Update rejected')
@@ -223,6 +241,7 @@ export default function KanbanView() {
             status: values.status,
             epicId: values.epicId,
             description: values.description,
+            kbArticleId: sanitizedKbArticleId,
           }
         })
         if (!res?.ok || !res.task) throw new Error('Create rejected')
@@ -432,8 +451,10 @@ export default function KanbanView() {
                                 epic={task.epicId ? epicMap.get(task.epicId) ?? null : null}
                                 provided={dragProvided}
                                 dragging={dragSnapshot.isDragging}
+                                kbArticleTitle={task.kbArticleId ? knowledgeBaseItems[task.kbArticleId]?.title ?? null : null}
                                 onEdit={() => openEditTask(task)}
                                 onDelete={() => handleDeleteTask(task)}
+                                onOpenKnowledgeBase={() => handleOpenKnowledgeBase(task.kbArticleId)}
                               />
                             )}
                           </Draggable>
@@ -490,11 +511,13 @@ type KanbanTaskCardProps = {
   epic: KanbanEpic | null
   provided: any
   dragging: boolean
+  kbArticleTitle: string | null
   onEdit: () => void
   onDelete: () => void
+  onOpenKnowledgeBase?: () => void
 }
 
-function KanbanTaskCard({ task, epic, provided, dragging, onEdit, onDelete }: KanbanTaskCardProps) {
+function KanbanTaskCard({ task, epic, provided, dragging, kbArticleTitle, onEdit, onDelete, onOpenKnowledgeBase }: KanbanTaskCardProps) {
   return (
     <Paper
       ref={provided.innerRef}
@@ -525,6 +548,35 @@ function KanbanTaskCard({ task, epic, provided, dragging, onEdit, onDelete }: Ka
               <StreamingMarkdown content={task.description} showCursor={false} />
             </Box>
           )}
+          {task.kbArticleId && (
+            <Anchor
+              component="button"
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                onOpenKnowledgeBase?.()
+              }}
+              mt="xs"
+              size="sm"
+              c="var(--mantine-color-blue-4)"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                maxWidth: '100%',
+              }}
+            >
+              <IconBook size={14} />
+              <Text
+                size="sm"
+                c="inherit"
+                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                title={kbArticleTitle ?? task.kbArticleId}
+              >
+                {kbArticleTitle ?? task.kbArticleId}
+              </Text>
+            </Anchor>
+          )}
         </Box>
         <Stack gap={4}>
           <ActionIcon variant="subtle" size="sm" onClick={onEdit}>
@@ -551,6 +603,13 @@ function TaskModal({ epics, onSubmit, saving }: TaskModalProps) {
   const updateTaskForm = useKanbanUI((s) => s.updateTaskForm)
   const closeTaskModal = useKanbanUI((s) => s.closeTaskModal)
   const isTaskFormValid = useKanbanUI((s) => s.isTaskFormValid())
+  const kbItems = useKnowledgeBase((s) => s.itemsMap)
+
+  const knowledgeBaseOptions = useMemo(() => {
+    return Object.values(kbItems || {})
+      .map((item: any) => ({ value: item.id, label: item.title || item.id }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [kbItems])
 
   if (!modalState) return null
 
@@ -564,6 +623,7 @@ function TaskModal({ epics, onSubmit, saving }: TaskModalProps) {
         title: taskForm.title.trim(),
         status: taskForm.status,
         epicId: taskForm.epicId,
+        kbArticleId: taskForm.kbArticleId,
         description: taskForm.description.trim(),
       },
       modalState.mode === 'edit' ? modalState.task.id : undefined,
@@ -605,6 +665,16 @@ function TaskModal({ epics, onSubmit, saving }: TaskModalProps) {
             onChange={(value) => updateTaskForm({ epicId: value })}
           />
         </Group>
+        <Select
+          label="Knowledge Base article"
+          data={knowledgeBaseOptions}
+          allowDeselect
+          searchable
+          placeholder="No linked article"
+          value={taskForm.kbArticleId}
+          onChange={(value) => updateTaskForm({ kbArticleId: value })}
+          nothingFoundMessage={knowledgeBaseOptions.length ? 'No matches' : 'No articles yet'}
+        />
         <Textarea
           label="Description"
           minRows={4}

@@ -1,6 +1,33 @@
 import { getBackendClient } from '../lib/backend/bootstrap'
 import type { FlowExecutionArgs } from '@/../../electron/flow-engine/types'
 
+export interface FlowToolDefinition {
+  name: string
+  description: string
+  category?: string
+  displayName?: string
+  pluginId?: string
+  pluginLabel?: string
+}
+
+export interface FlowMcpToolSummary {
+  name: string
+  description?: string | null
+  fullName: string
+}
+
+export interface FlowMcpServerSummary {
+  id: string
+  slug: string
+  label: string
+  workspaceId: string | null
+  status: 'disconnected' | 'connecting' | 'connected' | 'error'
+  enabled: boolean
+  autoStart: boolean
+  toolCount: number
+  tools: FlowMcpToolSummary[]
+}
+
 export type FlowEvent = {
   requestId: string
   sessionId?: string
@@ -39,12 +66,14 @@ export const FlowService = {
     return client.rpc('flow.stop', { requestId })
   },
 
-  async getTools(): Promise<Array<{ name: string; description: string; category?: string }>> {
+  async getTools(): Promise<{ tools: FlowToolDefinition[]; mcpServers: FlowMcpServerSummary[] }> {
     const client = getBackendClient()
-    if (!client) return []
+    if (!client) return { tools: [], mcpServers: [] }
     try { await client.whenReady?.(5000) } catch {}
     const result = await client.rpc('flows.getTools', {})
-    return result?.tools || []
+    const tools = Array.isArray(result?.tools) ? result.tools : []
+    const mcpServers = Array.isArray(result?.mcpServers) ? result.mcpServers : []
+    return { tools, mcpServers }
   },
 
   async getActive(): Promise<string[]> {

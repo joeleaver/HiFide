@@ -61,6 +61,12 @@ export class KanbanService extends Service<KanbanState> {
     }
   }
 
+  private sanitizeKbArticleId(value?: string | null): string | null {
+    if (value === undefined || value === null) return value ?? null
+    const trimmed = String(value).trim()
+    return trimmed.length ? trimmed : null
+  }
+
   private getWorkspaceState(workspaceId: string): KanbanWorkspaceState {
     const normalized = this.normalizeWorkspaceId(workspaceId)
     return this.state.workspaces[normalized] ?? this.createWorkspaceState()
@@ -247,6 +253,7 @@ export class KanbanService extends Service<KanbanState> {
     title: string
     status?: KanbanStatus
     epicId?: string | null
+    kbArticleId?: string | null
     description?: string
     assignees?: string[]
     tags?: string[]
@@ -266,6 +273,7 @@ export class KanbanService extends Service<KanbanState> {
       order: nextOrderForStatus(board, status),
       description: input.description ?? '',
       epicId: input.epicId ?? null,
+      kbArticleId: this.sanitizeKbArticleId(input.kbArticleId),
       assignees: input.assignees ? [...input.assignees] : [],
       tags: input.tags ? [...input.tags] : [],
       createdAt: timestamp,
@@ -312,6 +320,10 @@ export class KanbanService extends Service<KanbanState> {
       status: patch.status ?? task.status,
       description: patch.description ?? task.description ?? '',
       epicId: patch.epicId === undefined ? task.epicId ?? null : patch.epicId ?? null,
+      kbArticleId:
+        patch.kbArticleId === undefined
+          ? task.kbArticleId ?? null
+          : this.sanitizeKbArticleId(patch.kbArticleId),
       assignees: patch.assignees ? [...patch.assignees] : task.assignees,
       tags: patch.tags ? [...patch.tags] : task.tags,
       updatedAt: Date.now(),

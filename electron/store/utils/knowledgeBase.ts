@@ -91,6 +91,144 @@ export function extractTrailingMeta(s: string): { body: string; tags?: string[];
   return out
 }
 
+const TOKEN_SPLIT_REGEX = /[^a-z0-9]+/i
+const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'this', 'that', 'from', 'into', 'your', 'you', 'are', 'was', 'were', 'have', 'has', 'had', 'not', 'but', 'can', 'will', 'its', 'our', 'their', 'about'])
+
+function tokenizeQueryTokens(query: string): string[] {
+  const rawTokens = (query || '')
+    .toLowerCase()
+    .split(TOKEN_SPLIT_REGEX)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3 && !STOP_WORDS.has(t))
+
+  const seen = new Set<string>()
+  const tokens: string[] = []
+  for (const token of rawTokens) {
+    if (!token || seen.has(token)) continue
+    seen.add(token)
+    tokens.push(token)
+  }
+  return tokens
+}
+
+type CountResult = { count: number; firstIndex: number }
+
+function countTokenMatches(haystack: string, needle: string): CountResult {
+  if (!haystack || !needle) return { count: 0, firstIndex: -1 }
+  let idx = haystack.indexOf(needle)
+  if (idx === -1) return { count: 0, firstIndex: -1 }
+  let count = 0
+  const firstIndex = idx
+  while (idx !== -1) {
+    count += 1
+    idx = haystack.indexOf(needle, idx + needle.length)
+  }
+  return { count, firstIndex }
+}
+
+function buildBodyExcerpt(body: string, index: number, matchLength: number): string {
+  if (!body) return ''
+  const start = Math.max(0, index - 80)
+  const end = Math.min(body.length, index + matchLength + 80)
+  const prefix = start > 0 ? '…' : ''
+  const suffix = end < body.length ? '…' : ''
+  return `${prefix}${body.slice(start, end)}${suffix}`.trim()
+}
+
+function buildFieldExcerpt(label: string, raw: string, index: number, matchLength: number): string {
+  if (!raw) return ''
+  if (index >= 0) {
+    const start = Math.max(0, index - 40)
+    const end = Math.min(raw.length, index + matchLength + 40)
+    const prefix = start > 0 ? '…' : ''
+    const suffix = end < raw.length ? '…' : ''
+    return `${label}: ${prefix}${raw.slice(start, end)}${suffix}`.trim()
+  }
+  const truncated = raw.length > 160 ? `${raw.slice(0, 160)}…` : raw
+  return `${label}: ${truncated}`.trim()
+}
+
+type TokenScoreInput = {
+  tokens: string[]
+  titleRaw: string
+  titleLower: string
+  tagsRaw: string
+  tagsLower: string
+  filesRaw: string
+  filesLower: string
+  bodyRaw: string
+  bodyLower: string
+}
+
+function scoreTokenMatches(ctx: TokenScoreInput): { score: number; excerpt?: string } | null {
+  if (!ctx.tokens.length) return null
+  let uniqueTokensMatched = 0
+  let totalHits = 0
+  let titleHits = 0
+  let tagHits = 0
+  let fileHits = 0
+  let bodyHits = 0
+  let excerpt: string | undefined
+
+  for (const token of ctx.tokens) {
+    let tokenMatched = false
+
+    const titleMatch = countTokenMatches(ctx.titleLower, token)
+    if (titleMatch.count > 0) {
+      tokenMatched = true
+      titleHits += titleMatch.count
+      totalHits += titleMatch.count
+      if (!excerpt && titleMatch.firstIndex >= 0) {
+        excerpt = buildFieldExcerpt('Title', ctx.titleRaw, titleMatch.firstIndex, token.length)
+      }
+    }
+
+    const tagsMatch = countTokenMatches(ctx.tagsLower, token)
+    if (tagsMatch.count > 0) {
+      tokenMatched = true
+      tagHits += tagsMatch.count
+      totalHits += tagsMatch.count
+      if (!excerpt && tagsMatch.firstIndex >= 0) {
+        excerpt = buildFieldExcerpt('Tags', ctx.tagsRaw, tagsMatch.firstIndex, token.length)
+      }
+    }
+
+    const filesMatch = countTokenMatches(ctx.filesLower, token)
+    if (filesMatch.count > 0) {
+      tokenMatched = true
+      fileHits += filesMatch.count
+      totalHits += filesMatch.count
+      if (!excerpt && filesMatch.firstIndex >= 0) {
+        excerpt = buildFieldExcerpt('Files', ctx.filesRaw, filesMatch.firstIndex, token.length)
+      }
+    }
+
+    const bodyMatch = countTokenMatches(ctx.bodyLower, token)
+    if (bodyMatch.count > 0) {
+      tokenMatched = true
+      bodyHits += bodyMatch.count
+      totalHits += bodyMatch.count
+      if (!excerpt && bodyMatch.firstIndex >= 0) {
+        excerpt = buildBodyExcerpt(ctx.bodyRaw, bodyMatch.firstIndex, token.length)
+      }
+    }
+
+    if (tokenMatched) {
+      uniqueTokensMatched += 1
+    }
+  }
+
+  if (!uniqueTokensMatched) return null
+
+  const coverageScore = uniqueTokensMatched / ctx.tokens.length
+  const metadataScore = (titleHits * 2.5) + (tagHits * 1.5) + (fileHits * 1.25)
+  const bodyScore = Math.min(bodyHits, 12) * 0.5
+  const densityScore = totalHits * 0.15
+  const score = Number(((coverageScore * 5) + metadataScore + bodyScore + densityScore).toFixed(3))
+
+  return { score, excerpt }
+}
+
 
 function parseFrontMatter(text: string): { meta: Partial<KbMeta>; body: string } {
   if (!text.startsWith('---')) return { meta: {}, body: text }
@@ -297,9 +435,11 @@ export async function search(baseDir: string, params: { query?: string; tags?: s
   const { query, tags, limit = 50 } = params || {}
   const q = (query || '').toLowerCase().trim()
   const tagSet = new Set((tags || []).map((t) => t.toLowerCase()))
+  const tokens = tokenizeQueryTokens(q)
   const dir = await ensureKbRoot(baseDir)
   const entries = await fs.readdir(dir).catch(() => [])
   const out: KbHit[] = []
+  const fallbackCandidates: Array<{ item: KbItem; excerpt?: string; score: number }> = []
 
   for (const name of entries.sort()) {
     if (!name.endsWith('.md')) continue
@@ -330,25 +470,90 @@ export async function search(baseDir: string, params: { query?: string; tags?: s
     // Text match
     if (!q) {
       out.push(item)
-    } else {
-      const titleTagsFiles = `${item.title}\n${item.tags.join(', ')}\n${(item as any).files?.join('\n') ?? ''}`.toLowerCase()
-      let matched = false
-      let excerpt: string | undefined
-      if (titleTagsFiles.includes(q)) matched = true
-      const bl = (body || '').toLowerCase()
-      const bi = bl.indexOf(q)
-      if (bi !== -1) {
+      if (out.length >= limit) break
+      continue
+    }
+
+    const titleRaw = item.title || ''
+    const tagsRaw = item.tags.join(', ')
+    const filesRaw = (item.files || []).join(', ')
+    const bodyRaw = body || ''
+
+    const titleLower = titleRaw.toLowerCase()
+    const tagsLower = tagsRaw.toLowerCase()
+    const filesLower = filesRaw.toLowerCase()
+    const bodyLower = bodyRaw.toLowerCase()
+
+    let matched = false
+    let excerpt: string | undefined
+
+    const titleIdx = titleLower.indexOf(q)
+    if (titleIdx !== -1) {
+      matched = true
+      excerpt = buildFieldExcerpt('Title', titleRaw, titleIdx, q.length)
+    }
+
+    if (!matched) {
+      const tagsIdx = tagsLower.indexOf(q)
+      if (tagsIdx !== -1) {
         matched = true
-        const bodyStart = Math.max(0, bi - 60)
-        const bodyEnd = Math.min(body.length, bi + q.length + 60)
-        excerpt = body.slice(bodyStart, bodyEnd)
-      }
-      if (matched) {
-        out.push({ ...item, excerpt, score: 1 })
+        excerpt = buildFieldExcerpt('Tags', tagsRaw, tagsIdx, q.length)
       }
     }
-    if (out.length >= limit) break
+
+    if (!matched) {
+      const filesIdx = filesLower.indexOf(q)
+      if (filesIdx !== -1) {
+        matched = true
+        excerpt = buildFieldExcerpt('Files', filesRaw, filesIdx, q.length)
+      }
+    }
+
+    if (!matched) {
+      const bodyIdx = bodyLower.indexOf(q)
+      if (bodyIdx !== -1) {
+        matched = true
+        excerpt = buildBodyExcerpt(bodyRaw, bodyIdx, q.length)
+      }
+    }
+
+    if (matched) {
+      out.push({ ...item, excerpt, score: 1 })
+      if (out.length >= limit) break
+      continue
+    }
+
+    if (tokens.length) {
+      const scored = scoreTokenMatches({
+        tokens,
+        titleRaw,
+        titleLower,
+        tagsRaw,
+        tagsLower,
+        filesRaw,
+        filesLower,
+        bodyRaw,
+        bodyLower,
+      })
+      if (scored) {
+        fallbackCandidates.push({ item, excerpt: scored.excerpt, score: scored.score })
+      }
+    }
   }
-  return out
+
+  if (out.length > 0 || tokens.length === 0) {
+    return out
+  }
+
+  fallbackCandidates.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score
+    return a.item.title.localeCompare(b.item.title)
+  })
+
+  return fallbackCandidates.slice(0, limit).map(({ item, excerpt, score }) => ({
+    ...item,
+    excerpt,
+    score
+  }))
 }
 

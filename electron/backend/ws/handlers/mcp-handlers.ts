@@ -1,11 +1,22 @@
 import type { CreateMcpServerInput, UpdateMcpServerInput } from '../../../../shared/mcp.js'
 import { getMcpService } from '../../../services/index.js'
 
-export function createMcpHandlers(addMethod: (method: string, handler: (params: any) => any) => void): void {
+import type { RpcConnection } from '../types'
+
+export function createMcpHandlers(
+  addMethod: (method: string, handler: (params: any) => any) => void,
+  _connection: RpcConnection
+): void {
   const mcpService = getMcpService()
 
+
   addMethod('mcp.listServers', async () => {
-    return { ok: true, servers: mcpService.listServers() }
+    try {
+      return { ok: true, servers: mcpService.listServers() }
+    } catch (error) {
+      console.error('[mcp.handlers] listServers failed', error)
+      return { ok: true, servers: [] }
+    }
   })
 
   addMethod('mcp.createServer', async (params: any) => {

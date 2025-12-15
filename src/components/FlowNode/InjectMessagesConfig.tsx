@@ -1,6 +1,7 @@
 import { Text, Select, Checkbox, NumberInput } from '@mantine/core'
 import { useFlowEditorLocal } from '../../store/flowEditorLocal'
 import { useMemo } from 'react'
+import { useDraftField } from '../../hooks/useDraftField'
 
 interface InjectMessagesConfigProps {
   nodeId: string
@@ -9,6 +10,9 @@ interface InjectMessagesConfigProps {
 }
 
 export default function InjectMessagesConfig({ nodeId, config, onConfigChange }: InjectMessagesConfigProps) {
+  const staticUserMessage = useDraftField(config.staticUserMessage || '', (v) => onConfigChange({ staticUserMessage: v }), { debounceMs: 250 })
+  const staticAssistantMessage = useDraftField(config.staticAssistantMessage || '', (v) => onConfigChange({ staticAssistantMessage: v }), { debounceMs: 250 })
+
   // Get edges to check if handles are connected
   const feEdges = useFlowEditorLocal((s) => s.edges)
 
@@ -31,8 +35,10 @@ export default function InjectMessagesConfig({ nodeId, config, onConfigChange }:
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
         <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>User Message:</span>
         <textarea
-          value={isUserMessageConnected ? '' : (config.staticUserMessage || '')}
-          onChange={(e) => onConfigChange({ staticUserMessage: e.target.value })}
+          value={isUserMessageConnected ? '' : staticUserMessage.draft}
+          onChange={(e) => staticUserMessage.onChange(e.target.value)}
+          onFocus={staticUserMessage.onFocus}
+          onBlur={staticUserMessage.onBlur}
           placeholder={isUserMessageConnected ? 'Connected' : 'Enter user message...'}
           disabled={isUserMessageConnected}
           rows={3}
@@ -55,8 +61,10 @@ export default function InjectMessagesConfig({ nodeId, config, onConfigChange }:
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
         <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>Assistant Message:</span>
         <textarea
-          value={isAssistantMessageConnected ? '' : (config.staticAssistantMessage || '')}
-          onChange={(e) => onConfigChange({ staticAssistantMessage: e.target.value })}
+          value={isAssistantMessageConnected ? '' : staticAssistantMessage.draft}
+          onChange={(e) => staticAssistantMessage.onChange(e.target.value)}
+          onFocus={staticAssistantMessage.onFocus}
+          onBlur={staticAssistantMessage.onBlur}
           placeholder={isAssistantMessageConnected ? 'Connected' : 'Enter assistant message...'}
           disabled={isAssistantMessageConnected}
           rows={3}

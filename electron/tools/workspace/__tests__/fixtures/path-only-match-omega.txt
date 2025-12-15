@@ -1,0 +1,1 @@
+This file intentionally omits the token to ensure path-only matches.

@@ -19,11 +19,14 @@
  */
 
 import type { MainFlowContext } from './types'
-import type { FlowAPI } from './flow-api'
+import type { FlowAPI, Tool as FlowTool } from './flow-api'
 import type { ContextManager } from './contextManager'
 import type { AgentTool, ProviderAdapter } from '../providers/provider'
 
+import { inspect } from 'util'
+
 import { getProviderKey, providers } from '../core/state'
+import { getAgentToolSnapshot } from '../tools/agentToolRegistry.js'
 import { createCallbackEventEmitters } from './execution-events'
 import { rateLimitTracker } from '../providers/rate-limit-tracker'
 import { parseRateLimitError, sleep, withRetries } from '../providers/retry'
@@ -34,6 +37,7 @@ import {
   formatMessagesForOpenAI,
   logLLMRequestPayload,
 } from './llm/payloads'
+
 import { createTokenCounter, ToolUsageTracker, UsageAccumulator } from './llm/usage-tracker'
 import { resolveSamplingControls } from './llm/stream-options'
 import { wrapToolsWithPolicy } from './llm/tool-policy'
@@ -51,7 +55,7 @@ export interface LLMServiceRequest {
   message: string
 
   /** Optional tools for agent mode */
-  tools?: AgentTool[]
+  tools?: Array<AgentTool | FlowTool>
 
   /** FlowAPI instance for emitting execution events */
   flowAPI: FlowAPI
@@ -109,7 +113,7 @@ class LLMService {
       overrideProvider: requestProvider,
       overrideModel: requestModel,
       message,
-      tools,
+      tools: requestedTools,
       responseSchema,
       skipHistory,
       reasoningEffort: requestReasoningEffort,
@@ -170,11 +174,35 @@ class LLMService {
       }
     }
 
+    const { tools: hydratedTools, missing } = hydrateAgentTools(requestedTools, flowAPI.workspaceId)
+    if (missing.length) {
+      try {
+        flowAPI.log?.warn?.('llmService.chat missing agent tool implementations', { missing })
+      } catch {}
+    }
+
     // 3. Append user message via ContextManager (for non-skipHistory)
     if (!skipHistory) {
-      contextManager.addMessage({ role: 'user', content: message })
+      const normalizedIncoming = normalizeUserMessageContent(message)
+      const existingHistory = Array.isArray(workingContext?.messageHistory)
+        ? workingContext.messageHistory
+        : []
+      const lastEntry = existingHistory[existingHistory.length - 1]
+      const normalizedLast = normalizeUserMessageContent(lastEntry?.content)
+      const alreadyAppended =
+        !!lastEntry &&
+        lastEntry.role === 'user' &&
+        normalizedIncoming.length > 0 &&
+        normalizedIncoming === normalizedLast
+
+      if (!alreadyAppended) {
+        const contentToStore = normalizedIncoming || message
+        contextManager.addMessage({ role: 'user', content: contentToStore })
+      }
+
       workingContext = contextManager.get()
     }
+
 
     // 4. Format messages for the specific provider
     // llm-service is responsible for converting MainFlowContext to provider-specific format
@@ -201,8 +229,9 @@ class LLMService {
         }
       } else {
         // OpenAI and others — include a system message first if present
+        const systemText = context.systemInstructions
         formattedMessages = [
-          ...(context.systemInstructions ? [{ role: 'system' as const, content: context.systemInstructions }] : []),
+          ...(systemText ? [{ role: 'system' as const, content: systemText }] : []),
           { role: 'user' as const, content: message }
         ]
       }
@@ -477,14 +506,14 @@ class LLMService {
             streamType: 'agent',
             streamOpts,
             responseSchema,
-            tools
+            tools: hydratedTools
           })
 
           // Wrap provider call with retry logic
           await withRetries(
             async () => {
-              const policyTools = (tools && tools.length)
-                ? wrapToolsWithPolicy(tools, {
+              const policyTools = (hydratedTools && hydratedTools.length)
+                ? wrapToolsWithPolicy(hydratedTools, {
                   // Disable dedupe for fsReadLines/fsReadFile to ensure RAW text is returned (no cached JSON stubs)
                   dedupeReadLines: false,
                   // Remove re-read limits for fsReadLines so LLMs can read, edit, then re-read to verify
@@ -505,11 +534,20 @@ class LLMService {
 
               try {
                 const { apiKey: _apiKey, ...loggableConfig } = agentStreamConfig as any
-                console.log('[llm-service] agentStream config', {
+                const logPayload = {
                   provider: effectiveProvider,
                   model: effectiveModel,
                   config: loggableConfig
-                })
+                }
+                console.log(
+                  '[llm-service] agentStream config',
+                  inspect(logPayload, {
+                    depth: null,
+                    maxArrayLength: null,
+                    breakLength: 120,
+                    colors: false
+                  })
+                )
               } catch {}
 
               streamHandle = await providerAdapter.agentStream(agentStreamConfig)
@@ -565,7 +603,7 @@ class LLMService {
       }
 
       const toolSnapshot = toolUsageTracker.getSnapshot()
-      const toolDefinitionsTokens = tokenCounter.count(JSON.stringify(tools || []))
+      const toolDefinitionsTokens = tokenCounter.count(JSON.stringify(hydratedTools || []))
       const responseFormatTokens = tokenCounter.count(JSON.stringify(responseSchema || null))
       const toolCallResultsTokens = toolSnapshot.resultsTokensIn
       const assistantTextTokens = tokenCounter.count(response)
@@ -692,4 +730,60 @@ class LLMService {
 
 // Singleton instance
 export const llmService = new LLMService()
+
+function normalizeUserMessageContent(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function hydrateAgentTools(
+  requested: Array<AgentTool | FlowTool> | undefined,
+  workspaceId?: string | null
+): { tools: AgentTool[]; missing: string[] } {
+  if (!Array.isArray(requested) || requested.length === 0) {
+    return { tools: [], missing: [] }
+  }
+
+  const resolved: AgentTool[] = []
+  const missing: string[] = []
+  let registryByName: Map<string, AgentTool> | null = null
+
+  const resolveFromRegistry = (name: string): AgentTool | undefined => {
+    if (!registryByName) {
+      const snapshot = getAgentToolSnapshot(workspaceId)
+      registryByName = new Map(snapshot.map((tool) => [tool.name, tool]))
+    }
+    return registryByName ? registryByName.get(name) : undefined
+  }
+
+  for (const entry of requested) {
+    if (!entry) continue
+    if (typeof (entry as AgentTool).run === 'function') {
+      resolved.push(entry as AgentTool)
+      continue
+    }
+
+    const name = extractToolName(entry)
+    if (!name) continue
+
+    const match = resolveFromRegistry(name)
+    if (match) {
+      resolved.push(match)
+    } else if (!missing.includes(name)) {
+      missing.push(name)
+    }
+  }
+
+  return { tools: resolved, missing }
+}
+
+function extractToolName(entry: AgentTool | FlowTool | string | undefined): string | null {
+  if (!entry) return null
+  if (typeof entry === 'string') {
+    return entry || null
+  }
+  if (typeof (entry as FlowTool).name === 'string') {
+    return (entry as FlowTool).name
+  }
+  return null
+}
 

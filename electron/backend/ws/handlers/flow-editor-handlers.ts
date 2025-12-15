@@ -7,6 +7,7 @@
 import { dialog } from 'electron'
 import fs from 'node:fs/promises'
 import { getFlowProfileService, getFlowGraphService, getFlowCacheService, getSessionService, getFlowContextsService } from '../../../services/index.js'
+import { persistAutosaveSnapshot } from '../../../services/flowAutosave.js'
 import { getConnectionWorkspaceId, type RpcConnection } from '../broadcast.js'
 
 /**
@@ -171,7 +172,7 @@ export function createFlowEditorHandlers(
       }
 
       const flowGraphService = getFlowGraphService()
-      flowGraphService.setGraph({ workspaceId, nodes, edges })
+      flowGraphService.setGraph({ workspaceId, nodes, edges, reason: 'autosave' })
 
       // Auto-save user and workspace flows to disk (system flows are read-only)
       const selectedTemplateId = flowGraphService.getSelectedTemplateId({ workspaceId })
@@ -184,12 +185,13 @@ export function createFlowEditorHandlers(
         if (template && (template.library === 'workspace' || template.library === 'user')) {
           console.log('[flowEditor.setGraph] Auto-saving flow:', { templateId: selectedTemplateId, library: template.library })
           try {
-            await flowProfileService.saveProfile({
+            await persistAutosaveSnapshot({
               workspaceId,
-              name: selectedTemplateId,
+              templateId: selectedTemplateId,
               library: template.library,
+              description: template.description || '',
               nodes,
-              edges
+              edges,
             })
             console.log('[flowEditor.setGraph] Flow auto-saved successfully')
           } catch (e: any) {
@@ -228,7 +230,7 @@ export function createFlowEditorHandlers(
       const { nodes, edges } = profile
 
       // Update the graph in FlowGraphService and track which template is loaded
-      flowGraphService.setGraph({ workspaceId, nodes, edges, templateId })
+      flowGraphService.setGraph({ workspaceId, nodes, edges, templateId, reason: 'template-load' })
 
       return { ok: true, nodes, edges }
     } catch (e: any) {

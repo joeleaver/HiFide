@@ -173,8 +173,9 @@ export class FlowProfileService extends Service<FlowProfileState> {
     library: FlowLibrary
     nodes: any[]
     edges: any[]
+    reloadTemplates?: boolean
   }): Promise<void> {
-    const { workspaceId, name, library, nodes, edges } = params
+    const { workspaceId, name, library, nodes, edges, reloadTemplates = true } = params
 
     console.log('[FlowProfile] Saving profile:', { workspaceId, name, library })
 
@@ -185,7 +186,9 @@ export class FlowProfileService extends Service<FlowProfileState> {
         await saveFlowProfile(nodes, edges, name, '')
       }
 
-      await this.reloadTemplatesFor(workspaceId)
+      if (reloadTemplates) {
+        await this.reloadTemplatesFor(workspaceId)
+      }
     } catch (error) {
       console.error('[FlowProfile] Failed to save profile:', error)
       throw error

@@ -10,17 +10,13 @@ interface KBSearchViewerProps {
 }
 
 export function KBSearchViewer({ badge }: KBSearchViewerProps) {
-  // Use existing BadgeKnowledgeBaseSearchContent component
-  if (badge.interactive?.data?.key) {
-    return (
-      <BadgeKnowledgeBaseSearchContent
-        badgeId={badge.id}
-        searchKey={badge.interactive.data.key}
-        fullParams={badge.metadata?.fullParams}
-      />
-    )
-  }
-
-  return null
+  return (
+    <BadgeKnowledgeBaseSearchContent
+      badgeId={badge.id}
+      searchKey={badge.interactive?.data?.key}
+      fullParams={badge.metadata?.fullParams ?? badge.args}
+      llmResult={badge.result}
+    />
+  )
 }
 

@@ -11,6 +11,7 @@ import { initAppBootEvents } from '../../store/appBoot'
 import { initTerminalTabsEvents } from '../../store/terminalTabs'
 import { initFlowEditorEvents } from '../../store/flowEditor'
 import { initFlowEditorLocalEvents } from '../../store/flowEditorLocal'
+import { initFlowEditorScreenController } from '../../store/flowEditorScreenController'
 import { initExplorerEvents } from '../../store/explorer'
 import { initExplorerScreenController } from '../../store/explorerScreenController'
 import { initHydrationEvents, useHydration } from '../../store/hydration'
@@ -85,6 +86,7 @@ export function bootstrapBackendFromPreload(): void {
   initLspEvents()
   initLanguageSupportEvents()
   initExplorerScreenController()
+  initFlowEditorScreenController()
   initViewStateController()
   initUiEvents()
 

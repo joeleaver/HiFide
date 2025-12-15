@@ -7,7 +7,7 @@
 import { Service } from './base/Service.js'
 import type { ModelOption, RouteRecord } from '../store/types.js'
 import { MAX_ROUTE_HISTORY } from '../../src/store/utils/constants'
-import { DEFAULT_PRICING } from '../data/defaultPricing.js'
+import { getDefaultPricingConfig } from '../data/defaultModelSettings.js'
 import { getSettingsService } from './index.js'
 
 interface ProviderState {
@@ -23,6 +23,7 @@ interface ProviderState {
 
 export class ProviderService extends Service<ProviderState> {
   constructor() {
+
     super(
       {
         selectedModel: 'gpt-4o',
@@ -344,7 +345,7 @@ export class ProviderService extends Service<ProviderState> {
 
       if (!key) {
         // Fallback to defaults if no key available
-        const defaults = DEFAULT_PRICING[provider] || {}
+        const defaults = getDefaultPricingConfig()[provider] || {}
         const fallbackList = Object.keys(defaults).map((id) => ({ value: id, label: id }))
 
         this.setState({
@@ -389,7 +390,7 @@ export class ProviderService extends Service<ProviderState> {
       console.error('[provider] Failed to refresh models for', provider, ':', e)
 
       // Fallback to defaults on error
-      const defaults = DEFAULT_PRICING[provider] || {}
+      const defaults = getDefaultPricingConfig()[provider] || {}
       const fallbackList = Object.keys(defaults).map((id) => ({ value: id, label: id }))
 
       this.setState({

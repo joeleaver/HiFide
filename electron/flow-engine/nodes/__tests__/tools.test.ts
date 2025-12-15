@@ -77,9 +77,9 @@ describe('Tools Node', () => {
   })
 
   describe('MCP Tool Integration', () => {
-    it('should include MCP tools even when they are not explicitly selected', async () => {
+    it('should include MCP tools when enabled (default)', async () => {
       const flow = createMockFlowAPI()
-      const mcpTool = createTestTool('mcp.server.weather')
+      const mcpTool = createTestTool('mcp_server_weather')
       flow.tools.list = jest.fn(() => [...mockTools, mcpTool])
       const context = createMainFlowContext()
       const config = createTestConfig({ tools: ['tool1'] })
@@ -88,7 +88,66 @@ describe('Tools Node', () => {
       const result = await toolsNode(flow, context, null, inputs, config)
 
       expect(result.status).toBe('success')
-      expect(result.tools.map((t: any) => t.name)).toEqual(['tool1', 'mcp.server.weather'])
+      expect(result.tools.map((t: any) => t.name)).toEqual(['tool1', 'mcp_server_weather'])
+    })
+
+    it('should exclude MCP tools when disabled in config', async () => {
+      const flow = createMockFlowAPI()
+      const mcpTool = createTestTool('mcp_server_weather')
+      flow.tools.list = jest.fn(() => [...mockTools, mcpTool])
+      const context = createMainFlowContext()
+      const config = createTestConfig({ tools: 'auto', mcpEnabled: false })
+      const inputs = createMockNodeInputs()
+
+      const result = await toolsNode(flow, context, null, inputs, config)
+
+      expect(result.status).toBe('success')
+      expect(result.tools.map((t: any) => t.name)).toEqual(['tool1', 'tool2', 'tool3'])
+    })
+
+    it('should filter MCP tools from dynamic overrides when disabled', async () => {
+      const flow = createMockFlowAPI()
+      const mcpTool = createTestTool('mcp_server_weather')
+      flow.tools.list = jest.fn(() => [...mockTools, mcpTool])
+      const context = createMainFlowContext()
+      const config = createTestConfig({ tools: 'auto', mcpEnabled: false })
+      const dataIn = JSON.stringify(['mcp_server_weather', 'tool2'])
+      const inputs = createMockNodeInputs()
+
+      const result = await toolsNode(flow, context, dataIn, inputs, config)
+
+      expect(result.status).toBe('success')
+      expect(result.tools.map((t: any) => t.name)).toEqual(['tool2'])
+    })
+
+    it('should disable only the specified MCP plugin when mcpPlugins overrides are provided', async () => {
+      const flow = createMockFlowAPI()
+      const playwrightTool = createTestTool('mcp_playwright_openPage')
+      const rivalTool = createTestTool('mcp_rivalsearch_search')
+      flow.tools.list = jest.fn(() => [...mockTools, playwrightTool, rivalTool])
+      const context = createMainFlowContext()
+      const config = createTestConfig({ tools: ['tool1'], mcpPlugins: { playwright: false } })
+      const inputs = createMockNodeInputs()
+
+      const result = await toolsNode(flow, context, null, inputs, config)
+
+      expect(result.status).toBe('success')
+      expect(result.tools.map((t: any) => t.name)).toEqual(['tool1', 'mcp_rivalsearch_search'])
+    })
+
+    it('should allow per-plugin overrides even when the legacy flag disables MCP tools', async () => {
+      const flow = createMockFlowAPI()
+      const playwrightTool = createTestTool('mcp_playwright_openPage')
+      const rivalTool = createTestTool('mcp_rivalsearch_search')
+      flow.tools.list = jest.fn(() => [...mockTools, playwrightTool, rivalTool])
+      const context = createMainFlowContext()
+      const config = createTestConfig({ tools: 'auto', mcpEnabled: false, mcpPlugins: { playwright: true } })
+      const inputs = createMockNodeInputs()
+
+      const result = await toolsNode(flow, context, null, inputs, config)
+
+      expect(result.status).toBe('success')
+      expect(result.tools.map((t: any) => t.name)).toEqual(['tool1', 'tool2', 'tool3', 'mcp_playwright_openPage'])
     })
   })
 

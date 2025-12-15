@@ -323,16 +323,16 @@ export async function hydrateSessionUiSettingsAndFlows(): Promise<void> {
   }
 
   try {
-    console.log('[sessionUi] hydrateSessionUiSettingsAndFlows: requesting settings.get + flowEditor.getTemplates + flowEditor.getGraph + kanban.getBoard')
+    console.log('[sessionUi] hydrateSessionUiSettingsAndFlows: requesting settings.get + flowEditor.getTemplates + kanban.getBoard')
 
     // Pre-fetch flow editor graph and kanban board to avoid loading screens
-    const { useFlowEditor } = await import('./flowEditor')
+
     const { useKanban } = await import('./kanban')
 
     const settled = await Promise.allSettled([
       client.rpc('settings.get', {}),
       client.rpc('flowEditor.getTemplates', {}),
-      useFlowEditor.getState().fetchGraph(),
+
       useKanban.getState().hydrateBoard(),
     ])
 
@@ -342,7 +342,7 @@ export async function hydrateSessionUiSettingsAndFlows(): Promise<void> {
 
     const settingsRes = getVal(0)
     const templates = getVal(1)
-    // Graph and kanban are already set in their respective stores via fetchGraph() and hydrateBoard()
+    // Kanban is already set in its store via hydrateBoard().
 
     let providerValidMap: Record<string, boolean> = settingsRes?.providerValid || {}
     const modelsMap = settingsRes?.modelsByProvider || {}

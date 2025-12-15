@@ -1,9 +1,10 @@
 import { Text, UnstyledButton, Stack, Skeleton, Center, Button } from '@mantine/core'
 import { IconChevronLeft, IconChevronRight, IconRefresh, IconAlertTriangle } from '@tabler/icons-react'
-import { useEffect } from 'react'
+
 import { useUiStore } from '../store/ui'
 import { useFlowEditorHydration } from '../store/screenHydration'
 import { useFlowEditor } from '../store/flowEditor'
+import { reloadFlowEditorScreen } from '../store/flowEditorScreenController'
 import AgentDebugPanel from './AgentDebugPanel'
 import FlowCanvasPanel from './FlowCanvasPanel'
 import NodePalettePanel from './NodePalettePanel'
@@ -48,8 +49,7 @@ export default function FlowView() {
   // Screen hydration state
   const screenPhase = useFlowEditorHydration((s) => s.phase)
   const screenError = useFlowEditorHydration((s) => s.error)
-  const startLoading = useFlowEditorHydration((s) => s.startLoading)
-  const setReady = useFlowEditorHydration((s) => s.setReady)
+
 
   // Renderer-only UI state
   const metaPanelOpen = useUiStore((s) => s.metaPanelOpen)
@@ -61,14 +61,6 @@ export default function FlowView() {
   // Perf: trace rerenders for FlowView hot path
   useRerenderTrace('FlowView', { metaPanelOpen, screenPhase })
 
-  // Mark screen as ready on mount - data is already loaded from snapshot
-  useEffect(() => {
-    if (screenPhase === 'idle') {
-      // Transition idle → loading → ready
-      startLoading()
-      setReady()
-    }
-  }, [screenPhase, startLoading, setReady])
 
   // Meta panel resize handler
   const handleMetaPanelMouseDown = (e: React.MouseEvent) => {
@@ -94,9 +86,11 @@ export default function FlowView() {
   }
 
   // Render loading/error/content based on phase
-  if (screenPhase === 'idle' || screenPhase === 'loading') {
-    return <FlowEditorSkeleton />
-  }
+  // NOTE: setReady() only transitions from loading/refreshing → ready.
+  // If the phase stays 'idle', the skeleton will be shown forever.
+  // Therefore: when the graph store is hydrated, ensure we move to loading (if idle)
+  // and then to ready.
+  if (screenPhase === 'idle' || screenPhase === 'loading') return <FlowEditorSkeleton />
 
   if (screenPhase === 'error') {
     return (
@@ -111,9 +105,8 @@ export default function FlowView() {
             size="sm"
             leftSection={<IconRefresh size={16} />}
             onClick={() => {
-              startLoading()
+              reloadFlowEditorScreen()
               useFlowEditor.getState().hydrateTemplates()
-              useFlowEditor.getState().fetchGraph()
             }}
           >
             Retry

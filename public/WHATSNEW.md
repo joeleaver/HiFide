@@ -7,15 +7,22 @@ Release date: 2025-12-10
 
 ## Details
 
+### MCP Support
+
+* http/stdin/websockets
+* configure by pasting-in json or manually
+* configure in tools node
+
 ### Explorer/Editor
 
 * language server support with auto-installation
+* First-class markdown support with built-in markdown editor
 * Colors and icons in file tree
 * Workspace search and replace
 
 ### Many Bugfixes
 
-mostly related to workspace isolation
+* mostly related to workspace isolation
 
 ***
 

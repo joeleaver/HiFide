@@ -297,6 +297,24 @@ export function createUiHandlers(
     }
   })
 
+  addMethod('window.setMinimumSize', async ({ width, height }: { width: number; height: number }) => {
+    try {
+      const meta = activeConnections.get(connection)
+      if (!meta?.windowId) return { ok: false, error: 'no-window' }
+
+      const win = BrowserWindow.fromId(meta.windowId)
+      if (!win) return { ok: false, error: 'window-not-found' }
+
+      const minWidth = Math.max(200, Math.min(3840, Math.floor(width)))
+      const minHeight = Math.max(200, Math.min(2160, Math.floor(height)))
+
+      win.setMinimumSize(minWidth, minHeight)
+      return { ok: true, width: minWidth, height: minHeight }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+ 
   addMethod('window.minimize', async () => {
     try {      const meta = activeConnections.get(connection)
       if (!meta?.windowId) return { ok: false, error: 'no-window' }

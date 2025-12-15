@@ -7,6 +7,7 @@ import type {
   UpdateMcpServerInput,
 } from '../../shared/mcp'
 
+
 interface McpServersStore {
   servers: McpServerSnapshot[]
   loading: boolean
@@ -44,7 +45,9 @@ const requireClient = () => {
   return client
 }
 
-export const useMcpServers = create<McpServersStore>((set) => ({
+
+
+export const useMcpServers = create<McpServersStore>((set, get) => ({
   servers: [],
   loading: false,
   creating: false,
@@ -53,8 +56,11 @@ export const useMcpServers = create<McpServersStore>((set) => ({
   testingIds: {},
 
   setServers: (servers) => {
-    const next = Array.isArray(servers) ? sortServers(servers) : []
-    set({ servers: next, error: null })
+    if (!Array.isArray(servers)) {
+      set({ servers: [], error: null })
+      return
+    }
+    set({ servers: sortServers(servers), error: null })
   },
 
   hydrateServers: async () => {
@@ -66,7 +72,7 @@ export const useMcpServers = create<McpServersStore>((set) => ({
         throw new Error(res?.error || 'Failed to load MCP servers')
       }
       const servers: McpServerSnapshot[] = Array.isArray(res.servers) ? res.servers : []
-      set({ servers: sortServers(servers), error: null })
+      get().setServers(servers)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       set({ error: message })
@@ -84,7 +90,8 @@ export const useMcpServers = create<McpServersStore>((set) => ({
       if (!res?.ok || !res.server) {
         throw new Error(res?.error || 'Failed to create MCP server')
       }
-      set((state) => ({ servers: upsertServer(state.servers, res.server) }))
+      const next = upsertServer(get().servers, res.server)
+      get().setServers(next)
       return res.server as McpServerSnapshot
     } catch (err) {
       throw err
@@ -101,7 +108,8 @@ export const useMcpServers = create<McpServersStore>((set) => ({
       if (!res?.ok || !res.server) {
         throw new Error(res?.error || 'Failed to update MCP server')
       }
-      set((state) => ({ servers: upsertServer(state.servers, res.server) }))
+      const next = upsertServer(get().servers, res.server)
+      get().setServers(next)
       return res.server as McpServerSnapshot
     } finally {
       set((state) => {
@@ -120,7 +128,8 @@ export const useMcpServers = create<McpServersStore>((set) => ({
       if (!res?.ok) {
         throw new Error(res?.error || 'Failed to delete MCP server')
       }
-      set((state) => ({ servers: removeServer(state.servers, serverId) }))
+      const next = removeServer(get().servers, serverId)
+      get().setServers(next)
     } finally {
       set((state) => {
         const next = { ...state.mutatingIds }
@@ -138,7 +147,8 @@ export const useMcpServers = create<McpServersStore>((set) => ({
       if (!res?.ok || !res.server) {
         throw new Error(res?.error || 'Failed to refresh MCP server')
       }
-      set((state) => ({ servers: upsertServer(state.servers, res.server) }))
+      const next = upsertServer(get().servers, res.server)
+      get().setServers(next)
       return res.server as McpServerSnapshot
     } finally {
       set((state) => {
@@ -157,7 +167,8 @@ export const useMcpServers = create<McpServersStore>((set) => ({
       if (!res?.ok || !res.server) {
         throw new Error(res?.error || 'Failed to update server state')
       }
-      set((state) => ({ servers: upsertServer(state.servers, res.server) }))
+      const next = upsertServer(get().servers, res.server)
+      get().setServers(next)
       return res.server as McpServerSnapshot
     } finally {
       set((state) => {

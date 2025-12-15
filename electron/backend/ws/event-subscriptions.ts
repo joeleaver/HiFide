@@ -176,6 +176,7 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
     selectedTemplate: '', // selectedTemplate is UI-specific, not tracked in FlowGraphService
     nodesCount: Array.isArray(data.nodes) ? data.nodes.length : 0,
     edgesCount: Array.isArray(data.edges) ? data.edges.length : 0,
+    reason: data?.reason || 'unknown',
   }))
 
   // Provider/models
@@ -188,11 +189,13 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
   }))
 
   const mcpService = getMcpService()
-  addGlobalSubscription(mcpService, 'mcp:servers:changed', 'mcp.servers.changed', (data) => ({
+  addWorkspaceSubscription(mcpService, 'mcp:servers:changed', 'mcp.servers.changed', (data) => ({
+    workspaceId: data?.workspaceId || null,
     servers: Array.isArray(data?.servers) ? data.servers : [],
   }))
 
-  addGlobalSubscription(mcpService, 'mcp:tools:changed', 'flow.tools.changed', (data) => ({
+  addWorkspaceSubscription(mcpService, 'mcp:tools:changed', 'flow.tools.changed', (data) => ({
+    workspaceId: data?.workspaceId || null,
     version: typeof data?.version === 'number' ? data.version : Date.now(),
     servers: Array.isArray(data?.servers) ? data.servers : [],
   }))

@@ -6,9 +6,7 @@ import { useSessionUi } from '../store/sessionUi'
 import { useChatTimeline } from '../store/chatTimeline'
 import SessionPane from '../SessionPane'
 import { getBackendClient } from '../lib/backend/bootstrap'
-import { MIN_SESSION_PANEL_WIDTH } from '../constants/layout'
-
-const NAV_WIDTH = 48
+import { MIN_SESSION_PANEL_WIDTH, ACTIVITY_BAR_WIDTH } from '../constants/layout'
 
 export default function GlobalSessionPanel() {
   const sessions = useSessionUi((s: any) => s.sessions)
@@ -38,11 +36,11 @@ export default function GlobalSessionPanel() {
     } catch {}
   }
 
-  // When collapsed, session panel should grow/shrink to fill the window content width (minus nav)
+  // When collapsed, session panel should grow/shrink to fill the window content width (minus the activity bar)
   useEffect(() => {
     if (!mainCollapsed) return
     const recompute = () => {
-      const target = Math.max(MIN_SESSION_PANEL_WIDTH, (window.innerWidth || 0) - NAV_WIDTH)
+      const target = Math.max(MIN_SESSION_PANEL_WIDTH, (window.innerWidth || 0) - ACTIVITY_BAR_WIDTH)
       const current = useUiStore.getState().sessionPanelWidth
       if (Math.abs(target - current) > 1) {
         setSessionPanelWidth(target)
@@ -60,7 +58,7 @@ export default function GlobalSessionPanel() {
 
     const handleMouseMove = (ev: MouseEvent) => {
       const newWidth = ev.clientX
-      const maxWidth = Math.max(MIN_SESSION_PANEL_WIDTH, window.innerWidth - NAV_WIDTH - 200)
+      const maxWidth = Math.max(MIN_SESSION_PANEL_WIDTH, window.innerWidth - ACTIVITY_BAR_WIDTH - 200)
       if (newWidth >= MIN_SESSION_PANEL_WIDTH && newWidth <= maxWidth) {
         setSessionPanelWidth(newWidth)
       }

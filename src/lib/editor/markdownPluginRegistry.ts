@@ -6,8 +6,11 @@ export const markdownPluginKeys = [
   'shortcuts',
   'codeblock',
   'codemirror',
+  'table',
   'thematic-break',
   'frontmatter',
+  'links',
+  'link-dialog',
 ] as const
 
 export type MarkdownPluginKey = (typeof markdownPluginKeys)[number]

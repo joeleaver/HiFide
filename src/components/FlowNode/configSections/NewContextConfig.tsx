@@ -1,4 +1,5 @@
 import { Text } from '@mantine/core'
+import { useDraftField } from '../../../hooks/useDraftField'
 import type { ProviderOption } from '../../../store/sessionUi'
 import { SamplingControls } from '../SamplingControls'
 
@@ -13,6 +14,9 @@ interface NewContextConfigProps {
 export function NewContextConfig({ config, onConfigChange, providerOptions, modelsByProvider, isSysInConnected }: NewContextConfigProps) {
   const currentProvider = config.provider || 'openai'
   const modelOptions = modelsByProvider[currentProvider as keyof typeof modelsByProvider] || []
+
+  const external = config.systemInstructions || ''
+  const systemInstructions = useDraftField(external, (v) => onConfigChange({ systemInstructions: v }), { debounceMs: 250 })
 
   return (
     <div style={sectionStyle}>
@@ -54,8 +58,13 @@ export function NewContextConfig({ config, onConfigChange, providerOptions, mode
         <span style={labelStyle}>System Instructions:</span>
         {!isSysInConnected ? (
           <textarea
-            value={config.systemInstructions || ''}
-            onChange={(e) => onConfigChange({ systemInstructions: e.target.value })}
+            value={systemInstructions.draft}
+            onChange={(e) => {
+              const v = e.target.value
+              systemInstructions.onChange(v)
+            }}
+            onFocus={systemInstructions.onFocus}
+            onBlur={systemInstructions.onBlur}
             placeholder="Optional system instructions for this isolated context (e.g., 'You are a code analyzer...')"
             rows={4}
             style={textareaStyle}

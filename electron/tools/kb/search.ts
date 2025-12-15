@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 
 export const knowledgeBaseSearchTool: AgentTool = {
   name: 'knowledgeBaseSearch',
-  description: 'Search the project Knowledge Base for documentation. If information is missing, create or update entries with knowledgeBaseStore instead of writing files.',
+  description: 'Search the project Knowledge Base for documentation. Multi-word queries fall back to tokenized ranking across titles, tags, files, and body content. If information is missing, create or update entries with knowledgeBaseStore instead of writing files.',
   parameters: {
     type: 'object',
     properties: {
@@ -19,13 +19,11 @@ export const knowledgeBaseSearchTool: AgentTool = {
     }
     const baseDir = meta.workspaceId
     const query = typeof input?.query === 'string' ? input.query : ''
-    const tags: string[] = Array.isArray(input?.tags) ? (input.tags as any[]).map((t) => String(t)) : []
-    const limit = typeof input?.limit === 'number' ? input.limit : 50
+    const tags: string[] = Array.isArray(input?.tags) ? (input.tags as any[]).map((t) => String(t).trim()).filter(Boolean) : []
+    const limit = typeof input?.limit === 'number' ? Math.min(100, Math.max(1, Math.floor(input.limit))) : 50
 
-    const qLower = (query || '').toLowerCase().trim()
-    // Use simple text-based search from knowledgeBase utils
     const tagSet = new Set(tags.map((t: string) => t.toLowerCase()))
-    const results = await kbSearch(baseDir, { query: qLower, tags: Array.from(tagSet), limit })
+    const results = await kbSearch(baseDir, { query: query.trim(), tags: Array.from(tagSet), limit })
 
     return {
       ok: true,
@@ -38,7 +36,7 @@ export const knowledgeBaseSearchTool: AgentTool = {
           files: (r as any).files || [],
           path: r.relPath.replace(/^\\?/, ''),
           excerpt: r.excerpt,
-          score: r.score ?? 1,
+          score: typeof r.score === 'number' ? r.score : 1,
         }))
       }
     }
@@ -48,14 +46,25 @@ export const knowledgeBaseSearchTool: AgentTool = {
     if (raw?.ok && raw?.data) {
       const previewKey = randomUUID()
       const resultData = raw.data
-      const resultCount = resultData?.count || 0
+      const resultCount = typeof resultData?.count === 'number' ? resultData.count : Array.isArray(resultData?.results) ? resultData.results.length : 0
+      const minimalResults = Array.isArray(resultData?.results)
+        ? resultData.results.map((r: any) => ({
+            id: r.id,
+            title: r.title,
+            tags: r.tags,
+            files: r.files,
+            path: r.path,
+            excerpt: r.excerpt,
+            score: r.score,
+          }))
+        : []
 
       return {
         minimal: {
           ok: true,
           count: resultCount,
-          previewKey,
-          resultCount
+          resultCount,
+          results: minimalResults
         },
         ui: resultData,
         previewKey

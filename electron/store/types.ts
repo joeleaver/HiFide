@@ -44,6 +44,7 @@ export interface KanbanTask {
   order: number
   description?: string
   epicId?: string | null
+  kbArticleId?: string | null
   assignees?: string[]
   tags?: string[]
   createdAt: number

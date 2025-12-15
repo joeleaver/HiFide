@@ -1,4 +1,5 @@
 import { Text } from '@mantine/core'
+import { useDraftField } from '../../../hooks/useDraftField'
 import { SamplingControls } from '../SamplingControls'
 
 interface DefaultContextConfigProps {
@@ -9,6 +10,13 @@ interface DefaultContextConfigProps {
 }
 
 export function DefaultContextConfig({ config, onConfigChange, modelsByProvider, isSysInConnected }: DefaultContextConfigProps) {
+  const external = config.systemInstructions || ''
+  const systemInstructions = useDraftField(
+    external,
+    (v) => onConfigChange({ systemInstructions: v }),
+    { debounceMs: 250 }
+  )
+
   return (
     <div style={sectionStyle}>
       <Text size="xs" c="dimmed" style={descriptionStyle}>
@@ -18,8 +26,13 @@ export function DefaultContextConfig({ config, onConfigChange, modelsByProvider,
         <span style={labelStyle}>System Instructions:</span>
         {!isSysInConnected ? (
           <textarea
-            value={config.systemInstructions || ''}
-            onChange={(e) => onConfigChange({ systemInstructions: e.target.value })}
+            value={systemInstructions.draft}
+            onChange={(e) => {
+              const v = e.target.value
+              systemInstructions.onChange(v)
+            }}
+            onFocus={systemInstructions.onFocus}
+            onBlur={systemInstructions.onBlur}
             placeholder="Optional system instructions for the AI (e.g., 'You are a helpful assistant...')"
             rows={4}
             style={textareaStyle}

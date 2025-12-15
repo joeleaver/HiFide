@@ -4,7 +4,9 @@ import {
   ChangeCodeMirrorLanguage,
   CodeToggle,
   ConditionalContents,
+  CreateLink,
   InsertCodeBlock,
+  InsertTable,
   ListsToggle,
   toolbarPlugin,
   headingsPlugin,
@@ -13,6 +15,9 @@ import {
   markdownShortcutPlugin,
   codeBlockPlugin,
   codeMirrorPlugin,
+  tablePlugin,
+  linkPlugin,
+  linkDialogPlugin,
   thematicBreakPlugin,
   frontmatterPlugin,
   UndoRedo,
@@ -84,6 +89,8 @@ const ToolbarContents = (): ReactElement =>
     createElement(CodeToggle, null),
     createElement(BlockTypeSelect, null),
     createElement(ListsToggle, null),
+    createElement(CreateLink, null),
+    createElement(InsertTable, null),
     createElement(InsertCodeBlock, null),
     createElement(ConditionalContents, {
       options: [
@@ -110,8 +117,11 @@ const pluginBuilders: Record<MarkdownPluginKey, () => RealmPlugin> = {
       codeBlockLanguages: CODE_LANGUAGES,
       autoLoadLanguageSupport: true,
     }),
+  table: () => tablePlugin(),
   'thematic-break': () => thematicBreakPlugin(),
   frontmatter: () => frontmatterPlugin(),
+  links: () => linkPlugin(),
+  'link-dialog': () => linkDialogPlugin(),
 }
 
 export const markdownPlugins: RealmPlugin[] = markdownPluginKeys.map((key) => {

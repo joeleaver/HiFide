@@ -73,15 +73,32 @@ class BadgeConfigRegistry {
     const workspaceSearchConfig: BadgeConfig = {
       toolName: 'workspaceSearch',
       defaultType: 'tool',
-      contentType: 'search-results',
+      contentType: 'workspace-search',
       requiresExpansion: true,
       generateLabel: (badge: any) => {
         const query = badge.args?.query || badge.metadata?.query
         return query ? `Search: ${query}` : 'Workspace Search'
       },
       enrichMetadata: (badge: any) => {
+        const metadata: Record<string, any> = {}
         const query = badge.args?.query
-        return query ? { query } : {}
+        if (query) metadata.query = query
+
+        if (badge.args) {
+          metadata.fullParams = { ...badge.args }
+        }
+
+        const count = typeof badge.result?.count === 'number'
+          ? badge.result.count
+          : typeof badge.result?.resultCount === 'number'
+            ? badge.result.resultCount
+            : undefined
+
+        if (typeof count === 'number') {
+          metadata.resultCount = count
+        }
+
+        return metadata
       },
       determineStatus: (badge: any) => {
         if (badge.result?.error) return 'error'
@@ -247,36 +264,53 @@ class BadgeConfigRegistry {
     })
 
     // Knowledge Base Tools
-    this.register({
+    const kbSearchConfig: BadgeConfig = {
       toolName: 'knowledgeBaseSearch',
       defaultType: 'tool',
-      contentType: 'search-results', // Re-use search viewer if compatible, or json
+      contentType: 'kb-search',
       requiresExpansion: true,
       generateLabel: (badge: any) => {
         const query = badge.args?.query
         const tags = badge.args?.tags
-        let label = 'KB Search'
-        if (query) label += `: "${query}"`
-        if (tags && tags.length) label += ` [${tags.join(', ')}]`
-        return label
+        const limit = badge.args?.limit
+        const parts = ['KB Search']
+        if (query) parts.push(`"${query}"`)
+        if (Array.isArray(tags) && tags.length) parts.push(`[${tags.join(', ')}]`)
+        if (typeof limit === 'number') parts.push(`(limit ${limit})`)
+        return parts.join(' ')
       },
-      enrichMetadata: (badge: any) => ({
-        query: badge.args?.query,
-        tags: badge.args?.tags
-      }),
+      enrichMetadata: (badge: any) => {
+        const metadata: Record<string, any> = {
+          query: badge.args?.query,
+          tags: badge.args?.tags,
+        }
+        if (typeof badge.args?.limit === 'number') {
+          metadata.limit = badge.args.limit
+        }
+        if (badge.args) {
+          metadata.fullParams = { ...badge.args }
+        }
+        const count = typeof badge.result?.count === 'number'
+          ? badge.result.count
+          : typeof badge.result?.resultCount === 'number'
+            ? badge.result.resultCount
+            : undefined
+        if (typeof count === 'number') {
+          metadata.resultCount = count
+        }
+        return metadata
+      },
       determineStatus: (badge: any) => {
         if (badge.result?.error) return 'error'
-        // Handle nested result structure from KB tool
-        const results = badge.result?.data?.results || badge.result?.ui?.results || []
+        const results = badge.result?.results
         if (Array.isArray(results) && results.length === 0) return 'warning'
         return 'success'
       },
       isExpandable: (_badge: any) => true,
-      shouldShowPreview: (badge: any) => {
-        const results = badge.result?.data?.results || badge.result?.ui?.results
-        return Boolean(results && results.length > 0)
-      }
-    })
+      shouldShowPreview: (_badge: any) => true
+    }
+    this.register(kbSearchConfig)
+    this.register({ ...kbSearchConfig, toolName: 'knowledgeBase.search' })
 
     this.register({
       toolName: 'knowledgeBaseStore',

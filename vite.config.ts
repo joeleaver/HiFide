@@ -84,17 +84,30 @@ export default defineConfig({
 
           for (const file of files) {
             if (file.endsWith('.json')) {
-              copyFileSync(
-                path.join(srcDir, file),
-                path.join(destDir, file)
-              )
+              copyFileSync(path.join(srcDir, file), path.join(destDir, file))
               console.log(`Copied profile: ${file}`)
             }
           }
         } catch (error) {
           console.error('Failed to copy profiles:', error)
         }
-      }
+      },
+    },
+    // Copy editable model defaults into dist-electron so the main process can load it at runtime.
+    {
+      name: 'copy-default-model-settings',
+      closeBundle() {
+        const srcFile = path.join(__dirname, 'electron', 'data', 'defaultModelSettings.json')
+        const destFile = path.join(__dirname, 'dist-electron', 'defaultModelSettings.json')
+
+        try {
+          mkdirSync(path.dirname(destFile), { recursive: true })
+          copyFileSync(srcFile, destFile)
+          console.log('Copied defaultModelSettings.json to dist-electron')
+        } catch (error) {
+          console.error('Failed to copy defaultModelSettings.json:', error)
+        }
+      },
     }
   ],
   resolve: {

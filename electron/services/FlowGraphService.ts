@@ -15,6 +15,7 @@
 
 import { Service } from './base/Service.js'
 import type { Node, Edge } from 'reactflow'
+import type { FlowGraphChangeReason } from '../../shared/flowGraph.js'
 
 interface WorkspaceGraph {
   nodes: Node[]
@@ -28,7 +29,11 @@ interface FlowGraphState {
   graphsByWorkspace: Record<string, WorkspaceGraph>
 }
 
+type PendingReasonMap = Record<string, FlowGraphChangeReason>
+
 export class FlowGraphService extends Service<FlowGraphState> {
+  private pendingReasons: PendingReasonMap = {}
+
   constructor() {
     super({
       graphsByWorkspace: {},
@@ -44,10 +49,13 @@ export class FlowGraphService extends Service<FlowGraphState> {
       for (const workspaceId in updates.graphsByWorkspace) {
         const graph = updates.graphsByWorkspace[workspaceId]
         if (graph) {
+          const reason = this.pendingReasons[workspaceId] || 'unknown'
+          delete this.pendingReasons[workspaceId]
           this.events.emit('flowGraph:changed', {
             workspaceId,
             nodes: graph.nodes,
             edges: graph.edges,
+            reason,
           })
         }
       }
@@ -131,8 +139,8 @@ export class FlowGraphService extends Service<FlowGraphState> {
    * Set the graph (called when user saves in renderer or loads a template)
    * This is the "committed" graph that the scheduler will read
    */
-  setGraph(params: { workspaceId: string; nodes: Node[]; edges: Edge[]; templateId?: string }): void {
-    const { workspaceId, nodes, edges, templateId } = params
+  setGraph(params: { workspaceId: string; nodes: Node[]; edges: Edge[]; templateId?: string; reason?: FlowGraphChangeReason }): void {
+    const { workspaceId, nodes, edges, templateId, reason = 'unknown' } = params
 
     console.log('[FlowGraph] Setting graph:', {
       workspaceId,
@@ -152,6 +160,8 @@ export class FlowGraphService extends Service<FlowGraphState> {
         dataKeys: sampleNode.data ? Object.keys(sampleNode.data) : []
       })
     }
+
+    this.pendingReasons[workspaceId] = reason
 
     const graphsByWorkspace = { ...this.state.graphsByWorkspace }
     const currentGraph = this.getWorkspaceGraph(workspaceId)

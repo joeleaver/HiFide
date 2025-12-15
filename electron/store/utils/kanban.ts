@@ -27,6 +27,7 @@ const KanbanTaskSchema = z.object({
   order: z.number().int().nonnegative(),
   description: z.string().optional(),
   epicId: z.string().nullable().optional(),
+  kbArticleId: z.string().nullable().optional(),
   assignees: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
   createdAt: z.number().int().nonnegative(),
@@ -70,6 +71,10 @@ function normalizeTask(task: KanbanTask): KanbanTask {
     ...task,
     description: task.description ?? '',
     epicId: task.epicId ?? null,
+    kbArticleId:
+      typeof task.kbArticleId === 'string'
+        ? task.kbArticleId.trim() || null
+        : task.kbArticleId ?? null,
     assignees: task.assignees ?? [],
     tags: task.tags ?? [],
     archived: task.archived ?? false,
@@ -135,6 +140,7 @@ export function createDefaultKanbanBoard(): KanbanBoard {
         order: 0,
         description: 'Open the Kanban view and move this card to understand drag & drop.',
         epicId,
+        kbArticleId: null,
         assignees: [],
         tags: ['kanban'],
         createdAt: timestamp,

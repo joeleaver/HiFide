@@ -17,6 +17,7 @@ import { UsageBreakdownViewer } from './viewers/UsageBreakdownViewer'
 import { JsonViewer } from './viewers/JsonViewer'
 import { TerminalExecViewer } from './viewers/TerminalExecViewer'
 import { ErrorViewer } from './viewers/ErrorViewer'
+import { inferContentType } from './inferContentType'
 
 interface BadgeContentProps {
   badge: BadgeType
@@ -76,21 +77,5 @@ export function BadgeContent({ badge }: BadgeContentProps) {
   }
 }
 
-/**
- * Infer content type from tool name
- */
-function inferContentType(toolName?: string): string {
-  if (!toolName) return 'json'
 
-  // Map tool names to content types
-  if (toolName.includes('edits.apply')) return 'diff'
-  if (toolName.includes('fs.read_lines')) return 'read-lines'
-  if (toolName.includes('workspace.search')) return 'workspace-search'
-  if (toolName.includes('knowledgeBase.search')) return 'kb-search'
-  if (toolName.includes('knowledgeBase.store')) return 'kb-store'
-  if (toolName.includes('index.search')) return 'search'
-  if (toolName === 'terminalExec') return 'terminal-exec'
-
-  return 'json'
-}
 

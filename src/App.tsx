@@ -16,7 +16,7 @@ import RendererDialogs from './components/RendererDialogs'
 import LoadingScreen from './components/LoadingScreen'
 import { useRerenderTrace } from './utils/perf'
 import { useUiStore } from './store/ui'
-import { MIN_SESSION_PANEL_WIDTH } from './constants/layout'
+import { MIN_SESSION_PANEL_WIDTH, ACTIVITY_BAR_WIDTH } from './constants/layout'
 import { getBackendClient } from './lib/backend/bootstrap'
 
 import { useAppBoot } from './store/appBoot'
@@ -129,10 +129,9 @@ function App() {
         // Restore collapsed state
         if (typeof layout.mainCollapsed === 'boolean') {
           setMainCollapsed(layout.mainCollapsed)
-          // If starting collapsed, shrink the window right away to Session + Nav width
+          // If starting collapsed, shrink the window right away to Session + Activity Bar width
           if (layout.mainCollapsed) {
-            const NAV_W = 48
-            const targetW = Math.max(MIN_SESSION_PANEL_WIDTH + NAV_W, Math.floor(spw + NAV_W))
+            const targetW = Math.max(MIN_SESSION_PANEL_WIDTH + ACTIVITY_BAR_WIDTH, Math.floor(spw + ACTIVITY_BAR_WIDTH))
             const targetH = Math.max(300, Math.floor(window.innerHeight || 600))
             try { await getBackendClient()?.rpc('window.setContentSize', { width: targetW, height: targetH }) } catch { }
           }
@@ -141,6 +140,21 @@ function App() {
     })()
   }, [setSessionPanelWidth, setMainCollapsed])
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const client = getBackendClient()
+        if (!client) return
+        const MIN_HEIGHT = 300
+        if (mainCollapsed) {
+          const collapsedMinWidth = MIN_SESSION_PANEL_WIDTH + ACTIVITY_BAR_WIDTH
+          await client.rpc('window.setMinimumSize', { width: collapsedMinWidth, height: MIN_HEIGHT })
+        } else {
+          await client.rpc('window.setMinimumSize', { width: 400, height: MIN_HEIGHT })
+        }
+      } catch { }
+    })()
+  }, [mainCollapsed])
 
   const renderView = useCallback(() => {
     // Show welcome screen if no workspace is attached
