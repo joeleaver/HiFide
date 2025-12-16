@@ -119,6 +119,9 @@ export interface WorkspaceSnapshot {
   settings: {
     providerValid: Record<string, boolean>
     modelsByProvider: Record<string, Array<{ value: string; label: string }>>
+    // Canonical allowlist for default models (from defaultModelSettings.json pricing keys).
+    // Used by renderer to ensure pickers never show provider catalogs.
+    defaultPricingConfig: any
   }
 
   // Knowledge base (full data)

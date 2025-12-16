@@ -149,6 +149,9 @@ async function hydrateStoresFromSnapshot(snapshot: WorkspaceSnapshot): Promise<v
     useSessionUi.getState().__setSessions(snapshot.sessions, snapshot.currentSessionId)
     useSessionUi.getState().__setMeta(snapshot.meta)
     useSessionUi.getState().__setUsage(snapshot.usage.tokenUsage, snapshot.usage.costs, snapshot.usage.requestsLog)
+    // Apply defaultPricingConfig before models so renderer-side clamping uses
+    // the canonical allowlist from defaultModelSettings.json.
+    useSessionUi.getState().__setDefaultPricingConfig(snapshot.settings.defaultPricingConfig)
     useSessionUi.getState().__setSettings(snapshot.settings.providerValid, snapshot.settings.modelsByProvider)
     useSessionUi.getState().__setFlows(snapshot.flowEditor.templates)
     console.log('[hydration] sessionUi hydrated, current state:', {

@@ -5,6 +5,7 @@
       "gpt-5.2": { "inputCostPer1M": 1.75, "outputCostPer1M": 14, "cachedInputCostPer1M": 0.175 },
       "gpt-5.2-pro": { "inputCostPer1M": 21, "outputCostPer1M": 168, "cachedInputCostPer1M": 21 },
       "gpt-5.1": { "inputCostPer1M": 1.25, "outputCostPer1M": 10, "cachedInputCostPer1M": 0.125 },
+      "gpt-5.1-codex-mini": { "inputCostPer1M": 0.25, "outputCostPer1M": 2, "cachedInputCostPer1M": 0.025 },
       "gpt-5.1-codex": { "inputCostPer1M": 1.25, "outputCostPer1M": 10, "cachedInputCostPer1M": 0.125 },
       "gpt-5": { "inputCostPer1M": 1.25, "outputCostPer1M": 10, "cachedInputCostPer1M": 0.125 },
       "gpt-5-mini": { "inputCostPer1M": 0.25, "outputCostPer1M": 2, "cachedInputCostPer1M": 0.025 },
@@ -12,56 +13,10 @@
       "gpt-5-chat-latest": { "inputCostPer1M": 1.25, "outputCostPer1M": 10, "cachedInputCostPer1M": 0.125 },
       "gpt-5-codex": { "inputCostPer1M": 1.25, "outputCostPer1M": 10, "cachedInputCostPer1M": 0.125 },
       "gpt-5-pro": { "inputCostPer1M": 15, "outputCostPer1M": 120, "cachedInputCostPer1M": 1.5 },
-
       "gpt-4.1": { "inputCostPer1M": 2, "outputCostPer1M": 8, "cachedInputCostPer1M": 0.2 },
       "gpt-4.1-mini": { "inputCostPer1M": 0.4, "outputCostPer1M": 1.6, "cachedInputCostPer1M": 0.04 },
       "gpt-4.1-nano": { "inputCostPer1M": 0.1, "outputCostPer1M": 0.4, "cachedInputCostPer1M": 0.01 },
-
-      "gpt-4o": { "inputCostPer1M": 2.5, "outputCostPer1M": 10, "cachedInputCostPer1M": 0.25 },
-      "gpt-4o-2024-11-20": { "inputCostPer1M": 2.5, "outputCostPer1M": 10, "cachedInputCostPer1M": 0.25 },
-      "gpt-4o-2024-08-06": { "inputCostPer1M": 2.5, "outputCostPer1M": 10, "cachedInputCostPer1M": 0.25 },
-      "gpt-4o-2024-05-13": { "inputCostPer1M": 5, "outputCostPer1M": 15, "cachedInputCostPer1M": 0.5 },
-      "gpt-4o-mini": { "inputCostPer1M": 0.15, "outputCostPer1M": 0.6, "cachedInputCostPer1M": 0.015 },
-      "gpt-4o-mini-2024-07-18": { "inputCostPer1M": 0.15, "outputCostPer1M": 0.6, "cachedInputCostPer1M": 0.015 },
-
-      "gpt-realtime": { "inputCostPer1M": 4, "outputCostPer1M": 16, "cachedInputCostPer1M": 0.4 },
-      "gpt-realtime-mini": { "inputCostPer1M": 0.6, "outputCostPer1M": 2.4, "cachedInputCostPer1M": 0.06 },
-      "gpt-4o-realtime-preview": { "inputCostPer1M": 5, "outputCostPer1M": 20, "cachedInputCostPer1M": 0.5 },
-      "gpt-4o-mini-realtime-preview": { "inputCostPer1M": 0.6, "outputCostPer1M": 2.4, "cachedInputCostPer1M": 0.06 },
-
-      "gpt-audio": { "inputCostPer1M": 2.5, "outputCostPer1M": 10, "cachedInputCostPer1M": 0.25 },
-      "gpt-audio-mini": { "inputCostPer1M": 0.6, "outputCostPer1M": 2.4, "cachedInputCostPer1M": 0.06 },
-      "gpt-4o-audio-preview": { "inputCostPer1M": 2.5, "outputCostPer1M": 10, "cachedInputCostPer1M": 0.25 },
-      "gpt-4o-mini-audio-preview": { "inputCostPer1M": 0.15, "outputCostPer1M": 0.6, "cachedInputCostPer1M": 0.015 },
-
-      "o1": { "inputCostPer1M": 15, "outputCostPer1M": 60, "cachedInputCostPer1M": 1.5 },
-      "o1-2024-12-17": { "inputCostPer1M": 15, "outputCostPer1M": 60, "cachedInputCostPer1M": 1.5 },
-      "o1-preview": { "inputCostPer1M": 15, "outputCostPer1M": 60, "cachedInputCostPer1M": 1.5 },
-      "o1-preview-2024-09-12": { "inputCostPer1M": 15, "outputCostPer1M": 60, "cachedInputCostPer1M": 1.5 },
-      "o1-mini": { "inputCostPer1M": 1.1, "outputCostPer1M": 4.4, "cachedInputCostPer1M": 0.11 },
-      "o1-mini-2024-09-12": { "inputCostPer1M": 1.1, "outputCostPer1M": 4.4, "cachedInputCostPer1M": 0.11 },
-      "o1-pro": { "inputCostPer1M": 150, "outputCostPer1M": 600, "cachedInputCostPer1M": 15 },
-      "o3-pro": { "inputCostPer1M": 20, "outputCostPer1M": 80, "cachedInputCostPer1M": 2 },
-      "o3": { "inputCostPer1M": 2, "outputCostPer1M": 8, "cachedInputCostPer1M": 0.2 },
-      "o3-deep-research": { "inputCostPer1M": 10, "outputCostPer1M": 40, "cachedInputCostPer1M": 1 },
-      "o3-mini": { "inputCostPer1M": 1.1, "outputCostPer1M": 4.4, "cachedInputCostPer1M": 0.11 },
-      "o4-mini": { "inputCostPer1M": 1.1, "outputCostPer1M": 4.4, "cachedInputCostPer1M": 0.11 },
-      "o4-mini-deep-research": { "inputCostPer1M": 2, "outputCostPer1M": 8, "cachedInputCostPer1M": 0.2 },
-
-      "codex-mini-latest": { "inputCostPer1M": 1.5, "outputCostPer1M": 6, "cachedInputCostPer1M": 0.15 },
-      "gpt-4o-mini-search-preview": { "inputCostPer1M": 0.15, "outputCostPer1M": 0.6, "cachedInputCostPer1M": 0.015 },
-      "gpt-4o-search-preview": { "inputCostPer1M": 2.5, "outputCostPer1M": 10, "cachedInputCostPer1M": 0.25 },
-      "computer-use-preview": { "inputCostPer1M": 3, "outputCostPer1M": 12, "cachedInputCostPer1M": 0.3 },
-      "gpt-image-1": { "inputCostPer1M": 5, "outputCostPer1M": 0, "cachedInputCostPer1M": 0.5 },
-      "gpt-image-1-mini": { "inputCostPer1M": 2, "outputCostPer1M": 0, "cachedInputCostPer1M": 0.2 },
-
-      "gpt-4-turbo": { "inputCostPer1M": 10, "outputCostPer1M": 30, "cachedInputCostPer1M": 1 },
-      "gpt-4-turbo-2024-04-09": { "inputCostPer1M": 10, "outputCostPer1M": 30, "cachedInputCostPer1M": 1 },
-      "gpt-4-turbo-preview": { "inputCostPer1M": 10, "outputCostPer1M": 30, "cachedInputCostPer1M": 1 },
-      "gpt-4": { "inputCostPer1M": 30, "outputCostPer1M": 60, "cachedInputCostPer1M": 3 },
-      "gpt-4-0613": { "inputCostPer1M": 30, "outputCostPer1M": 60, "cachedInputCostPer1M": 3 },
-      "gpt-3.5-turbo": { "inputCostPer1M": 0.5, "outputCostPer1M": 1.5, "cachedInputCostPer1M": 0.05 },
-      "gpt-3.5-turbo-0125": { "inputCostPer1M": 0.5, "outputCostPer1M": 1.5, "cachedInputCostPer1M": 0.05 }
+      "computer-use-preview": { "inputCostPer1M": 3, "outputCostPer1M": 12, "cachedInputCostPer1M": 0.3 }
     },
 
     "anthropic": {
@@ -92,27 +47,7 @@
       "gemini-2.5-flash-image": { "inputCostPer1M": 0.3, "outputCostPer1M": 0 },
       "gemini-2.5-flash-preview-tts": { "inputCostPer1M": 0.5, "outputCostPer1M": 10 },
       "gemini-2.5-pro-preview-tts": { "inputCostPer1M": 1, "outputCostPer1M": 20 },
-      "gemini-2.5-computer-use-preview-10-2025": { "inputCostPer1M": 1.25, "outputCostPer1M": 10 },
-      "gemini-2.0-flash": { "inputCostPer1M": 0.1, "outputCostPer1M": 0.4 },
-      "gemini-2.0-flash-exp": { "inputCostPer1M": 0, "outputCostPer1M": 0 },
-      "gemini-2.0-flash-thinking-exp-1219": { "inputCostPer1M": 0, "outputCostPer1M": 0 },
-      "gemini-2.0-flash-lite": { "inputCostPer1M": 0.075, "outputCostPer1M": 0.3 },
-      "gemini-1.5-pro": { "inputCostPer1M": 1.25, "outputCostPer1M": 5 },
-      "gemini-1.5-pro-002": { "inputCostPer1M": 1.25, "outputCostPer1M": 5 },
-      "gemini-1.5-pro-001": { "inputCostPer1M": 1.25, "outputCostPer1M": 5 },
-      "gemini-1.5-pro-exp-0827": { "inputCostPer1M": 0, "outputCostPer1M": 0 },
-      "gemini-1.5-flash": { "inputCostPer1M": 0.075, "outputCostPer1M": 0.3 },
-      "gemini-1.5-flash-002": { "inputCostPer1M": 0.075, "outputCostPer1M": 0.3 },
-      "gemini-1.5-flash-001": { "inputCostPer1M": 0.075, "outputCostPer1M": 0.3 },
-      "gemini-1.5-flash-8b": { "inputCostPer1M": 0.0375, "outputCostPer1M": 0.15 },
-      "gemini-1.5-flash-8b-001": { "inputCostPer1M": 0.0375, "outputCostPer1M": 0.15 },
-      "gemini-1.0-pro": { "inputCostPer1M": 0.5, "outputCostPer1M": 1.5 },
-      "gemini-1.0-pro-001": { "inputCostPer1M": 0.5, "outputCostPer1M": 1.5 },
-      "gemini-1.0-pro-002": { "inputCostPer1M": 0.5, "outputCostPer1M": 1.5 },
-      "gemini-embedding-001": { "inputCostPer1M": 0.15, "outputCostPer1M": 0 },
-      "gemini-robotics-er-1.5-preview": { "inputCostPer1M": 0.3, "outputCostPer1M": 2.5 },
-      "gemma-3": { "inputCostPer1M": 0, "outputCostPer1M": 0 },
-      "gemma-3n": { "inputCostPer1M": 0, "outputCostPer1M": 0 }
+      "gemini-2.5-computer-use-preview-10-2025": { "inputCostPer1M": 1.25, "outputCostPer1M": 10 }
     },
 
     "fireworks": {
@@ -137,10 +72,6 @@
   },
   "modelDefaults": {
     "openai": {
-      "o1": { "reasoningEffort": "medium" },
-      "o3": { "reasoningEffort": "medium" },
-      "o3-mini": { "reasoningEffort": "medium" },
-      "o4-mini": { "reasoningEffort": "medium" }
     },
     "anthropic": {
       "claude-sonnet-4.5": { "includeThoughts": true, "thinkingBudget": 2048 },

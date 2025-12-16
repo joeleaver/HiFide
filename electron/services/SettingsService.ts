@@ -45,47 +45,74 @@ export class SettingsService extends Service<SettingsState> {
     // Force default pricing config to match the current codebase, ignoring any stale persistence
     this.state.defaultPricingConfig = DEFAULT_PRICING
 
-    // Merge missing defaults into active pricing config (e.g. new models)
-    this.mergeDefaultsIntoActivePricing()
+    // Enforce defaults as the single source of truth for the set of available models.
+    // Pricing overrides are allowed ONLY for models present in DEFAULT_PRICING
+    // (plus Fireworks user model overrides, which are handled by ProviderService).
+    this.clampActivePricingToDefaults()
   }
 
-  private mergeDefaultsIntoActivePricing(): void {
-    let changed = false
-    const active = { ...this.state.pricingConfig }
+  private clampActivePricingToDefaults(): void {
     const DEFAULT_PRICING = getDefaultPricingConfig()
 
-    for (const provider of Object.keys(DEFAULT_PRICING)) {
-      const defaultModels = DEFAULT_PRICING[provider as keyof PricingConfig]
-      const activeModels = active[provider as keyof PricingConfig]
+    let changed = false
+    const next: PricingConfig = { ...DEFAULT_PRICING }
 
-      // If provider missing in active, add it
-      if (activeModels === undefined) {
-        (active as any)[provider] = defaultModels
-        changed = true
+    // Preserve the customRates flag from persisted state if present
+    ;(next as any).customRates = !!(this.state.pricingConfig as any)?.customRates
+
+    for (const provider of Object.keys(DEFAULT_PRICING)) {
+      const defaultsForProvider = (DEFAULT_PRICING as any)[provider]
+      if (typeof defaultsForProvider === 'boolean') {
+        ;(next as any)[provider] = defaultsForProvider
         continue
       }
 
-      // If both are objects (model maps), merge missing models
-      if (
-        typeof activeModels === 'object' &&
-        activeModels !== null &&
-        typeof defaultModels === 'object' &&
-        defaultModels !== null
-      ) {
-        for (const model of Object.keys(defaultModels)) {
-          if (!(activeModels as any)[model]) {
-            // New model found in defaults, add to active
-            ;(activeModels as any)[model] = (defaultModels as any)[model]
+      const persistedForProvider = (this.state.pricingConfig as any)?.[provider]
+      if (!persistedForProvider || typeof persistedForProvider !== 'object') {
+        ;(next as any)[provider] = defaultsForProvider
+        continue
+      }
+
+      // Only keep overrides for models that exist in defaults.
+      const clampedProvider: Record<string, ModelPricing> = { ...defaultsForProvider }
+      for (const model of Object.keys(defaultsForProvider)) {
+        const persisted = persistedForProvider?.[model]
+        if (persisted && typeof persisted === 'object') {
+          clampedProvider[model] = persisted
+        }
+      }
+
+      // Detect whether persisted had extra models (or missing providers)
+      const persistedKeys = Object.keys(persistedForProvider)
+      const defaultKeys = Object.keys(defaultsForProvider)
+      if (persistedKeys.length !== defaultKeys.length) changed = true
+      else {
+        for (const k of persistedKeys) {
+          if (!(k in defaultsForProvider)) {
             changed = true
+            break
           }
         }
+      }
+
+      ;(next as any)[provider] = clampedProvider
+    }
+
+    // If provider set differs from defaults, also mark changed
+    for (const provider of Object.keys(this.state.pricingConfig as any)) {
+      if (!(provider in (DEFAULT_PRICING as any))) {
+        changed = true
+        break
       }
     }
 
     if (changed) {
-      console.log('[SettingsService] Merged new default pricing models into active configuration')
-      this.state.pricingConfig = active
+      console.log('[SettingsService] Clamped persisted pricingConfig to defaults allowlist')
+      this.state.pricingConfig = next
       this.persistState()
+    } else {
+      // Still ensure pricingConfig is at least defaults-shaped
+      this.state.pricingConfig = next
     }
   }
 
@@ -393,6 +420,18 @@ export class SettingsService extends Service<SettingsState> {
 
   // Pricing Actions
   setPricingForModel(provider: string, model: string, pricing: ModelPricing): void {
+    const DEFAULT_PRICING = getDefaultPricingConfig() as any
+    const defaultsForProvider = DEFAULT_PRICING?.[provider]
+    const isAllowed =
+      provider === 'fireworks'
+        ? true
+        : !!(defaultsForProvider && typeof defaultsForProvider === 'object' && defaultsForProvider[model])
+
+    if (!isAllowed) {
+      console.warn('[SettingsService] Ignoring pricing override for non-default model', { provider, model })
+      return
+    }
+
     this.setState({
       pricingConfig: {
         ...this.state.pricingConfig,

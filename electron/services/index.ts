@@ -73,8 +73,10 @@ export function initializeServices(): void {
   } catch (error) {
     console.error('[Services] Failed to attach explorer to GitStatusService:', error)
   }
-  providerService = new ProviderService()
+  // Settings must initialize before ProviderService so model allowlists/pricing defaults
+  // are clamped deterministically on first model refresh / provider events.
   settingsService = new SettingsService()
+  providerService = new ProviderService()
   kanbanService = new KanbanService()
   knowledgeBaseService = new KnowledgeBaseService()
   mcpService = new McpService()

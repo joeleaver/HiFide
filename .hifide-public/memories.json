@@ -1,4 +1,1187 @@
 {
   "version": 1,
-  "items": []
+  "items": [
+    {
+      "id": "mem-30ddc6e1-c889-4d1f-8895-783fe7208748",
+      "type": "fact",
+      "text": "Fireworks defaults also derive from defaultModelSettings.json pricing entries while user-added Fireworks model overrides continue to work via addFireworksModel/removeFireworksModel.",
+      "tags": [
+        "fireworks",
+        "models"
+      ],
+      "importance": 0.5,
+      "contentHash": "cdf3b36b5deca179095a1e04b729c29529f5f56334447b96c45b6b25901ad803",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T00:50:08.342Z",
+      "updatedAt": "2025-12-16T00:50:08.342Z",
+      "lastUsedAt": "2025-12-16T03:15:22.155Z",
+      "usageCount": 10
+    },
+    {
+      "id": "mem-41b78189-d38d-43cf-96d2-f7434d463243",
+      "type": "workflow",
+      "text": "ProviderService now uses a private filterToDefaults(provider, fetched) helper so the backend snapshot that populates model pickers only exposes allowlisted models from defaultModelSettings.json plus any approved Fireworks overrides.",
+      "tags": [
+        "backend",
+        "ui",
+        "models"
+      ],
+      "importance": 0.5,
+      "contentHash": "6ccfd0416f2d0ebaa88e54411b27ef383187e0797f6219f23ede0be9c5515214",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T01:30:04.602Z",
+      "updatedAt": "2025-12-16T01:30:04.602Z",
+      "lastUsedAt": "2025-12-16T02:50:24.313Z",
+      "usageCount": 15
+    },
+    {
+      "id": "mem-924dfd69-bd41-4f41-9ff4-5e30bf18a8c1",
+      "type": "fact",
+      "text": "ProviderService now filters every provider model list before writing to modelsByProvider, keeping only entries whose keys appear in defaultModelSettings.json for OpenAI/Anthropic/Gemini/xAI or in fireworksAllowedModels (including user overrides).",
+      "tags": [
+        "provider-service",
+        "model-pickers"
+      ],
+      "importance": 0.75,
+      "contentHash": "1418e9f1a5d0f97d7a0cd71d68486bd92d04be270d2dcecafedb98b543b8f622",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T01:35:38.203Z",
+      "updatedAt": "2025-12-16T01:35:38.203Z",
+      "lastUsedAt": "2025-12-16T03:24:48.917Z",
+      "usageCount": 26
+    },
+    {
+      "id": "mem-d24a8682-801b-43a8-a7e7-33d96cf3cc22",
+      "type": "workflow",
+      "text": "On boot and whenever the Fireworks allowlist changes, ProviderService calls ensureModelsByProviderAllowlist to clamp any persisted modelsByProvider data to the allowlist boundary.",
+      "tags": [
+        "provider-service",
+        "startup"
+      ],
+      "importance": 0.5,
+      "contentHash": "2421c852f93da6d1765fa5687a2b4794042c3ff30dba4c24eab24b51ae1b5d97",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T01:35:38.203Z",
+      "updatedAt": "2025-12-16T01:35:38.203Z",
+      "lastUsedAt": "2025-12-16T01:40:26.718Z",
+      "usageCount": 2
+    },
+    {
+      "id": "mem-06fea3d9-40fd-4cf7-996d-5f4e52fd88b3",
+      "type": "warning",
+      "text": "If model pickers still surface non-default entries after a restart, investigate UI-side fallback lists or workspace-local settings (e.g., .hifide-private/settings.json) because those could bypass ProviderService’s enforce filter.",
+      "tags": [
+        "debuging",
+        "settings"
+      ],
+      "importance": 0.5,
+      "contentHash": "9d6479411919ee449725f09c9ac5d5d4bae9651ada8327bde03a131dbb0b8c79",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T01:35:38.203Z",
+      "updatedAt": "2025-12-16T01:35:38.203Z",
+      "lastUsedAt": "2025-12-16T02:57:11.547Z",
+      "usageCount": 6
+    },
+    {
+      "id": "mem-1476cc21-f821-44e6-a470-f4591c90f410",
+      "type": "fact",
+      "text": "ProviderService enforces the allowlist for OpenAI/Anthropic/Gemini/xAI via defaultModelSettings pricing keys and for Fireworks via fireworksAllowedModels whenever setModelsForProvider writes modelsByProvider.",
+      "tags": [
+        "backend",
+        "providerservice",
+        "allowlist"
+      ],
+      "importance": 0.75,
+      "contentHash": "fe10d2b3faa95ea70ee8e9053f99135e2512536158789f1e6b596a51795b8c49",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T01:38:26.728Z",
+      "updatedAt": "2025-12-16T01:38:26.728Z",
+      "lastUsedAt": "2025-12-16T03:24:48.917Z",
+      "usageCount": 22
+    },
+    {
+      "id": "mem-c4920107-b77c-4b00-83ea-c20c2bcc757a",
+      "type": "workflow",
+      "text": "refreshModels now routes every write to modelsByProvider (fallback lists, fetched lists, error lists) through setModelsForProvider so the allowlist clamping is centralized.",
+      "tags": [
+        "backend",
+        "workflow",
+        "allowlist"
+      ],
+      "importance": 0.75,
+      "contentHash": "538a78351047c3827cfd8ccac00d1d179d0cb3caebc12876eb4355b35a6cd456",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T01:38:26.728Z",
+      "updatedAt": "2025-12-16T01:38:26.728Z",
+      "lastUsedAt": "2025-12-16T03:24:48.917Z",
+      "usageCount": 16
+    },
+    {
+      "id": "mem-2f1074a0-847d-420e-932c-12566a70eebf",
+      "type": "workflow",
+      "text": "ProviderService invokes ensureModelsByProviderAllowlist after initializing the Fireworks allowlist and whenever that allowlist changes to clamp any already-populated persisted modelsByProvider state.",
+      "tags": [
+        "backend",
+        "providerservice",
+        "workflow"
+      ],
+      "importance": 0.5,
+      "contentHash": "fe2bacb33830f0fe36d33c2f204b4b3fe8f79f9732294b7f07900cc4ed4defb4",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T01:38:26.728Z",
+      "updatedAt": "2025-12-16T01:38:26.728Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-cb9bde99-775f-42b6-99c3-0c3f5d07e5aa",
+      "type": "warning",
+      "text": "If a full model list still appears after app restart, it means a writer outside ProviderService (or a UI fallback) is populating modelsByProvider, so search for other modelsByProvider mutations to trace the source.",
+      "tags": [
+        "backend",
+        "debuging",
+        "models"
+      ],
+      "importance": 0.25,
+      "contentHash": "480f4576ce2c2149c82396b25b26a6027b9657b0010451b24ce51045ca4c576a",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T01:38:26.728Z",
+      "updatedAt": "2025-12-16T01:38:26.728Z",
+      "lastUsedAt": "2025-12-16T02:14:10.266Z",
+      "usageCount": 4
+    },
+    {
+      "id": "mem-a797f8d6-24cd-442c-8f6a-cb2efd4ece71",
+      "type": "constraint",
+      "text": "The only enforced model existence logic is filterToDefaults (derived from defaultModelSettings.json via getDefaultPricingConfig) plus the clamp inside setModelsForProvider; fetchOpenAIModels, fetchGeminiModels, and fetchXAIModels now return raw provider lists without heuristic filtering.",
+      "tags": [
+        "backend",
+        "models",
+        "constraints"
+      ],
+      "importance": 0.75,
+      "contentHash": "0d746f430b473a1fe3b04347cac91d68c678511596ae068bf75bd4a6bb55a422",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T01:42:38.074Z",
+      "updatedAt": "2025-12-16T01:42:38.074Z",
+      "lastUsedAt": "2025-12-16T03:24:48.917Z",
+      "usageCount": 15
+    },
+    {
+      "id": "mem-88fdf959-78ce-45e5-981c-b79516b96c98",
+      "type": "fact",
+      "text": "ProviderService.fetchOpenAIModels, fetchGeminiModels, and fetchXAIModels now return their provider's raw deduped lists and rely exclusively on filterToDefaults (pricing allowlist) plus the setModelsForProvider clamp for enforcing model existence.",
+      "tags": [
+        "provider",
+        "models"
+      ],
+      "importance": 0.75,
+      "contentHash": "84ad840169ca8e582931e444e05a8cf2a86f049f7b649b647ecdfe0906daea33",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T01:45:50.069Z",
+      "updatedAt": "2025-12-16T01:45:50.069Z",
+      "lastUsedAt": "2025-12-16T03:24:48.917Z",
+      "usageCount": 9
+    },
+    {
+      "id": "mem-61663769-5b8b-4283-b9b7-f901e8fb753b",
+      "type": "constraint",
+      "text": "The allowlist for model pickers is defined solely by the pricing keys in electron/data/defaultModelSettings.json, and modelDefaults entries no longer dictate which models exist.",
+      "tags": [
+        "models",
+        "settings"
+      ],
+      "importance": 0.75,
+      "contentHash": "c0f9df8c2448744999eff3e4d3f17c0f19ed93af0f71132e685b402863c1d84e",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T01:45:50.069Z",
+      "updatedAt": "2025-12-16T01:45:50.069Z",
+      "lastUsedAt": "2025-12-16T03:24:48.917Z",
+      "usageCount": 21
+    },
+    {
+      "id": "mem-942bfd83-eb77-4632-92bf-c72bf6d0f279",
+      "type": "fact",
+      "text": "Fireworks models continue to be sourced from fireworksAllowedModels defaults with optional user overrides rather than the general provider allowlist.",
+      "tags": [
+        "fireworks",
+        "models"
+      ],
+      "importance": 0.5,
+      "contentHash": "225c7c76591c7c0c00fc4a1c38804fc27a1f906ffcfed5c23e2d3efa0c85713e",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T01:45:50.069Z",
+      "updatedAt": "2025-12-16T01:45:50.069Z",
+      "lastUsedAt": "2025-12-16T03:15:22.155Z",
+      "usageCount": 6
+    },
+    {
+      "id": "mem-560e73ad-2e41-468c-9e05-f9f3b1e92a83",
+      "type": "workflow",
+      "text": "Renderer sessionUi.ts now clamps modelsByProvider against the defaultPricingConfig snapshot (sourced from defaultModelSettings.json pricing) whenever hydrating settings, merging provider.refreshModels prefetch results, or applying settings.models.changed events.",
+      "tags": [
+        "renderer",
+        "clamp",
+        "models"
+      ],
+      "importance": 0.5,
+      "contentHash": "fd06b671bca76f06419adf24d27dfa624c039c3ce5b9990677e591da7b1c92b9",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T01:55:04.157Z",
+      "updatedAt": "2025-12-16T01:55:04.157Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-e7577e48-a77a-43a0-9e11-243a394a8adc",
+      "type": "constraint",
+      "text": "After restart or refresh, every UI model picker should only list models present under defaultModelSettings.json -> pricing -> <provider>, with Fireworks still honoring its server/user-managed overrides.",
+      "tags": [
+        "ui",
+        "model-pickers",
+        "pricing"
+      ],
+      "importance": 0.5,
+      "contentHash": "7e6598bb763b247dab2d235e28e5c8951377604806403993e36e8b255f6a3c3d",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T01:55:04.157Z",
+      "updatedAt": "2025-12-16T01:55:04.157Z",
+      "lastUsedAt": "2025-12-16T03:03:13.182Z",
+      "usageCount": 6
+    },
+    {
+      "id": "mem-3e4ed81b-886f-4908-9d5a-383a25e4aace",
+      "type": "fact",
+      "text": "SessionControlsBar renders whatever useSessionUi().modelsByProvider already holds, so it never recomputes or filters the model list itself.",
+      "tags": [
+        "ui"
+      ],
+      "importance": 0.5,
+      "contentHash": "94f7bfdeab4d2451dd95bbf7deb10d211dc59434e450270e45c94021a51e5c38",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:03:51.389Z",
+      "updatedAt": "2025-12-16T02:03:51.389Z",
+      "lastUsedAt": "2025-12-16T03:03:13.182Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-3fa2448d-aae3-43c2-a82d-ca8a5842b19a",
+      "type": "fact",
+      "text": "defaultPricingConfig is derived from electron/data/defaultModelSettings.json pricing entries and is the canonical allowlist source shared between backend and renderer.",
+      "tags": [
+        "data"
+      ],
+      "importance": 0.5,
+      "contentHash": "e23ec0fb724edf451c1c13a4377f2ad8b8831ba2db341e3445f979772a18564c",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:03:51.389Z",
+      "updatedAt": "2025-12-16T02:03:51.389Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-251fd152-b319-4a8b-ae54-0ffad65c1b7c",
+      "type": "fact",
+      "text": "SessionControlsBar and every node model chooser render whatever is stored in useSessionUi().modelsByProvider without doing additional filtering.",
+      "tags": [
+        "ui",
+        "models",
+        "sessions"
+      ],
+      "importance": 0.75,
+      "contentHash": "aa4d2a7906490169e71dc7e87d821f222a54a0c12625d03327dca88a99901ed8",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:06:58.162Z",
+      "updatedAt": "2025-12-16T02:06:58.162Z",
+      "lastUsedAt": "2025-12-16T03:03:13.182Z",
+      "usageCount": 3
+    },
+    {
+      "id": "mem-2fd1ad33-36db-4b43-a622-689de538d31b",
+      "type": "constraint",
+      "text": "The renderer sessionUi store now clamps modelsByProvider inside __setSettings and whenever __setDefaultPricingConfig runs, using the allowlist derived from defaultPricingConfig/pricing config so no consumer can persist disallowed models.",
+      "tags": [
+        "sessionui",
+        "store",
+        "allowlist"
+      ],
+      "importance": 0.75,
+      "contentHash": "d80ee9b185a997167bcfaacd5fbc132efce825b2da787f9cecbd021c92cc0f18",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:06:58.162Z",
+      "updatedAt": "2025-12-16T02:06:58.162Z",
+      "lastUsedAt": "2025-12-16T03:24:48.917Z",
+      "usageCount": 14
+    },
+    {
+      "id": "mem-d5eb05a7-7369-4a1e-9411-2cdee46d9770",
+      "type": "fact",
+      "text": "Fireworks model allowlisting remains unmanaged in the renderer because its overrides come from the server side, so the renderer does not clamp those models.",
+      "tags": [
+        "fireworks",
+        "renderer",
+        "models"
+      ],
+      "importance": 0.5,
+      "contentHash": "030e42d26a6869a8a3b474157b146e2fce8964a53aa5dbd8c6e8764010159cf8",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:06:58.162Z",
+      "updatedAt": "2025-12-16T02:06:58.162Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-6e6cfd68-8b5c-4300-a47f-192cf9ec33bc",
+      "type": "constraint",
+      "text": "Clamp logic skips until defaultPricingConfig is populated so non-Fireworks providers remain visible until the allowlist data arrives, and once set the store immediately re-clamps.",
+      "tags": [
+        "renderer",
+        "store",
+        "allowlist"
+      ],
+      "importance": 0.5,
+      "contentHash": "4d53bf36b1cd5e0774a1701a52ef9f9d9651074ce7624c88f708af4858a235d0",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:09:00.653Z",
+      "updatedAt": "2025-12-16T02:09:00.653Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-65497887-cecd-4f3c-bf73-6aa5b4672c44",
+      "type": "fact",
+      "text": "Fireworks models remain un-clamped in the renderer because their allowlist is managed server-side with user overrides.",
+      "tags": [
+        "renderer",
+        "fireworks",
+        "model-filtering"
+      ],
+      "importance": 0.25,
+      "contentHash": "54d98ea243653a0d9398f39268d501be26c8ab99d84b99c3e6d740eb4de625a4",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:09:00.653Z",
+      "updatedAt": "2025-12-16T02:09:00.653Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-487153e1-4f81-44e7-8ccf-605f82657312",
+      "type": "fact",
+      "text": "sessionUi's clampModelsByProviderToAllowlist only passes through Fireworks models while defaultPricingConfig is missing or empty, and once the config arrives it clamps every other provider to the pricing allowlist keys.",
+      "tags": [
+        "renderer",
+        "sessionui",
+        "allowlist"
+      ],
+      "importance": 0.75,
+      "contentHash": "e20e517e31784b6072d549344c3cf75e1053a69d32326873dd90de2296b0e17f",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:12:27.137Z",
+      "updatedAt": "2025-12-16T02:12:27.137Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-d5864dcc-a1ed-4ecc-8721-37e8d43f339c",
+      "type": "constraint",
+      "text": "The renderer store must never show non-Fireworks models before defaultPricingConfig is hydrated, so UI cannot rely on “all OpenAI models” as a fallback and must use sessionUi.modelsByProvider for model pickers.",
+      "tags": [
+        "renderer",
+        "constraint",
+        "models"
+      ],
+      "importance": 0.75,
+      "contentHash": "d79755adf2dc1bb51f84a409b34e4f66f07738e8fb5a170c9a64ac206ed5fa79",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:12:27.137Z",
+      "updatedAt": "2025-12-16T02:12:27.137Z",
+      "lastUsedAt": "2025-12-16T03:24:48.917Z",
+      "usageCount": 12
+    },
+    {
+      "id": "mem-cbfef1d8-f6b6-4266-a379-1228513411c7",
+      "type": "workflow",
+      "text": "hydrateSessionUiSettingsAndFlows now always calls __setDefaultPricingConfig(settingsRes.defaultPricingConfig) before __setSettings(...) so models are never clamped against an empty allowlist.",
+      "tags": [
+        "workflow",
+        "ordering",
+        "pricing"
+      ],
+      "importance": 0.5,
+      "contentHash": "258b44ff2b1f52274fd54d26422fb51de5f9dd4b64400e74cc4045711e894f47",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:13:43.313Z",
+      "updatedAt": "2025-12-16T02:13:43.313Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-6d3bd637-bb0c-46f8-a1d7-de39731a37ac",
+      "type": "workflow",
+      "text": "provider.refreshModels prefetch rebuilds the pricing allowlist from the current store defaultPricingConfig each time to avoid stale allowlists filtering away models.",
+      "tags": [
+        "prefetch",
+        "allowlist",
+        "models"
+      ],
+      "importance": 0.5,
+      "contentHash": "0ee83c82c3fececd299ba5a8e6857e35cb6f092a4f8bd96142b55dcf7b706510",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:13:43.313Z",
+      "updatedAt": "2025-12-16T02:13:43.313Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-b1fe7f55-dde0-4ce6-8418-a684e7262ace",
+      "type": "fact",
+      "text": "The renderer session store now keeps models untouched until defaultPricingConfig is populated so clampModelsByProviderToAllowlist no longer hard-drops models when pricing config is missing.",
+      "tags": [
+        "store",
+        "models",
+        "pricing"
+      ],
+      "importance": 0.5,
+      "contentHash": "51b002b6802d5b722eb1c82dbcd8bd7858234ac42aa643ea19ad32440d470937",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:17:39.534Z",
+      "updatedAt": "2025-12-16T02:17:39.534Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-ee515bf0-ac76-45b9-9643-45477ae9e9a3",
+      "type": "fact",
+      "text": "Workspace snapshot hydration now includes defaultPricingConfig and sets it before pushing models, ensuring the allowlist is always available when sessionUi.modelsByProvider is populated.",
+      "tags": [
+        "hydration",
+        "snapshot",
+        "pricing"
+      ],
+      "importance": 0.5,
+      "contentHash": "7ee9ab021a1e0f7978eeb784c81165acbde22573bc1ee3b86b399771c617e645",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:17:39.534Z",
+      "updatedAt": "2025-12-16T02:17:39.534Z",
+      "lastUsedAt": "2025-12-16T02:43:58.554Z",
+      "usageCount": 2
+    },
+    {
+      "id": "mem-64c34ee4-2c88-4d8a-8c6b-b935724795ca",
+      "type": "fact",
+      "text": "Prefetching models now rebuilds the provider allowlist from the current store defaultPricingConfig instead of a captured one, preventing stale allowlists from filtering everything out.",
+      "tags": [
+        "prefetch",
+        "allowlist"
+      ],
+      "importance": 0.25,
+      "contentHash": "fc2f89ea341f29aa6726f8fa32b7b3692eaa2b95249a1adf75d6515f82e4d488",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:17:39.534Z",
+      "updatedAt": "2025-12-16T02:17:39.534Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-830aab37-767d-4f72-82f1-be4c26052d52",
+      "type": "workflow",
+      "text": "During snapshot hydration we must set sessionUi.__setDefaultPricingConfig(snapshot.settings.defaultPricingConfig) before calling sessionUi.__setSettings(modelsByProvider) so clamping has the allowlist prior to applying models.",
+      "tags": [
+        "hydration",
+        "workflow"
+      ],
+      "importance": 0.75,
+      "contentHash": "6fe6ab81736ce9c0e6ceb22f1a8a72c2207c644b28b36869bcb389aac2e4307a",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:21:22.900Z",
+      "updatedAt": "2025-12-16T02:21:22.900Z",
+      "lastUsedAt": "2025-12-16T03:13:56.125Z",
+      "usageCount": 4
+    },
+    {
+      "id": "mem-1886fba8-4d8f-49b8-a8ad-f40267e7d3a3",
+      "type": "constraint",
+      "text": "SessionUi now drops all non-Fireworks providers when defaultPricingConfig is missing/empty and drops unknown providers so only defaultModelSettings.json pricing keys can reach the UI.",
+      "tags": [
+        "sessionui",
+        "clamp"
+      ],
+      "importance": 0.75,
+      "contentHash": "57c2f46d3714a9dcfd7be0fa379fec2301f20801dffc96302d82956990509315",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:21:22.900Z",
+      "updatedAt": "2025-12-16T02:21:22.900Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-cd713f69-b209-436e-af67-db1641e31684",
+      "type": "fact",
+      "text": "SessionControlsBar renders the menu based on useSessionUi().modelsByProvider, so that dropdown reflects whatever model list the sessionUi store supplies.",
+      "tags": [
+        "sessioncontrolsbar",
+        "sessionui"
+      ],
+      "importance": 0.5,
+      "contentHash": "2d2004499b3fa0c8c6e5f5c30b4dccbaaa4bf689b0cc83350af7f9f95ab9b123",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:29:32.022Z",
+      "updatedAt": "2025-12-16T02:29:32.022Z",
+      "lastUsedAt": "2025-12-16T03:03:13.182Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-47387c5b-4ae9-4e8e-8049-6e4b4b144b0f",
+      "type": "constraint",
+      "text": "sessionUi now rejects any provider models outside defaultModelSettings.json pricing by dropping all non-Fireworks entries until pricing defaults load, discarding unknown providers, and once defaults exist clamping each provider to the allowlisted keys so catalog-only models can no longer reach the UI.",
+      "tags": [
+        "sessionui",
+        "pricing",
+        "allowlist"
+      ],
+      "importance": 0.75,
+      "contentHash": "0e8bb224d48b99d2d00f6bace3b48efc28fe1723b75947877d0fe5c89d28f339",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:29:32.022Z",
+      "updatedAt": "2025-12-16T02:29:32.022Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-fe6f7945-259c-43f6-85fd-bb681aa6d184",
+      "type": "workflow",
+      "text": "If the menu still shows all models after restarting, check the console log line `[sessionUi] __setSettings applied { modelCounts, hasDefaultPricingConfig, defaultPricingProviders }` to verify whether pricing defaults are present and how many models each provider is passing through.",
+      "tags": [
+        "debug",
+        "logging"
+      ],
+      "importance": 0.5,
+      "contentHash": "9c0b0b9eabc2da382d2b4b3409ae4d85c6e143111539b4e8df88306ee2992f7a",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:29:32.022Z",
+      "updatedAt": "2025-12-16T02:29:32.022Z",
+      "lastUsedAt": "2025-12-16T02:43:58.554Z",
+      "usageCount": 2
+    },
+    {
+      "id": "mem-30dfab0d-c4e0-4435-9fb7-c6b081cb6f9a",
+      "type": "fact",
+      "text": "SettingsService loads persisted pricingConfig and merges defaults but never shrinks it, so any historically large active pricing lists stay large unless the renderer clamps them back down to defaultPricingConfig.",
+      "tags": [
+        "settingservice",
+        "pricing",
+        "backend"
+      ],
+      "importance": 0.5,
+      "contentHash": "7b4f3f5912779e4ffdce6a17c67002e6b6fd2d02df6a510f676009cdf46293fc",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:40:21.902Z",
+      "updatedAt": "2025-12-16T02:40:21.902Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-1de678bf-a284-4179-84d2-5de4ed78126b",
+      "type": "fact",
+      "text": "defaultPricingProviders currently lists openai, anthropic, gemini, fireworks, xai, and customRates.",
+      "tags": [
+        "pricing",
+        "providers"
+      ],
+      "importance": 0.25,
+      "contentHash": "eb926bc9692856adba7cca97047198c8ce4f72fd69f2fc72011c3cb78e40c649",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:44:24.437Z",
+      "updatedAt": "2025-12-16T02:44:24.437Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-cd53fce3-bca0-46d4-a296-fdfb0736cfb1",
+      "type": "fact",
+      "text": "SessionUi stores both pricingConfig and defaultPricingConfig but the clamp only derives allowlists from defaultPricingConfig so UI selection should follow the raw defaults.",
+      "tags": [
+        "sessionui",
+        "pricing"
+      ],
+      "importance": 0.5,
+      "contentHash": "0dd1f257949c7bc7f08b85312c16e997740a58c8a3e9f2191e73f2851e8cabc7",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:44:24.437Z",
+      "updatedAt": "2025-12-16T02:44:24.437Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-3bd74a49-387e-4aae-987d-bb47cc379423",
+      "type": "warning",
+      "text": "SettingsService loads pricingConfig from persisted settings, merges defaults into it via mergeDefaultsIntoActivePricing, and never shrinks it back down, so legacy configs can indefinitely inflate provider model counts.",
+      "tags": [
+        "settings",
+        "pricing"
+      ],
+      "importance": 0.75,
+      "contentHash": "21501973ff0eaa5427dd2e2c4834f65b4ae0af78abd6ae6a3cf1eea0d71ac34c",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:44:24.437Z",
+      "updatedAt": "2025-12-16T02:44:24.437Z",
+      "lastUsedAt": "2025-12-16T02:57:11.547Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-237ee6c2-e814-47cd-bad9-4b5a7ae462cb",
+      "type": "workflow",
+      "text": "Enable VITE_SESSION_USAGE_DEBUG=1 or set window.__HF_SESSION_USAGE_DEBUG = true to see the [sessionUi] clamp models log showing openaiAllow, openaiIn, and openaiOut for verifying the allowlist size.",
+      "tags": [
+        "debug",
+        "workflow"
+      ],
+      "importance": 0.25,
+      "contentHash": "12cdaa53b410ebad3dfec1d887bb39330e9c7f0d5f2bf1eb5a4f87d026ed0d8d",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:44:24.437Z",
+      "updatedAt": "2025-12-16T02:44:24.437Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-a5f35ff2-8d03-42c7-a155-1a923be706ea",
+      "type": "fact",
+      "text": "SettingsService now clamps persisted pricingConfig on startup to exactly the models/providers defined in defaultModelSettings.json and drops any extra historical entries.",
+      "tags": [
+        "backend",
+        "pricing",
+        "clamp"
+      ],
+      "importance": 0.75,
+      "contentHash": "51975b7048ad5bc5bc8fdd65439a089c28af193a5c20e555b41d2a394d581e66",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:52:21.124Z",
+      "updatedAt": "2025-12-16T02:52:21.124Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-8e1c3942-111e-48f8-9618-de2060e01103",
+      "type": "constraint",
+      "text": "SettingsService.setPricingForModel rejects overrides for any provider/model pair that isn’t already in DEFAULT_PRICING except for user-managed fireworks overrides.",
+      "tags": [
+        "backend",
+        "pricing",
+        "constraint"
+      ],
+      "importance": 0.75,
+      "contentHash": "d8e7271684d14aa553ab04f3cb4681aaa60314cbe9617636c948fd93a0990430",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:52:21.124Z",
+      "updatedAt": "2025-12-16T02:52:21.124Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-e287978e-9b37-490e-8dfb-06a763b8c044",
+      "type": "fact",
+      "text": "Task task-beb6f9a8-2eda-4ace-92be-1ca07e0a9a26 to make defaults the single source of truth is marked done.",
+      "tags": [
+        "task",
+        "status"
+      ],
+      "importance": 0.25,
+      "contentHash": "6cedfcb58a7308f157934486b4abe98ed8bf55852e35b662b74fb1f1b888f8bb",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:52:21.124Z",
+      "updatedAt": "2025-12-16T02:52:21.124Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-2470acfe-0fc9-4db4-8705-7a937cc7d900",
+      "type": "fact",
+      "text": "The knowledge base article Model defaults & pricing: JSON source of truth (68b0fa40-c564-4dd2-b95c-7aa081fb1ecb) now documents the enforced invariants and enforcement points.",
+      "tags": [
+        "docs",
+        "kb",
+        "pricing"
+      ],
+      "importance": 0.25,
+      "contentHash": "728fc4d35109e0d0c78dd94b64186d7350b4a72805cfd7608231c7ae3917638e",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:52:21.124Z",
+      "updatedAt": "2025-12-16T02:52:21.124Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-ecbb4c27-9974-49dd-9962-1cda27f3a0a6",
+      "type": "constraint",
+      "text": "SettingsService clamps persisted pricingConfig to the models listed in defaultModelSettings.json and rejects pricing overrides for non-default models except user-controlled Fireworks entries.",
+      "tags": [
+        "settings",
+        "pricing",
+        "defaults"
+      ],
+      "importance": 0.75,
+      "contentHash": "fd6b18c3d6d080af87588fc308e3e94bfafd7d51d134a3423a4b361d057e6da8",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:55:22.691Z",
+      "updatedAt": "2025-12-16T02:55:22.691Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-72fc545c-c559-4f77-b277-e327b4e9b1f2",
+      "type": "workflow",
+      "text": "The renderer now relies solely on backend-provided modelsByProvider (already clamped to defaultModelSettings.json plus Fireworks overrides) and no longer prefetches or merges raw provider catalogs into its registry.",
+      "tags": [
+        "renderer",
+        "workflow",
+        "models"
+      ],
+      "importance": 0.5,
+      "contentHash": "0a1ca857520ba6b902bf5004739678285cbde73ff97777d5fc25d38a7484887e",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T02:55:22.691Z",
+      "updatedAt": "2025-12-16T02:55:22.691Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-6d7943b1-7711-4993-b41b-cd4acf08b606",
+      "type": "fact",
+      "text": "The renderer no longer merges raw provider catalogs and now only consumes the backend-provided modelsByProvider via settings.get and settings.models.changed events, so renderer state can’t grow beyond the backend defaults/overides.",
+      "tags": [
+        "renderer",
+        "models"
+      ],
+      "importance": 0.5,
+      "contentHash": "2f413f24ca29021470f150ea858d72fccb4eb4c553765834d9f192199eac9575",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:00:00.099Z",
+      "updatedAt": "2025-12-16T03:00:00.099Z",
+      "lastUsedAt": "2025-12-16T03:09:28.167Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-b738519a-3041-421f-be1d-bfed02689043",
+      "type": "constraint",
+      "text": "SettingsService must initialize before ProviderService so default pricing is clamped before ProviderService reads defaults and refreshes models.",
+      "tags": [
+        "service-initialization",
+        "ordering"
+      ],
+      "importance": 0.75,
+      "contentHash": "fbc6843b737b4069824d4ffff8d5e706300a80dc46f2766cbab42114a5868a7e",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:00:00.099Z",
+      "updatedAt": "2025-12-16T03:00:00.099Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-f24035bf-09a5-4438-b324-025b91c5fe01",
+      "type": "fact",
+      "text": "defaultModelSettings.json pricing.openai lists 15 models and does not include gpt-image-1, and ProviderService.filterToDefaults/setModelsForProvider clamp to that list.",
+      "tags": [
+        "defaults",
+        "providerservice"
+      ],
+      "importance": 0.25,
+      "contentHash": "385e24694eed4478fda28096e50ce1cc2a85a07572696a888fd225cdfa337451",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:00:00.099Z",
+      "updatedAt": "2025-12-16T03:00:00.099Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-70150eb0-8900-4752-b439-7dcef2a9d8ca",
+      "type": "fact",
+      "text": "The backend now always logs modelsByProvider counts on settings.get plus ProviderService openai model comparisons without any environment gating to reveal non-default entries.",
+      "tags": [
+        "logging",
+        "debuging"
+      ],
+      "importance": 0.5,
+      "contentHash": "6a008ef1b39131b2d59e7c79582399113b33bd4b572ae9562e92969741448c36",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:05:36.532Z",
+      "updatedAt": "2025-12-16T03:05:36.532Z",
+      "lastUsedAt": "2025-12-16T03:09:28.167Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-6cc64c51-ce12-4661-95f7-3def6c6ca172",
+      "type": "workflow",
+      "text": "On the next restart, capture the lines that begin with `[settings.get] modelsByProvider counts`, `[settings.get] defaultPricingConfig counts`, `[settings.get] openai extra vs defaults (first 20)`, and any `[ProviderService] openai models contained non-default entries` output so we can pinpoint the source of any wide lists.",
+      "tags": [
+        "debuging",
+        "workflow"
+      ],
+      "importance": 0.5,
+      "contentHash": "e04f52a7e535807958036e213991efc7e1ea072e87d8af72949ec744290a4f18",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:05:36.532Z",
+      "updatedAt": "2025-12-16T03:05:36.532Z",
+      "lastUsedAt": "2025-12-16T03:13:56.125Z",
+      "usageCount": 2
+    },
+    {
+      "id": "mem-7220a914-b822-4851-a808-9dc11c66e561",
+      "type": "fact",
+      "text": "The backend’s SettingsService defaultPricingConfig currently returns 53 OpenAI models even though the source JSON only lists 15, so defaults are already inflated before reaching the renderer.",
+      "tags": [
+        "backend",
+        "defaultpricing",
+        "openai"
+      ],
+      "importance": 0.75,
+      "contentHash": "084a0027497aecf1ac7a7c3f37e04ce207ba0c95b5d8cb37a3ff2c6277582d4f",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:10:41.516Z",
+      "updatedAt": "2025-12-16T03:10:41.516Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-28437c5a-930d-487d-a62e-6fdff36345d5",
+      "type": "workflow",
+      "text": "Always-on logs now print modelsByProvider counts, defaultPricingConfig counts/keys, and openai extra/default difs during settings.get and within ProviderService.getModelsForProvider('openai') to capture the ground-truth state.",
+      "tags": [
+        "logging",
+        "diagnostics"
+      ],
+      "importance": 0.5,
+      "contentHash": "338b04a4bfab9e556e0c07d133baa9e9cfc877422aaa5b32fcf13eac988e3f0c",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:10:41.516Z",
+      "updatedAt": "2025-12-16T03:10:41.516Z",
+      "lastUsedAt": "2025-12-16T03:13:56.125Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-22330704-709b-4a91-ab66-43c1dfe99701",
+      "type": "fact",
+      "text": "SettingsService.defaultPricingConfig is populated from an expanded source containing many OpenAI models (gpt-5.* variants) rather than the repository electron/data/defaultModelSettings.json, so renderer defaults and filters reflect the wrong set.",
+      "tags": [
+        "settings",
+        "openai",
+        "defaults"
+      ],
+      "importance": 0.75,
+      "contentHash": "5d8de482ffb1357bab1cedcd5210972744296ec7b06e8c5aa6053c2dab1d602c",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:14:10.282Z",
+      "updatedAt": "2025-12-16T03:14:10.282Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-22922ac2-0db8-4090-b950-50b01a99c8f4",
+      "type": "workflow",
+      "text": "Task task-bce0c985-960f-4e69-b342-e5956f662600 is In Progress to debug the pricing/defaults mismatch.",
+      "tags": [
+        "task-tracking",
+        "debuging"
+      ],
+      "importance": 0.25,
+      "contentHash": "8c240db370039bd33c2018ab55ced6717f23666c1bf3f071916ab65ecb971609",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:14:10.282Z",
+      "updatedAt": "2025-12-16T03:14:10.282Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-73b07726-7663-4474-b7ad-db394685bae2",
+      "type": "fact",
+      "text": "electron/data/defaultModelSettings.json currently lists gpt-image-1, gpt-image-1-mini, o3-dep-research, o4-mini-dep-research, gpt-4, gpt-3.5-turbo, and many other OpenAI variants, and dist-electron/defaultModelSettings.json is identical thanks to vite.config.ts copying.",
+      "tags": [
+        "default-model-settings",
+        "openai",
+        "allowlist"
+      ],
+      "importance": 0.5,
+      "contentHash": "47e9cfa9aad6aa47548e0977ac52356768b9079fa498212cb187e441da1887bb",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:15:59.363Z",
+      "updatedAt": "2025-12-16T03:15:59.363Z",
+      "lastUsedAt": "2025-12-16T03:23:51.181Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-1c3c35ee-7018-4692-8853-7606325337aa",
+      "type": "workflow",
+      "text": "Search every reference to defaultModelSettings.json to find the runtime source, force the app to load electron/data/defaultModelSettings.json exclusively (failing loudly if it cannot), and add always-on startup logging of the resolved path plus checksum/byte length of the file actually loaded.",
+      "tags": [
+        "default-model-settings",
+        "startup",
+        "logging"
+      ],
+      "importance": 0.75,
+      "contentHash": "9bcbb4928b304a83575dabd3a8b1fc847558dcad575d3728ad2a0213d12bdd19",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:15:59.363Z",
+      "updatedAt": "2025-12-16T03:15:59.363Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-990a779e-dc11-49c5-a3ae-66aee363f4a5",
+      "type": "workflow",
+      "text": "Prune the default allowlist to the ~15 desired OpenAI models, ensure modelDefaults.openai only references the remaining pricing models, and add a test asserting no pricing entries include gpt-image-/realtime/legacy models (or whatever stricter list we settle on).",
+      "tags": [
+        "allowlist",
+        "testing",
+        "policy"
+      ],
+      "importance": 0.5,
+      "contentHash": "de14bcd5473648b2a89679c15ce491018044f60e117caff815bc9d86917dd284",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:15:59.363Z",
+      "updatedAt": "2025-12-16T03:15:59.363Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-f7c0d48a-d6c4-4f29-81ee-5cf0f07ea4d3",
+      "type": "fact",
+      "text": "The running Electron backend currently reads a different defaultModelSettings.json (with ~53 OpenAI models) than the repo’s electron/data/defaultModelSettings.json (~15 models), so the UI and runtime don’t share a single allowlist.",
+      "tags": [
+        "config",
+        "build",
+        "bug"
+      ],
+      "importance": 0.75,
+      "contentHash": "7d4dc09b0786735ca35be07d0b42b8030f044db0230bec017252bd6339d32ffc",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:16:38.281Z",
+      "updatedAt": "2025-12-16T03:16:38.281Z",
+      "lastUsedAt": "2025-12-16T03:23:51.181Z",
+      "usageCount": 2
+    },
+    {
+      "id": "mem-920af741-856a-453b-8f90-611e5be59b95",
+      "type": "constraint",
+      "text": "Ensure the runtime always loads the repo file in dev and the packaged resources copy in prod, logging the absolute path plus a file hash/size and failing fast if the expected file is missing to prevent silent fallback to stale defaults.",
+      "tags": [
+        "config",
+        "workflow"
+      ],
+      "importance": 0.75,
+      "contentHash": "826e5bf0992cb00cfb8f852fe31cff060def1b5bea959889c16e957049b3c67c",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:16:38.281Z",
+      "updatedAt": "2025-12-16T03:16:38.281Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-6a9d7e58-0d10-4c73-9071-c8a16923867b",
+      "type": "warning",
+      "text": "electron/data/defaultModelSettings.ts currently searches multiple filesystem locations (dist-electron, repo data path, process cwd, packaged resources), so the runtime can read a different JSON than the one in source control.",
+      "tags": [
+        "runtime",
+        "configuration"
+      ],
+      "importance": 0.75,
+      "contentHash": "b4836baaa8166510a824333bcce2ee1568f1d4eb0b6b54f0fa6e5e9340cd948f",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:20:18.990Z",
+      "updatedAt": "2025-12-16T03:20:18.990Z",
+      "lastUsedAt": "2025-12-16T03:23:51.181Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-535740a6-0dc0-48fb-bd25-d3d43c03ba97",
+      "type": "fact",
+      "text": "electron/data/defaultModelSettings.ts now logs “[defaultModelSettings] loading from: …” and the byte count so we can verify which file path is actually used.",
+      "tags": [
+        "logging",
+        "diagnostics"
+      ],
+      "importance": 0.25,
+      "contentHash": "6906cb64638a559df0387787f38382b3f82fb7f1e07f72acce70ba96658699fd",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:20:18.990Z",
+      "updatedAt": "2025-12-16T03:20:18.990Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-589a7665-11ca-4743-a479-9b865c4a1570",
+      "type": "workflow",
+      "text": "Task task-e7682eea-6b06-4892-899e-2bcde34bc636 tracks moving defaultModelSettings.json into public/ and eliminating multi-path search to create a single source of truth.",
+      "tags": [
+        "task",
+        "planning"
+      ],
+      "importance": 0.25,
+      "contentHash": "dfda78483bc20356d0e54ff486a145af5866a26545d60041d7ec33c840928f0d",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:20:18.990Z",
+      "updatedAt": "2025-12-16T03:20:18.990Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-d4aa23bd-2e54-493a-86f6-baa103cc61ab",
+      "type": "fact",
+      "text": "electron/data/defaultModelSettings.ts currently resolves defaultModelSettings.json by searching dist-electron, ../data, process.cwd(), and process.resourcesPath, which lets dev/build artifacts override the source file and causes inconsistent values.",
+      "tags": [
+        "electron",
+        "configuration",
+        "debuging"
+      ],
+      "importance": 0.5,
+      "contentHash": "c68251508f44b17a363f834a41f0e6f504e9f90d3a636289cbc191ac517d6e58",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:23:06.299Z",
+      "updatedAt": "2025-12-16T03:23:06.299Z",
+      "lastUsedAt": "2025-12-16T03:23:51.181Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-858e92f5-3caf-4dc5-aaef-b618c42b8569",
+      "type": "fact",
+      "text": "Always-on logs in electron/data/defaultModelSettings.ts now print the `[defaultModelSettings] loading from:` path and the byte size so we can confirm which file the main process actually loads.",
+      "tags": [
+        "logging",
+        "debuging"
+      ],
+      "importance": 0.25,
+      "contentHash": "33f6091fc644d3fed11f2b594d86677e2631ee60befb101598da9224164ca577",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:23:06.299Z",
+      "updatedAt": "2025-12-16T03:23:06.299Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-2c03caee-6e60-4da1-bd05-707c254c93af",
+      "type": "fact",
+      "text": "The workspace file electron/data/defaultModelSettings.json does not include gpt-image-1, so any gpt-image-1 in the UI must come from another model registry path such as provider API responses or a different renderer store.",
+      "tags": [
+        "models",
+        "debuging"
+      ],
+      "importance": 0.5,
+      "contentHash": "d7e07dcf02c4823badb7d95eb14cfaf05304bae32cdde7a9c0d5b646662a21d9",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:23:06.299Z",
+      "updatedAt": "2025-12-16T03:23:06.299Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-ba230105-3d7a-4b01-a0fe-44f72a22a7b2",
+      "type": "fact",
+      "text": "dist-electron/defaultModelSettings.json currently contains gpt-image-1 while electron/data/defaultModelSettings.json (the source-of-truth) does not, so any wide model lists in the UI were coming from the stale dist copy.",
+      "tags": [
+        "defaultmodelsettings",
+        "models"
+      ],
+      "importance": 0.5,
+      "contentHash": "88dcc1df97a7c2a62dc1053b4895f18b423251991ec17653c774f9940dc847d5",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:24:20.466Z",
+      "updatedAt": "2025-12-16T03:24:20.466Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-cc167a22-bf05-4a9f-b838-b927b2c7351c",
+      "type": "fact",
+      "text": "The main process always logs '[defaultModelSettings] loaded from <abs path> bytes=<n>' when it loads the file, making it easy to verify which path was used.",
+      "tags": [
+        "defaultmodelsettings",
+        "observability"
+      ],
+      "importance": 0.25,
+      "contentHash": "dde42b40db1de40d811f7e86ed73d85986ca4620b6c4f9010cad099485a14134",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:24:20.466Z",
+      "updatedAt": "2025-12-16T03:24:20.466Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-24d6c690-a0dc-449c-8d71-d38ddf7a50a6",
+      "type": "fact",
+      "text": "vite.config.ts still copies electron/data/defaultModelSettings.json to dist-electron but now logs the copied file’s size/hash so stale copies can be spotted.",
+      "tags": [
+        "vite",
+        "defaultmodelsettings"
+      ],
+      "importance": 0.25,
+      "contentHash": "5ae1171c3a609c19cc34d384b61c6f7501bfe32d0c1ec8e73d5973e596bc0adb",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:24:20.466Z",
+      "updatedAt": "2025-12-16T03:24:20.466Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-9540f999-9406-48d2-875a-83195adf5918",
+      "type": "warning",
+      "text": "dist-electron/defaultModelSettings.json can become stale and previously overode source defaults, so the build now logs the file size/hash when copying it to help detect divergence.",
+      "tags": [
+        "build",
+        "dist",
+        "warning"
+      ],
+      "importance": 0.5,
+      "contentHash": "9b07299c618b994a3ebfa9717e428698f1803bb8f75598ebaa3a53e060537d74",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:26:14.533Z",
+      "updatedAt": "2025-12-16T03:26:14.533Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-d1ffa4f7-ed13-4c2d-8ac9-85f3825effd3",
+      "type": "workflow",
+      "text": "When verifying the dev build restart the app and check the main-process log for the defaultModelSettings load path to ensure it reads process.cwd()/electron/data/defaultModelSettings.json and that models like gpt-image-1 disappear.",
+      "tags": [
+        "verification",
+        "workflow"
+      ],
+      "importance": 0.5,
+      "contentHash": "80dd930b194d4538bc1e834e1cb79ed04da314d8566774a2f34245c686a37747",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:26:14.533Z",
+      "updatedAt": "2025-12-16T03:26:14.533Z",
+      "usageCount": 0
+    }
+  ]
 }

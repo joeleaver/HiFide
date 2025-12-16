@@ -1,33 +1,46 @@
 ---
 id: 68b0fa40-c564-4dd2-b95c-7aa081fb1ecb
 title: Model defaults & pricing: JSON source of truth
-tags: [models, config, pricing, kb]
-files: [electron/data/defaultPricing.ts, electron/services/SettingsService.ts]
+tags: [models, config, pricing, allowlist, architecture]
+files: [electron/data/defaultModelSettings.json, electron/services/SettingsService.ts, electron/services/ProviderService.ts, electron/backend/ws/handlers/settings-handlers.ts, src/store/sessionUi.ts, src/store/hydration.ts, electron/backend/ws/snapshot.ts]
 createdAt: 2025-12-15T17:46:15.657Z
-updatedAt: 2025-12-15T18:04:35.909Z
+updatedAt: 2025-12-16T02:59:34.059Z
 ---
 
 # Model defaults & pricing: JSON source of truth
 
-## Source of truth file
-- `electron/data/defaultModelSettings.json`
+## Goal
+`electron/data/defaultModelSettings.json` is the **single source of truth** for which *default/built-in* models exist in the app.
 
-## Runtime lookup & packaging
-The main process loads this JSON at runtime.
+Allowed exceptions:
+- **User-created Fireworks model overrides** via the Fireworks allowlist controls.
 
-The loader (`electron/data/defaultModelSettings.ts`) searches several locations to work in dev, tests, and packaged builds:
-- `dist-electron/defaultModelSettings.json` (dev build output)
-- `electron/data/defaultModelSettings.json` (source tree fallback)
-- `process.resourcesPath/defaultModelSettings.json` (typical electron-builder packaged resources)
+## Invariants
+1) **Model existence allowlist = `defaultModelSettings.json.pricing` keys**.
+   - If a model id is not present under `pricing.<provider>`, it must not appear in any model picker.
+2) `pricingConfig` is **not a model registry**.
+   - Settings may only store pricing overrides for models that already exist in defaults.
+3) Fireworks is special:
+   - Default Fireworks models come from `pricing.fireworks` keys.
+   - Users can extend the allowlist at runtime; those extra models can exist even if not in defaults.
 
-**Build step:** `vite.config.ts` includes a `copy-default-model-settings` plugin that copies:
-- from `electron/data/defaultModelSettings.json`
-- to `dist-electron/defaultModelSettings.json`
+## Enforcement points
+### Backend
+- `electron/services/SettingsService.ts`
+  - On startup, clamps persisted `pricingConfig` to the defaults allowlist (drops extra models).
+  - Rejects `setPricingForModel` for non-default models (except Fireworks).
 
-## Precedence for runtime sampling defaults
-Highest → lowest:
-1. per-request overrides (e.g. requestReasoningEffort)
-2. `context.modelOverrides[]`
-3. `context.temperature` / `context.reasoningEffort` / etc.
-4. JSON defaults (`defaultModelSettings.json`)
-5. internal fallbacks
+- `electron/services/ProviderService.ts`
+  - When refreshing models from provider APIs, filters fetched lists to defaults allowlist (`filterToDefaults`).
+  - When setting `modelsByProvider`, clamps to defaults allowlist at the setter boundary.
+
+### Renderer
+- The renderer must **never** merge raw provider catalogs into its own store.
+  - `modelsByProvider` shown in pickers must come from the backend snapshot/events.
+
+## Bootstrap ordering requirement
+`SettingsService` must initialize **before** `ProviderService` so that:
+- default pricing is loaded/clamped
+- provider model refresh + events cannot run against uninitialized settings
+
+(Implemented in `electron/services/index.ts`.)

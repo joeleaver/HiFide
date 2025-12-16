@@ -45,18 +45,13 @@ export class ProviderService extends Service<ProviderState> {
         },
         defaultModels: {},
         routeHistory: [],
-        fireworksAllowedModels: [
-          'accounts/fireworks/models/qwen3-coder-480b-a35b-instruct',
-          'accounts/fireworks/models/glm-4p6',
-          'accounts/fireworks/models/kimi-k2-instruct-0905',
-          'accounts/fireworks/models/deepseek-v3p1-terminus',
-	          'accounts/fireworks/models/deepseek-v3p2',
-          'accounts/fireworks/models/kimi-k2-thinking',
-          'accounts/fireworks/models/minimax-m2',
-        ],
+        // NOTE: defaults are loaded from defaultModelSettings.json via getDefaultPricingConfig()
+        // Users may still add their own Fireworks model overrides at runtime.
+        fireworksAllowedModels: [],
       },
       'provider'
     )
+
 
     // One-time migration: load from old individual keys if new key doesn't exist
     if (!this.persistence.has('provider')) {
@@ -92,6 +87,23 @@ export class ProviderService extends Service<ProviderState> {
         this.persistence.delete('fireworksAllowedModels')
       }
     }
+
+    // Initialize Fireworks allowlist from defaultModelSettings.json (single source of truth).
+    // If the user has previously customized the allowlist, the persisted state will already
+    // contain values and we should preserve them.
+    if (!this.state.fireworksAllowedModels || this.state.fireworksAllowedModels.length === 0) {
+      const fwDefaults = Object.keys(getDefaultPricingConfig().fireworks || {})
+      if (fwDefaults.length > 0) {
+        this.state = {
+          ...this.state,
+          fireworksAllowedModels: fwDefaults,
+        }
+      }
+    }
+
+    // Defensive clamp: if persisted state or some other code path populated large model lists,
+    // ensure we only expose allowlisted defaults (plus Fireworks user overrides).
+    this.ensureModelsByProviderAllowlist()
   }
 
   protected onStateChange(updates: Partial<ProviderState>): void {
@@ -135,6 +147,28 @@ export class ProviderService extends Service<ProviderState> {
     return this.state.selectedModel
   }
 
+  // Defensive clamp: prevent any non-default models from being exposed via modelsByProvider
+  // (except Fireworks user overrides, which are controlled by fireworksAllowedModels).
+  private ensureModelsByProviderAllowlist(): void {
+    const next: Record<string, ModelOption[]> = { ...this.state.modelsByProvider }
+
+    const providers: Array<'openai' | 'anthropic' | 'gemini' | 'xai'> = ['openai', 'anthropic', 'gemini', 'xai']
+    for (const p of providers) {
+      next[p] = this.filterToDefaults(p, Array.isArray(next[p]) ? next[p] : [])
+    }
+
+    const fwAllowed = new Set((this.state.fireworksAllowedModels || []).filter(Boolean))
+    next.fireworks = (Array.isArray(next.fireworks) ? next.fireworks : []).filter((m) => fwAllowed.has(m.value))
+
+    try {
+      if (JSON.stringify(this.state.modelsByProvider) !== JSON.stringify(next)) {
+        this.setState({ modelsByProvider: next })
+      }
+    } catch {
+      this.setState({ modelsByProvider: next })
+    }
+  }
+
   getSelectedProvider(): string {
     return this.state.selectedProvider
   }
@@ -148,7 +182,27 @@ export class ProviderService extends Service<ProviderState> {
   }
 
   getModelsForProvider(provider: string): ModelOption[] {
-    return this.state.modelsByProvider[provider] || []
+    const raw = this.state.modelsByProvider[provider] || []
+
+    // Always-on diagnostics to catch unexpected wide model lists at the source.
+    // If we ever see non-default models here, it means some code path bypassed allowlisting.
+    if (provider === 'openai') {
+      try {
+        const defaults = Object.keys(getDefaultPricingConfig().openai || {})
+        const extra = raw.map((m) => m.value).filter((id) => !defaults.includes(id))
+        if (extra.length > 0) {
+          console.log('[ProviderService] openai models contained non-default entries', {
+            count: raw.length,
+            defaultCount: defaults.length,
+            extra: extra.slice(0, 20),
+          })
+        }
+      } catch (e) {
+        console.warn('[ProviderService] diagnostics failed', e)
+      }
+    }
+
+    return raw
   }
 
   getDefaultModel(provider: string): string | undefined {
@@ -209,12 +263,20 @@ export class ProviderService extends Service<ProviderState> {
   }
 
   setModelsForProvider(provider: string, models: ModelOption[]): void {
-    this.setState({
-      modelsByProvider: {
-        ...this.state.modelsByProvider,
-        [provider]: models,
-      },
-    })
+    const nextMap = {
+      ...this.state.modelsByProvider,
+      [provider]: Array.isArray(models) ? models : [],
+    }
+
+    // Enforce allowlist at the setter boundary.
+    if (provider === 'openai' || provider === 'anthropic' || provider === 'gemini' || provider === 'xai') {
+      nextMap[provider] = this.filterToDefaults(provider, nextMap[provider] || [])
+    } else if (provider === 'fireworks') {
+      const allowed = new Set((this.state.fireworksAllowedModels || []).filter(Boolean))
+      nextMap.fireworks = (nextMap.fireworks || []).filter((m) => allowed.has(m.value))
+    }
+
+    this.setState({ modelsByProvider: nextMap })
   }
 
   setDefaultModel(provider: string, model: string): void {
@@ -274,6 +336,7 @@ export class ProviderService extends Service<ProviderState> {
   // Fireworks allowlist
   async setFireworksAllowedModels(models: string[]): Promise<void> {
     this.setState({ fireworksAllowedModels: models })
+    this.ensureModelsByProviderAllowlist()
     await this.refreshFireworksModelsSafely()
   }
 
@@ -283,6 +346,7 @@ export class ProviderService extends Service<ProviderState> {
     const current = this.state.fireworksAllowedModels
     if (!current.includes(trimmed)) {
       this.setState({ fireworksAllowedModels: [...current, trimmed] })
+      this.ensureModelsByProviderAllowlist()
       await this.refreshFireworksModelsSafely()
     }
   }
@@ -291,20 +355,14 @@ export class ProviderService extends Service<ProviderState> {
     this.setState({
       fireworksAllowedModels: this.state.fireworksAllowedModels.filter((m) => m !== model),
     })
+    this.ensureModelsByProviderAllowlist()
     await this.refreshFireworksModelsSafely()
   }
 
   async loadFireworksRecommendedDefaults(): Promise<void> {
-    const defaults = [
-      'accounts/fireworks/models/qwen3-coder-480b-a35b-instruct',
-      'accounts/fireworks/models/glm-4p6',
-      'accounts/fireworks/models/kimi-k2-instruct-0905',
-      'accounts/fireworks/models/deepseek-v3p1-terminus',
-	      'accounts/fireworks/models/deepseek-v3p2',
-      'accounts/fireworks/models/kimi-k2-thinking',
-      'accounts/fireworks/models/minimax-m2',
-    ]
+    const defaults = Object.keys(getDefaultPricingConfig().fireworks || {})
     this.setState({ fireworksAllowedModels: defaults })
+    this.ensureModelsByProviderAllowlist()
     await this.refreshFireworksModelsSafely()
   }
 
@@ -345,38 +403,34 @@ export class ProviderService extends Service<ProviderState> {
 
       if (!key) {
         // Fallback to defaults if no key available
+        // Source of truth: pricing allowlist in defaultModelSettings.json
+        // (NOT modelDefaults; modelDefaults may contain legacy entries).
         const defaults = getDefaultPricingConfig()[provider] || {}
         const fallbackList = Object.keys(defaults).map((id) => ({ value: id, label: id }))
 
-        this.setState({
-          modelsByProvider: {
-            ...this.state.modelsByProvider,
-            [provider]: fallbackList,
-          },
-        })
+        // IMPORTANT: Always go through setModelsForProvider so allowlisting is enforced
+        // consistently (single source of truth: defaultModelSettings.json).
+        this.setModelsForProvider(provider, fallbackList)
         return
       }
 
       let list: ModelOption[] = []
 
       if (provider === 'openai') {
-        list = await this.fetchOpenAIModels(key)
+        list = this.filterToDefaults('openai', await this.fetchOpenAIModels(key))
       } else if (provider === 'anthropic') {
-        list = await this.fetchAnthropicModels(key)
+        list = this.filterToDefaults('anthropic', await this.fetchAnthropicModels(key))
       } else if (provider === 'gemini') {
-        list = await this.fetchGeminiModels(key)
+        list = this.filterToDefaults('gemini', await this.fetchGeminiModels(key))
       } else if (provider === 'fireworks') {
         list = await this.fetchFireworksModels()
       } else if (provider === 'xai') {
-        list = await this.fetchXAIModels(key)
+        list = this.filterToDefaults('xai', await this.fetchXAIModels(key))
       }
 
-      this.setState({
-        modelsByProvider: {
-          ...this.state.modelsByProvider,
-          [provider]: list,
-        },
-      })
+      // IMPORTANT: Always go through setModelsForProvider so allowlisting is enforced
+      // consistently (single source of truth: defaultModelSettings.json).
+      this.setModelsForProvider(provider, list)
 
       // Auto-select first model as default if no default is set OR if current default is not in the list
       const currentDefault = this.state.defaultModels?.[provider]
@@ -393,12 +447,9 @@ export class ProviderService extends Service<ProviderState> {
       const defaults = getDefaultPricingConfig()[provider] || {}
       const fallbackList = Object.keys(defaults).map((id) => ({ value: id, label: id }))
 
-      this.setState({
-        modelsByProvider: {
-          ...this.state.modelsByProvider,
-          [provider]: fallbackList,
-        },
-      })
+      // IMPORTANT: Always go through setModelsForProvider so allowlisting is enforced
+      // consistently (single source of truth: defaultModelSettings.json).
+      this.setModelsForProvider(provider, fallbackList)
     }
   }
 
@@ -420,6 +471,22 @@ export class ProviderService extends Service<ProviderState> {
     }
   }
 
+  /**
+   * Filter a fetched provider model list to the allowlisted models in defaultModelSettings.json.
+   *
+   * The pricing config (getDefaultPricingConfig) is treated as the single source of truth for
+   * which *default* models exist in the app.
+   */
+  private filterToDefaults(
+    provider: 'openai' | 'anthropic' | 'gemini' | 'xai',
+    fetched: ModelOption[]
+  ): ModelOption[] {
+    const defaults = getDefaultPricingConfig()[provider] || {}
+    const allowed = new Set(Object.keys(defaults))
+    if (allowed.size === 0) return []
+    return (Array.isArray(fetched) ? fetched : []).filter((m) => allowed.has(m.value))
+  }
+
   // Private helper methods for fetching models
   private async fetchOpenAIModels(key: string): Promise<ModelOption[]> {
     const f: any = (globalThis as any).fetch
@@ -437,24 +504,11 @@ export class ProviderService extends Service<ProviderState> {
       .map((m: any) => m?.id)
       .filter((id: any) => typeof id === 'string')
 
-    const allowed = ids.filter(
-      (id) =>
-        /^(gpt-5|gpt-4\.1|gpt-4o|o[34])/i.test(id) &&
-        !/realtime/i.test(id) &&
-        !/(whisper|audio|tts|speech|embedding|embeddings)/i.test(id)
-    )
-    const uniq = Array.from(new Set(allowed))
-
-    const allowPriority = ['gpt-5', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini', 'o4', 'o4-mini', 'o3-mini']
-    const withLabels = uniq.map((id) => ({ id, label: id }))
-    withLabels.sort((a, b) => {
-      const ia = allowPriority.findIndex((p) => a.id.startsWith(p))
-      const ib = allowPriority.findIndex((p) => b.id.startsWith(p))
-      if (ia !== ib) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
-      return a.id.localeCompare(b.id)
-    })
-
-    return withLabels.map((m) => ({ value: m.id, label: m.label }))
+    // IMPORTANT: model allowlisting is enforced by defaultModelSettings.json.
+    // Do not apply additional heuristics here; just return the provider's list
+    // (downstream will clamp via filterToDefaults / setModelsForProvider).
+    const uniq = Array.from(new Set(ids))
+    return uniq.map((id) => ({ value: id, label: id }))
   }
 
   private async fetchAnthropicModels(key: string): Promise<ModelOption[]> {
@@ -498,7 +552,8 @@ export class ProviderService extends Service<ProviderState> {
       } catch {}
     }
 
-    // Normalize, filter and dedupe
+    // Normalize and dedupe. Do not apply additional filtering; allowlisting is enforced
+    // by defaultModelSettings.json via filterToDefaults / setModelsForProvider.
     const seen = new Set<string>()
     const models = all
       .map((m: any) => {
@@ -509,10 +564,7 @@ export class ProviderService extends Service<ProviderState> {
       })
       .filter((m: any) => {
         const id = m.id || ''
-        const hasGenerate = m.supported?.includes('generateContent')
-        const isNotEmbedding = !/(embedding|vision)/i.test(id)
-        const isNotImageGen = !/image-generation/i.test(id)
-        if (!(hasGenerate && isNotEmbedding && isNotImageGen)) return false
+
         if (seen.has(id)) return false
         seen.add(id)
         return true
@@ -542,9 +594,10 @@ export class ProviderService extends Service<ProviderState> {
     const data = await resp.json()
     const arr = Array.isArray(data?.data) ? data.data : []
     const ids: string[] = arr.map((m: any) => m?.id || m?.name).filter(Boolean)
-    const allowed = ids.filter((id) => /^grok-4/i.test(id) || id === 'grok-code-fast-1')
-    const uniq = Array.from(new Set(allowed))
-
+    // IMPORTANT: model allowlisting is enforced by defaultModelSettings.json.
+    // Do not apply additional heuristics here; just return the provider's list
+    // (downstream will clamp via filterToDefaults / setModelsForProvider).
+    const uniq = Array.from(new Set(ids))
     return uniq.map((id) => ({ value: id, label: id }))
   }
 }

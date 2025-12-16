@@ -27,6 +27,32 @@ function buildSettingsSnapshot(): SettingsSnapshot {
     xai: providerService.getModelsForProvider('xai'),
   }
 
+  // Always-on diagnostics to identify unexpected wide model catalogs.
+  try {
+    const openaiIds = (modelsByProvider.openai || []).map((m) => m.value)
+    const defaults = settingsService.getDefaultPricingConfig() as any
+    const defaultOpenaiIds = Object.keys(defaults?.openai || {})
+    const extra = openaiIds.filter((id) => !defaultOpenaiIds.includes(id))
+    console.log('[settings.get] modelsByProvider counts', {
+      openai: openaiIds.length,
+      anthropic: (modelsByProvider.anthropic || []).length,
+      gemini: (modelsByProvider.gemini || []).length,
+      fireworks: (modelsByProvider.fireworks || []).length,
+      xai: (modelsByProvider.xai || []).length,
+    })
+    console.log('[settings.get] defaultPricingConfig counts', {
+      openai: defaultOpenaiIds.length,
+      anthropic: Object.keys(defaults?.anthropic || {}).length,
+      gemini: Object.keys(defaults?.gemini || {}).length,
+      fireworks: Object.keys(defaults?.fireworks || {}).length,
+      xai: Object.keys(defaults?.xai || {}).length,
+    })
+    console.log('[settings.get] defaultPricingConfig.openai keys (first 30)', defaultOpenaiIds.slice(0, 30))
+    console.log('[settings.get] openai extra vs defaults (first 20)', extra.slice(0, 20))
+  } catch (e) {
+    console.warn('[settings.get] diagnostics failed', e)
+  }
+
   const defaultModels: Record<string, string | undefined> = {
     openai: providerService.getDefaultModel('openai'),
     anthropic: providerService.getDefaultModel('anthropic'),

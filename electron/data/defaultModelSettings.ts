@@ -71,36 +71,42 @@ function validateModelDefaultsConfig(value: unknown): value is ModelDefaultsConf
 }
 
 export function getDefaultModelSettingsPath(): string {
-  // When running from source (dev/test) `__dirname` is typically `electron/data`.
-  // When bundled, `__dirname` may be `dist-electron` (or inside an asar).
-  // We therefore search a couple of likely locations.
-  const candidates = [
-    // 1) Next to the compiled main bundle output (e.g. dist-electron/defaultModelSettings.json)
-    path.resolve(__dirname, SETTINGS_FILENAME),
-    // 2) In the source tree (e.g. electron/data/defaultModelSettings.json)
-    path.resolve(__dirname, '..', 'data', SETTINGS_FILENAME),
-    path.resolve(process.cwd(), 'electron', 'data', SETTINGS_FILENAME),
-    // 3) In the packaged resources directory (typical electron-builder layout)
-    ...(process.resourcesPath
-      ? [path.resolve(process.resourcesPath, SETTINGS_FILENAME)]
-      : []),
-  ]
+  // Single source of truth rules:
+  // - In dev/test: always read from the source tree so editing `electron/data/defaultModelSettings.json`
+  //   immediately affects the running app.
+  // - In packaged builds: read from the packaged resources directory.
+  //
+  // IMPORTANT: Do not prefer `dist-electron/defaultModelSettings.json` in dev.
+  // That output can be stale and silently diverge from the source tree.
 
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p
-  }
+  const packagedPath = process.resourcesPath
+    ? path.resolve(process.resourcesPath, SETTINGS_FILENAME)
+    : null
+  const sourcePath = path.resolve(process.cwd(), 'electron', 'data', SETTINGS_FILENAME)
 
-  // Fall back to the original expectation to preserve the path in the error message.
-  return candidates[0]
+  if (packagedPath && fs.existsSync(packagedPath)) return packagedPath
+  if (fs.existsSync(sourcePath)) return sourcePath
+
+  // If we can't find either canonical path, fail loudly with context.
+  throw new Error(
+    `[defaultModelSettings] Could not locate ${SETTINGS_FILENAME}. Looked for: ` +
+      `${packagedPath ?? '(no process.resourcesPath)'} and ${sourcePath}`,
+  )
 }
 
 let cached: DefaultModelSettingsFileV1 | null = null
+
+export function clearDefaultModelSettingsCache(): void {
+  cached = null
+}
 
 export function loadDefaultModelSettingsFile(): DefaultModelSettingsFileV1 {
   if (cached) return cached
 
   const filePath = getDefaultModelSettingsPath()
+  console.log(`[defaultModelSettings] loading from: ${filePath}`)
   const raw = fs.readFileSync(filePath, 'utf-8')
+  console.log(`[defaultModelSettings] bytes: ${Buffer.byteLength(raw, 'utf-8')}`)
   const parsed = JSON.parse(raw) as unknown
 
   if (!isObject(parsed) || parsed.version !== 1) {

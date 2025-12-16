@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { getBackendClient } from '../lib/backend/bootstrap'
 import { useChatTimeline } from './chatTimeline'
 import { useFlowRuntime, refreshFlowRuntimeStatusWithRetry } from './flowRuntime'
+import type { PricingConfig } from '../../electron/store/types'
 
 const SESSION_USAGE_DEBUG_FROM_ENV = import.meta.env?.VITE_SESSION_USAGE_DEBUG === '1'
 
@@ -25,9 +26,77 @@ const summarizeUsagePayload = (payload: any) => ({
   requestsLogLength: Array.isArray(payload?.requestsLog) ? payload.requestsLog.length : 0,
 })
 
+function buildPricingAllowlistByProvider(defaultPricingConfig?: PricingConfig): Record<string, Set<string>> {
+  const cfg = (defaultPricingConfig || {}) as any
+  const providers = ['openai', 'anthropic', 'gemini', 'fireworks', 'xai'] as const
+  const out: Record<string, Set<string>> = {}
+  for (const p of providers) {
+    const models = (cfg[p] || {}) as Record<string, unknown>
+    out[p] = new Set(Object.keys(models))
+  }
+  return out
+}
+
+function clampModelsByProviderToAllowlist(
+  modelsByProvider: Record<string, ProviderOption[]>,
+  defaultPricingConfig?: PricingConfig,
+): Record<string, ProviderOption[]> {
+  // defaultPricingConfig (from defaultModelSettings.json pricing keys) is the single source of truth.
+  // If it's missing/empty, we *must not* accept any non-Fireworks provider model list;
+  // otherwise the UI can show the provider's entire catalog.
+  //
+  // Fireworks is special: user overrides are allowed, so we leave it to the backend to provide
+  // the correct allowlisted list.
+  const map = modelsByProvider || {}
+  const cfg = defaultPricingConfig as any
+  // If defaults aren't available, we intentionally render no non-Fireworks models.
+  // This avoids ever showing the provider's full catalog due to a race.
+  if (!cfg || Object.keys(cfg).length === 0) {
+    return {
+      fireworks: Array.isArray((map as any).fireworks) ? (map as any).fireworks : [],
+    }
+  }
+
+  const allowlist = buildPricingAllowlistByProvider(defaultPricingConfig)
+  const clamped = filterModelsByPricingAllowlist(map, allowlist)
+
+  // DEBUG (guarded by env): If we're still showing too many models, log why.
+  try {
+    if (shouldLogSessionUsageDebug()) {
+      const openaiAllow = allowlist.openai ? allowlist.openai.size : -1
+      const openaiIn = Array.isArray((map as any).openai) ? (map as any).openai.length : -1
+      const openaiOut = Array.isArray((clamped as any).openai) ? (clamped as any).openai.length : -1
+      console.debug('[sessionUi] clamp models', { openaiAllow, openaiIn, openaiOut })
+    }
+  } catch {}
+
+  return clamped
+}
 
 export interface SessionSummary { id: string; title: string }
 export interface ProviderOption { value: string; label: string }
+
+function filterModelsByPricingAllowlist(
+  modelsByProvider: Record<string, ProviderOption[]>,
+  allowlistByProvider: Record<string, Set<string>>,
+): Record<string, ProviderOption[]> {
+  const next: Record<string, ProviderOption[]> = {}
+  for (const [provider, models] of Object.entries(modelsByProvider || {})) {
+    const list = Array.isArray(models) ? models : []
+    const allow = allowlistByProvider[provider]
+    // If we don't know the provider, drop it. Unknown providers are not allowed to
+    // define model catalogs.
+    if (!allow) continue
+    // Fireworks allowlist is managed server-side (defaults + user overrides).
+    // Renderer clamps only the providers that should be *strictly* allowlisted by defaults.
+    if (provider === 'fireworks') {
+      next[provider] = list
+      continue
+    }
+    next[provider] = list.filter((m) => allow.has(String((m as any)?.value ?? '')))
+  }
+  return next
+}
 
 interface SessionUsageState {
   tokenUsage?: any
@@ -46,6 +115,10 @@ export interface SessionUiState extends SessionUsageState, SessionMetaState {
   currentId: string | null
   providerValid: Record<string, boolean>
   modelsByProvider: Record<string, ProviderOption[]>
+  // Used to clamp model lists client-side to the defaultModelSettings.json allowlist (pricing keys)
+  defaultPricingConfig?: PricingConfig
+  // Active pricing config (user-editable). This is NOT the allowlist.
+  pricingConfig?: PricingConfig
   flows: Array<{ id: string; name: string; library?: string }>
 
   // Hydration flags
@@ -69,6 +142,8 @@ export interface SessionUiState extends SessionUsageState, SessionMetaState {
   __setUsage: (usage?: any, costs?: any, requestsLog?: any[]) => void
   __setMeta: (meta: Partial<SessionMetaState>) => void
   __setSettings: (providerValid: Record<string, boolean>, modelsByProvider: Record<string, ProviderOption[]>) => void
+  __setDefaultPricingConfig: (cfg?: PricingConfig) => void
+  __setPricingConfig: (cfg?: PricingConfig) => void
   __setFlows: (flows: Array<{ id: string; name: string; library?: string }>) => void
   __reset: () => void
 }
@@ -82,6 +157,8 @@ function createSessionUiStore() {
     modelId: '',
     providerValid: {},
     modelsByProvider: {},
+    defaultPricingConfig: undefined,
+    pricingConfig: undefined,
     flows: [],
     isHydratingMeta: false,
     isHydratingUsage: false,
@@ -170,7 +247,8 @@ function createSessionUiStore() {
     },
     __setMeta: (meta) => set((s) => ({ ...s, ...meta })),
     __setSettings: (providerValid, modelsByProvider) => {
-      set({ providerValid, modelsByProvider })
+      const clamped = clampModelsByProviderToAllowlist(modelsByProvider || {}, get().defaultPricingConfig)
+      set({ providerValid, modelsByProvider: clamped })
       try {
         const snapshot = get()
         const modelCounts = Object.fromEntries(
@@ -179,9 +257,19 @@ function createSessionUiStore() {
         console.log('[sessionUi] __setSettings applied', {
           providerValid: snapshot.providerValid,
           modelCounts,
+          hasDefaultPricingConfig: !!snapshot.defaultPricingConfig,
+          defaultPricingProviders: snapshot.defaultPricingConfig ? Object.keys(snapshot.defaultPricingConfig as any) : [],
         })
       } catch {}
     },
+    __setDefaultPricingConfig: (cfg) => {
+      // When pricing changes, immediately clamp any existing modelsByProvider.
+      set((s) => ({
+        defaultPricingConfig: cfg,
+        modelsByProvider: clampModelsByProviderToAllowlist(s.modelsByProvider || {}, cfg),
+      }))
+    },
+    __setPricingConfig: (cfg) => set({ pricingConfig: cfg }),
     __setFlows: (flows) => set({ flows }),
     __reset: () => set({
       sessions: [],
@@ -237,6 +325,7 @@ async function fetchAndApplyCurrentSessionMeta(reason = 'unknown'): Promise<void
   }
 }
 
+
 export function initSessionUiEvents(): void {
   const client = getBackendClient()
   if (!client) return
@@ -290,10 +379,22 @@ export function initSessionUiEvents(): void {
   client.subscribe('settings.models.changed', (p: any) => {
     console.log('[sessionUi] settings.models.changed received, updating provider/models snapshot')
     try {
-      useSessionUi.getState().__setSettings(p?.providerValid || {}, p?.modelsByProvider || {})
+      // Clamp to defaultPricingConfig allowlist if available (single source of truth)
+      const cur = useSessionUi.getState()
+      const allowlist = buildPricingAllowlistByProvider((cur as any).defaultPricingConfig)
+      const clamped = filterModelsByPricingAllowlist(p?.modelsByProvider || {}, allowlist)
+      useSessionUi.getState().__setSettings(p?.providerValid || {}, clamped)
     } catch (e) {
       console.warn('[sessionUi] settings.models.changed: __setSettings failed', e)
     }
+  })
+
+  client.subscribe('settings.pricing.changed', (p: any) => {
+    try {
+      // Store pricing + defaultPricingConfig so model allowlisting has a stable baseline.
+      useSessionUi.getState().__setPricingConfig(p?.pricingConfig)
+      useSessionUi.getState().__setDefaultPricingConfig(p?.defaultPricingConfig)
+    } catch {}
   })
 
   client.subscribe('session.list.changed', (p: any) => {
@@ -345,7 +446,9 @@ export async function hydrateSessionUiSettingsAndFlows(): Promise<void> {
     // Kanban is already set in its store via hydrateBoard().
 
     let providerValidMap: Record<string, boolean> = settingsRes?.providerValid || {}
-    const modelsMap = settingsRes?.modelsByProvider || {}
+    const modelsMapRaw = settingsRes?.modelsByProvider || {}
+    const allowlist = buildPricingAllowlistByProvider(settingsRes?.defaultPricingConfig)
+    const modelsMap = filterModelsByPricingAllowlist(modelsMapRaw, allowlist)
     const modelCounts = Object.fromEntries(
       Object.entries(modelsMap).map(([k, v]) => [k, Array.isArray(v) ? v.length : -1]),
     )
@@ -383,44 +486,23 @@ export async function hydrateSessionUiSettingsAndFlows(): Promise<void> {
 
     if (settingsRes?.ok) {
       try {
-        useSessionUi.getState().__setSettings(providerValidMap, settingsRes.modelsByProvider || {})
+        // IMPORTANT: set pricing config before models so the store clamp has an allowlist.
+        // Without this, models can be temporarily over-filtered (empty) or under-filtered (full list)
+        // depending on timing.
+        useSessionUi.getState().__setPricingConfig(settingsRes?.pricingConfig)
+        useSessionUi.getState().__setDefaultPricingConfig(settingsRes?.defaultPricingConfig)
+        useSessionUi.getState().__setSettings(providerValidMap, modelsMap)
       } catch (e) {
         console.warn('[sessionUi] hydrateSessionUiSettingsAndFlows: __setSettings failed', e)
       }
     }
 
-    // Proactively fetch models for valid providers on first hydrate if none are loaded yet.
-    try {
-      const anyValid = Object.values(providerValidMap || {}).some(Boolean)
-      const totalLoaded = Object.values(modelCounts || {}).reduce(
-        (acc: number, n: any) => acc + (typeof n === 'number' && n > 0 ? n : 0),
-        0,
-      )
-
-      if (anyValid && totalLoaded === 0) {
-        const providersToRefresh = (['openai', 'anthropic', 'gemini', 'fireworks', 'xai'] as const)
-          .filter((pid) => (providerValidMap as any)[pid])
-        console.log('[sessionUi] hydrateSessionUiSettingsAndFlows: prefetching models for', providersToRefresh)
-
-        await Promise.allSettled(
-          providersToRefresh.map(async (pid) => {
-            try {
-              const res: any = await client.rpc('provider.refreshModels', { provider: pid })
-              if (res?.ok) {
-                const cur = useSessionUi.getState()
-                const curModels = Array.isArray(res.models) ? res.models : []
-                const nextMap = { ...(cur.modelsByProvider || {}), [pid]: curModels }
-                useSessionUi.getState().__setSettings(cur.providerValid || {}, nextMap)
-              }
-            } catch (e) {
-              console.warn('[sessionUi] hydrateSessionUiSettingsAndFlows: prefetch failed for', pid, e)
-            }
-          }),
-        )
-      }
-    } catch (e) {
-      console.warn('[sessionUi] hydrateSessionUiSettingsAndFlows: prefetch block failed', e)
-    }
+    // IMPORTANT: Do not prefetch and merge raw provider model catalogs into the UI store.
+    // The backend ProviderService is the sole authority for modelsByProvider and must already
+    // be clamped to the defaultModelSettings.json allowlist (+ Fireworks overrides).
+    //
+    // Keeping a renderer-side merge here re-introduces multiple sources of truth and can cause
+    // the SessionControlsBar and node model pickers to show disallowed models.
 
     if (templates?.ok) {
       try {

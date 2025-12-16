@@ -9,6 +9,7 @@ import type { WorkspaceSnapshot } from '../../../shared/hydration.js'
 import {
   getSessionService,
   getProviderService,
+  getSettingsService,
   getFlowProfileService,
   getFlowGraphService,
   getKanbanService,
@@ -25,6 +26,7 @@ export async function buildWorkspaceSnapshot(workspaceId: string): Promise<Works
     const sessionService = getSessionService()
     const flowContextsService = getFlowContextsService()
     const providerService = getProviderService()
+    const settingsService = getSettingsService()
     const flowProfileService = getFlowProfileService()
     const flowGraphService = getFlowGraphService()
     const kanbanService = getKanbanService()
@@ -133,6 +135,7 @@ export async function buildWorkspaceSnapshot(workspaceId: string): Promise<Works
         fireworks: providerService.getModelsForProvider('fireworks'),
         xai: providerService.getModelsForProvider('xai'),
       },
+      defaultPricingConfig: settingsService.getDefaultPricingConfig(),
     }
 
     // Get knowledge base items (full data, not just count)
