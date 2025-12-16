@@ -33,8 +33,10 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
 
   const { providerOverride, modelOverride } = applyOverrides(manager, config)
 
-  // Long-term RAG: retrieve workspace memories and inject into system instructions
-  // (workspace-scoped, deterministic lexical ranking)
+  // Long-term RAG: retrieve workspace memories and inject into system instructions.
+  // IMPORTANT: do NOT mutate flow.context.systemInstructions here, otherwise memories can
+  // accumulate across turns and even interfere with later message resolution.
+  let injectedSystemInstructions: string | undefined
   if (flow?.workspaceId) {
     try {
       const memories = await retrieveWorkspaceMemoriesForQuery(message, {
@@ -56,7 +58,7 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
           lines.push(`- (${m.type}, importance=${m.importance}) ${m.text}${tags} [memory:${m.id}]`)
         }
 
-        manager.update({ systemInstructions: lines.filter(Boolean).join('\n') })
+        injectedSystemInstructions = lines.filter(Boolean).join('\\n')
 
         // Mark used (best-effort)
         await markMemoriesUsed(memories.map((m) => m.id), { workspaceId: flow.workspaceId })
@@ -74,6 +76,7 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
     flowAPI: flow,
     overrideProvider: providerOverride,
     overrideModel: modelOverride,
+    ...(injectedSystemInstructions ? { systemInstructions: injectedSystemInstructions } : {}),
   })
 
   if (result.error) {

@@ -84,7 +84,47 @@ export async function writeWorkspaceMemories(memories: WorkspaceMemoriesFile, wo
   const payload = JSON.stringify(normalized, null, 2)
   const tmpPath = `${absPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 9)}`
   await fs.writeFile(tmpPath, payload, 'utf8')
-  await fs.rename(tmpPath, absPath)
+
+  // On Windows, AV/indexers can temporarily lock the destination file causing EPERM on rename.
+  // We retry a few times with backoff and fall back to unlink+rename when appropriate.
+  await renameWithRetries(tmpPath, absPath)
+}
+
+async function renameWithRetries(from: string, to: string): Promise<void> {
+  const maxAttempts = 8
+  const baseDelayMs = 15
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await fs.rename(from, to)
+      return
+    } catch (e: any) {
+      const code = e?.code
+
+      // If destination exists or is temporarily locked, try unlinking destination (best-effort)
+      // and retry. This is primarily to mitigate Windows EPERM caused by AV/indexers.
+      if (code === 'EEXIST' || code === 'EPERM') {
+        try {
+          await fs.unlink(to)
+        } catch (unlinkErr: any) {
+          if (unlinkErr?.code !== 'ENOENT') {
+            // ignore
+          }
+        }
+      }
+
+      if (attempt < maxAttempts && (code === 'EPERM' || code === 'EBUSY' || code === 'ENOTEMPTY')) {
+        await sleep(baseDelayMs * attempt)
+        continue
+      }
+
+      throw e
+    }
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**

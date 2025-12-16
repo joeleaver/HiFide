@@ -72,6 +72,12 @@ export interface LLMServiceRequest {
   /** Skip adding message to context history (for stateless calls like intentRouter) */
   skipHistory?: boolean
 
+  /**
+   * Optional per-call system instructions.
+   * Applied only to this request's provider payload; must not be persisted to the flow context.
+   */
+  systemInstructions?: string
+
   /** Optional reasoning effort override (for reasoning-capable models) */
   reasoningEffort?: 'low' | 'medium' | 'high'
 }
@@ -213,7 +219,7 @@ class LLMService {
       // Format it appropriately for each provider
       if (effectiveProvider === 'anthropic') {
         // Include system instructions even in stateless mode (skipHistory)
-        const systemText = context.systemInstructions || ''
+        const systemText = request.systemInstructions ?? context.systemInstructions ?? ''
         const system = systemText
           ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }]
           : undefined
@@ -224,12 +230,12 @@ class LLMService {
       } else if (effectiveProvider === 'gemini') {
         // Include systemInstruction even in stateless mode (skipHistory)
         formattedMessages = {
-          systemInstruction: context.systemInstructions || '',
+          systemInstruction: request.systemInstructions ?? context.systemInstructions ?? '',
           contents: [{ role: 'user', parts: [{ text: message }] }]
         }
       } else {
         // OpenAI and others — include a system message first if present
-        const systemText = context.systemInstructions
+        const systemText = request.systemInstructions ?? context.systemInstructions
         formattedMessages = [
           ...(systemText ? [{ role: 'system' as const, content: systemText }] : []),
           { role: 'user' as const, content: message }

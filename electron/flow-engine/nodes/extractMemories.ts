@@ -106,12 +106,9 @@ export const extractMemoriesNode: NodeFunction = async (flow, context, dataIn, i
   }
 
   // Use a stateless call; we don't want extractor messages in conversation history.
-  // NOTE: llmService.chat includes context.systemInstructions in skipHistory mode;
-  // we temporarily override the context system instructions for this call.
-  const originalSystem = flow.context.get().systemInstructions
-  try {
-    flow.context.setSystemInstructions(SYSTEM_INSTRUCTION)
-
+  // IMPORTANT: Do not mutate the flow context (system instructions, provider/model, etc.).
+  // This node must be isolated aside from writing to the memories store.
+  {
     const responseSchema = {
       name: 'workspace_memory_extraction',
       strict: true,
@@ -141,6 +138,7 @@ export const extractMemoriesNode: NodeFunction = async (flow, context, dataIn, i
     const llmResult = await llmService.chat({
       message: transcript,
       flowAPI: flow,
+      systemInstructions: SYSTEM_INSTRUCTION,
       responseSchema,
       overrideProvider: provider,
       overrideModel: model,
@@ -172,8 +170,7 @@ export const extractMemoriesNode: NodeFunction = async (flow, context, dataIn, i
       status: 'success' as const,
       metadata: { ...result, provider, model, lookbackPairs },
     }
-  } finally {
-    flow.context.setSystemInstructions(originalSystem || '')
+
   }
 }
 
