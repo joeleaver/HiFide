@@ -12,6 +12,7 @@ export const NODE_COLORS: Record<string, string> = {
   tools: '#f97316',
   injectMessages: '#06b6d4',  // Cyan - message injection/context manipulation
   intentRouter: '#f39c12',
+  extractMemories: '#8e44ad',
   redactor: '#14b8a6',
   budgetGuard: '#f59e0b',
   errorDetection: '#f97316',
@@ -36,6 +37,7 @@ export const NODE_TYPE_LABELS: Record<string, string> = {
   tools: 'Tools',
   injectMessages: 'Inject Messages',
   intentRouter: 'Intent Router',
+  extractMemories: 'Extract Memories',
   parallelSplit: 'Split',
   parallelJoin: 'Merge',
   redactor: 'Redactor',
@@ -70,6 +72,7 @@ export const NODE_CATEGORIES: Record<string, NodeCategory> = {
   newContext: 'llm',
   injectMessages: 'llm',
   intentRouter: 'flow-control',
+  extractMemories: 'llm',
   parallelSplit: 'flow-control',
   parallelJoin: 'flow-control',
   portalInput: 'flow-control',

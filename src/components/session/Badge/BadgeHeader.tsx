@@ -7,6 +7,7 @@ import { Group, Text, Badge as MantineBadge, UnstyledButton, useMantineTheme } f
 import { IconChevronDown, IconChevronUp } from '@tabler/icons-react'
 import { useUiStore } from '../../../store/ui'
 import type { Badge as BadgeType } from '../../../../electron/store/types'
+import { BadgePill } from './components/BadgePill'
 
 interface BadgeHeaderProps {
   badge: BadgeType
@@ -98,7 +99,7 @@ export function BadgeHeader({ badge, simple }: BadgeHeaderProps) {
             </MantineBadge>
           )}
 
-          {/* Tool Name */}
+          {/* Title (tool action summary; should NOT repeat the tool name) */}
           <Text
             size="xs"
             fw={600}
@@ -110,7 +111,7 @@ export function BadgeHeader({ badge, simple }: BadgeHeaderProps) {
               whiteSpace: 'nowrap',
             }}
           >
-            {badge.label}
+            {badge.title ?? badge.label}
           </Text>
 
           {/* Metadata (file count, etc.) */}
@@ -130,44 +131,12 @@ export function BadgeHeader({ badge, simple }: BadgeHeaderProps) {
         <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
           {/* Added Lines Pill */}
           {typeof badge.addedLines === 'number' && (
-            <MantineBadge
-              size="xs"
-              style={{
-                padding: '0 6px',
-                height: 16,
-                lineHeight: '16px',
-                borderRadius: 9999,
-                border: '1px solid rgba(255,255,255,0.25)',
-                background: theme.colors.green[8],
-                color: '#fff',
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: 0.3,
-              }}
-            >
-              +{badge.addedLines}
-            </MantineBadge>
+            <BadgePill tone="success">+{badge.addedLines}</BadgePill>
           )}
 
           {/* Removed Lines Pill */}
           {typeof badge.removedLines === 'number' && (
-            <MantineBadge
-              size="xs"
-              style={{
-                padding: '0 6px',
-                height: 16,
-                lineHeight: '16px',
-                borderRadius: 9999,
-                border: '1px solid rgba(255,255,255,0.25)',
-                background: theme.colors.red[8],
-                color: '#fff',
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: 0.3,
-              }}
-            >
-              -{badge.removedLines}
-            </MantineBadge>
+            <BadgePill tone="danger">-{badge.removedLines}</BadgePill>
           )}
 
           {/* Expander Icon */}

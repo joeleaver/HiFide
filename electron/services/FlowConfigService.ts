@@ -39,6 +39,9 @@ interface FlowConfigState {
   
   // Portal data cache (ephemeral - only exists during flow execution)
   portalData: Map<string, { context?: any; data?: any }>
+
+  // Memory extraction rule toggles (workspace-scoped memories)
+
 }
 
 export class FlowConfigService extends Service<FlowConfigState> {
@@ -57,6 +60,8 @@ export class FlowConfigService extends Service<FlowConfigState> {
       errorDetectBlock: false,
       errorDetectPatterns: '',
       portalData: new Map(),
+
+
     })
   }
 
@@ -113,6 +118,7 @@ export class FlowConfigService extends Service<FlowConfigState> {
     }
   }
 
+
   // Setters
   setRetryAttempts(params: { n: number }): void {
     this.setState({ retryAttempts: Math.max(1, Number(params.n || 1)) })
@@ -161,6 +167,8 @@ export class FlowConfigService extends Service<FlowConfigState> {
   setErrorDetectPatterns(params: { text: string }): void {
     this.setState({ errorDetectPatterns: params.text })
   }
+
+
 
   // Portal data management
   setPortalData(portalId: string, context?: any, data?: any): void {

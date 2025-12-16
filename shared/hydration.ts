@@ -183,6 +183,7 @@ export type ScreenId =
   | 'explorer'
   | 'kanban'
   | 'knowledgeBase'
+  | 'memories'
   | 'settings'
   | 'sourceControl'
   | 'terminal'

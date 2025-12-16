@@ -13,6 +13,33 @@ import { providers, getProviderKey } from '../../core/state'
 import type { ProviderAdapter } from '../../providers/provider'
 import { resolveWorkspaceRootAsync } from '../../utils/workspace.js'
 
+export type MemoryItemType = 'decision' | 'constraint' | 'preference' | 'fact' | 'warning' | 'workflow'
+
+export type WorkspaceMemoryItem = {
+  id: string
+  type: MemoryItemType
+  text: string
+  tags: string[]
+  importance: number // 0..1
+  contentHash: string
+  source: 'implicit-extraction' | 'user-edit' | 'system'
+  /**
+   * When false, this memory is ignored by retrieval and should generally be treated as inactive.
+   * Defaults to true when missing.
+   */
+  enabled?: boolean
+  createdAt: string
+  updatedAt: string
+  lastUsedAt?: string
+  usageCount?: number
+}
+
+export type WorkspaceMemoriesFile = {
+  version: 1
+  settings?: Record<string, unknown>
+  items: WorkspaceMemoryItem[]
+}
+
 const exec = promisify(execCb)
 
 /**

@@ -13,6 +13,7 @@ import { llmRequestNode, metadata as llmRequestMetadata } from './llmRequest'
 import { toolsNode, metadata as toolsMetadata } from './tools'
 import { manualInputNode, metadata as manualInputMetadata } from './manualInput'
 import { intentRouterNode, metadata as intentRouterMetadata } from './intentRouter'
+import { extractMemoriesNode, metadata as extractMemoriesMetadata } from './extractMemories'
 import { portalInputNode, metadata as portalInputMetadata } from './portalInput'
 import { portalOutputNode, metadata as portalOutputMetadata } from './portalOutput'
 import { injectMessagesNode, metadata as injectMessagesMetadata } from './injectMessages'
@@ -65,6 +66,10 @@ const NODE_REGISTRY: Record<string, NodeMetadata> = {
   intentRouter: {
     fn: intentRouterNode,
     ...intentRouterMetadata
+  },
+  extractMemories: {
+    fn: extractMemoriesNode,
+    ...extractMemoriesMetadata
   },
   portalInput: {
     fn: portalInputNode,

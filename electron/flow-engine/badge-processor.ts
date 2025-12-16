@@ -7,6 +7,71 @@
 
 import { BadgeContentType, BadgeStatus, BadgeType } from '../store/types'
 
+// ---------------------------------------------------------------------------
+// Shared utilities (server-side) for consistent badge labels/metadata
+// ---------------------------------------------------------------------------
+
+const shortenMiddle = (value: string, max = 80) => {
+  if (value.length <= max) return value
+  const keep = Math.max(10, Math.floor((max - 3) / 2))
+  return `${value.slice(0, keep)}...${value.slice(-keep)}`
+}
+
+const safeByteLength = (value: unknown) => {
+  if (typeof value !== 'string') return undefined
+  try {
+    return Buffer.byteLength(value, 'utf8')
+  } catch {
+    return undefined
+  }
+}
+
+type FileEffectAction = 'read' | 'write' | 'append' | 'truncate' | 'delete' | 'move' | 'copy' | 'mkdir' | 'stat' | 'exists' | 'list'
+
+type BadgeToolPayload = {
+  kind: 'tool-payload'
+  toolName?: string
+  inputs?: unknown
+  outputs?: unknown
+  effects?: {
+    files?: Array<{ action: FileEffectAction; path?: string; from?: string; to?: string; bytes?: number; lines?: { start?: number; end?: number; added?: number; removed?: number } }>
+  }
+  diagnostics?: {
+    durationMs?: number
+    ok?: boolean
+    exitCode?: number
+    timedOut?: boolean
+    error?: string
+  }
+}
+
+const buildToolPayload = (badge: any, partial?: Partial<BadgeToolPayload>): BadgeToolPayload => {
+  const durationMs =
+    typeof badge.metadata?.duration === 'number'
+      ? badge.metadata.duration
+      : typeof badge.startTimestamp === 'number' && typeof badge.endTimestamp === 'number'
+        ? Math.max(0, badge.endTimestamp - badge.startTimestamp)
+        : undefined
+
+  return {
+    kind: 'tool-payload',
+    toolName: badge.toolName,
+    inputs: badge.args,
+    outputs: badge.result,
+    diagnostics: {
+      durationMs,
+      ok: badge.result?.ok,
+      exitCode: badge.result?.exitCode,
+      timedOut: badge.result?.timedOut,
+      error: badge.result?.error
+    },
+    ...partial,
+    effects: {
+      ...(partial?.effects ?? {}),
+    }
+  }
+}
+
 export interface BadgeConfig {
   // Basic properties
   toolName: string
@@ -18,6 +83,9 @@ export interface BadgeConfig {
   
   // Label and metadata handling
   generateLabel: (badge: any) => string
+  // Short, tool-name-free summary shown next to the tool pill in the header
+  // (e.g. for fsReadFile: "path/to/file.ts", for workspaceSearch: "\"query\" (23 results)")
+  generateTitle?: (badge: any) => string
   enrichMetadata: (badge: any) => Record<string, any>
   enrichInteractive?: (badge: any) => { type: string; data: any } | undefined
   
@@ -41,6 +109,76 @@ class BadgeConfigRegistry {
   }
   
   private initializeDefaults() {
+
+    // -----------------------------------------------------------------------
+    // Generic MCP tool handling
+    // MCP tool names are user-extensible; we intentionally avoid tool-specific
+    // badge configs and instead apply consistent labeling + operation-result.
+    // -----------------------------------------------------------------------
+
+    const parseMcpToolName = (toolName: string) => {
+      // Convention in this codebase: mcp_<serverId>_<toolName>
+      // Examples:
+      // - mcp_playwright-dbcb6f_browser_navigate
+      // - mcp_rivalsearchmcp-b3cd8b_google_search
+      const withoutPrefix = toolName.replace(/^mcp_/, '')
+      const parts = withoutPrefix.split('_')
+      if (parts.length < 2) {
+        return { server: shortenMiddle(withoutPrefix, 40), tool: '' }
+      }
+
+      const server = parts[0]
+      const tool = parts.slice(1).join('_')
+      return { server: shortenMiddle(server, 40), tool: shortenMiddle(tool, 60) }
+    }
+
+    const pickMcpTitleParam = (args: any): { key?: string; value?: string } => {
+      if (!args || typeof args !== 'object') return {}
+      const preferredKeys = ['url', 'query', 'path', 'resource', 'topic', 'keyword', 'keywords', 'text', 'name', 'id', 'title']
+      for (const key of preferredKeys) {
+        const value = (args as any)[key]
+        if (typeof value === 'string' && value.trim()) return { key, value: shortenMiddle(value.trim(), 80) }
+        if (Array.isArray(value) && value.length) {
+          const rendered = value.slice(0, 3).map(v => (typeof v === 'string' ? v : JSON.stringify(v))).join(', ')
+          return { key, value: shortenMiddle(rendered, 80) }
+        }
+      }
+      return {}
+    }
+
+    const mcpGenericConfig: BadgeConfig = {
+      toolName: 'mcp_*',
+      defaultType: 'tool',
+      contentType: 'operation-result',
+      requiresExpansion: true,
+      generateTitle: (badge: any) => {
+        const toolName = badge.toolName || badge.name || 'mcp_unknown'
+        const { server, tool } = parseMcpToolName(toolName)
+        return tool ? `MCP ${server}: ${tool}` : `MCP ${server}`
+      },
+      generateLabel: (badge: any) => {
+        // server/tool are already included in title; label focuses on a key arg
+        const picked = pickMcpTitleParam(badge.args)
+        const suffix = picked.key && picked.value ? `${picked.key}: ${picked.value}` : ''
+        return suffix
+      },
+      enrichMetadata: (badge: any) => {
+        const toolName = badge.toolName || badge.name || 'mcp_unknown'
+        const { server, tool } = parseMcpToolName(toolName)
+        const payload = buildToolPayload({ ...badge, toolName }, {})
+        return {
+          server,
+          mcpTool: tool,
+          fullParams: payload,
+        }
+      },
+      determineStatus: (badge: any) => badge.result?.error ? 'error' : 'success',
+      isExpandable: (_badge: any) => true,
+      shouldShowPreview: (_badge: any) => false
+    }
+
+    // Register early: specific first-party tool configs still override this.
+    this.register(mcpGenericConfig)
     
     // Terminal Exec
     const terminalExecConfig: BadgeConfig = {
@@ -48,15 +186,21 @@ class BadgeConfigRegistry {
       defaultType: 'tool',
       contentType: 'terminal-exec',
       requiresExpansion: true,
+      generateTitle: (_badge: any) => 'Terminal',
       generateLabel: (badge: any) => {
         const command = badge.args?.command || badge.metadata?.command
-        if (!command) return 'Terminal Command'
+        if (!command) return ''
         const cmdPreview = command.length > 40 ? `${command.substring(0, 40)}...` : command
         return `$ ${cmdPreview}`
       },
       enrichMetadata: (badge: any) => {
         const command = badge.args?.command
-        return command ? { command } : {}
+        const metadata: Record<string, any> = command ? { command } : {}
+
+        // Standard expandable payload (v1)
+        metadata.fullParams = buildToolPayload(badge)
+
+        return metadata
       },
       determineStatus: (badge: any) => {
         if (badge.result?.error) return 'error'
@@ -75,18 +219,18 @@ class BadgeConfigRegistry {
       defaultType: 'tool',
       contentType: 'workspace-search',
       requiresExpansion: true,
+      generateTitle: (_badge: any) => 'Workspace Search',
       generateLabel: (badge: any) => {
         const query = badge.args?.query || badge.metadata?.query
-        return query ? `Search: ${query}` : 'Workspace Search'
+        return query ? `"${query}"` : ''
       },
       enrichMetadata: (badge: any) => {
         const metadata: Record<string, any> = {}
         const query = badge.args?.query
         if (query) metadata.query = query
 
-        if (badge.args) {
-          metadata.fullParams = { ...badge.args }
-        }
+        // Standard expandable payload (v1)
+        metadata.fullParams = buildToolPayload(badge)
 
         const count = typeof badge.result?.count === 'number'
           ? badge.result.count
@@ -116,15 +260,20 @@ class BadgeConfigRegistry {
     this.register({
       toolName: 'textGrep',
       defaultType: 'tool',
-      contentType: 'text-search',
+      contentType: 'search',
       requiresExpansion: true,
-      generateLabel: (badge: any) => {
+      // Title should show key parameter (pattern)
+      generateTitle: (badge: any) => {
         const pattern = badge.args?.pattern || badge.metadata?.pattern
-        return pattern ? `Grep: ${pattern}` : 'Text Grep'
+        return pattern ? `Grep: "${pattern}"` : 'Grep'
       },
+      generateLabel: (_badge: any) => '',
       enrichMetadata: (badge: any) => {
         const pattern = badge.args?.pattern
-        return pattern ? { pattern } : {}
+        const md: Record<string, any> = {}
+        if (pattern) md.pattern = pattern
+        md.fullParams = buildToolPayload(badge)
+        return md
       },
       determineStatus: (badge: any) => {
         if (badge.result?.error) return 'error'
@@ -141,21 +290,24 @@ class BadgeConfigRegistry {
       defaultType: 'tool',
       contentType: 'diff',
       requiresExpansion: true,
-      generateLabel: (badge: any) => {
+      generateLabel: (_badge: any) => '',
+      // Title should primarily show the file name (applyEdits is the tool pill)
+      generateTitle: (badge: any) => {
         const fileCount = badge.result?.previewCount || 1
         if (fileCount === 1) {
           // Try to get filename from files array or result
           const files = badge.result?.files || []
           const firstFile = files[0]?.path || badge.result?.files?.[0] || 'Unknown File'
           const fileName = firstFile.split(/[/\\]/).pop()
-          return `Apply Edits: ${fileName}`
+          return fileName ? String(fileName) : 'Apply Edits'
         }
-        return `Apply Edits (${fileCount} files)`
+        return fileCount ? `(${fileCount} files)` : 'Apply Edits'
       },
       enrichMetadata: (badge: any) => ({
         fileCount: badge.result?.previewCount,
         addedLines: badge.result?.addedLines,
-        removedLines: badge.result?.removedLines
+        removedLines: badge.result?.removedLines,
+        fullParams: buildToolPayload(badge)
       }),
       enrichInteractive: (badge: any) => {
         // If result contains previewKey, use it for RPC fetch
@@ -180,27 +332,131 @@ class BadgeConfigRegistry {
     })
 
     // FS Operations
-    const fsToolNames = ['fsWriteFile', 'fsReadFile', 'fsDeleteFile', 'fsCreateDir', 'fsDeleteDir', 'fs.read_file', 'fs.write_file', 'fs.delete_file', 'fs.create_dir']
-    fsToolNames.forEach(toolName => {
+    // Most file tools should be expandable so the user can inspect inputs/outputs.
+    // NOTE: we keep contentType as 'json' for now because there is no dedicated
+    // OperationResultViewer wired in BadgeContent yet.
+    const fsToolNames = [
+      'fsReadFile',
+      'fsReadLines',
+      'fsReadDir',
+      'fsExists',
+      'fsStat',
+      'fsWriteFile',
+      'fsAppendFile',
+      'fsTruncateFile',
+      'fsCreateDir',
+      'fsMove',
+      'fsCopy',
+      'fsDeleteFile',
+      'fsDeleteDir',
+      'fsRemove',
+      'fsTruncateDir',
+      // legacy / alternate names
+      'fs.read_file',
+      'fs.write_file',
+      'fs.delete_file',
+      'fs.create_dir'
+    ]
+
+    const fsOpLabel = (badge: any) => {
+      // Tool name should live ONLY in the tool pill (BadgeHeader). Keep label concise.
+      const path = badge.args?.path || badge.metadata?.path
+      const from = badge.args?.from
+      const to = badge.args?.to
+
+      if (typeof from === 'string' && typeof to === 'string') {
+        return `${shortenMiddle(from, 90)} → ${shortenMiddle(to, 90)}`
+      }
+      if (typeof path === 'string') {
+        return `${shortenMiddle(path, 110)}`
+      }
+      return ''
+    }
+
+    fsToolNames.forEach((toolName) => {
       this.register({
         toolName,
         defaultType: 'tool',
         contentType: 'operation-result',
-        requiresExpansion: false,
-        generateLabel: (badge: any) => {
-          const path = badge.args?.path || badge.metadata?.path
-          const sanitizedPath = path && path.length > 30 ? `...${path.slice(-30)}` : path
-          return `${toolName}: ${sanitizedPath || 'No path'}`
-        },
+        requiresExpansion: true,
+        generateLabel: (badge: any) => fsOpLabel(badge),
         enrichMetadata: (badge: any) => {
-          const path = badge.args?.path
-          return path ? { path } : {}
+          const md: Record<string, any> = {}
+          if (badge.args?.path) md.path = badge.args.path
+          if (badge.args?.from) md.from = badge.args.from
+          if (badge.args?.to) md.to = badge.args.to
+
+          // Standard expansion payload (inputs/effects/outputs/diagnostics)
+          const action: Record<string, FileEffectAction> = {
+            fsReadFile: 'read',
+            'fs.read_file': 'read',
+            fsReadLines: 'read',
+            'fs.read_lines': 'read',
+            fsReadDir: 'list',
+            fsExists: 'exists',
+            fsStat: 'stat',
+            fsWriteFile: 'write',
+            'fs.write_file': 'write',
+            fsAppendFile: 'append',
+            fsTruncateFile: 'truncate',
+            fsCreateDir: 'mkdir',
+            'fs.create_dir': 'mkdir',
+            fsMove: 'move',
+            fsCopy: 'copy',
+            fsDeleteFile: 'delete',
+            'fs.delete_file': 'delete',
+            fsDeleteDir: 'delete',
+            fsRemove: 'delete',
+            fsTruncateDir: 'truncate',
+          }
+
+          const bytes = safeByteLength(badge.args?.content)
+
+          const fileEffect = {
+            action: action[toolName] ?? 'read',
+            path: badge.args?.path,
+            from: badge.args?.from,
+            to: badge.args?.to,
+            bytes,
+            lines: toolName === 'fsReadLines'
+              ? {
+                start: badge.args?.startLine,
+                end: badge.args?.endLine,
+              }
+              : undefined
+          }
+
+          md.fullParams = buildToolPayload(badge, {
+            effects: {
+              files: [fileEffect]
+            }
+          })
+
+          // Header summary values
+          if (toolName === 'fsReadLines') {
+            const rc = typeof badge.result?.resultCount === 'number'
+              ? badge.result.resultCount
+              : typeof badge.result?.count === 'number'
+                ? badge.result.count
+                : undefined
+            if (typeof rc === 'number') md.resultCount = rc
+          }
+          if (toolName === 'fsReadDir' && Array.isArray(badge.result?.entries)) {
+            md.entryCount = badge.result.entries.length
+          }
+          if (typeof bytes === 'number' && (toolName === 'fsWriteFile' || toolName === 'fsAppendFile')) {
+            md.bytes = bytes
+          }
+
+          return md
         },
         determineStatus: (badge: any) => {
           if (badge.result?.error) return 'error'
+          // Some fs tools return ok:false with error string
+          if (badge.result?.ok === false) return 'error'
           return 'success'
         },
-        isExpandable: (badge: any) => Boolean(badge.result?.error),
+        isExpandable: (_badge: any) => true,
         shouldShowPreview: (_badge: any) => false
       })
     })
@@ -209,20 +465,33 @@ class BadgeConfigRegistry {
     this.register({
       toolName: 'kanbanGetBoard',
       defaultType: 'tool',
-      contentType: 'json',
+      contentType: 'operation-result',
       requiresExpansion: true,
+      generateTitle: (_badge: any) => 'Kanban Board',
       generateLabel: (badge: any) => {
         const status = badge.args?.status
         const epicId = badge.args?.epicId
-        const parts = ['Kanban Board']
+        const parts: string[] = []
         if (status) parts.push(`(${status})`)
         if (epicId) parts.push(`[Epic: ${epicId}]`)
         return parts.join(' ')
       },
-      enrichMetadata: (badge: any) => ({
-        status: badge.args?.status,
-        epicId: badge.args?.epicId
-      }),
+      enrichMetadata: (badge: any) => {
+        const md: Record<string, any> = {
+          status: badge.args?.status,
+          epicId: badge.args?.epicId,
+        }
+        md.fullParams = buildToolPayload(badge)
+        if (badge.result && typeof badge.result === 'object') {
+          const count = typeof badge.result?.resultCount === 'number'
+            ? badge.result.resultCount
+            : typeof badge.result?.count === 'number'
+              ? badge.result.count
+              : undefined
+          if (typeof count === 'number') md.resultCount = count
+        }
+        return md
+      },
       determineStatus: (badge: any) => badge.result?.error ? 'error' : 'success',
       isExpandable: (_badge: any) => true,
       shouldShowPreview: (_badge: any) => false
@@ -231,17 +500,27 @@ class BadgeConfigRegistry {
     this.register({
       toolName: 'kanbanCreateTask',
       defaultType: 'tool',
-      contentType: 'json',
+      contentType: 'operation-result',
       requiresExpansion: true,
       generateLabel: (badge: any) => {
         const title = badge.args?.title
-        return title ? `Create Task: "${title}"` : 'Create Task'
+        return title ? `"${title}"` : ''
       },
-      enrichMetadata: (badge: any) => ({
-        title: badge.args?.title,
-        status: badge.args?.status,
-        epicId: badge.args?.epicId
-      }),
+      // Title should be the task title
+      generateTitle: (badge: any) => {
+        const title = badge.args?.title
+        return title ? String(title) : 'Create Task'
+      },
+      enrichMetadata: (badge: any) => {
+        const taskId = badge.result?.task?.id ?? badge.result?.id
+        return {
+          title: badge.args?.title,
+          status: badge.args?.status,
+          epicId: badge.args?.epicId,
+          taskId,
+          fullParams: buildToolPayload(badge),
+        }
+      },
       determineStatus: (badge: any) => badge.result?.error ? 'error' : 'success',
       isExpandable: (_badge: any) => true,
       shouldShowPreview: (_badge: any) => false
@@ -250,14 +529,134 @@ class BadgeConfigRegistry {
     this.register({
       toolName: 'kanbanUpdateTask',
       defaultType: 'tool',
-      contentType: 'json',
+      contentType: 'operation-result',
       requiresExpansion: true,
       generateLabel: (badge: any) => {
         const taskId = badge.args?.taskId
         const title = badge.args?.title
-        return taskId ? `Update Task: ${taskId}` + (title ? ` ("${title}")` : '') : 'Update Task'
+        if (!taskId) return ''
+        const parts: string[] = [String(taskId)]
+        if (title) parts.push(`("${title}")`)
+        return parts.join(' ')
       },
-      enrichMetadata: (badge: any) => ({ ...badge.args }),
+      generateTitle: (_badge: any) => 'Update Task',
+      enrichMetadata: (badge: any) => ({
+        ...badge.args,
+        fullParams: buildToolPayload(badge),
+        taskId: badge.args?.taskId ?? badge.result?.task?.id ?? badge.result?.id
+      }),
+      determineStatus: (badge: any) => badge.result?.error ? 'error' : 'success',
+      isExpandable: (_badge: any) => true,
+      shouldShowPreview: (_badge: any) => false
+    })
+
+    this.register({
+      toolName: 'kanbanDeleteTask',
+      defaultType: 'tool',
+      contentType: 'operation-result',
+      requiresExpansion: true,
+      generateTitle: (_badge: any) => 'Delete Task',
+      generateLabel: (badge: any) => {
+        const taskId = badge.args?.taskId
+        return taskId ? String(taskId) : ''
+      },
+      enrichMetadata: (badge: any) => ({
+        taskId: badge.args?.taskId,
+        fullParams: buildToolPayload(badge)
+      }),
+      determineStatus: (badge: any) => badge.result?.error ? 'error' : 'success',
+      isExpandable: (_badge: any) => true,
+      shouldShowPreview: (_badge: any) => false
+    })
+
+    this.register({
+      toolName: 'kanbanMoveTask',
+      defaultType: 'tool',
+      contentType: 'operation-result',
+      requiresExpansion: true,
+      generateTitle: (_badge: any) => 'Move Task',
+      generateLabel: (badge: any) => {
+        const taskId = badge.args?.taskId
+        const toStatus = badge.args?.status
+        // Best-effort: allow server-side tool result to carry previous status
+        const fromStatus = badge.result?.fromStatus ?? badge.result?.from?.status ?? badge.result?.task?.status
+
+        const parts: string[] = []
+        if (taskId) parts.push(String(taskId))
+        if (fromStatus && toStatus) parts.push(`${fromStatus} → ${toStatus}`)
+        else if (toStatus) parts.push(`→ ${toStatus}`)
+        return parts.join(' ')
+      },
+      enrichMetadata: (badge: any) => ({
+        taskId: badge.args?.taskId,
+        fromStatus: badge.result?.fromStatus ?? badge.result?.from?.status ?? badge.result?.task?.status,
+        toStatus: badge.args?.status,
+        index: badge.args?.index,
+        fullParams: buildToolPayload(badge)
+      }),
+      determineStatus: (badge: any) => badge.result?.error ? 'error' : 'success',
+      isExpandable: (_badge: any) => true,
+      shouldShowPreview: (_badge: any) => false
+    })
+
+    this.register({
+      toolName: 'kanbanCreateEpic',
+      defaultType: 'tool',
+      contentType: 'operation-result',
+      requiresExpansion: true,
+      generateLabel: (badge: any) => {
+        const name = badge.args?.name
+        return name ? `"${name}"` : ''
+      },
+      generateTitle: (_badge: any) => 'Create Epic',
+      enrichMetadata: (badge: any) => ({
+        name: badge.args?.name,
+        epicId: badge.result?.epic?.id ?? badge.result?.id,
+        fullParams: buildToolPayload(badge)
+      }),
+      determineStatus: (badge: any) => badge.result?.error ? 'error' : 'success',
+      isExpandable: (_badge: any) => true,
+      shouldShowPreview: (_badge: any) => false
+    })
+
+    this.register({
+      toolName: 'kanbanUpdateEpic',
+      defaultType: 'tool',
+      contentType: 'operation-result',
+      requiresExpansion: true,
+      generateLabel: (badge: any) => {
+        const epicId = badge.args?.epicId
+        const name = badge.args?.name
+        if (!epicId) return ''
+        const parts: string[] = [String(epicId)]
+        if (name) parts.push(`("${name}")`)
+        return parts.join(' ')
+      },
+      generateTitle: (_badge: any) => 'Update Epic',
+      enrichMetadata: (badge: any) => ({
+        epicId: badge.args?.epicId,
+        name: badge.args?.name,
+        fullParams: buildToolPayload(badge)
+      }),
+      determineStatus: (badge: any) => badge.result?.error ? 'error' : 'success',
+      isExpandable: (_badge: any) => true,
+      shouldShowPreview: (_badge: any) => false
+    })
+
+    this.register({
+      toolName: 'kanbanDeleteEpic',
+      defaultType: 'tool',
+      contentType: 'operation-result',
+      requiresExpansion: true,
+      generateTitle: (_badge: any) => 'Delete Epic',
+      generateLabel: (badge: any) => {
+        const epicId = badge.args?.epicId
+        return epicId ? String(epicId) : ''
+      },
+      enrichMetadata: (badge: any) => ({
+        epicId: badge.args?.epicId,
+        fullParams: buildToolPayload(badge)
+      }),
       determineStatus: (badge: any) => badge.result?.error ? 'error' : 'success',
       isExpandable: (_badge: any) => true,
       shouldShowPreview: (_badge: any) => false
@@ -269,11 +668,19 @@ class BadgeConfigRegistry {
       defaultType: 'tool',
       contentType: 'kb-search',
       requiresExpansion: true,
+      // Avoid redundant "KB Search" text; show the query/tags in the title.
+      generateTitle: (badge: any) => {
+        const query = badge.args?.query
+        const tags = badge.args?.tags
+        if (query) return `"${query}"`
+        if (Array.isArray(tags) && tags.length) return `[${tags.join(', ')}]`
+        return 'Search'
+      },
       generateLabel: (badge: any) => {
         const query = badge.args?.query
         const tags = badge.args?.tags
         const limit = badge.args?.limit
-        const parts = ['KB Search']
+        const parts: string[] = []
         if (query) parts.push(`"${query}"`)
         if (Array.isArray(tags) && tags.length) parts.push(`[${tags.join(', ')}]`)
         if (typeof limit === 'number') parts.push(`(limit ${limit})`)
@@ -287,9 +694,7 @@ class BadgeConfigRegistry {
         if (typeof badge.args?.limit === 'number') {
           metadata.limit = badge.args.limit
         }
-        if (badge.args) {
-          metadata.fullParams = { ...badge.args }
-        }
+        metadata.fullParams = buildToolPayload(badge)
         const count = typeof badge.result?.count === 'number'
           ? badge.result.count
           : typeof badge.result?.resultCount === 'number'
@@ -302,7 +707,10 @@ class BadgeConfigRegistry {
       },
       determineStatus: (badge: any) => {
         if (badge.result?.error) return 'error'
-        const results = badge.result?.results
+
+        // knowledgeBaseSearch tool often returns { count, results } but tests use
+        // an older wrapper shape: { data: { results: [...] } }
+        const results = badge.result?.results ?? badge.result?.data?.results
         if (Array.isArray(results) && results.length === 0) return 'warning'
         return 'success'
       },
@@ -315,19 +723,48 @@ class BadgeConfigRegistry {
     this.register({
       toolName: 'knowledgeBaseStore',
       defaultType: 'tool',
-      contentType: 'json',
+      contentType: 'operation-result',
       requiresExpansion: true,
       generateLabel: (badge: any) => {
         const title = badge.args?.title
         const id = badge.args?.id
-        if (id && !title) return `KB Store: Update ${id}`
-        return title ? `KB Store: "${title}"` : 'KB Store'
+        if (id && !title) return `Update ${id}`
+        return title ? `"${title}"` : ''
       },
-      enrichMetadata: (badge: any) => ({
-        title: badge.args?.title,
-        id: badge.args?.id,
-        tags: badge.args?.tags
-      }),
+      generateTitle: (_badge: any) => 'KB Store',
+      enrichMetadata: (badge: any) => {
+        const args = badge.args ?? {}
+        const payload = buildToolPayload(badge)
+        return {
+          title: args.title,
+          id: args.id,
+          tags: args.tags,
+          fullParams: payload,
+        }
+      },
+      determineStatus: (badge: any) => badge.result?.error ? 'error' : 'success',
+      isExpandable: (_badge: any) => true,
+      shouldShowPreview: (_badge: any) => false
+    })
+
+    this.register({
+      toolName: 'knowledgeBaseDelete',
+      defaultType: 'tool',
+      contentType: 'operation-result',
+      requiresExpansion: true,
+      generateLabel: (badge: any) => {
+        const id = badge.args?.id
+        return id ? String(id) : ''
+      },
+      generateTitle: (_badge: any) => 'KB Delete',
+      enrichMetadata: (badge: any) => {
+        const args = badge.args ?? {}
+        const payload = buildToolPayload(badge)
+        return {
+          id: args.id,
+          fullParams: payload,
+        }
+      },
       determineStatus: (badge: any) => badge.result?.error ? 'error' : 'success',
       isExpandable: (_badge: any) => true,
       shouldShowPreview: (_badge: any) => false
@@ -339,10 +776,11 @@ class BadgeConfigRegistry {
       defaultType: 'tool',
       contentType: 'json',
       requiresExpansion: false,
-      generateLabel: (badge: any) => {
+      generateTitle: (badge: any) => {
         const toolName = badge.toolName || badge.name || 'Unknown Tool'
         return toolName
       },
+      generateLabel: (_badge: any) => '',
       enrichMetadata: (_badge: any) => ({}),
       determineStatus: (badge: any) => {
         if (badge.result?.error) return 'error'
@@ -361,6 +799,12 @@ class BadgeConfigRegistry {
   getConfig(toolName: string): BadgeConfig {
     // Try exact match first
     let config = this.configs.get(toolName)
+
+    // MCP wildcard match (user-extensible tools)
+    if (!config && typeof toolName === 'string' && toolName.startsWith('mcp_')) {
+      const mcpWildcard = this.configs.get('mcp_*')
+      if (mcpWildcard) config = mcpWildcard
+    }
     
     // Fall back to wildcard for unknown tools
     if (!config) {
@@ -432,6 +876,9 @@ export class BadgeProcessor {
       
       // Label generation
       label: config.generateLabel(badge),
+
+      // Header title generation (avoid repeating the tool name)
+      title: config.generateTitle ? config.generateTitle(badge) : undefined,
       
       // Metadata enrichment
       metadata: {

@@ -5,6 +5,7 @@ import {
   IconGitBranch,
   IconSettings,
   IconBook,
+  IconBrain,
   IconLayoutKanban,
   IconChevronLeft,
   IconPlugConnected,
@@ -208,6 +209,35 @@ export default function ActivityBar() {
       active: !mainCollapsed && currentView === 'knowledgeBase',
       onClick: async () => {
         setCurrentViewLocal('knowledgeBase')
+        if (mainCollapsed) {
+          try {
+            const client = getBackendClient()
+            const res: any = await client?.rpc('workspace.getSettings', {})
+            const prev = (res && res.settings) || {}
+            const prevLayout = prev.layout || {}
+            const prevExpandedWidth: number = Number(prevLayout.expandedWindowWidth) || 0
+            const persistedSessionWidth: number = clampSessionPanelWidth(prevLayout)
+
+            setMainCollapsed(false)
+            try { setSessionPanelWidth(persistedSessionWidth) } catch {}
+            await client?.rpc('workspace.setSetting', { key: 'layout', value: { ...prevLayout, mainCollapsed: false } })
+            await new Promise((r) => setTimeout(r, 0))
+
+            const currentContentWidth = Math.max(0, window.innerWidth || 0)
+            const currentContentHeight = Math.max(0, window.innerHeight || 0)
+            const targetWidth = Math.max(800, Math.floor(prevExpandedWidth || currentContentWidth))
+            await getBackendClient()?.rpc('window.setContentSize', { width: targetWidth, height: currentContentHeight })
+          } catch {}
+        }
+      },
+    },
+    {
+      icon: <IconBrain size={24} stroke={1.5} />,
+      label: 'Memories',
+      view: 'memories',
+      active: !mainCollapsed && currentView === 'memories',
+      onClick: async () => {
+        setCurrentViewLocal('memories')
         if (mainCollapsed) {
           try {
             const client = getBackendClient()

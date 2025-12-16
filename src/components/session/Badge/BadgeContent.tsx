@@ -10,6 +10,7 @@ import { CodeViewer } from './viewers/CodeViewer'
 import { SearchResultsViewer } from './viewers/SearchResultsViewer'
 import { WorkspaceSearchViewer } from './viewers/WorkspaceSearchViewer'
 import { WorkspaceMapViewer } from './viewers/WorkspaceMapViewer'
+import { WorkspaceJumpViewer } from './viewers/WorkspaceJumpViewer'
 import { KBSearchViewer } from './viewers/KBSearchViewer'
 import { KBStoreViewer } from './viewers/KBStoreViewer'
 import { AgentAssessViewer } from './viewers/AgentAssessViewer'
@@ -17,6 +18,7 @@ import { UsageBreakdownViewer } from './viewers/UsageBreakdownViewer'
 import { JsonViewer } from './viewers/JsonViewer'
 import { TerminalExecViewer } from './viewers/TerminalExecViewer'
 import { ErrorViewer } from './viewers/ErrorViewer'
+import { OperationResultViewer } from './viewers/OperationResultViewer'
 import { inferContentType } from './inferContentType'
 
 interface BadgeContentProps {
@@ -49,8 +51,10 @@ export function BadgeContent({ badge }: BadgeContentProps) {
       return <SearchResultsViewer badge={badge} />
     
     case 'workspace-search':
-    case 'workspace-jump':
       return <WorkspaceSearchViewer badge={badge} />
+
+    case 'workspace-jump':
+      return <WorkspaceJumpViewer badge={badge} />
     
     case 'workspace-map':
       return <WorkspaceMapViewer badge={badge} />
@@ -69,6 +73,9 @@ export function BadgeContent({ badge }: BadgeContentProps) {
 
     case 'terminal-exec':
       return <TerminalExecViewer badge={badge} />
+
+    case 'operation-result':
+      return <OperationResultViewer badge={badge} />
     
     case 'json':
     case 'text':

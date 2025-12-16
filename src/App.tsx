@@ -6,6 +6,7 @@ import FlowView from './components/FlowView'
 import ExplorerView from './components/ExplorerView'
 import SourceControlView from './components/SourceControlView'
 import KnowledgeBaseView from './components/KnowledgeBaseView'
+import MemoriesView from './components/MemoriesView'
 import KanbanView from './components/KanbanView'
 import McpPane from './components/mcp/McpPane'
 import SettingsPane from './SettingsPane'
@@ -172,6 +173,8 @@ function App() {
         return <SourceControlView />
       case 'knowledgeBase':
         return <KnowledgeBaseView />
+      case 'memories':
+        return <MemoriesView />
       case 'kanban':
         return <KanbanView />
       case 'mcp':

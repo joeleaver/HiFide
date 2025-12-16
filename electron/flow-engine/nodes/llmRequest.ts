@@ -7,6 +7,7 @@
 
 import type { NodeFunction, NodeExecutionPolicy, MainFlowContext } from '../types'
 import { llmService } from '../llm-service'
+import { markMemoriesUsed, retrieveWorkspaceMemoriesForQuery } from '../../store/utils/memories'
 
 const DEFAULT_PROVIDER = 'openai'
 const DEFAULT_MODEL = 'gpt-4o'
@@ -23,6 +24,7 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
     return { status: 'error', error: 'No message provided to LLM Request node', context: flow.context.get() }
   }
 
+
   const manager = flow.context
   const snapshot = context ?? manager.get()
 
@@ -30,6 +32,39 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
   applySamplingSettings(manager, config)
 
   const { providerOverride, modelOverride } = applyOverrides(manager, config)
+
+  // Long-term RAG: retrieve workspace memories and inject into system instructions
+  // (workspace-scoped, deterministic lexical ranking)
+  if (flow?.workspaceId) {
+    try {
+      const memories = await retrieveWorkspaceMemoriesForQuery(message, {
+        workspaceId: flow.workspaceId,
+        maxItems: 8,
+        maxChars: 2400,
+        minImportance: 0,
+      })
+
+      if (memories.length) {
+        const base = manager.get()?.systemInstructions || ''
+
+        const lines: string[] = []
+        if (base && String(base).trim()) lines.push(String(base).trim())
+        lines.push('')
+        lines.push('## Relevant workspace memories')
+        for (const m of memories) {
+          const tags = Array.isArray(m.tags) && m.tags.length ? ` [tags: ${m.tags.join(', ')}]` : ''
+          lines.push(`- (${m.type}, importance=${m.importance}) ${m.text}${tags} [memory:${m.id}]`)
+        }
+
+        manager.update({ systemInstructions: lines.filter(Boolean).join('\n') })
+
+        // Mark used (best-effort)
+        await markMemoriesUsed(memories.map((m) => m.id), { workspaceId: flow.workspaceId })
+      }
+    } catch (e: any) {
+      flow.log.warn('llmRequest: failed to inject memories', { error: e?.message || String(e) })
+    }
+  }
 
   const tools = inputs.has('tools') ? await inputs.pull('tools') : undefined
 

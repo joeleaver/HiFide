@@ -18,6 +18,7 @@ export type ViewType =
   | 'terminal'
   | 'settings'
   | 'knowledgeBase'
+  | 'memories'
   | 'kanban'
   | 'mcp'
 // ============================================================================
@@ -91,7 +92,7 @@ export type BadgeContentType =
   | 'custom'
   | 'terminal-exec'
   | 'search-results'
-  | 'text-search'
+
   | 'operation-result'
 
 export type Badge = {
@@ -102,6 +103,7 @@ export type Badge = {
 
   // Badge-specific data
   label: string                 // Display text (may include context like filename)
+  title?: string                // Header title text (should NOT repeat tool name)
   icon?: string                 // Emoji or icon
   color?: string                // Badge color (mantine color name)
   variant?: 'light' | 'filled'  // Badge style

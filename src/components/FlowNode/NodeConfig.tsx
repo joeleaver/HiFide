@@ -11,6 +11,7 @@ import { ApprovalGateConfig, BudgetGuardConfig } from './configSections/GuardCon
 import { LLMRequestConfig } from './configSections/LLMRequestConfig'
 import { RedactorConfig, ErrorDetectionConfig } from './configSections/ModerationConfigs'
 import { IntentRouterConfig } from './configSections/IntentRouterConfig'
+import { ExtractMemoriesConfig } from './configSections/ExtractMemoriesConfig'
 import { CacheConfig } from './configSections/CacheConfig'
 import { ToolsConfig } from './configSections/ToolsConfig'
 
@@ -113,6 +114,15 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
 
       {nodeType === 'intentRouter' && (
         <IntentRouterConfig
+          config={config}
+          onConfigChange={onConfigChange}
+          providerOptions={providerOptions}
+          modelOptions={modelsByProvider}
+        />
+      )}
+
+      {nodeType === 'extractMemories' && (
+        <ExtractMemoriesConfig
           config={config}
           onConfigChange={onConfigChange}
           providerOptions={providerOptions}

@@ -20,6 +20,10 @@ describe('inferContentType', () => {
     expect(inferContentType('index.search')).toBe('search')
     expect(inferContentType('terminalExec')).toBe('terminal-exec')
     expect(inferContentType('terminal.exec')).toBe('terminal-exec')
+    expect(inferContentType('operation-result')).toBe('operation-result')
+
+    // MCP tools are user-extensible; treat them generically
+    expect(inferContentType('mcp_playwright-dbcb6f_browser_navigate')).toBe('operation-result')
   })
 
   it('falls back to json for unknown tools', () => {

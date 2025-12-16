@@ -12,6 +12,7 @@ const NODE_PALETTE: Array<{ nodeType: string; label: string; icon: string; descr
   { nodeType: 'tools', label: 'Tools', icon: '🔧', description: 'Provide tools to LLM (auto or specific list)' },
   { nodeType: 'injectMessages', label: 'Inject Messages', icon: '💉', description: 'Inject user/assistant message pair into conversation history' },
   { nodeType: 'intentRouter', label: 'Intent Router', icon: '🔀', description: 'Route based on LLM-classified user intent' },
+  { nodeType: 'extractMemories', label: 'Extract Memories', icon: '🧠', description: 'Extract durable workspace memories and write to .hifide-public/memories.json' },
   { nodeType: 'portalInput', label: 'Portal In', icon: '📥', description: 'Store data for portal output (reduces edge crossings)' },
   { nodeType: 'portalOutput', label: 'Portal Out', icon: '📤', description: 'Retrieve data from portal input (reduces edge crossings)' },
   { nodeType: 'parallelSplit', label: 'Split', icon: '⑂', description: 'Split flow into two parallel branches' },

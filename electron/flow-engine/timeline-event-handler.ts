@@ -373,9 +373,9 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
               data: { key: usageKey }
             },
             metadata: {
-              inputTokens: ev.usageBreakdown?.totals?.inputTokens,
-              outputTokens: ev.usageBreakdown?.totals?.outputTokens,
-              totalTokens: ev.usageBreakdown?.totals?.totalTokens
+              inputTokens: usageData?.totals?.inputTokens,
+              outputTokens: usageData?.totals?.outputTokens,
+              totalTokens: usageData?.totals?.totalTokens
             }
           }
 

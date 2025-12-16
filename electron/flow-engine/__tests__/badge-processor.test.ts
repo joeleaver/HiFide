@@ -12,8 +12,9 @@ describe('BadgeProcessor - New Tools', () => {
     }
     
     const processed = processor.processBadge(badge)
-    expect(processed.label).toBe('Kanban Board (todo) [Epic: epic-1]')
-    expect(processed.metadata).toEqual({ status: 'todo', epicId: 'epic-1' })
+    expect(processed.title).toBe('Kanban Board')
+    expect(processed.label).toBe('(todo) [Epic: epic-1]')
+    expect(processed.metadata).toMatchObject({ status: 'todo', epicId: 'epic-1' })
     expect(processed.status).toBe('success')
   })
 
@@ -25,8 +26,9 @@ describe('BadgeProcessor - New Tools', () => {
     }
     
     const processed = processor.processBadge(badge)
-    expect(processed.label).toBe('Create Task: "New Task"')
-    expect(processed.metadata).toEqual({ title: 'New Task', status: 'backlog', epicId: undefined })
+    expect(processed.title).toBe('New Task')
+    expect(processed.label).toBe('"New Task"')
+    expect(processed.metadata).toMatchObject({ title: 'New Task', status: 'backlog', epicId: undefined })
   })
 
   it('should correctly label knowledgeBaseSearch', () => {
@@ -37,7 +39,8 @@ describe('BadgeProcessor - New Tools', () => {
     }
     
     const processed = processor.processBadge(badge)
-    expect(processed.label).toBe('KB Search: "docs" [bug]')
+    expect(processed.title).toBe('"docs"')
+    expect(processed.label).toBe('"docs" [bug]')
     expect(processed.status).toBe('success')
     expect(processed.showPreview).toBe(true)
   })
@@ -50,7 +53,33 @@ describe('BadgeProcessor - New Tools', () => {
     }
     
     const processed = processor.processBadge(badge)
-    expect(processed.label).toBe('KB Search: "missing"')
+    expect(processed.title).toBe('"missing"')
+    expect(processed.label).toBe('"missing"')
     expect(processed.status).toBe('warning')
+  })
+
+  it('should label MCP tools with server + tool name (generic MCP config)', () => {
+    const badge: any = {
+      toolName: 'mcp_playwright_openPage',
+      args: { url: 'https://example.com' },
+      result: { ok: true, data: { title: 'Example' } },
+      metadata: {}
+    }
+
+    const processed = processor.processBadge(badge)
+
+    expect(processed.contentType).toBe('operation-result')
+    expect(processed.expandable).toBe(true)
+    expect(processed.needsExpansion).toBe(true)
+    expect(processed.title).toContain('MCP playwright: openPage')
+    expect(processed.label).toContain('url: https://example.com')
+    expect(processed.metadata).toMatchObject({
+      server: 'playwright',
+      mcpTool: 'openPage'
+    })
+    expect(processed.metadata.fullParams).toMatchObject({
+      kind: 'tool-payload',
+      toolName: 'mcp_playwright_openPage',
+    })
   })
 })

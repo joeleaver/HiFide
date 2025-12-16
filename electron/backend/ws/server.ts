@@ -17,6 +17,7 @@ import {
   createTerminalHandlers,
   createWorkspaceHandlers,
   createKbHandlers,
+  createMemoriesHandlers,
   createUiHandlers,
   createFlowEditorHandlers,
   createMiscHandlers,
@@ -210,6 +211,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
       createTerminalHandlers(addMethod, connection)
       createWorkspaceHandlers(addMethod, connection)
       createKbHandlers(addMethod, connection)
+      createMemoriesHandlers(addMethod, connection)
       createUiHandlers(addMethod, connection)
       createFlowEditorHandlers(addMethod, connection)
       createMiscHandlers(addMethod, connection)
