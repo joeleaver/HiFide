@@ -119,6 +119,21 @@ export class WorkspaceService extends Service<WorkspaceState> {
   async openFolder(path: string, windowId: number): Promise<void> {
     this.setWorkspaceForWindow(windowId, path)
     this.addRecentFolder({ path, lastOpened: Date.now() })
+
+    // Initialize the vector database for the new workspace path
+    try {
+      const { getVectorService } = await import('./index.js')
+      const vectorService = getVectorService()
+      if (vectorService) {
+        // We don't await this here to avoid blocking the UI window transition,
+        // but it starts the initialization process immediately.
+        vectorService.init(path).catch(err => {
+          console.error('[WorkspaceService] Failed to initialize VectorService:', err)
+        })
+      }
+    } catch (error) {
+      console.error('[WorkspaceService] Could not load VectorService for initialization:', error)
+    }
   }
 
   async closeWorkspace(windowId: number): Promise<void> {

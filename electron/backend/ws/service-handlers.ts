@@ -12,6 +12,10 @@ import {
   getKanbanService,
   getProviderService,
   getSettingsService,
+  getVectorService,
+  getCodeIndexerService,
+  getKBIndexerService,
+  getWorkspaceService,
 } from '../../services/index.js'
 import type { RpcConnection } from './types.js'
 import { getConnectionWorkspaceId } from './broadcast.js'
@@ -386,6 +390,11 @@ export const settingsHandlers = {
       providerValid,
       modelsByProvider,
       defaultModels,
+      selectedProvider: providerService.getSelectedProvider(),
+      selectedModel: providerService.getSelectedModel(),
+      fireworksAllowedModels: providerService.getFireworksAllowedModels(),
+      openrouterAllowedModels: providerService.getOpenRouterAllowedModels(),
+      startupMessage: null,
       pricingConfig: settingsService.getPricingConfig(),
       defaultPricingConfig: settingsService.getDefaultPricingConfig(),
     }
@@ -440,6 +449,79 @@ export const settingsHandlers = {
     const settingsService = getSettingsService()
     settingsService.setPricingForModel(provider, model, pricing)
     return { ok: true, pricingConfig: settingsService.getPricingConfig() }
+  },
+}
+
+// Vector & Indexing Handlers
+export const vectorHandlers = {
+  async getState() {
+    try {
+      const vectorService = getVectorService()
+      const state = vectorService.getState()
+      console.log('[vectorHandlers] getState returning:', JSON.stringify(state))
+      return {
+        ok: true,
+        state,
+      }
+    } catch (err) {
+      console.error('[vectorHandlers] getState error:', err)
+      return { ok: false, error: String(err) }
+    }
+  },
+
+  async search(query: string, options: { limit?: number; type?: 'code' | 'kb' } = {}) {
+    try {
+      const vectorService = getVectorService()
+      const filter = options.type ? `type = '${options.type}'` : undefined;
+      const results = await vectorService.search(query, options.limit || 10, filter);
+      
+      // Ensure results are strictly plain objects for RPC serialization
+      const sanitizedResults = results.map((r: any) => ({
+        id: String(r.id),
+        score: Number(r.score),
+        text: String(r.text || ''),
+        type: String(r.type || ''),
+        metadata: r.metadata || {},
+        filePath: String(r.filePath || ''),
+        symbolName: String(r.symbolName || ''),
+        symbolType: String(r.symbolType || ''),
+        kbId: String(r.kbId || ''),
+        articleTitle: String(r.articleTitle || '')
+      }));
+
+      return { ok: true, results: sanitizedResults }
+    } catch (err) {
+      console.error('[vectorHandlers] search error:', err)
+      return { ok: false, error: String(err) }
+    }
+  },
+}
+
+export const indexerHandlers = {
+  async indexWorkspace(_connection: RpcConnection, options?: { force?: boolean }) {
+    const ws = getWorkspaceService()
+    const workspaces = ws.getAllWindowWorkspaces()
+    const workspaceRoot = Object.values(workspaces)[0] as string
+
+    if (!workspaceRoot) return { ok: false, error: 'no-active-workspace' }
+
+    const force = !!options?.force
+
+    // If forcing, purge the vector table first to ensure a clean slate
+    if (force) {
+      console.log('[indexerHandlers] Forced re-index requested. Purging vector table...')
+      try {
+        await getVectorService().purge()
+      } catch (err) {
+        console.error('[indexerHandlers] Error purging vector table during forced re-index:', err)
+      }
+    }
+
+    // Start both code and KB indexing
+    getCodeIndexerService().indexWorkspace(workspaceRoot, force)
+    getKBIndexerService().indexWorkspace(force)
+
+    return { ok: true }
   },
 }
 

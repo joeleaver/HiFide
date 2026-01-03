@@ -67,7 +67,22 @@ function computeTempPreview(normalized: number | undefined): string {
 }
 
 /** Get provider from model ID (heuristic) */
-function getProviderFromModel(model: string): 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'unknown' {
+function getProviderFromModel(model?: string): 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter' | 'unknown' {
+  if (!model) return 'unknown'
+  const lowerModel = model.toLowerCase().trim()
+  
+  // Check for explicit provider prefixes first (common in OpenRouter or unified model selectors)
+  if (lowerModel.includes(':')) {
+    const prefix = lowerModel.split(':')[0].trim()
+    if (prefix === 'openrouter') return 'openrouter'
+    if (prefix === 'openai') return 'openai'
+    if (prefix === 'anthropic') return 'anthropic'
+    if (prefix === 'gemini' || prefix === 'google') return 'gemini'
+    if (prefix === 'fireworks') return 'fireworks'
+    if (prefix === 'xai') return 'xai'
+  }
+
+  if (lowerModel.startsWith('openrouter/') || lowerModel.includes('openrouter')) return 'openrouter'
   if (/^(gpt-|o1|o3|chatgpt|text-|dall-e|whisper|tts)/i.test(model)) return 'openai'
   if (/^claude/i.test(model)) return 'anthropic'
   if (/^gemini/i.test(model)) return 'gemini'
@@ -82,14 +97,18 @@ function supportsReasoningEffort(model: string): boolean {
 }
 
 /** Check if model supports extended thinking */
-function supportsThinking(model: string): boolean {
+function supportsThinking(model: string, provider?: string): boolean {
+  // OpenRouter can support thinking if the underlying model does
+  const isOpenRouter = provider === 'openrouter' || model.startsWith('openrouter/')
+  const cleanModel = isOpenRouter ? model.replace('openrouter/', '') : model
+
   // Gemini 2.5+ or 3+
-  if (/(2\.5|[^0-9]3[.-])/i.test(model) && /gemini/i.test(model)) return true
+  if (/(2\.5|[^0-9]3[.-])/i.test(cleanModel) && (/gemini/i.test(cleanModel) || isOpenRouter)) return true
   // Anthropic Claude 3.5+ Sonnet, 3.7+, 4+
-  if (/claude-4/i.test(model) || /claude-opus-4/i.test(model) ||
-      /claude-sonnet-4/i.test(model) || /claude-haiku-4/i.test(model) ||
-      /claude-3-7-sonnet/i.test(model) || /claude-3\.7/i.test(model) ||
-      /claude-3-5-sonnet/i.test(model) || /claude-3\.5-sonnet/i.test(model)) return true
+  if (/claude-4/i.test(cleanModel) || /claude-opus-4/i.test(cleanModel) ||
+      /claude-sonnet-4/i.test(cleanModel) || /claude-haiku-4/i.test(cleanModel) ||
+      /claude-3-7-sonnet/i.test(cleanModel) || /claude-3\.7/i.test(cleanModel) ||
+      /claude-3-5-sonnet/i.test(cleanModel) || /claude-3\.5-sonnet/i.test(cleanModel)) return true
   return false
 }
 
@@ -102,6 +121,16 @@ export const SamplingControls: React.FC<SamplingControlsProps> = ({
   const key = (name: string) => prefix ? `${prefix}${name.charAt(0).toUpperCase()}${name.slice(1)}` : name
   const get = (name: string) => config[key(name)]
   const set = (name: string, value: any) => onConfigChange({ [key(name)]: value })
+
+  // Determine the effective provider for the main controls
+  const effectiveModel = prefix === 'override' ? config.overrideModel : config.model
+  const effectiveProvider = prefix === 'override' ? config.overrideProvider : config.provider
+  const detectedProvider = getProviderFromModel(effectiveModel)
+  
+  // Use the explicitly selected provider if the heuristic fails or if it's openrouter
+  const provider = (effectiveProvider === 'openrouter' || detectedProvider === 'unknown') 
+    ? (effectiveProvider || detectedProvider) 
+    : detectedProvider
 
   const modelOverrides: ModelOverride[] = get('modelOverrides') || []
 
@@ -132,31 +161,34 @@ export const SamplingControls: React.FC<SamplingControlsProps> = ({
   }
 
   const tempPreview = computeTempPreview(get('temperature'))
+  const showMainTemp = provider && provider !== 'unknown'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {/* Normalized Temperature */}
-      <div style={sectionStyle}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
-          <span style={{ fontSize: 10, color: '#888', width: 90 }}>Temperature:</span>
-          <input
-            type="number"
-            step="0.05"
-            min={0}
-            max={1}
-            value={(get('temperature') ?? '') as any}
-            onChange={(e) => {
-              const v = e.target.value
-              const num = parseFloat(v)
-              set('temperature', Number.isFinite(num) ? Math.max(0, Math.min(1, num)) : undefined)
-            }}
-            placeholder="0–1"
-            style={{ ...inputStyle, flex: 1 }}
-          />
-        </label>
-        {tempPreview && <span style={hintStyle}>{tempPreview}</span>}
-        <span style={hintStyle}>Normalized 0-1 scale, mapped to provider ranges at runtime</span>
-      </div>
+      {showMainTemp && (
+        <div style={sectionStyle}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+            <span style={{ fontSize: 10, color: '#888', width: 90 }}>Temperature:</span>
+            <input
+              type="number"
+              step="0.05"
+              min={0}
+              max={1}
+              value={(get('temperature') ?? '') as any}
+              onChange={(e) => {
+                const v = e.target.value
+                const num = parseFloat(v)
+                set('temperature', Number.isFinite(num) ? Math.max(0, Math.min(1, num)) : undefined)
+              }}
+              placeholder="0–1"
+              style={{ ...inputStyle, flex: 1 }}
+            />
+          </label>
+          {tempPreview && <span style={hintStyle}>{tempPreview}</span>}
+          <span style={hintStyle}>Normalized 0-1 scale, mapped to provider ranges at runtime</span>
+        </div>
+      )}
 
       {/* Reasoning Effort */}
       <div style={sectionStyle}>
@@ -177,6 +209,7 @@ export const SamplingControls: React.FC<SamplingControlsProps> = ({
       </div>
 
       {/* Extended Thinking */}
+      {supportsThinking(effectiveModel || '', provider) && (
       <div style={sectionStyle}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
           <input
@@ -212,6 +245,7 @@ export const SamplingControls: React.FC<SamplingControlsProps> = ({
         )}
         <span style={hintStyle}>Applies to: Gemini 2.5+, Claude 3.5+ Sonnet / 3.7+ / 4+</span>
       </div>
+      )}
 
       {/* Model-Specific Overrides */}
       <div style={{ borderTop: '1px solid #3e3e42', paddingTop: 10 }}>
@@ -222,8 +256,10 @@ export const SamplingControls: React.FC<SamplingControlsProps> = ({
         {modelOverrides.map((override, idx) => {
           const provider = getProviderFromModel(override.model)
           const showReasoningEffort = supportsReasoningEffort(override.model)
-          const showThinking = supportsThinking(override.model)
-          const showTemp = provider !== 'unknown'
+          const showThinking = supportsThinking(override.model, provider)
+          // Always show temperature for anything that looks like a valid override, 
+          // or if we identified a known provider.
+          const showTemp = provider !== 'unknown' || override.model.includes(':') || override.model.length > 0
 
           return (
             <div
@@ -278,13 +314,13 @@ export const SamplingControls: React.FC<SamplingControlsProps> = ({
                       type="number"
                       step="0.1"
                       min={0}
-                      max={provider === 'anthropic' ? 1 : 2}
+                      max={(provider === 'anthropic' || provider === 'openrouter') ? 1 : 2}
                       value={override.temperature ?? ''}
                       onChange={(e) => {
                         const v = parseFloat(e.target.value)
                         updateOverride(idx, { temperature: Number.isFinite(v) ? v : undefined })
                       }}
-                      placeholder={provider === 'anthropic' ? '0-1' : '0-2'}
+                      placeholder={(provider === 'anthropic' || provider === 'openrouter') ? '0-1' : '0-2'}
                       style={{ ...inputStyle, width: 50 }}
                     />
                   </label>

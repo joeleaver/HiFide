@@ -23,6 +23,7 @@ import {
   createMiscHandlers,
   createSettingsHandlers,
   createKanbanHandlers,
+  createVectorHandlers,
   createMcpHandlers,
   createLanguageHandlers,
 } from './handlers/index.js'
@@ -217,6 +218,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
       createMiscHandlers(addMethod, connection)
       createSettingsHandlers(addMethod)
       createKanbanHandlers(addMethod)
+      createVectorHandlers(addMethod)
       createMcpHandlers(addMethod, connection)
       createLanguageHandlers(addMethod, connection)
       // Setup all event subscriptions for this connection

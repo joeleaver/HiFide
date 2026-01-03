@@ -1,9 +1,8 @@
-import { useEffect } from 'react'
-import { Group, Text, UnstyledButton } from '@mantine/core'
-import { IconFolder } from '@tabler/icons-react'
+import { useEffect, useState } from 'react'
+import { Group, Text, UnstyledButton, Loader, Tooltip } from '@mantine/core'
+import { IconFolder, IconDatabase } from '@tabler/icons-react'
 import { getBackendClient } from '../lib/backend/bootstrap'
 import { useFlowEditorLocal } from '../store/flowEditorLocal'
-import { useRerenderTrace } from '../utils/perf'
 import { useUiStore } from '../store/ui'
 import { useWorkspaceUi } from '../store/workspaceUi'
 
@@ -33,12 +32,28 @@ export default function StatusBar() {
   }, [])
 
 
+  const [status, setStatus] = useState<any>(null)
+
+  useEffect(() => {
+    const client = getBackendClient()
+    if (!client) return
+    let unsubscribe: any = null
+    ;(async () => {
+      try {
+        const res: any = await client.rpc('vector.getState', {})
+        if (res?.ok) setStatus(res.state?.status)
+        
+        unsubscribe = client.subscribe('vector_service.changed', (state: any) => {
+          setStatus(state?.status)
+        })
+      } catch (e) {}
+    })()
+    return () => {
+      if (unsubscribe) unsubscribe()
+    }
+  }, [])
+
   // Perf: trace rerenders without passing large objects
-  useRerenderTrace('StatusBar', {
-    currentView,
-    nodes: nodesCount,
-    edges: edgesCount,
-  })
 
 
 
@@ -101,6 +116,15 @@ export default function StatusBar() {
 
       {/* Right side - Combined status for agent view */}
       <Group gap={8}>
+        {status?.indexing && (
+          <Tooltip label={`Indexing Vector DB: ${status.indexedFiles}/${status.totalFiles} files (${status.progress}%)`}>
+            <Group gap={4} px={8} style={{ cursor: 'help' }}>
+              <Loader size={10} color="white" />
+              <IconDatabase size={14} />
+              <Text size="xs" style={{ color: '#fff' }}>{status.progress}%</Text>
+            </Group>
+          </Tooltip>
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 8px', height: STATUS_BAR_HEIGHT }}>
           {currentView === 'flow' ? (
             // Agent view: Show flow stats + metrics

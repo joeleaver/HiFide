@@ -66,8 +66,8 @@ export default function MemoriesView() {
 
   const [draft, setDraft] = useState<WorkspaceMemoryItem | null>(null)
 
-  const load = async () => {
-    setLoading(true)
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true)
     setError(null)
     try {
       const client = getBackendClient()
@@ -77,15 +77,14 @@ export default function MemoriesView() {
       setItems(next.map((m) => ({ ...m, enabled: m.enabled !== false })))
 
       // keep selection if possible
-      if (selectedId && !next.some((m) => m.id === selectedId)) {
-        setSelectedId(next[0]?.id ?? null)
-      } else if (!selectedId) {
-        setSelectedId(next[0]?.id ?? null)
-      }
+      setSelectedId((prev) => {
+        if (prev && next.some((m) => m.id === prev)) return prev
+        return next[0]?.id ?? null
+      })
     } catch (e: any) {
       setError(e?.message || String(e))
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
@@ -95,8 +94,10 @@ export default function MemoriesView() {
   }, [])
 
   useEffect(() => {
-    setDraft(selected ? { ...selected } : null)
-  }, [selectedId])
+    if (selected) {
+      setDraft({ ...selected })
+    }
+  }, [selectedId, selected])
 
   const save = async () => {
     if (!draft) return
@@ -104,7 +105,21 @@ export default function MemoriesView() {
     setError(null)
     try {
       const client = getBackendClient()
-      const res: any = await client?.rpc('memories.upsert', { item: { ...draft, source: 'user-edit', updatedAt: new Date().toISOString() } })
+      
+      // Compute contentHash based on current text to pass schema validation
+      const textToSave = draft.text.trim() || 'New memory…'
+      const itemToSave = { 
+        ...draft,
+        text: textToSave,
+        contentHash: draft.contentHash === 'new-memory-placeholder' || !draft.contentHash
+          ? `uhash-${Math.random().toString(16).slice(2, 10)}` // Simple unique hash for user edit
+          : draft.contentHash,
+        source: 'user-edit' as const, 
+        updatedAt: new Date().toISOString() 
+      }
+      
+      const res: any = await client?.rpc('memories.upsert', { item: itemToSave })
+      
       if (!res?.ok) throw new Error(res?.error || 'Failed to save memory')
       await load()
     } catch (e: any) {
@@ -123,26 +138,27 @@ export default function MemoriesView() {
       text: 'New memory…',
       tags: [],
       importance: 0.5,
-      contentHash: '',
+      contentHash: 'new-memory-placeholder',
       source: 'user-edit',
       enabled: true,
       createdAt: now,
       updatedAt: now,
     }
-    setDraft(item)
+
+    // Update local state first for immediate UI response
+    setItems((prev) => [item, ...prev])
     setSelectedId(id)
-    // Persist immediately so it appears for other parts of the app
-    setLoading(true)
+    // Note: useEffect handles setDraft(item) when selectedId changes
+
+    // Persist in background
     try {
       const client = getBackendClient()
       const res: any = await client?.rpc('memories.upsert', { item })
       if (!res?.ok) throw new Error(res?.error || 'Failed to create memory')
-      await load()
-      setSelectedId(id)
+      // reload silently to avoid flashes
+      await load(true)
     } catch (e: any) {
       setError(e?.message || String(e))
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -166,7 +182,15 @@ export default function MemoriesView() {
       <Group justify="space-between" align="center">
         <Title order={3}>Memories</Title>
         <Group gap="xs">
-          <ActionIcon variant="subtle" onClick={load} aria-label="Refresh memories">
+          <ActionIcon
+            variant="subtle"
+            onClick={() => {
+              console.log('Refreshing memories...')
+              load(false)
+            }}
+            aria-label="Refresh memories"
+            loading={loading}
+          >
             <IconRefresh size={18} />
           </ActionIcon>
           <Button leftSection={<IconPlus size={16} />} onClick={createNew}>

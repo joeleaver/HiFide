@@ -107,13 +107,13 @@ async function runSemanticSearch({
     if (!matches || matches.length === 0) return null
 
     const results: SearchWorkspaceResult[] = matches
-      .filter(m => m.score < 0.8)
-      .map((m) => {
+      .filter((m: any) => (m.score ?? 0) < 0.8)
+      .map((m: any) => {
         const type = m.metadata.symbolType ? `${m.metadata.symbolType} ` : ''
         const name = m.metadata.symbolName ? `${m.metadata.symbolName}: ` : ''
         return {
-          path: m.metadata.filePath || 'unknown',
-          lineNumber: m.metadata.startLine || 0,
+          path: m.filePath || 'unknown',
+          lineNumber: m.startLine || 0,
           line: `[semantic match] ${type}${name}${m.text.split('\n')[0]}...`
         }
       })

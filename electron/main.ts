@@ -146,9 +146,14 @@ async function initialize(): Promise<void> {
 
   // Create the window
   // Workspace attachment happens via handshake.init based on persisted window→workspace mapping
-  initializeApp(() => {
+  const initRenderer = () => {
     // Build menu after window is created
     buildMenu()
+  }
+
+  initializeApp((a, m) => {
+    getAppService().setReferences(a, m);
+    initRenderer()
   })
 
   // Register all IPC handlers early

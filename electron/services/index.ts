@@ -1,305 +1,152 @@
-/**
- * Service Registry and Initialization
- * 
- * Central place to initialize and register all services.
- * Services replace Zustand slices with a simpler class-based architecture.
- */
+import { EmbeddingService } from './vector/EmbeddingService.js';
+import { VectorService } from './vector/VectorService.js';
+import { KBIndexerService } from './vector/KBIndexerService.js';
+import { CodeIndexerService } from './vector/CodeIndexerService.js';
+import { WorkspaceService } from './WorkspaceService.js';
+import { ToolsService } from './ToolsService.js';
+import { AppService } from './AppService.js';
+import { SettingsService } from './SettingsService.js';
+import { ProviderService } from './ProviderService.js';
+import { SessionService } from './SessionService.js';
+import { KanbanService } from './KanbanService.js';
+import { KnowledgeBaseService } from './KnowledgeBaseService.js';
+import { McpService } from './McpService.js';
+import { ExplorerService } from './ExplorerService.js';
+import { LanguageServerService } from './LanguageServerService.js';
+import { GitStatusService } from './GitStatusService.js';
+import { GitDiffService } from './GitDiffService.js';
+import { GitLogService } from './GitLogService.js';
+import { GitCommitService } from './GitCommitService.js';
+import { FlowGraphService } from './FlowGraphService.js';
+import { FlowContextsService } from './FlowContextsService.js';
+import { FlowProfileService } from './FlowProfileService.js';
+import { FlowCacheService } from './FlowCacheService.js';
+import { WorkspaceSearchService } from './WorkspaceSearchService.js';
 
-import { ServiceRegistry } from './base/ServiceRegistry'
-import { DebugService } from './DebugService'
-import { ToolsService } from './ToolsService'
-import { WorkspaceService } from './WorkspaceService'
-import { ExplorerService } from './ExplorerService'
-import { ProviderService } from './ProviderService'
-import { SettingsService } from './SettingsService'
-import { KanbanService } from './KanbanService'
-import { KnowledgeBaseService } from './KnowledgeBaseService'
-import { AppService } from './AppService'
-import { McpService } from './McpService'
-import { LanguageServerService } from './LanguageServerService'
-import { GitStatusService } from './GitStatusService'
-import { GitDiffService } from './GitDiffService'
-import { GitCommitService } from './GitCommitService'
-import { GitLogService } from './GitLogService'
-import { WorkspaceSearchService } from './WorkspaceSearchService'
-import { VectorService, vectorService } from './vector/VectorService.js'
-import { CodeIndexerService } from './vector/CodeIndexerService.js'
+let embeddingService: EmbeddingService;
+let vectorService: VectorService;
+let kbIndexerService: KBIndexerService;
+let codeIndexerService: CodeIndexerService;
+let workspaceService: WorkspaceService;
+let toolsService: ToolsService;
+let appService: AppService;
+let settingsService: SettingsService;
+let providerService: ProviderService;
+let sessionService: SessionService;
+let kanbanService: KanbanService;
+let knowledgeBaseService: KnowledgeBaseService;
+let mcpService: McpService;
+let explorerService: ExplorerService;
+let languageServerService: LanguageServerService;
+let gitStatusService: GitStatusService;
+let gitDiffService: GitDiffService;
+let gitLogService: GitLogService;
+let gitCommitService: GitCommitService;
+let flowGraphService: FlowGraphService;
+let flowContextsService: FlowContextsService;
+let flowProfileService: FlowProfileService;
+let flowCacheService: FlowCacheService;
+let workspaceSearchService: WorkspaceSearchService;
 
-import { SessionService } from './SessionService'
-import { FlowProfileService } from './FlowProfileService'
-import { FlowConfigService } from './FlowConfigService'
-import { FlowGraphService } from './FlowGraphService'
-import { FlowCacheService } from './FlowCacheService'
-import { FlowContextsService } from './FlowContextsService'
+import { ServiceRegistry } from './base/ServiceRegistry.js';
 
-// Singleton registry instance
-const registry = ServiceRegistry.getInstance()
+export function initializeServices() {
+  const registry = ServiceRegistry.getInstance();
 
-// Service instances (initialized lazily)
-let debugService: DebugService | null = null
-let toolsService: ToolsService | null = null
-let workspaceService: WorkspaceService | null = null
-let explorerService: ExplorerService | null = null
-let providerService: ProviderService | null = null
-let settingsService: SettingsService | null = null
-let kanbanService: KanbanService | null = null
-let knowledgeBaseService: KnowledgeBaseService | null = null
-let appService: AppService | null = null
-let mcpService: McpService | null = null
-let languageServerService: LanguageServerService | null = null
-let gitStatusService: GitStatusService | null = null
-let gitDiffService: GitDiffService | null = null
-let gitCommitService: GitCommitService | null = null
-let gitLogService: GitLogService | null = null
-let workspaceSearchService: WorkspaceSearchService | null = null
-let vectorServiceInstance: VectorService | null = null
-let codeIndexerService: CodeIndexerService | null = null
+  settingsService = new SettingsService();
+  registry.register('settings', settingsService);
 
-let sessionService: SessionService | null = null
-let flowProfileService: FlowProfileService | null = null
-let flowConfigService: FlowConfigService | null = null
-let flowGraphService: FlowGraphService | null = null
-let flowCacheService: FlowCacheService | null = null
-let flowContextsService: FlowContextsService | null = null
+  providerService = new ProviderService();
+  registry.register('provider', providerService);
 
-/**
- * Initialize all services
- * Call this once during app startup
- */
-export function initializeServices(): void {
-  console.log('[Services] Initializing services...')
+  appService = new AppService();
+  registry.register('app', appService);
+  
+  embeddingService = new EmbeddingService();
+  registry.register('embedding', embeddingService);
 
-  // Phase 1: Simple services
-  debugService = new DebugService()
+  vectorService = new VectorService();
+  registry.register('vector', vectorService);
 
-  // Phase 2: Medium complexity
-  toolsService = new ToolsService()
-  workspaceService = new WorkspaceService()
-  explorerService = new ExplorerService()
-  gitStatusService = new GitStatusService()
-  gitDiffService = new GitDiffService()
-  gitCommitService = new GitCommitService()
-  gitLogService = new GitLogService()
-  workspaceSearchService = new WorkspaceSearchService()
-  vectorServiceInstance = vectorService
-  codeIndexerService = new CodeIndexerService(vectorServiceInstance)
-  try {
-    gitStatusService.attachExplorerService(explorerService)
-  } catch (error) {
-    console.error('[Services] Failed to attach explorer to GitStatusService:', error)
-  }
-  // Settings must initialize before ProviderService so model allowlists/pricing defaults
-  // are clamped deterministically on first model refresh / provider events.
-  settingsService = new SettingsService()
-  providerService = new ProviderService()
-  kanbanService = new KanbanService()
-  knowledgeBaseService = new KnowledgeBaseService()
-  mcpService = new McpService()
-  languageServerService = new LanguageServerService()
+  workspaceService = new WorkspaceService();
+  registry.register('workspace', workspaceService);
 
-  // Phase 3: Session services (must come before terminal)
-  sessionService = new SessionService()
-  flowCacheService = new FlowCacheService()
+  kbIndexerService = new KBIndexerService();
+  registry.register('kbIndexer', kbIndexerService);
 
-  // Phase 4: Complex services that depend on session
-  appService = new AppService()
+  codeIndexerService = new CodeIndexerService();
+  registry.register('codeIndexer', codeIndexerService);
 
+  toolsService = new ToolsService();
+  registry.register('tools', toolsService);
+  
+  sessionService = new SessionService();
+  registry.register('session', sessionService);
 
-  // Phase 5: Flow services
-  flowProfileService = new FlowProfileService()
-  flowConfigService = new FlowConfigService()
-  flowGraphService = new FlowGraphService()
-  flowContextsService = new FlowContextsService()
+  kanbanService = new KanbanService();
+  registry.register('kanban', kanbanService);
 
-  // Register all services
-  registry.register('debug', debugService)
-  registry.register('tools', toolsService)
-  registry.register('workspace', workspaceService)
-  registry.register('explorer', explorerService)
-  registry.register('provider', providerService)
-  registry.register('settings', settingsService)
-  registry.register('kanban', kanbanService)
-  registry.register('knowledgeBase', knowledgeBaseService)
-  registry.register('app', appService)
-  registry.register('mcp', mcpService)
-  registry.register('languageServer', languageServerService)
-  registry.register('gitStatus', gitStatusService)
-  registry.register('gitDiff', gitDiffService)
-  registry.register('gitCommit', gitCommitService)
-  registry.register('gitLog', gitLogService)
-  registry.register('workspaceSearch', workspaceSearchService)
-  registry.register('vector', vectorServiceInstance)
-  registry.register('codeIndexer', codeIndexerService)
+  knowledgeBaseService = new KnowledgeBaseService();
+  registry.register('knowledgeBase', knowledgeBaseService);
 
-  registry.register('session', sessionService)
-  registry.register('flowCache', flowCacheService)
-  registry.register('flowProfile', flowProfileService)
-  registry.register('flowConfig', flowConfigService)
-  registry.register('flowGraph', flowGraphService)
-  registry.register('flowContexts', flowContextsService)
+  mcpService = new McpService();
+  registry.register('mcp', mcpService);
 
+  explorerService = new ExplorerService();
+  registry.register('explorer', explorerService);
 
-  console.log('[Services] Initialized:', registry.getServiceNames().join(', '))
+  languageServerService = new LanguageServerService();
+  registry.register('languageServer', languageServerService);
+
+  gitStatusService = new GitStatusService();
+  registry.register('gitStatus', gitStatusService);
+
+  gitDiffService = new GitDiffService();
+  registry.register('gitDiff', gitDiffService);
+
+  gitLogService = new GitLogService();
+  registry.register('gitLog', gitLogService);
+
+  gitCommitService = new GitCommitService();
+  registry.register('gitCommit', gitCommitService);
+  
+  flowGraphService = new FlowGraphService();
+  registry.register('flowGraph', flowGraphService);
+
+  flowContextsService = new FlowContextsService();
+  registry.register('flowContexts', flowContextsService);
+
+  flowProfileService = new FlowProfileService();
+  registry.register('flowProfile', flowProfileService);
+
+  flowCacheService = new FlowCacheService();
+  registry.register('flowCache', flowCacheService);
+
+  workspaceSearchService = new WorkspaceSearchService();
+  registry.register('workspaceSearch', workspaceSearchService);
 }
 
-/**
- * Get the service registry
- */
-export function getServiceRegistry(): ServiceRegistry {
-  return registry
-}
-
-/**
- * Get a specific service by name
- */
-export function getService<T>(name: string): T {
-  return registry.get<T>(name)
-}
-
-/**
- * Convenience getters for all services
- */
-export function getDebugService(): DebugService {
-  if (!debugService) throw new Error('[Services] DebugService not initialized')
-  return debugService
-}
-
-export function getToolsService(): ToolsService {
-  if (!toolsService) throw new Error('[Services] ToolsService not initialized')
-  return toolsService
-}
-
-export function getWorkspaceService(): WorkspaceService {
-  if (!workspaceService) throw new Error('[Services] WorkspaceService not initialized')
-  return workspaceService
-}
-
-export function getExplorerService(): ExplorerService {
-  if (!explorerService) throw new Error('[Services] ExplorerService not initialized')
-  return explorerService
-}
-
-export function getProviderService(): ProviderService {
-  if (!providerService) throw new Error('[Services] ProviderService not initialized')
-  return providerService
-}
-
-export function getSettingsService(): SettingsService {
-  if (!settingsService) throw new Error('[Services] SettingsService not initialized')
-  return settingsService
-}
-
-export function getKanbanService(): KanbanService {
-  if (!kanbanService) throw new Error('[Services] KanbanService not initialized')
-  return kanbanService
-}
-
-export function getKnowledgeBaseService(): KnowledgeBaseService {
-  if (!knowledgeBaseService) throw new Error('[Services] KnowledgeBaseService not initialized')
-  return knowledgeBaseService
-}
-
-export function getAppService(): AppService {
-  if (!appService) throw new Error('[Services] AppService not initialized')
-  return appService
-}
-
-export function getMcpService(): McpService {
-  if (!mcpService) throw new Error('[Services] McpService not initialized')
-  return mcpService
-}
-
-export function getLanguageServerService(): LanguageServerService {
-  if (!languageServerService) throw new Error('[Services] LanguageServerService not initialized')
-  return languageServerService
-}
-
-export function getGitStatusService(): GitStatusService {
-  if (!gitStatusService) throw new Error('[Services] GitStatusService not initialized')
-  return gitStatusService
-}
-
-export function getGitDiffService(): GitDiffService {
-  if (!gitDiffService) throw new Error('[Services] GitDiffService not initialized')
-  return gitDiffService
-}
-
-export function getGitCommitService(): GitCommitService {
-  if (!gitCommitService) throw new Error('[Services] GitCommitService not initialized')
-  return gitCommitService
-}
-
-export function getGitLogService(): GitLogService {
-  if (!gitLogService) throw new Error('[Services] GitLogService not initialized')
-  return gitLogService
-}
-
-export function getWorkspaceSearchService(): WorkspaceSearchService {
-  if (!workspaceSearchService) throw new Error('[Services] WorkspaceSearchService not initialized')
-  return workspaceSearchService
-}
-
-export function getVectorService(): VectorService {
-  if (!vectorServiceInstance) throw new Error('[Services] VectorService not initialized')
-  return vectorServiceInstance
-}
-
-export function getCodeIndexerService(): CodeIndexerService {
-  if (!codeIndexerService) throw new Error('[Services] CodeIndexerService not initialized')
-  return codeIndexerService
-}
-
-export function getSessionService(): SessionService {
-  if (!sessionService) throw new Error('[Services] SessionService not initialized')
-  return sessionService
-}
-
-export function getFlowProfileService(): FlowProfileService {
-  if (!flowProfileService) throw new Error('[Services] FlowProfileService not initialized')
-  return flowProfileService
-}
-
-export function getFlowConfigService(): FlowConfigService {
-  if (!flowConfigService) throw new Error('[Services] FlowConfigService not initialized')
-  return flowConfigService
-}
-
-export function getFlowGraphService(): FlowGraphService {
-  if (!flowGraphService) throw new Error('[Services] FlowGraphService not initialized')
-  return flowGraphService
-}
-
-export function getFlowCacheService(): FlowCacheService {
-  if (!flowCacheService) throw new Error('[Services] FlowCacheService not initialized')
-  return flowCacheService
-}
-
-export function getFlowContextsService(): FlowContextsService {
-  if (!flowContextsService) throw new Error('[Services] FlowContextsService not initialized')
-  return flowContextsService
-}
-
-
-export { FlowContextsService } from './FlowContextsService'
-/**
- * Export service classes for type imports
- */
-export { DebugService } from './DebugService'
-export { ToolsService } from './ToolsService'
-export { WorkspaceService } from './WorkspaceService'
-export { ExplorerService } from './ExplorerService'
-export { ProviderService } from './ProviderService'
-export { SettingsService } from './SettingsService'
-export { KanbanService } from './KanbanService'
-export { KnowledgeBaseService } from './KnowledgeBaseService'
-export { AppService } from './AppService'
-export { McpService } from './McpService'
-export { LanguageServerService } from './LanguageServerService'
-export { WorkspaceSearchService } from './WorkspaceSearchService'
-
-export { SessionService } from './SessionService'
-export { FlowProfileService } from './FlowProfileService'
-export { FlowConfigService } from './FlowConfigService'
-export { FlowGraphService } from './FlowGraphService'
-export { FlowCacheService } from './FlowCacheService'
-
+export const getEmbeddingService = () => embeddingService;
+export const getVectorService = () => vectorService;
+export const getKBIndexerService = () => kbIndexerService;
+export const getCodeIndexerService = () => codeIndexerService;
+export const getWorkspaceService = () => workspaceService;
+export const getToolsService = () => toolsService;
+export const getAppService = () => appService;
+export const getSettingsService = () => settingsService;
+export const getProviderService = () => providerService;
+export const getSessionService = () => sessionService;
+export const getKanbanService = () => kanbanService;
+export const getKnowledgeBaseService = () => knowledgeBaseService;
+export const getMcpService = () => mcpService;
+export const getExplorerService = () => explorerService;
+export const getLanguageServerService = () => languageServerService;
+export const getGitStatusService = () => gitStatusService;
+export const getGitDiffService = () => gitDiffService;
+export const getGitLogService = () => gitLogService;
+export const getGitCommitService = () => gitCommitService;
+export const getFlowGraphService = () => flowGraphService;
+export const getFlowContextsService = () => flowContextsService;
+export const getFlowProfileService = () => flowProfileService;
+export const getFlowCacheService = () => flowCacheService;
+export const getWorkspaceSearchService = () => workspaceSearchService;

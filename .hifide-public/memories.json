@@ -2,58 +2,77 @@
   "version": 1,
   "items": [
     {
-      "id": "mem-39add0fa-b59f-4242-b092-2669942d0ca2",
-      "type": "workflow",
-      "text": "Run electron-builder install-app-deps via a package.json postinstall script (with a Windows-friendly wrapper) to keep native modules matched to the Electron version.",
+      "id": "mem-136a75c1-0ef2-44c3-92b1-65c6528e623f",
+      "type": "preference",
+      "text": "Before resuming execution on complex plans, review the current state of the codebase against technical documentation to reconcile previous progress.",
       "tags": [
-        "build",
-        "electron",
-        "script"
-      ],
-      "importance": 0.75,
-      "contentHash": "1e071ef170d445d09cbcd8db7b9d9a447523911509ccc567a3a0f38dfa3832fc",
-      "source": "implicit-extraction",
-      "enabled": true,
-      "createdAt": "2026-01-03T06:34:51.182Z",
-      "updatedAt": "2026-01-03T06:34:51.182Z",
-      "lastUsedAt": "2026-01-03T18:18:39.321Z",
-      "usageCount": 57
-    },
-    {
-      "id": "mem-e6161de8-1700-4542-81da-d4b4b0c9190a",
-      "type": "fact",
-      "text": "Enable npmRebuild in the electron-builder configuration so it automatically rebuilds native dependencies during packaging.",
-      "tags": [
-        "build",
-        "electron",
-        "configuration"
+        "workflow",
+        "consistency",
+        "technical-debt"
       ],
       "importance": 0.5,
-      "contentHash": "486954bd918fdd834b43465e20f742378515cbe5f515cbd4d65b93cfd9683403",
+      "contentHash": "cd1c3beeeccc3a29556492e264181ecd8565874e8babf4f04f4bbc33726b8d57",
       "source": "implicit-extraction",
       "enabled": true,
-      "createdAt": "2026-01-03T06:34:51.182Z",
-      "updatedAt": "2026-01-03T06:34:51.182Z",
-      "lastUsedAt": "2026-01-03T18:18:39.321Z",
-      "usageCount": 57
+      "createdAt": "2026-01-03T18:57:33.077Z",
+      "updatedAt": "2026-01-03T18:57:33.077Z",
+      "lastUsedAt": "2026-01-03T21:45:52.555Z",
+      "usageCount": 113
     },
     {
-      "id": "mem-be4d8411-9d54-4541-80ff-916095f96dc0",
-      "type": "fact",
-      "text": "Add node-pty to pnpm.onlyBuiltDependencies so its native binaries are correctly recognized when using pnpm on Windows.",
+      "id": "mem-3bdaf43d-ccab-422e-add2-d700e6756215",
+      "type": "preference",
+      "text": "The UI should include a small indexing status indicator in the status bar and a detailed breakdown of vector search indexing within the settings screen.",
       "tags": [
-        "pnpm",
-        "node-pty",
-        "build"
+        "ui-ux",
+        "vector-search",
+        "indexing",
+        "ui",
+        "ux"
       ],
       "importance": 0.5,
-      "contentHash": "574dde80f9b91f409741b8fb326636f84a93db155ff8975c3528d0e706574f39",
+      "contentHash": "4ffff790530ac8a3e9c7716f27bfd3f56aa4e45be0ef12eae49d66bc44cf16d1",
       "source": "implicit-extraction",
       "enabled": true,
-      "createdAt": "2026-01-03T06:34:51.182Z",
-      "updatedAt": "2026-01-03T06:34:51.182Z",
-      "lastUsedAt": "2026-01-03T18:18:39.321Z",
-      "usageCount": 57
+      "createdAt": "2026-01-03T19:00:52.349Z",
+      "updatedAt": "2026-01-03T19:08:25.358Z",
+      "lastUsedAt": "2026-01-03T21:45:52.555Z",
+      "usageCount": 112
+    },
+    {
+      "id": "mem-71b0e4bc-5c74-4493-9c70-b33e42cc0f74",
+      "type": "preference",
+      "text": "Prioritize direct code implementation over conceptual explanations when requested changes are identified.",
+      "tags": [
+        "interaction-style",
+        "implementation"
+      ],
+      "importance": 0.5,
+      "contentHash": "4b4189489382d05a2940f26256d0120834b2213596c02d1fb305ab72b15fdb27",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T19:57:10.043Z",
+      "updatedAt": "2026-01-03T19:57:10.043Z",
+      "lastUsedAt": "2026-01-03T21:45:52.555Z",
+      "usageCount": 77
+    },
+    {
+      "id": "mem-a90634cb-fef7-4744-b625-de847807a31f",
+      "type": "preference",
+      "text": "Avoid using useEffect for side effects that can be managed within state store actions to prevent hook-related render errors.",
+      "tags": [
+        "react",
+        "hooks",
+        "best-practice"
+      ],
+      "importance": 0.5,
+      "contentHash": "8349e60cb5423bc86c4b1c15cda994518ce11cbc7377ecd644fb7a84c88506a3",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T20:35:24.443Z",
+      "updatedAt": "2026-01-03T20:35:24.443Z",
+      "lastUsedAt": "2026-01-03T21:45:52.555Z",
+      "usageCount": 53
     }
   ]
 }

@@ -34,7 +34,7 @@ export function resolveSamplingControls(options: SamplingOptionsInput): Sampling
     temperature = modelOverride.temperature
   } else if (typeof (workingContext as any)?.temperature === 'number') {
     const normalized = (workingContext as any).temperature
-    if (provider === 'anthropic') {
+    if (provider === 'anthropic' || provider === 'openrouter') {
       temperature = Math.min(normalized, 1)
     } else {
       temperature = normalized * 2

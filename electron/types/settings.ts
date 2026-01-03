@@ -9,7 +9,6 @@ export interface SettingsSnapshot {
   defaultModels: Record<string, string | undefined>
   selectedProvider: string
   selectedModel: string
-  autoRetry: boolean
   fireworksAllowedModels: string[]
   openrouterAllowedModels: string[]
   startupMessage: string | null

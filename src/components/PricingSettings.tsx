@@ -44,15 +44,17 @@ export default function PricingSettings({ modelsByProvider, providerValid }: Pri
     <Card withBorder style={{ backgroundColor: '#1e1e1e', borderColor: '#3e3e42' }}>
       <Stack gap="md">
         <Group justify="space-between">
-          <div>
+          <Stack gap={0}>
             <Text size="sm" fw={600} c="#cccccc">Cost Estimation</Text>
-            <Text size="xs" c="dimmed">
-              Configure pricing per model for cost tracking
-              {hasCustomRates && (
-                <Badge size="xs" color="blue" ml="xs">Custom Rates</Badge>
-              )}
-            </Text>
-          </div>
+        <Group gap="xs" align="center" wrap="nowrap">
+          <Text component="span" size="xs" c="dimmed">
+            Configure pricing per model for cost tracking
+          </Text>
+          {hasCustomRates && (
+            <Badge size="xs" color="blue">Custom Rates</Badge>
+          )}
+        </Group>
+          </Stack>
           <Button
             size="xs"
             variant="light"

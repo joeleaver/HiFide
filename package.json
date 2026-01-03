@@ -11,9 +11,9 @@
   "description": "Agentic-first IDE",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && pnpm -s prepackage:kill && pnpm -s rebuild:native && pnpm -s package:electron",
+    "build": "tsc && vite build && pnpm -s rebuild:native && pnpm -s package:electron",
     "prepackage:kill": "node scripts/prepackage-kill.cjs",
-    "rebuild:native": "node scripts/postinstall.cjs",
+    "rebuild:native": "cross-env CL=\"/std:c++20\" npm_config_msvs_version=2022 npx electron-rebuild -f -w node-pty,sharp,tree-sitter",
     "clean:release": "node --input-type=module -e \"import fs from 'fs'; try{fs.rmSync('release',{recursive:true,force:true})}catch(e){}\"",
     "package:electron": "node scripts/package-electron.cjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
@@ -46,6 +46,7 @@
     "@openrouter/ai-sdk-provider": "^1.5.4",
     "@tanstack/react-query": "^5.90.6",
     "@uiw/react-json-view": "2.0.0-alpha.39",
+    "@xenova/transformers": "^2.17.2",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "ai": "^5.0.87",
@@ -71,6 +72,12 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "reactflow": "^11.11.4",
+    "sharp": "^0.34.5",
+    "tree-sitter": "^0.25.0",
+    "tree-sitter-go": "^0.25.0",
+    "tree-sitter-python": "^0.25.0",
+    "tree-sitter-rust": "^0.24.0",
+    "tree-sitter-typescript": "^0.23.2",
     "ts-morph": "^27.0.0",
     "typescript-language-server": "^5.1.3",
     "vscode-jsonrpc": "^8.2.1",
@@ -82,6 +89,7 @@
     "zod": "^4"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.2",
     "@jest/globals": "^30.2.0",
     "@tabler/icons-react": "^3.35.0",
     "@types/dagre": "^0.7.53",
@@ -144,16 +152,18 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "@img/sharp-win32-x64",
       "electron",
       "keytar",
       "node-pty",
       "protobufjs",
+      "sharp",
+      "tree-sitter",
       "vscode-ripgrep"
     ],
     "public-hoist-pattern": [
       "*"
     ],
-    "ignoredBuiltDependencies": [],
     "patchedDependencies": {
       "node-pty@1.0.0": "patches/node-pty@1.0.0.patch"
     }

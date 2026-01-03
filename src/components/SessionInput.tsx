@@ -129,6 +129,22 @@ export default memo(function SessionInput() {
     }
   }, [handleFiles])
 
+  const onPaste = useCallback((e: React.ClipboardEvent) => {
+    if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+      handleFiles(e.clipboardData.files)
+    } else {
+      // Check items for image data (e.g. from screenshot tool)
+      const items = Array.from(e.clipboardData.items)
+      const imageItems = items.filter(item => item.type.startsWith('image/'))
+      if (imageItems.length > 0) {
+        const files = imageItems.map(item => item.getAsFile()).filter(Boolean) as File[]
+        if (files.length > 0) {
+          handleFiles(files)
+        }
+      }
+    }
+  }, [handleFiles])
+
   const removeImage = (id: string) => {
     setPendingImages(prev => prev.filter(img => img.id !== id))
   }
@@ -178,6 +194,7 @@ export default memo(function SessionInput() {
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      onPaste={onPaste}
       style={{ 
         position: 'relative',
         border: isDragging ? '2px dashed var(--mantine-color-blue-6)' : '2px solid transparent',

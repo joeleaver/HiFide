@@ -5,6 +5,7 @@ import type { Readable } from 'node:stream'
 import { randomUUID } from 'node:crypto'
 import { Service } from './base/Service.js'
 import { preferUnpackedRipgrepPath } from '../utils/ripgrep.js'
+import { getVectorService, getSettingsService } from './index.js'
 import type {
   WorkspaceSearchParams,
   WorkspaceSearchBatchPayload,
@@ -79,6 +80,16 @@ export class WorkspaceSearchService extends Service<WorkspaceSearchServiceState>
     params: WorkspaceSearchParams,
     callbacks: WorkspaceSearchCallbacks
   ): Promise<{ id: string; cancel: () => void }> {
+    const searchId = randomUUID()
+    const vectorSettings = getSettingsService().getState().vector;
+
+    if (vectorSettings?.enabled) {
+      // Background semantic search
+      this.runSemanticSearch(workspaceRoot, searchId, params, callbacks).catch(err => {
+        console.error('[search] Semantic search failed:', err);
+      });
+    }
+
     const normalizedRoot = this.normalizeWorkspaceRoot(workspaceRoot)
     const normalizedParams = this.normalizeParams(params)
     if (!normalizedParams.query) {
@@ -90,7 +101,6 @@ export class WorkspaceSearchService extends Service<WorkspaceSearchServiceState>
       throw new Error('ripgrep-unavailable')
     }
 
-    const searchId = randomUUID()
     const args = this.buildRipgrepArgs(normalizedParams)
     args.push('-e', normalizedParams.query)
     args.push('--', '.')
@@ -259,6 +269,63 @@ export class WorkspaceSearchService extends Service<WorkspaceSearchServiceState>
       this.handleRipgrepLine(job, line)
       if (job.limitHit) break
       newlineIndex = job.leftover.indexOf('\n')
+    }
+  }
+
+  private async runSemanticSearch(
+    workspaceRoot: string,
+    searchId: string,
+    params: WorkspaceSearchParams,
+    callbacks: WorkspaceSearchCallbacks
+  ) {
+    const vectorService = getVectorService();
+    const results = await vectorService.search(params.query, 10);
+    
+    if (results.length === 0) return;
+
+    const files: WorkspaceSearchBatchPayload['files'] = [];
+    const filesMap = new Map<string, WorkspaceSearchMatch[]>();
+
+    for (const match of results) {
+      if (match.type !== 'code') continue;
+      const meta = match.metadata;
+      const relPath = meta.filePath;
+      const absPath = path.resolve(workspaceRoot, relPath);
+
+      const matches = filesMap.get(relPath) || [];
+      matches.push({
+        id: `semantic:${match.id}`,
+        path: absPath,
+        relativePath: relPath,
+        line: meta.startLine,
+        column: 1,
+        matchText: `[Semantic Match] ${match.text.split('\n')[0]}`,
+        lineText: match.text.split('\n')[1] || match.text,
+        range: {
+          start: { line: meta.startLine, column: 1 },
+          end: { line: meta.endLine || meta.startLine, column: 1 }
+        }
+      });
+      filesMap.set(relPath, matches);
+    }
+
+    for (const [relPath, matches] of filesMap.entries()) {
+      files.push({
+        path: path.resolve(workspaceRoot, relPath),
+        relativePath: relPath,
+        matches
+      });
+    }
+
+    if (files.length > 0) {
+      callbacks.onBatch({
+        searchId,
+        workspaceRoot,
+        files,
+        matchCount: results.length,
+        fileCount: files.length,
+        isSemantic: true
+      } as any);
     }
   }
 

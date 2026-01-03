@@ -1,49 +1,95 @@
-import { VectorService } from './VectorService.js';
 import { Service } from '../base/Service.js';
-import { listItems, readById } from '../../store/utils/knowledgeBase.js';
+import { getKnowledgeBaseService, getVectorService, getWorkspaceService } from '../index.js';
 import crypto from 'node:crypto';
 
-interface IndexerState {
-    indexedArticles: Record<string, string>; // kbId -> hash
+interface KBIndexerState {
+  indexedArticles: Record<string, string>; // kbId -> hash
 }
 
-export class KBIndexerService extends Service<IndexerState> {
-    constructor(private vectorService: VectorService) {
-        super({
-            indexedArticles: {}
-        }, 'kb_indexer');
+export class KBIndexerService extends Service<KBIndexerState> {
+  constructor() {
+    super({
+      indexedArticles: {}
+    }, 'kb_indexer');
+  }
+
+  onStateChange(): void {
+    this.persistState();
+  }
+
+  async indexWorkspace(force = false) {
+    const ws = getWorkspaceService();
+    const vs = getVectorService();
+
+    // WorkspaceService holds windowWorkspaces. For indexing, we typically use the first active one or a primary context.
+    const workspaces = ws.getAllWindowWorkspaces();
+    const workspaceRoot = Object.values(workspaces as any)[0] as string;
+
+    if (!workspaceRoot) {
+      console.warn('[KBIndexerService] Cannot index: No active workspace found');
+      return;
     }
 
-    protected onStateChange(): void {
-        this.persistState();
+    // Ensure the vector service is initialized for this workspace before proceeding
+    try {
+      await vs.init(workspaceRoot);
+    } catch (error) {
+      console.error('[KBIndexerService] Failed to initialize VectorService for indexing:', error);
+      return;
     }
 
-    async indexWorkspace(workspaceRoot: string) {
-        const items = await listItems(workspaceRoot);
-        for (const item of items) {
-            await this.indexArticle(workspaceRoot, item.id);
-        }
+    const kbService = getKnowledgeBaseService();
+    const allItems = kbService.getItems();
+    const items = Object.values(allItems);
+
+    // Note: KB indexing is usually much faster than code, but we still report it
+    if (force) {
+        console.log('[KBIndexerService] Forced re-index: clearing article hashes...');
+        this.setState({ indexedArticles: {} });
+        await this.persistState();
+        // Clear status for clean start
+        vs.updateIndexingStatus('kb', 0, 0);
+        // Wait a moment for persistence to settle
+        await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    async indexArticle(workspaceRoot: string, kbId: string) {
+    vs.updateIndexingStatus('kb', 0, items.length);
+
+    const batchSize = 5;
+    for (let i = 0; i < items.length; i += batchSize) {
+        const batch = items.slice(i, i + batchSize);
+        await Promise.all(batch.map((item: any) => this.indexArticle(workspaceRoot, item.id, force)));
+        
+        const indexedCount = Math.min(i + batchSize, items.length);
+        vs.updateIndexingStatus('kb', indexedCount, items.length);
+    }
+
+    vs.updateIndexingStatus('kb', items.length, items.length);
+  }
+
+    async indexArticle(_workspaceRoot: string, kbId: string, force = false) {
+        const kbService = getKnowledgeBaseService();
+        const vs = getVectorService();
         try {
-            const result = await readById(workspaceRoot, kbId);
-            if (!result) return;
-
-            const { meta, body } = result;
-            const content = `${meta.title}\nTags: ${meta.tags.join(', ')}\n\n${body}`;
+            const allItems = kbService.getItems();
+            const result = allItems[kbId];
+            const meta = result as any;
+            const body = (result as any).body || '';
+            const content = `${meta.title}\nTags: ${(meta.tags || []).join(', ')}\n\n${body}`;
             const hash = crypto.createHash('md5').update(content).digest('hex');
 
-            if (this.state.indexedArticles[kbId] === hash) {
+            if (!force && this.state.indexedArticles[kbId] === hash) {
                 return; // Unchanged
             }
 
             const chunks = this.chunkMarkdown(body, meta);
             
-            await this.vectorService.upsertItems(chunks.map((c, i) => ({
+                await vs.upsertItems(chunks.map((c, i) => ({
                 id: `kb:${kbId}:${i}`,
                 text: c.text,
                 type: 'kb',
+                kbId: kbId,
+                articleTitle: meta.title,
                 metadata: JSON.stringify({
                     kbId,
                     title: meta.title,
@@ -65,25 +111,23 @@ export class KBIndexerService extends Service<IndexerState> {
 
     private chunkMarkdown(body: string, meta: any) {
         const chunks: Array<{ text: string; section?: string }> = [];
-        
-        // Always add the title and summary as one chunk
-        chunks.push({
-            text: `Knowledge Base: ${meta.title}\nTags: ${meta.tags.join(', ')}\n\n${body.slice(0, 1000)}`,
-            section: 'Introduction'
-        });
+        const kbPrefix = `Knowledge Base: ${meta.title}\nTags: ${(meta.tags || []).join(', ')}\n\n`;
+        const fullContent = `${kbPrefix}${body}`;
 
-        // Split by headers
-        const sections = body.split(/\n(?=#+\s)/);
-        if (sections.length > 1) {
-            for (const section of sections) {
-                if (section.trim().length > 50) {
-                    const headerMatch = section.match(/^#+\s+(.*)/);
-                    const sectionTitle = headerMatch ? headerMatch[1] : undefined;
-                    chunks.push({
-                        text: `Knowledge Base: ${meta.title}\nSection: ${sectionTitle || 'Content'}\n\n${section}`,
-                        section: sectionTitle
-                    });
-                }
+        // Slidding window chunking for better semantic density
+        const chunkSize = 1000;
+        const overlap = 200;
+
+        if (fullContent.length <= chunkSize) {
+            chunks.push({ text: fullContent, section: 'Full content' });
+        } else {
+            for (let i = 0; i < fullContent.length; i += (chunkSize - overlap)) {
+                const chunkText = fullContent.substring(i, i + chunkSize);
+                if (chunkText.length < 100) continue; // Skip tiny tails
+                chunks.push({
+                    text: chunkText,
+                    section: `Fragment ${Math.floor(i / (chunkSize - overlap)) + 1}`
+                });
             }
         }
 

@@ -13,7 +13,6 @@ import { getSettingsService } from './index.js'
 interface ProviderState {
   selectedModel: string
   selectedProvider: string
-  autoRetry: boolean
   providerValid: Record<string, boolean>
   modelsByProvider: Record<string, ModelOption[]>
   defaultModels: Record<string, string>
@@ -29,7 +28,6 @@ export class ProviderService extends Service<ProviderState> {
       {
         selectedModel: 'gpt-4o',
         selectedProvider: 'openai',
-        autoRetry: false,
         providerValid: {
           openai: false,
           anthropic: false,
@@ -61,7 +59,6 @@ export class ProviderService extends Service<ProviderState> {
     if (!this.persistence.has('provider')) {
       const oldModel = this.persistence.load<string>('selectedModel', 'gpt-4o')
       const oldProvider = this.persistence.load<string>('selectedProvider', 'openai')
-      const oldAutoRetry = this.persistence.load<boolean>('autoRetry', false)
       const oldDefaultModels = this.persistence.load<Record<string, string>>('defaultModels', {})
       const oldFireworksModels = this.persistence.load<string[]>('fireworksAllowedModels', [])
       const oldOpenRouterModels = this.persistence.load<string[]>('openrouterAllowedModels', [])
@@ -69,7 +66,6 @@ export class ProviderService extends Service<ProviderState> {
       if (
         oldModel !== 'gpt-4o' ||
         oldProvider !== 'openai' ||
-        oldAutoRetry !== false ||
         Object.keys(oldDefaultModels).length > 0 ||
         oldFireworksModels.length > 0 ||
         oldOpenRouterModels.length > 0
@@ -78,7 +74,6 @@ export class ProviderService extends Service<ProviderState> {
           ...this.state,
           selectedModel: oldModel,
           selectedProvider: oldProvider,
-          autoRetry: oldAutoRetry,
           defaultModels: oldDefaultModels,
           fireworksAllowedModels:
             oldFireworksModels.length > 0 ? oldFireworksModels : this.state.fireworksAllowedModels,
@@ -133,7 +128,6 @@ export class ProviderService extends Service<ProviderState> {
     if (
       updates.selectedModel !== undefined ||
       updates.selectedProvider !== undefined ||
-      updates.autoRetry !== undefined ||
       updates.defaultModels !== undefined ||
       updates.fireworksAllowedModels !== undefined ||
       updates.openrouterAllowedModels !== undefined
@@ -228,10 +222,6 @@ export class ProviderService extends Service<ProviderState> {
     return this.state.selectedProvider
   }
 
-  getAutoRetry(): boolean {
-    return this.state.autoRetry
-  }
-
   getProviderValid(provider: string): boolean {
     return this.state.providerValid[provider] || false
   }
@@ -279,33 +269,17 @@ export class ProviderService extends Service<ProviderState> {
   // Setters
   setSelectedModel(model: string): void {
     this.setState({ selectedModel: model })
-    // Note: Session provider/model is set explicitly via setSessionProviderModelFor(), not auto-synced
   }
+
+
 
   setSelectedProvider(provider: string): void {
     this.setState({ selectedProvider: provider })
-
-    // Immediately update model to match new provider
-    const models = this.state.modelsByProvider[provider] || []
-
-    // Check if we have a preferred default model for this provider
-    const preferred = this.state.defaultModels?.[provider]
-    const hasPreferred = preferred && models.some((m) => m.value === preferred)
-
-    if (hasPreferred) {
-      // Use preferred model if it's available
-      this.setState({ selectedModel: preferred })
-    } else if (models.length > 0) {
-      // Otherwise use first available model
-      const first = models[0]
-      this.setState({ selectedModel: first.value })
-    }
-
-    // Note: Session provider/model is set explicitly via setSessionProviderModelFor(), not auto-synced
   }
 
-  setAutoRetry(value: boolean): void {
-    this.setState({ autoRetry: value })
+  setAutoRetry(_value: boolean): void {
+    // Note: autoRetry property was removed from ProviderState but we keep the method
+    // for compatibility or future use if needed, but currently it does nothing to state.
   }
 
   setProviderValid(provider: string, valid: boolean): void {
@@ -736,7 +710,7 @@ export class ProviderService extends Service<ProviderState> {
     return uniq.map((id) => ({ value: id, label: id }))
   }
 
-  private async fetchOpenRouterModels(key: string): Promise<ModelOption[]> {
+  private async fetchOpenRouterModels(_key: string): Promise<ModelOption[]> {
     // OpenRouter uses an allowlist from settings (similar to Fireworks)
     const orAllowed = this.state.openrouterAllowedModels || []
     const uniq = Array.from(new Set(orAllowed.filter(Boolean)))

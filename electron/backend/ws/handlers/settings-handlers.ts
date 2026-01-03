@@ -75,7 +75,6 @@ function buildSettingsSnapshot(): SettingsSnapshot {
     defaultModels,
     selectedProvider: providerService.getSelectedProvider(),
     selectedModel: providerService.getSelectedModel(),
-    autoRetry: providerService.getAutoRetry(),
     fireworksAllowedModels: providerService.getFireworksAllowedModels(),
     openrouterAllowedModels: providerService.getOpenRouterAllowedModels(),
     startupMessage: appService.getStartupMessage(),
@@ -164,11 +163,6 @@ export function createSettingsHandlers(
 
   addMethod('provider.setDefaultModel', async ({ provider, model }: { provider: string; model: string }) => {    const providerService = getProviderService()
     providerService.setDefaultModel(provider, model)
-    return { ok: true }
-  })
-
-  addMethod('provider.setAutoRetry', async ({ value }: { value: boolean }) => {    const providerService = getProviderService()
-    providerService.setAutoRetry(value)
     return { ok: true }
   })
 

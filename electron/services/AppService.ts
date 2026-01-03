@@ -17,25 +17,26 @@ interface AppState {
 }
 
 export class AppService extends Service<AppState> {
+  private app: any
+  private mainWindow: any
+
   constructor() {
     super({
-      appBootstrapping: true,
+      appBootstrapping: false,
       startupMessage: null,
       workspaceBoot: {},
-    })
+    }, 'app')
   }
 
-  protected onStateChange(updates: Partial<AppState>): void {
-    // App state is transient, no persistence needed
+  onStateChange(_state: AppState): void {}
 
-    // Emit events when boot status changes
-    if (updates.appBootstrapping !== undefined || updates.startupMessage !== undefined) {
-      this.events.emit('app:boot:changed', {
-        appBootstrapping: this.state.appBootstrapping,
-        startupMessage: this.state.startupMessage,
-      })
-    }
+  setReferences(app: any, mainWindow: any) {
+    this.app = app
+    this.mainWindow = mainWindow
   }
+
+  getApp() { return this.app; }
+  getMainWindow() { return this.mainWindow; }
 
   // Getters
   isBootstrapping(): boolean {

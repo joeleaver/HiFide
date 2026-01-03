@@ -1,151 +1,258 @@
 import * as lancedb from '@lancedb/lancedb';
-import OpenAI from 'openai';
-import { Service } from '../base/Service.js';
-import { getSettingsService } from '../index.js';
-import path from 'node:path';
-import fs from 'node:fs/promises';
-
-export interface VectorMatch {
-    id: string;
-    score: number;
-    text: string;
-    type: string;
-    metadata: any;
-}
+import path from 'path';
+import fs from 'fs/promises';
+import { getEmbeddingService, getWorkspaceService } from '../index.js';
 
 export interface VectorItem {
-    id: string;
-    vector: number[];
-    text: string;
-    type: 'code' | 'kb' | 'memory';
-    metadata: string; // JSON string for metadata
+  id: string;
+  vector: number[];
+  text: string;
+  type: 'code' | 'kb' | 'memory';
+  filePath?: string;
+  symbolName?: string;
+  symbolType?: string;
+  startLine?: number;
+  endLine?: number;
+  kbId?: string;
+  articleTitle?: string;
+  metadata: string; // JSON string
 }
 
-interface VectorState {
-    initialized: boolean;
-    indexing: boolean;
-    lastIndexedAt: number | null;
-}
+export class VectorService {
+  private db: lancedb.Connection | null = null;
+  private tableName = 'vectors';
+  private initPromise: Promise<void> | null = null;
+  private tableInitPromise: Promise<lancedb.Table> | null = null;
+  private state = {
+    initialized: false,
+    indexing: false,
+    lastIndexedAt: null as number | null,
+    status: {
+      indexing: false,
+      progress: 0,
+      totalFiles: 0,
+      indexedFiles: 0,
+      sources: {} as Record<string, { total: number; indexed: number }>
+    }
+  };
 
-export class VectorService extends Service<VectorState> {
-    private db: lancedb.Connection | null = null;
-    private openai: OpenAI | null = null;
-    private tableName = 'vectors';
-
-    constructor() {
-        super({
-            initialized: false,
-            indexing: false,
-            lastIndexedAt: null
-        }, 'vector_service');
+  private async ensureInitialized(): Promise<void> {
+    if (this.db) return;
+    
+    if (this.initPromise) {
+      await this.initPromise;
+      if (this.db) return;
     }
 
-    protected onStateChange(): void {
-        this.persistState();
+    const ws = getWorkspaceService();
+    const workspaces = ws.getAllWindowWorkspaces();
+    const activePath = Object.values(workspaces)[0];
+
+    if (!activePath) {
+      throw new Error('No active workspace found for VectorService initialization.');
     }
 
-    async init(workspaceRoot: string) {
-        if (this.state.initialized) return;
+    console.log(`[VectorService] DB missing, attempting late init with: ${activePath}`);
+    await this.init(activePath);
+  }
 
-        try {
-            const vectorDir = path.join(workspaceRoot, '.hifide', 'vectors');
-            await fs.mkdir(vectorDir, { recursive: true });
-            
-            this.db = await lancedb.connect(vectorDir);
-            
-            const apiKeys = getSettingsService().getApiKeys();
-            if (apiKeys?.openai) {
-                this.openai = new OpenAI({ apiKey: apiKeys.openai });
-            }
+  async init(workspaceRoot: string): Promise<void> {
+    if (this.initPromise) return this.initPromise;
 
-            this.setState({ initialized: true });
-        } catch (error) {
-            console.error('[VectorService] Failed to initialize:', error);
-            throw error;
-        }
-    }
-
-    private async getOpenAIClient(): Promise<OpenAI> {
-        if (this.openai) return this.openai;
+    this.initPromise = (async () => {
+      try {
+        const dbPath = path.join(workspaceRoot, '.hifide', 'vectors');
+        await fs.mkdir(dbPath, { recursive: true });
         
-        const apiKeys = getSettingsService().getApiKeys();
-        if (apiKeys?.openai) {
-            this.openai = new OpenAI({ apiKey: apiKeys.openai });
-            return this.openai;
-        }
+        console.log(`[VectorService] Connecting to LanceDB at: ${dbPath}`);
+        this.db = await lancedb.connect(dbPath);
         
-        throw new Error('OpenAI API key not found');
-    }
+        this.state.initialized = true;
+        console.log('[VectorService] Database initialized successfully.');
+      } catch (error) {
+        console.error('[VectorService] Initialization failed:', error);
+        this.db = null;
+        this.initPromise = null;
+        throw error;
+      }
+    })();
 
-    async getEmbeddings(text: string): Promise<number[]> {
-        const client = await this.getOpenAIClient();
-        const response = await client.embeddings.create({
-            model: 'text-embedding-3-small',
-            input: text,
-        });
-        return response.data[0].embedding;
-    }
+    return this.initPromise;
+  }
 
-    async upsertItems(items: Array<Omit<VectorItem, 'vector'>>) {
-        if (!this.db) throw new Error('VectorService not initialized');
+  async getOrCreateTable(): Promise<lancedb.Table> {
+    await this.ensureInitialized();
+    if (this.tableInitPromise) return await this.tableInitPromise;
 
-        const table = await this.getOrCreateTable();
-        
-        const itemsWithVectors: VectorItem[] = [];
-        for (const item of items) {
-            const vector = await this.getEmbeddings(item.text);
-            itemsWithVectors.push({
-                ...item,
-                vector
-            });
-        }
-
-        await table.add(itemsWithVectors as any);
-    }
-
-    async search(query: string, limit: number = 10, filter?: string): Promise<VectorMatch[]> {
-        if (!this.db) throw new Error('VectorService not initialized');
-
-        const table = await this.getOrCreateTable();
-        const queryVector = await this.getEmbeddings(query);
-
-        let queryBuilder = table.vectorSearch(queryVector).limit(limit);
-        
-        if (filter) {
-            queryBuilder = queryBuilder.where(filter);
-        }
-
-        const results = await queryBuilder.toArray();
-
-        return results.map((r: any) => ({
-            id: r.id,
-            score: r._distance,
-            text: r.text,
-            type: r.type,
-            metadata: JSON.parse(r.metadata || '{}')
-        }));
-    }
-
-    private async getOrCreateTable(): Promise<lancedb.Table> {
-        if (!this.db) throw new Error('VectorService not initialized');
-
+    this.tableInitPromise = (async () => {
+      if (!this.db) throw new Error('Database not connected');
+      const expectedDim = await getEmbeddingService().getDimension();
+      
+      try {
         const tableNames = await this.db.tableNames();
         if (tableNames.includes(this.tableName)) {
-            return await this.db.openTable(this.tableName);
+          const table = await this.db.openTable(this.tableName);
+          const schema = await table.schema();
+          
+          const fields = (schema as any).fields || [];
+          const vectorField = fields.find((f: any) => f.name === 'vector');
+          
+          if (vectorField && vectorField.type && vectorField.type.listSize !== expectedDim) {
+            console.warn(`[VectorService] Dimension mismatch detected (Table: ${vectorField.type.listSize}, Model: ${expectedDim}). Recreating table.`);
+            await this.db.dropTable(this.tableName);
+            return await this.createInitialTable(expectedDim);
+          }
+          
+          return table;
         }
+        return await this.createInitialTable(expectedDim);
+      } catch (e) {
+        return await this.createInitialTable(expectedDim);
+      }
+    })();
 
-        // Create table with dummy item to define schema
-        // text-embedding-3-small has 1536 dimensions
-        const dummyItem: VectorItem = {
-            id: 'dummy',
-            vector: new Array(1536).fill(0),
-            text: '',
-            type: 'code',
-            metadata: '{}'
-        };
+    return await this.tableInitPromise;
+  }
 
-        return await this.db.createTable(this.tableName, [dummyItem as any]);
+  private async createInitialTable(dim: number): Promise<lancedb.Table> {
+    console.log('[VectorService] Creating new vectors table...');
+    const seedVector = new Array(dim).fill(0);
+    const seed = {
+      id: 'seed',
+      vector: seedVector,
+      text: '',
+      type: 'memory',
+      filePath: '',
+      symbolName: '',
+      symbolType: '',
+      startLine: 0,
+      endLine: 0,
+      kbId: '',
+      articleTitle: '',
+      metadata: JSON.stringify({ isSeed: true })
+    };
+    
+    try {
+      return await this.db!.createTable(this.tableName, [seed as any]);
+    } catch (err: any) {
+      if (err.message?.includes('already exists')) {
+        return await this.db!.openTable(this.tableName);
+      }
+      throw err;
     }
-}
+  }
 
-export const vectorService = new VectorService();
+  async search(query: string, limit: number = 10, filter?: string) {
+    try {
+      const table = await this.getOrCreateTable();
+      const embeddingService = getEmbeddingService();
+      const queryVector = await embeddingService.embed(query);
+      
+      const safeLimit = Math.max(1, Math.floor(Number(limit) || 10));
+      
+      console.log(`[VectorService] Executing search for: "${query}" (limit: ${safeLimit}, filter: ${filter})`);
+
+      let queryBuilder = (table as any).search(queryVector);
+      if (typeof queryBuilder.metric === 'function') {
+        queryBuilder = queryBuilder.metric('cosine');
+      }
+      
+      if (filter) {
+        queryBuilder = queryBuilder.where(filter);
+      }
+
+      const results = await queryBuilder.limit(safeLimit).execute();
+      
+      const rawResults = Array.isArray(results) ? results : (results as any).toArray ? (results as any).toArray() : [];
+
+      return rawResults
+        .filter((r: any) => r.id !== 'seed')
+        .map((r: any) => {
+          let meta = {};
+          try {
+            meta = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata || {};
+          } catch {
+            meta = {};
+          }
+          
+          return {
+            id: r.id,
+            score: r._distance !== undefined ? 1 - r._distance : 0,
+            text: r.text,
+            type: r.type,
+            filePath: r.filePath,
+            symbolName: r.symbolName,
+            symbolType: r.symbolType,
+            articleTitle: r.articleTitle,
+            metadata: meta
+          };
+        });
+    } catch (error) {
+      console.error('[VectorService] search error:', error);
+      throw error;
+    }
+  }
+
+  async upsertItems(items: Array<Omit<VectorItem, 'vector' >>) {
+    await this.ensureInitialized();
+    const table = await this.getOrCreateTable();
+    const embeddingService = getEmbeddingService();
+
+    const vectors = await Promise.all(items.map(item => embeddingService.embed(item.text)));
+    
+    const data = items.map((item, i) => ({
+      ...item,
+      vector: vectors[i],
+      metadata: typeof item.metadata === 'string' ? item.metadata : JSON.stringify(item.metadata)
+    }));
+
+    await table.add(data as any);
+  }
+
+  getState() {
+    return this.state;
+  }
+
+  async purge() {
+    await this.ensureInitialized();
+    if (this.db) {
+      try {
+        await this.db.dropTable(this.tableName);
+        this.tableInitPromise = null;
+      } catch (e) {
+        // Table might not exist
+      }
+    }
+    this.state.status.sources = {};
+    this.state.status.totalFiles = 0;
+    this.state.status.indexedFiles = 0;
+    this.state.status.progress = 0;
+  }
+
+  updateIndexingStatus(source: string, indexed: number, total: number) {
+    this.state.status.sources[source] = { indexed, total };
+    
+    let globalTotal = 0;
+    let globalIndexed = 0;
+    
+    Object.values(this.state.status.sources).forEach(s => {
+      globalTotal += s.total;
+      globalIndexed += s.indexed;
+    });
+
+    this.state.status.totalFiles = globalTotal;
+    this.state.status.indexedFiles = globalIndexed;
+    this.state.status.progress = globalTotal > 0 ? Math.floor((globalIndexed / globalTotal) * 100) : 0;
+    this.state.indexing = globalIndexed < globalTotal;
+    this.state.status.indexing = this.state.indexing;
+
+    const ws = getWorkspaceService();
+    const workspaces = ws.getAllWindowWorkspaces();
+    const activePath = Object.values(workspaces)[0];
+    if (activePath) {
+      import('../../backend/ws/broadcast.js').then(({ broadcastWorkspaceNotification }) => {
+        broadcastWorkspaceNotification(activePath, 'vector_service.changed', this.state);
+      });
+    }
+  }
+}

@@ -1,63 +1,163 @@
-import { Project, SourceFile } from 'ts-morph';
-import { VectorService } from './VectorService.js';
-import { discoverWorkspaceFiles } from '../../utils/fileDiscovery.js';
+import Parser from 'tree-sitter';
+import { getVectorService } from '../index.js';
 import { Service } from '../base/Service.js';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+
+// Native languages
+import TypeScript from 'tree-sitter-typescript';
+import Go from 'tree-sitter-go';
+import Rust from 'tree-sitter-rust';
+import Python from 'tree-sitter-python';
 
 interface IndexerState {
     indexedFiles: Record<string, string>; // path -> hash
 }
 
 export class CodeIndexerService extends Service<IndexerState> {
-    private project: Project;
+    private parsers: Record<string, any> = {};
+    private initialized = false;
 
-    constructor(private vectorService: VectorService) {
+    constructor() {
         super({
             indexedFiles: {}
         }, 'code_indexer');
-        this.project = new Project({
-            useInMemoryFileSystem: true
-        });
+    }
+
+    async init() {
+        if (this.initialized) return;
+
+        try {
+            console.log('[CodeIndexerService] Initializing Native Tree-Sitter native bindings...');
+            
+            const languages: Record<string, any> = {
+                '.ts': TypeScript.typescript,
+                '.tsx': TypeScript.tsx,
+                '.js': TypeScript.typescript, // Native tree-sitter-typescript handles JS as well
+                '.jsx': TypeScript.tsx,
+                '.go': Go,
+                '.rs': Rust,
+                '.py': Python
+            };
+
+            for (const [ext, langBinding] of Object.entries(languages)) {
+                try {
+                    const parser = new Parser();
+                    parser.setLanguage(langBinding);
+                    this.parsers[ext] = parser;
+                } catch (e: any) {
+                    console.warn(`[CodeIndexerService] Could not load native parser for ${ext}:`, e.message);
+                }
+            }
+
+            this.initialized = true;
+            console.log('[CodeIndexerService] Native Tree-Sitter initialized.');
+        } catch (e) {
+            console.error(`[CodeIndexerService] Failed to initialize native engine:`, e);
+            throw e;
+        }
     }
 
     protected onStateChange(): void {
         this.persistState();
     }
 
-    async indexWorkspace(workspaceRoot: string) {
+    async indexWorkspace(workspaceRoot: string, force = false) {
+        if (!workspaceRoot) return;
+
+        const vectorService = getVectorService();
+
+        // Ensure engine and parsers are ready
+        await this.init();
+
+        if (force) {
+            console.log('[CodeIndexerService] Forced re-index: clearing existing hashes...');
+            this.setState({ indexedFiles: {} });
+            await this.persistState();
+            // Clear status for clean start
+            vectorService.updateIndexingStatus('code', 0, 0);
+            // Wait a moment for persistence to settle
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        console.log(`[CodeIndexerService] Starting discovery in: ${workspaceRoot} (force: ${force})`);
+        const { discoverWorkspaceFiles } = await import('../../utils/fileDiscovery.js');
         const files = await discoverWorkspaceFiles({
             cwd: workspaceRoot,
-            includeGlobs: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],
-            absolute: true
+            includeGlobs: [
+                '**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx', 
+                '**/*.go', '**/*.rs', '**/*.py', '**/*.java', 
+                '**/*.cpp', '**/*.c', '**/*.h', 
+                '**/*.json', '**/*.html', '**/*.md', '**/*.css',
+                '**/*.yml', '**/*.yaml'
+            ],
+            absolute: true,
+            respectGitignore: false // Temporary override to diagnose "3 files" issue
         });
+
+        console.log(`[CodeIndexerService] Discovered ${files.length} files to index.`);
+        
+        vectorService.updateIndexingStatus('code', 0, files.length);
 
         const batchSize = 10;
         for (let i = 0; i < files.length; i += batchSize) {
             const batch = files.slice(i, i + batchSize);
-            await Promise.all(batch.map(file => this.indexFile(workspaceRoot, file)));
+            await Promise.all(batch.map((file: string) => this.indexFile(workspaceRoot, file, force)));
+            
+            const indexedCount = Math.min(i + batchSize, files.length);
+            vectorService.updateIndexingStatus('code', indexedCount, files.length);
         }
+
+        vectorService.updateIndexingStatus('code', files.length, files.length);
     }
 
-    async indexFile(workspaceRoot: string, filePath: string) {
+    async indexFile(workspaceRoot: string, filePath: string, force = false) {
+        const vectorService = getVectorService();
         try {
-            const content = await import('node:fs/promises').then(fs => fs.readFile(filePath, 'utf-8'));
+            const content = await fs.readFile(filePath, 'utf-8');
             const hash = crypto.createHash('md5').update(content).digest('hex');
             
             const relPath = path.relative(workspaceRoot, filePath).replace(/\\/g, '/');
-            
-            if (this.state.indexedFiles[relPath] === hash) {
-                return; // Already indexed and unchanged
+            const ext = path.extname(filePath);
+
+            if (!force && this.state.indexedFiles[relPath] === hash) {
+                return;
             }
 
-            const sourceFile = this.project.createSourceFile(filePath, content, { overwrite: true });
-            const chunks = this.chunkSourceFile(sourceFile, relPath);
+            const parser = this.parsers[ext];
+            let chunks: Array<{
+                text: string;
+                symbolName: string;
+                symbolType: string;
+                startLine: number;
+                endLine: number;
+            }> = [];
+
+            if (parser) {
+                const tree = parser.parse(content);
+                chunks = this.chunkTree(tree, relPath);
+            } else {
+                // Fallback for non-code files (JSON, MD, HTML, etc.)
+                chunks.push({
+                    text: `File: ${relPath}\nContent:\n${content}`,
+                    symbolName: path.basename(filePath),
+                    symbolType: 'file',
+                    startLine: 1,
+                    endLine: content.split('\n').length
+                });
+            }
             
             if (chunks.length > 0) {
-                await this.vectorService.upsertItems(chunks.map(c => ({
+                await vectorService.upsertItems(chunks.map(c => ({
                     id: `code:${relPath}:${c.symbolName}:${c.startLine}`,
                     text: c.text,
                     type: 'code',
+                    filePath: relPath,
+                    symbolName: c.symbolName,
+                    symbolType: c.symbolType,
+                    startLine: c.startLine,
+                    endLine: c.endLine,
                     metadata: JSON.stringify({
                         filePath: relPath,
                         startLine: c.startLine,
@@ -74,15 +174,12 @@ export class CodeIndexerService extends Service<IndexerState> {
                     [relPath]: hash
                 }
             });
-
-            // Cleanup memory
-            this.project.removeSourceFile(sourceFile);
         } catch (error) {
             console.error(`[CodeIndexerService] Failed to index file ${filePath}:`, error);
         }
     }
 
-    private chunkSourceFile(sourceFile: SourceFile, relPath: string) {
+    private chunkTree(tree: any, relPath: string) {
         const chunks: Array<{
             text: string;
             symbolName: string;
@@ -91,103 +188,35 @@ export class CodeIndexerService extends Service<IndexerState> {
             endLine: number;
         }> = [];
 
-        // 1. Module Level
-        const fileText = sourceFile.getFullText();
-        if (fileText.length < 1000) { // Only chunk whole file if it's small
-             chunks.push({
-                text: `Module: ${relPath}\n${fileText}`,
-                symbolName: 'module',
-                symbolType: 'module',
-                startLine: 1,
-                endLine: sourceFile.getEndLineNumber()
-            });
-        }
-
-        // 2. Classes
-        sourceFile.getClasses().forEach(cls => {
-            const className = cls.getName() || 'anonymous';
-            const jsDoc = this.getJsDoc(cls);
-            
-            // Class Header
-            chunks.push({
-                text: `Class: ${className}. ${jsDoc}\nFile: ${relPath}`,
-                symbolName: className,
-                symbolType: 'class',
-                startLine: cls.getStartLineNumber(),
-                endLine: cls.getEndLineNumber()
-            });
-
-            // Methods
-            cls.getMethods().forEach(method => {
-                const methodName = method.getName();
-                const mJsDoc = this.getJsDoc(method);
+        const walk = (node: any) => {
+            if (node.type === 'class_declaration' || node.type === 'struct_declaration' || node.type === 'interface_declaration') {
+                const nameNode = node.childForFieldName('name');
+                const name = nameNode ? nameNode.text : 'anonymous';
                 chunks.push({
-                    text: `Method: ${className}.${methodName}. ${mJsDoc}\nBody:\n${method.getText()}\nFile: ${relPath}`,
-                    symbolName: `${className}.${methodName}`,
-                    symbolType: 'method',
-                    startLine: method.getStartLineNumber(),
-                    endLine: method.getEndLineNumber()
+                    text: `${node.type.replace('_declaration', '')}: ${name}\nFile: ${relPath}\n${node.text}`,
+                    symbolName: name,
+                    symbolType: node.type.split('_')[0],
+                    startLine: node.startPosition.row + 1,
+                    endLine: node.endPosition.row + 1
                 });
-            });
-
-            // Properties (grouped)
-            const props = cls.getProperties().filter(p => this.getJsDoc(p).length > 0);
-            if (props.length > 0) {
+            } else if (node.type === 'function_declaration' || node.type === 'method_declaration' || node.type === 'function_definition') {
+                const nameNode = node.childForFieldName('name');
+                const name = nameNode ? nameNode.text : 'anonymous';
                 chunks.push({
-                    text: `Properties of Class ${className}:\n${props.map(p => `- ${p.getName()}: ${this.getJsDoc(p)}`).join('\n')}\nFile: ${relPath}`,
-                    symbolName: `${className}.properties`,
-                    symbolType: 'properties',
-                    startLine: props[0].getStartLineNumber(),
-                    endLine: props[props.length - 1].getEndLineNumber()
+                    text: `${node.type.includes('method') ? 'Method' : 'Function'}: ${name}\nFile: ${relPath}\n${node.text}`,
+                    symbolName: name,
+                    symbolType: node.type.includes('method') ? 'method' : 'function',
+                    startLine: node.startPosition.row + 1,
+                    endLine: node.endPosition.row + 1
                 });
             }
-        });
 
-        // 3. Standalone Functions
-        sourceFile.getFunctions().forEach(fn => {
-            const fnName = fn.getName() || 'anonymous';
-            const jsDoc = this.getJsDoc(fn);
-            chunks.push({
-                text: `Function: ${fnName}. ${jsDoc}\nBody:\n${fn.getText()}\nFile: ${relPath}`,
-                symbolName: fnName,
-                symbolType: 'function',
-                startLine: fn.getStartLineNumber(),
-                endLine: fn.getEndLineNumber()
-            });
-        });
+            for (let i = 0; i < node.childCount; i++) {
+                walk(node.child(i));
+            }
+        };
 
-        // 4. Interfaces and Types
-        sourceFile.getInterfaces().forEach(iface => {
-            const name = iface.getName();
-            chunks.push({
-                text: `Interface: ${name}. ${this.getJsDoc(iface)}\nDefinition:\n${iface.getText()}\nFile: ${relPath}`,
-                symbolName: name,
-                symbolType: 'interface',
-                startLine: iface.getStartLineNumber(),
-                endLine: iface.getEndLineNumber()
-            });
-        });
-
-        sourceFile.getTypeAliases().forEach(type => {
-            const name = type.getName();
-            chunks.push({
-                text: `Type: ${name}. ${this.getJsDoc(type)}\nDefinition:\n${type.getText()}\nFile: ${relPath}`,
-                symbolName: name,
-                symbolType: 'type',
-                startLine: type.getStartLineNumber(),
-                endLine: type.getEndLineNumber()
-            });
-        });
-
+        walk(tree.rootNode);
         return chunks;
-    }
-
-    private getJsDoc(node: any): string {
-        try {
-            if (typeof node.getJsDocs === 'function') {
-                return node.getJsDocs().map((d: any) => d.getDescription()).join('\n');
-            }
-        } catch {}
-        return '';
     }
 }

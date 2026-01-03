@@ -34,7 +34,6 @@ export const LS_KEYS = {
   // Provider/Model
   SELECTED_MODEL: 'hifide:selectedModel',
   SELECTED_PROVIDER: 'hifide:selectedProvider',
-  AUTO_RETRY: 'hifide:autoRetry',
   DEFAULT_MODELS: 'hifide:defaultModels',
   
   // Settings
@@ -73,7 +72,6 @@ export const DEFAULTS = {
   // Provider/Model
   SELECTED_PROVIDER: 'openai',
   SELECTED_MODEL: 'gpt-4o',
-  AUTO_RETRY: false,
   
   // Settings
 

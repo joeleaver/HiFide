@@ -18,6 +18,11 @@ interface SettingsState {
   settingsValidateResult: { ok: boolean; failures: string[] } | null
   pricingConfig: PricingConfig
   defaultPricingConfig: PricingConfig
+  vector: {
+    enabled: boolean
+    provider: 'local' | 'openai'
+    model: string
+  }
 }
 
 export class SettingsService extends Service<SettingsState> {
@@ -39,6 +44,11 @@ export class SettingsService extends Service<SettingsState> {
         settingsValidateResult: null,
         pricingConfig: DEFAULT_PRICING,
         defaultPricingConfig: DEFAULT_PRICING,
+        vector: {
+          enabled: true,
+          provider: 'local',
+          model: 'all-MiniLM-L6-v2',
+        },
       },
       'settings'
     )

@@ -4,7 +4,7 @@
  * Handles app initialization, lifecycle events, and shutdown
  */
 
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, App } from 'electron'
 import { createWindow } from './window'
 
 /**
@@ -12,16 +12,16 @@ import { createWindow } from './window'
  *
  * Sets up app lifecycle handlers and creates the main window
  */
-export function initializeApp(onReady?: () => void): void {
+export function initializeApp(onReady?: (app: App, mainWindow: BrowserWindow) => void): void {
   /**
    * App ready handler
    */
   app.whenReady().then(() => {
     // Create main window
-    createWindow()
+    const mainWindow = createWindow()
 
     // Call optional ready callback (for menu building, etc.)
-    onReady?.()
+    onReady?.(app, mainWindow)
   })
 
   /**

@@ -1,43 +1,38 @@
 ---
 id: 0576a8e9-3556-4bb2-aaf0-4fb385ad5a41
 title: Multi-modal Prompting Architecture
-tags: [multi-modal, llm-service, images, context-management]
-files: [electron/flow-engine/llm/payloads.ts, electron/flow-engine/contextManager.ts, src/components/SessionInput.tsx, electron/store/types.ts]
+tags: [multi-modal, images, clipboard, frontend]
+files: [src/components/SessionInput.tsx]
 createdAt: 2026-01-03T04:08:13.749Z
-updatedAt: 2026-01-03T05:01:47.924Z
+updatedAt: 2026-01-03T21:46:06.871Z
 ---
 
 # Multi-modal Prompting Architecture
 
-This article outlines the support for multi-modal (image) prompting within the application.
+This article documents the implementation of multi-modal capabilities in the session input, specifically focusing on image ingestion and processing.
 
-## Overview
+## Image Ingestion Methods
 
-The application supports sending images to LLM providers that have vision capabilities (OpenAI, Anthropic, Gemini).
+1.  **Drag and Drop**: Users can drag images into the input container.
+2.  **File Picker**: A "+" icon allows manual file selection.
+3.  **Clipboard Paste**:
+    *   **Files**: Direct file paste (e.g. from file explorer).
+    *   **Image Data**: Paste of raw image data (e.g. from a screenshot tool or "Copy Image" in a browser). This is handled by iterating through `e.clipboardData.items` and using `getAsFile()`.
 
-## Architecture
+## Image Processing Pipeline
 
-### Frontend (Renderer)
-- **Component:** `src/components/SessionInput.tsx` handles drag-and-drop and the file picker.
-- **Processing:** Images are automatically resized using a Canvas to a maximum of **1568x1568px** and converted to compressed JPEG (`0.7` quality).
-- **State:** The `chatTimeline` store supports `TimelineMessagePart[]`.
+To ensure optimal performance and compatibility with LLM providers (Anthropic, OpenAI):
 
-### Backend (Main Process)
-- **Data Structure:** `ChatMessage` and `SessionMessage` support `string | MessagePart[]`.
-- **Persistence:** Multi-modal content is serialized as base64 strings in the session JSON files (`.hifide-private/sessions/<id>.json`).
+1.  **Resizing**: Images are constrained to a maximum of **1568px** (width or height). This balance preserves detail for OCR/reasoning while avoiding excessive token consumption or model timeouts.
+2.  **Optimization**:
+    *   All images are processed through a HTML5 Canvas.
+    *   Output format is **image/jpeg**.
+    *   Quality is set to **0.7**.
+    *   This significantly reduces payload size (often by 80-90%) with negligible impact on AI performance.
+3.  **State Management**: Optimized images are stored in `pendingImages` as Base64 strings before being sent in the `FlowService.resume` call.
 
-### LLM Service & Payloads
-- **Context Management:** The `ContextManager` maintains the full history.
-- **Payload Generation:** To prevent token limit issues, the `payloads.ts` generators (`formatMessagesForOpenAI`, `formatMessagesForAnthropic`, `formatMessagesForGemini`) only include image data for the **last user message** in the conversation. Previous images in the history are replaced with a `[Image]` text placeholder in the payload sent to the API.
+## Implementation Details
 
-## Data Formats
-
-### MessagePart
-```typescript
-{ type: 'text'; text: string } | { type: 'image'; image: string; mimeType: string }
-```
-
-### Constraints
-- **Image Resizing:** Max 1568px in either dimension.
-- **Compression:** JPEG at 0.7 quality.
-- **Context Window:** Images are stripped from history, preserving only the most recent user prompt's images.
+*   **File**: `src/components/SessionInput.tsx`
+*   **Key Logic**: `handleFiles` function manages the FileReader and Canvas optimization flow.
+*   **Paste Handler**: `onPaste` checks both `e.clipboardData.files` (for file objects) and `e.clipboardData.items` (for raw data).
