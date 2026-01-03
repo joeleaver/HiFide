@@ -175,25 +175,52 @@ export class ProviderService extends Service<ProviderState> {
   // Defensive clamp: prevent any non-default models from being exposed via modelsByProvider
   // (except Fireworks user overrides, which are controlled by fireworksAllowedModels).
   private ensureModelsByProviderAllowlist(): void {
-    const next: Record<string, ModelOption[]> = { ...this.state.modelsByProvider }
+    const nextModels: Record<string, ModelOption[]> = { ...this.state.modelsByProvider }
+    const nextValid: Record<string, boolean> = { ...this.state.providerValid }
+    let stateChanged = false
 
     const providers: Array<'openai' | 'anthropic' | 'gemini' | 'xai'> = ['openai', 'anthropic', 'gemini', 'xai']
     for (const p of providers) {
-      next[p] = this.filterToDefaults(p, Array.isArray(next[p]) ? next[p] : [])
+      nextModels[p] = this.filterToDefaults(p, Array.isArray(nextModels[p]) ? nextModels[p] : [])
     }
 
     const fwAllowed = new Set((this.state.fireworksAllowedModels || []).filter(Boolean))
-    next.fireworks = (Array.isArray(next.fireworks) ? next.fireworks : []).filter((m) => fwAllowed.has(m.value))
+    // For allowlist-based providers, the allowlist IS the source of truth for available models.
+    // We rebuild the model list from the allowlist to ensure it's always in sync,
+    // handling cases where modelsByProvider wasn't persisted or was cleared.
+    nextModels.fireworks = Array.from(fwAllowed).map((id) => ({ value: id, label: id }))
+    
+    // If we have allowed models, the provider is implicitly valid (no network fetch needed to list)
+    if (nextModels.fireworks.length > 0 && !nextValid.fireworks) {
+      nextValid.fireworks = true
+      stateChanged = true
+    }
 
     const orAllowed = new Set((this.state.openrouterAllowedModels || []).filter(Boolean))
-    next.openrouter = (Array.isArray(next.openrouter) ? next.openrouter : []).filter((m) => orAllowed.has(m.value))
+    nextModels.openrouter = Array.from(orAllowed).map((id) => ({ value: id, label: id }))
+    
+    // If we have allowed models, the provider is implicitly valid (no network fetch needed to list)
+    if (nextModels.openrouter.length > 0 && !nextValid.openrouter) {
+      nextValid.openrouter = true
+      stateChanged = true
+    }
 
-    try {
-      if (JSON.stringify(this.state.modelsByProvider) !== JSON.stringify(next)) {
-        this.setState({ modelsByProvider: next })
+    // Also check if models map actually changed (deep compare for other providers)
+    if (!stateChanged) {
+      try {
+        if (JSON.stringify(this.state.modelsByProvider) !== JSON.stringify(nextModels)) {
+          stateChanged = true
+        }
+      } catch {
+        stateChanged = true
       }
-    } catch {
-      this.setState({ modelsByProvider: next })
+    }
+
+    if (stateChanged) {
+      this.setState({ 
+        modelsByProvider: nextModels,
+        providerValid: nextValid
+      })
     }
   }
 
@@ -482,10 +509,22 @@ export class ProviderService extends Service<ProviderState> {
 
       if (!key) {
         // Fallback to defaults if no key available
-        // Source of truth: pricing allowlist in defaultModelSettings.json
-        // (NOT modelDefaults; modelDefaults may contain legacy entries).
-        const defaults = getDefaultPricingConfig()[provider] || {}
-        const fallbackList = Object.keys(defaults).map((id) => ({ value: id, label: id }))
+        let fallbackList: ModelOption[] = []
+
+        if (provider === 'openrouter') {
+          // For OpenRouter, use the persisted allowlist instead of hardcoded defaults
+          const allowed = this.state.openrouterAllowedModels || []
+          fallbackList = allowed.map((id) => ({ value: id, label: id }))
+        } else if (provider === 'fireworks') {
+          // For Fireworks, use the persisted allowlist instead of hardcoded defaults
+          const allowed = this.state.fireworksAllowedModels || []
+          fallbackList = allowed.map((id) => ({ value: id, label: id }))
+        } else {
+          // Source of truth: pricing allowlist in defaultModelSettings.json
+          // (NOT modelDefaults; modelDefaults may contain legacy entries).
+          const defaults = getDefaultPricingConfig()[provider] || {}
+          fallbackList = Object.keys(defaults).map((id) => ({ value: id, label: id }))
+        }
 
         // IMPORTANT: Always go through setModelsForProvider so allowlisting is enforced
         // consistently (single source of truth: defaultModelSettings.json).
@@ -529,8 +568,18 @@ export class ProviderService extends Service<ProviderState> {
       this.setProviderValid(provider, false)
 
       // Fallback to defaults on error
-      const defaults = getDefaultPricingConfig()[provider] || {}
-      const fallbackList = Object.keys(defaults).map((id) => ({ value: id, label: id }))
+      let fallbackList: ModelOption[] = []
+
+      if (provider === 'openrouter') {
+        const allowed = this.state.openrouterAllowedModels || []
+        fallbackList = allowed.map((id) => ({ value: id, label: id }))
+      } else if (provider === 'fireworks') {
+        const allowed = this.state.fireworksAllowedModels || []
+        fallbackList = allowed.map((id) => ({ value: id, label: id }))
+      } else {
+        const defaults = getDefaultPricingConfig()[provider] || {}
+        fallbackList = Object.keys(defaults).map((id) => ({ value: id, label: id }))
+      }
 
       // IMPORTANT: Always go through setModelsForProvider so allowlisting is enforced
       // consistently (single source of truth: defaultModelSettings.json).

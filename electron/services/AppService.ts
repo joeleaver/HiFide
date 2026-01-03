@@ -104,6 +104,7 @@ export class AppService extends Service<AppState> {
       const gkey = keys.gemini?.trim()
       const fkey = keys.fireworks?.trim()
       const xkey = keys.xai?.trim()
+      const orkey = keys.openrouter?.trim()
 
       // 3. Validate API keys
       let validMap: Record<string, boolean> = {
@@ -112,6 +113,7 @@ export class AppService extends Service<AppState> {
         gemini: false,
         fireworks: false,
         xai: false,
+        openrouter: false,
       }
       try {
         this.setStartupMessage('Validating provider keys…')
@@ -125,6 +127,7 @@ export class AppService extends Service<AppState> {
             validMap.gemini = !!gkey
             validMap.fireworks = !!fkey
             validMap.xai = !!xkey
+            validMap.openrouter = !!orkey
           } else {
             const failures = validationResult?.failures || []
             validMap.openai = !!okey && !failures.some((f: string) => f.toLowerCase().includes('openai'))
@@ -132,6 +135,7 @@ export class AppService extends Service<AppState> {
             validMap.gemini = !!gkey && !failures.some((f: string) => f.toLowerCase().includes('gemini'))
             validMap.fireworks = !!fkey && !failures.some((f: string) => f.toLowerCase().includes('fireworks'))
             validMap.xai = !!xkey && !failures.some((f: string) => f.toLowerCase().includes('xai'))
+            validMap.openrouter = !!orkey && !failures.some((f: string) => f.toLowerCase().includes('openrouter'))
           }
           console.log('[app:init] provider valid map from validateApiKeys', {
             validMap,
@@ -141,6 +145,7 @@ export class AppService extends Service<AppState> {
               gemini: !!gkey,
               fireworks: !!fkey,
               xai: !!xkey,
+              openrouter: !!orkey,
             },
           })
         } else {
@@ -149,6 +154,7 @@ export class AppService extends Service<AppState> {
           validMap.gemini = !!gkey
           validMap.fireworks = !!fkey
           validMap.xai = !!xkey
+          validMap.openrouter = !!orkey
         }
       } catch (e) {
         console.error('[app] Failed to validate API keys:', e)
@@ -156,6 +162,8 @@ export class AppService extends Service<AppState> {
         validMap.anthropic = !!akey
         validMap.gemini = !!gkey
         validMap.fireworks = !!fkey
+        validMap.xai = !!xkey
+        validMap.openrouter = !!orkey
       }
 
       // 4. Update provider validation state
@@ -172,7 +180,7 @@ export class AppService extends Service<AppState> {
       // Clear startup banner if we have at least one valid provider
       try {
         const hasValidProvider =
-          validMap.openai || validMap.anthropic || validMap.gemini || validMap.fireworks || validMap.xai
+          validMap.openai || validMap.anthropic || validMap.gemini || validMap.fireworks || validMap.xai || validMap.openrouter
         if (hasValidProvider) {
           this.setState({ startupMessage: null })
         } else {

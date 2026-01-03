@@ -1,46 +1,53 @@
 ---
 id: 91e5cbc1-f72e-4e78-b656-1e3549c48329
 title: OpenRouter Provider Implementation
-tags: [openrouter, provider, integration, settings, ai-sdk]
-files: [electron/services/ProviderService.ts, electron/providers-ai-sdk/openrouter.ts, src/SettingsPane.tsx]
+tags: [openrouter, provider, integration, settings, ai-sdk, architecture]
+files: [electron/providers-ai-sdk/openrouter.ts, electron/services/ProviderService.ts, electron/services/AppService.ts]
 createdAt: 2026-01-03T16:18:39.118Z
-updatedAt: 2026-01-03T17:41:11.553Z
+updatedAt: 2026-01-03T18:10:16.524Z
 ---
 
 # OpenRouter Provider Implementation
 
-OpenRouter integration uses a manual allowlist strategy (mirroring Fireworks) to manage the vast number of available models.
+This article documents the implementation details of the OpenRouter provider integration in HiFide.
 
 ## Architecture
 
-### Backend (`ProviderService.ts`)
-*   **Allowlist:** Uses `openrouterAllowedModels` in `ProviderState` to track user-authorized models.
-*   **Fetching:** `fetchOpenRouterModels` does **not** call the OpenRouter API. It returns the local allowlist. This avoids fetching thousands of models and strictly enforces manual management.
-*   **Filtering:** `setModelsForProvider` and `ensureModelsByProviderAllowlist` strictly filter models against the `openrouterAllowedModels` list.
-*   **Persistence:** The allowlist is persisted to disk via `electron-store`.
-*   **Defaults:** Defaults are loaded from `defaultModelSettings.json` if the allowlist is empty.
+The OpenRouter integration follows the standard `AiSdkProvider` pattern but differs in how model lists are managed.
 
-### AI SDK Adapter (`electron/providers-ai-sdk/openrouter.ts`)
-*   **Factory:** Uses `createOpenRouter({ apiKey })` from `@openrouter/ai-sdk-provider` to create the provider instance.
-*   **Streaming:** Implements `agentStream` using `streamText` from Vercel AI SDK.
-    *   **Crucial:** The stream returned by `streamText` must be consumed using `result.consumeStream()` (or by iterating `textStream`) to trigger `onChunk` callbacks. Awaiting `streamText` alone only returns the result object and does not drive the stream.
-    *   **Reasoning:** Uses `extractReasoningMiddleware({ tagName: 'think' })` to support reasoning models (e.g., DeepSeek R1).
-    *   **Artifacts:** Filters out "None" artifacts that sometimes appear at the start of OpenRouter streams.
-*   **Output:** Emits `text-delta` for content and `reasoning` events for thinking blocks.
+### 1. Allowlist-Based Model Management
+Unlike OpenAI or Anthropic, which fetch available models from the API, OpenRouter supports thousands of models. To prevent UI clutter and performance issues, HiFide uses a **local allowlist** for OpenRouter models.
 
-### Frontend (`SettingsPane.tsx`)
-*   **UI:** Provides an input field to manually add model IDs (e.g., `meta-llama/llama-3.1-8b-instruct`).
-*   **Actions:**
-    *   `addOpenRouterModel`: Adds ID to allowlist and refreshes.
-    *   `removeOpenRouterModel`: Removes ID from allowlist and refreshes.
-    *   `loadOpenRouterDefaults`: Resets allowlist to recommended defaults.
+*   **Source of Truth:** `defaultModelSettings.json` (defaults) and user persistence (additions).
+*   **ProviderService:**
+    *   `fetchOpenRouterModels(key)`: Returns *only* the models currently in the allowlist. It does **not** make a network request to list models.
+    *   `ensureModelsByProviderAllowlist()`: Called on startup to populate `modelsByProvider.openrouter` from the persisted allowlist. This ensures models appear immediately without waiting for a "refresh".
+    *   `refreshModels('openrouter')`: Re-syncs the `modelsByProvider` state with the allowlist. If the API key is missing or invalid, it gracefully falls back to the allowlist rather than clearing the models.
 
-### Key Validation
-*   Presence of an API key is checked locally.
-*   `providerValid.openrouter` is set to true if a key exists (or if `fetchOpenRouterModels` succeeds, which it always does as it's local).
+### 2. Startup Initialization (Crucial)
+OpenRouter model visibility relies on correct initialization sequence in `AppService.ts`.
+
+*   **AppService:** Responsible for validating API keys on startup and updating the global `providerValid` state.
+*   **Validation Map:** `AppService.initializeApp` constructs a `validMap` of providers. **OpenRouter must be explicitly included here.**
+    *   If omitted, `providerService.setProvidersValid(map)` will overwrite the state, potentially setting `openrouter` to `false` (or undefined), causing models to disappear from the UI even if they are loaded in the allowlist.
+    *   **Fix (2025):** `AppService.ts` was updated to explicitly extract the `openrouter` API key and include it in the `validMap` construction and validation logic.
+
+### 3. Stream Consumption & Reasoning
+The implementation uses Vercel AI SDK's `streamText`.
+
+*   **Stream Consumption:** The `agentStream` method **must** consume the returned stream (e.g., via `result.consumeStream()`) to trigger `onChunk` callbacks. Simply awaiting the result is insufficient and leads to execution hangs.
+*   **Reasoning:** Models like `deepseek-r1` emit reasoning via a `<think>` tag or specific chunk types. The `onChunk` handler processes `reasoning` chunks and standard text deltas.
+*   **"None" Artifacts:** The implementation filters out "None" strings that occasionally appear in OpenRouter streams.
+
+## Key Files
+
+*   `electron/providers-ai-sdk/openrouter.ts`: Core provider implementation (streaming, execution).
+*   `electron/services/ProviderService.ts`: Model management, allowlist logic.
+*   `electron/services/AppService.ts`: Startup validation and provider status initialization.
+*   `electron/data/defaultModelSettings.json`: Default allowlisted models.
 
 ## Troubleshooting
 
-*   **"No models available":** The user must manually add a model ID in Settings > API Keys > OpenRouter Models.
-*   **Provider not in list:** Ensure `providerValid.openrouter` is true (API key entered).
-*   **Stream hanging:** Ensure `result.consumeStream()` is called in the adapter.
+*   **Models appear then disappear:** Check `AppService.ts` to ensure `openrouter` is included in the `validMap` passed to `setProvidersValid`.
+*   **Execution hangs:** Ensure `result.consumeStream()` is called in `agentStream`.
+*   **Models not showing:** Verify `openrouterAllowedModels` in `ProviderService` state has entries.

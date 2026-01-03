@@ -127,6 +127,7 @@ export async function buildWorkspaceSnapshot(workspaceId: string): Promise<Works
         gemini: providerService.getProviderValid('gemini'),
         fireworks: providerService.getProviderValid('fireworks'),
         xai: providerService.getProviderValid('xai'),
+        openrouter: providerService.getProviderValid('openrouter'),
       },
       modelsByProvider: {
         openai: providerService.getModelsForProvider('openai'),
@@ -134,6 +135,7 @@ export async function buildWorkspaceSnapshot(workspaceId: string): Promise<Works
         gemini: providerService.getModelsForProvider('gemini'),
         fireworks: providerService.getModelsForProvider('fireworks'),
         xai: providerService.getModelsForProvider('xai'),
+        openrouter: providerService.getModelsForProvider('openrouter'),
       },
       defaultPricingConfig: settingsService.getDefaultPricingConfig(),
     }
