@@ -1,10 +1,10 @@
-/** * Flow Scheduler - Node-Controlled Execution
+/**
+ * Flow Scheduler - Node-Controlled Execution
  *
  * Architecture:
  * - Nodes are autonomous functions that control their own execution
  * - Nodes decide when to pull inputs (lazy evaluation)
  * - Nodes decide when they're "done" (different logic per node type)
- * - Nodes call successors when complete (via return value)
  * - Scheduler provides infrastructure (FlowAPI, pull functions) but doesn't make execution decisions
  *
  * Key concepts:
@@ -21,6 +21,7 @@ import type {
   Edge,
   NodeOutput,
   FlowExecutionArgs,
+  MessagePart,
 } from './types'
 import type { ContextBinding } from './contextRegistry'
 import { buildFlowGraph } from './flow-graph'
@@ -59,7 +60,7 @@ export class FlowScheduler {
   private abortController = new AbortController()
 
   // User input promises: for nodes waiting for external input
-  private userInputResolvers = new Map<string, (value: string) => void>()
+  private userInputResolvers = new Map<string, (value: string | MessagePart[]) => void>()
 
   // Multi-context tracking: main context + isolated contexts
   private contextLifecycle: ContextLifecycleManager
@@ -536,7 +537,7 @@ export class FlowScheduler {
    * Resolve a waiting user input promise
    * This doesn't "resume" the flow - the flow is already running, just awaiting this promise
    */
-  resolveUserInput(nodeId: string, userInput: string): void {
+  resolveUserInput(nodeId: string, userInput: string | MessagePart[]): void {
     console.log('[scheduler.resolveUserInput] Attempting to resolve nodeId:', nodeId)
     console.log('[scheduler.resolveUserInput] Available resolvers:', Array.from(this.userInputResolvers.keys()))
 
@@ -555,7 +556,7 @@ export class FlowScheduler {
    * Resolve ANY waiting user input promise (used when we don't know the exact nodeId)
    * This is called by resumeFlow when the user submits input
    */
-  resolveAnyWaitingUserInput(userInput: string): void {
+  resolveAnyWaitingUserInput(userInput: string | MessagePart[]): void {
     console.log('[scheduler.resolveAnyWaitingUserInput] Available resolvers:', Array.from(this.userInputResolvers.keys()))
 
     // There should only be one waiting resolver at a time
@@ -621,5 +622,3 @@ export class FlowScheduler {
   }
 
 }
-
-

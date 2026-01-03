@@ -75,41 +75,7 @@ export interface MainFlowContext {
    * Shared across all nodes using the same contextId.
    * Contains the full conversation between user and assistant.
    */
-  messageHistory: Array<{
-    role: 'system' | 'user' | 'assistant'
-    content: string
-
-    /**
-     * Optional reasoning/thinking content from the model
-     * Used by models that support extended thinking (e.g., Gemini 2.5, Fireworks reasoning models)
-     * This is the model's internal reasoning process, separate from the final response.
-     */
-    reasoning?: string
-
-    /**
-     * Optional metadata for message management and context windowing
-     */
-    metadata?: {
-      /**
-       * Unique identifier for this message (auto-generated)
-       * Used for idempotent message injection and updates
-       */
-      id: string
-
-      /**
-       * If true, this message is pinned to the top during context windowing
-       * Pinned messages maintain their relative order
-       */
-      pinned?: boolean
-
-      /**
-       * Priority for pinned messages (higher = more important)
-       * When windowing needs to remove pinned messages, lower priority goes first
-       * Default: 50
-       */
-      priority?: number
-    }
-  }>
+  messageHistory: MessageHistoryItem[]
 
   /**
    * Optional reference to the parent context this one forked from
@@ -125,6 +91,46 @@ export interface MainFlowContext {
    * ISO timestamp recording when the context was created
    */
   createdAt?: string
+}
+
+export type MessagePart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; image: string; mimeType: string }
+
+export interface MessageHistoryItem {
+  role: 'system' | 'user' | 'assistant'
+  content: string | MessagePart[]
+
+  /**
+   * Optional reasoning/thinking content from the model
+   * Used by models that support extended thinking (e.g., Gemini 2.5, Fireworks reasoning models)
+   * This is the model's internal reasoning process, separate from the final response.
+   */
+  reasoning?: string
+
+  /**
+   * Optional metadata for message management and context windowing
+   */
+  metadata?: {
+    /**
+     * Unique identifier for this message (auto-generated)
+     * Used for idempotent message injection and updates
+     */
+    id: string
+
+    /**
+     * If true, this message is pinned to the top during context windowing
+     * Pinned messages maintain their relative order
+     */
+    pinned?: boolean
+
+    /**
+     * Priority for pinned messages (higher = more important)
+     * When windowing needs to remove pinned messages, lower priority goes first
+     * Default: 50
+     */
+    priority?: number
+  }
 }
 
 /**
@@ -326,15 +332,7 @@ export interface FlowExecutionArgs {
     provider: string
     model: string
     systemInstructions?: string
-    messageHistory?: Array<{
-      role: 'system' | 'user' | 'assistant'
-      content: string
-      metadata?: {
-        id: string
-        pinned?: boolean
-        priority?: number
-      }
-    }>
+    messageHistory?: MessageHistoryItem[]
   }
 }
 
@@ -357,4 +355,3 @@ export interface PausedFlowState {
   nodeContexts: Map<string, ExecutionContext>
   executionState: Map<string, NodeExecutionState>
 }
-

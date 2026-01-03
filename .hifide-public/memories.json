@@ -50,8 +50,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:35:38.203Z",
       "updatedAt": "2025-12-16T01:35:38.203Z",
-      "lastUsedAt": "2025-12-16T17:29:02.460Z",
-      "usageCount": 51
+      "lastUsedAt": "2026-01-03T05:28:17.693Z",
+      "usageCount": 68
     },
     {
       "id": "mem-d24a8682-801b-43a8-a7e7-33d96cf3cc22",
@@ -102,8 +102,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:38:26.728Z",
       "updatedAt": "2025-12-16T01:38:26.728Z",
-      "lastUsedAt": "2025-12-16T17:29:02.460Z",
-      "usageCount": 47
+      "lastUsedAt": "2026-01-03T05:28:17.693Z",
+      "usageCount": 61
     },
     {
       "id": "mem-c4920107-b77c-4b00-83ea-c20c2bcc757a",
@@ -120,8 +120,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:38:26.728Z",
       "updatedAt": "2025-12-16T01:38:26.728Z",
-      "lastUsedAt": "2025-12-16T17:29:02.460Z",
-      "usageCount": 40
+      "lastUsedAt": "2026-01-03T05:23:28.789Z",
+      "usageCount": 54
     },
     {
       "id": "mem-2f1074a0-847d-420e-932c-12566a70eebf",
@@ -173,8 +173,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:42:38.074Z",
       "updatedAt": "2025-12-16T01:42:38.074Z",
-      "lastUsedAt": "2025-12-16T17:29:02.460Z",
-      "usageCount": 38
+      "lastUsedAt": "2026-01-03T05:28:17.693Z",
+      "usageCount": 53
     },
     {
       "id": "mem-88fdf959-78ce-45e5-981c-b79516b96c98",
@@ -190,8 +190,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:45:50.069Z",
       "updatedAt": "2025-12-16T01:45:50.069Z",
-      "lastUsedAt": "2025-12-16T17:06:14.185Z",
-      "usageCount": 22
+      "lastUsedAt": "2026-01-03T05:28:17.693Z",
+      "usageCount": 26
     },
     {
       "id": "mem-61663769-5b8b-4283-b9b7-f901e8fb753b",
@@ -207,8 +207,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:45:50.069Z",
       "updatedAt": "2025-12-16T01:45:50.069Z",
-      "lastUsedAt": "2025-12-16T17:29:02.460Z",
-      "usageCount": 46
+      "lastUsedAt": "2026-01-03T05:28:17.693Z",
+      "usageCount": 60
     },
     {
       "id": "mem-942bfd83-eb77-4632-92bf-c72bf6d0f279",
@@ -308,8 +308,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T02:06:58.162Z",
       "updatedAt": "2025-12-16T02:06:58.162Z",
-      "lastUsedAt": "2025-12-16T03:03:13.182Z",
-      "usageCount": 3
+      "lastUsedAt": "2026-01-03T05:14:18.233Z",
+      "usageCount": 4
     },
     {
       "id": "mem-2fd1ad33-36db-4b43-a622-689de538d31b",
@@ -326,8 +326,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T02:06:58.162Z",
       "updatedAt": "2025-12-16T02:06:58.162Z",
-      "lastUsedAt": "2025-12-16T17:29:02.460Z",
-      "usageCount": 38
+      "lastUsedAt": "2026-01-03T05:23:28.789Z",
+      "usageCount": 49
     },
     {
       "id": "mem-d5eb05a7-7369-4a1e-9411-2cdee46d9770",
@@ -414,8 +414,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T02:12:27.137Z",
       "updatedAt": "2025-12-16T02:12:27.137Z",
-      "lastUsedAt": "2025-12-16T17:29:02.460Z",
-      "usageCount": 37
+      "lastUsedAt": "2026-01-03T05:28:17.693Z",
+      "usageCount": 43
     },
     {
       "id": "mem-cbfef1d8-f6b6-4266-a379-1228513411c7",
@@ -986,8 +986,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T03:16:38.281Z",
       "updatedAt": "2025-12-16T03:16:38.281Z",
-      "lastUsedAt": "2025-12-16T03:23:51.181Z",
-      "usageCount": 2
+      "lastUsedAt": "2026-01-03T05:16:45.476Z",
+      "usageCount": 3
     },
     {
       "id": "mem-920af741-856a-453b-8f90-611e5be59b95",
@@ -1019,8 +1019,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T03:20:18.990Z",
       "updatedAt": "2025-12-16T03:20:18.990Z",
-      "lastUsedAt": "2025-12-16T17:29:02.460Z",
-      "usageCount": 4
+      "lastUsedAt": "2026-01-03T05:16:45.476Z",
+      "usageCount": 5
     },
     {
       "id": "mem-535740a6-0dc0-48fb-bd25-d3d43c03ba97",
@@ -1249,8 +1249,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T03:36:06.956Z",
       "updatedAt": "2025-12-16T03:36:06.956Z",
-      "lastUsedAt": "2025-12-16T17:08:58.263Z",
-      "usageCount": 6
+      "lastUsedAt": "2026-01-03T04:10:40.130Z",
+      "usageCount": 7
     },
     {
       "id": "mem-8d4c4df4-f8b5-4711-9de5-4b90c2ca5227",
@@ -1333,7 +1333,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T03:38:00.684Z",
       "updatedAt": "2025-12-16T15:05:44.249Z",
-      "usageCount": 0
+      "lastUsedAt": "2026-01-03T04:10:40.130Z",
+      "usageCount": 1
     },
     {
       "id": "mem-68bf459d-5626-4631-aa41-1ba952c79363",
@@ -1697,7 +1698,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T15:45:48.105Z",
       "updatedAt": "2025-12-16T15:45:48.105Z",
-      "usageCount": 0
+      "lastUsedAt": "2026-01-03T05:28:17.693Z",
+      "usageCount": 15
     },
     {
       "id": "mem-32ba16d4-50ce-4dc2-b82d-390e0f1f84f2",
@@ -1730,7 +1732,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T15:50:37.503Z",
       "updatedAt": "2025-12-16T15:50:37.503Z",
-      "usageCount": 0
+      "lastUsedAt": "2026-01-03T05:28:17.693Z",
+      "usageCount": 17
     },
     {
       "id": "mem-231d3676-cfbc-4cf7-b062-475eaedd1aaa",
@@ -2096,8 +2099,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T16:45:48.496Z",
       "updatedAt": "2025-12-16T16:45:48.496Z",
-      "lastUsedAt": "2025-12-16T17:23:31.453Z",
-      "usageCount": 1
+      "lastUsedAt": "2026-01-03T03:56:43.264Z",
+      "usageCount": 3
     },
     {
       "id": "mem-3d8cc4ac-e373-45f5-98ba-a9cb74c76d7a",
@@ -2245,7 +2248,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T17:04:24.222Z",
       "updatedAt": "2025-12-16T17:04:24.222Z",
-      "usageCount": 0
+      "lastUsedAt": "2026-01-03T03:56:43.264Z",
+      "usageCount": 1
     },
     {
       "id": "mem-c8204baa-f5e7-4cfc-8c3d-77be4258dc5e",
@@ -2654,6 +2658,647 @@
       "enabled": true,
       "createdAt": "2025-12-16T17:33:39.932Z",
       "updatedAt": "2025-12-16T17:33:39.932Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-ec7f6798-3cb6-482a-818e-81b2959fb293",
+      "type": "fact",
+      "text": "Default model settings now reside at public/defaultModelSettings.json and electron/data/defaultModelSettings.ts loads them via VITE_PUBLIC or the common runtime paths, leaving Vite to handle copying instead of a manual plugin.",
+      "tags": [
+        "config",
+        "electron",
+        "vite"
+      ],
+      "importance": 0.5,
+      "contentHash": "da784df524d571f927c5cea735cc4b1b9064ba05813f3cb6f62df65ecfea00d6",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T03:54:20.597Z",
+      "updatedAt": "2026-01-03T03:54:20.597Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-a3251208-169c-4a72-831e-2c0a8c1f1f5e",
+      "type": "fact",
+      "text": "GitDiffService exposes a git.getCommitDiff RPC that fetches per-file patches via git show while SourceControlStore caches those difs and auto-selects the first modified file when a commit is chosen.",
+      "tags": [
+        "git",
+        "backend",
+        "state"
+      ],
+      "importance": 0.5,
+      "contentHash": "55b660d16f787f89747250b4028495beda8e7707e72d4b3ed0d4e513101af158",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T03:54:20.597Z",
+      "updatedAt": "2026-01-03T03:54:20.597Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-48cfb10d-00f2-453c-af7d-d791fc167fb9",
+      "type": "fact",
+      "text": "defaultModelSettings.json now lives in public/defaultModelSettings.json and the Electron main process prioritizes process.env.VITE_PUBLIC before falling back to /public and /dist so the runtime can always load settings.",
+      "tags": [
+        "config",
+        "runtime"
+      ],
+      "importance": 0.5,
+      "contentHash": "8dfe2de4741eb3c6f2c963e9d9b04050ee2d3678005e69d4de747194342abcf3",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T03:58:20.613Z",
+      "updatedAt": "2026-01-03T03:58:20.613Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-cf7a88ce-97d7-419e-8724-147904c3fbb6",
+      "type": "fact",
+      "text": "Vite now owns copying defaultModelSettings.json into the build output, so the previous manual copy plugin was removed from vite.config.ts.",
+      "tags": [
+        "build",
+        "tooling"
+      ],
+      "importance": 0.25,
+      "contentHash": "79b16f570db69e6a39f01dc5f19a74f93cbb4de275be697898d41aebdbf9ffec",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T03:58:20.613Z",
+      "updatedAt": "2026-01-03T03:58:20.613Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-ee8be4d4-0ad5-4636-9054-605772c1a9b6",
+      "type": "workflow",
+      "text": "Selecting a commit now auto-loads its files, caches their difs via git.getCommitDiff, and surfaces them in CommitDetailsView’s DiffViewer for inspection.",
+      "tags": [
+        "git",
+        "ui",
+        "workflow"
+      ],
+      "importance": 0.5,
+      "contentHash": "203151aed38b5ab8abec05e6448e5b65c030ae71d138d4b9ee62a27ae5bc76a2",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T03:58:20.613Z",
+      "updatedAt": "2026-01-03T03:58:20.613Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-76030044-e77e-489b-a11d-1a4bc39e49e2",
+      "type": "fact",
+      "text": "ExplorerView’s sidebar body uses a flex column layout plus overflow-y:auto so both its internal ScrollArea and the sidebar itself can scroll when contents grow beyond the viewport.",
+      "tags": [
+        "ui",
+        "layout"
+      ],
+      "importance": 0.25,
+      "contentHash": "90e0fd4fa3c043d00c39d24786c031ae182bf1c81568bbb1efb2213b988a97b5",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T03:58:20.613Z",
+      "updatedAt": "2026-01-03T03:58:20.613Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-9c316581-406e-4b1d-9d76-c007246cb612",
+      "type": "fact",
+      "text": "The Monaco editor defaults for TypeScript and JavaScript now keep noSemanticValidation and noSyntaxValidation set to false so builtin diagnostic markers render in the editor.",
+      "tags": [
+        "monaco",
+        "diagnostics",
+        "editor"
+      ],
+      "importance": 0.75,
+      "contentHash": "078c9ce4df3f1b63c8c2378c3f24678a7cfdf123059067f5337a283401b1f97c",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:04:16.677Z",
+      "updatedAt": "2026-01-03T04:04:16.677Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-48522eba-9379-4810-8200-1a7e3c9d6ca1",
+      "type": "fact",
+      "text": "Bootstrap calls initLspEvents to subscribe to LSP_NOTIFICATION_DIAGNOSTICS so backend diagnostics reach the client diagnostics store.",
+      "tags": [
+        "lsp",
+        "diagnostics",
+        "bootstrap"
+      ],
+      "importance": 0.5,
+      "contentHash": "577aa4be4c8cf7d87e0a5b70647dd273637d5cf8705cebd0c8a6b2b9efd636ae",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:04:16.677Z",
+      "updatedAt": "2026-01-03T04:04:16.677Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-f53f5d60-fde5-4150-965c-54f157e0bb72",
+      "type": "fact",
+      "text": "Multi-modal Support epic on the Kanban board houses all work related to enabling multi-modal prompting.",
+      "tags": [
+        "kanban",
+        "planning"
+      ],
+      "importance": 0.5,
+      "contentHash": "a8996682010f455cbb8f33f9941ffe693407ef433b125290eb93687861f4156d",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:08:32.369Z",
+      "updatedAt": "2026-01-03T04:08:32.369Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-de38184e-a304-428d-aa13-f38759646d81",
+      "type": "fact",
+      "text": "Knowledge Base article 'Multi-modal Prompting Architecture' (ID 0576a8e9-3556-4bb2-af0-4fb385ad5a41) documents the required frontend, backend, and provider changes.",
+      "tags": [
+        "documentation"
+      ],
+      "importance": 0.5,
+      "contentHash": "f4aacb3a03c7166d7bb5630aa9fe438aa53ec1aae53e19e59be67b18bbdc715f",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:08:32.369Z",
+      "updatedAt": "2026-01-03T04:08:32.369Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-06823c6e-ae42-4b8e-8a40-c50224ff39bd",
+      "type": "fact",
+      "text": "ChatMessage shapes live in electron/providers/provider.ts, payload formatting happens in electron/flow-engine/llm/payloads.ts, and SessionInput is implemented in src/components/SessionInput.tsx, so multi-modal work will touch those files.",
+      "tags": [
+        "codebase",
+        "architecture"
+      ],
+      "importance": 0.5,
+      "contentHash": "1ef2d71680496fd936d27aecb3cbece92439b0aa9ab1286f9d0bee388a51130e",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:08:32.369Z",
+      "updatedAt": "2026-01-03T04:08:32.369Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-50381d2a-6120-4c58-8603-ec3ecd7236fa",
+      "type": "workflow",
+      "text": "Extend ChatMessage to support multi-part content (text plus images) before updating the backend payload formatting and SessionInput UI for multi-modal prompting.",
+      "tags": [
+        "workflow",
+        "llm"
+      ],
+      "importance": 0.75,
+      "contentHash": "6d44a2b7f3d44be812cbba06588513753820cef421e9d5e490d4e85d387d99f6",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:08:32.369Z",
+      "updatedAt": "2026-01-03T04:08:32.369Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-b6a74856-bf9a-4a9d-b3c4-304bb2f9e9ed",
+      "type": "fact",
+      "text": "Multi-modal user prompting is implemented so users can drag and drop images into the prompt box and these images are included in requests to OpenAI, Anthropic, and Gemini vision models.",
+      "tags": [
+        "feature",
+        "multimodal"
+      ],
+      "importance": 0.75,
+      "contentHash": "0acbf279cb008d95a5a313f4fe9cd79e0d5e156fdc65585cc789f7f56e970d67",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:14:08.759Z",
+      "updatedAt": "2026-01-03T04:14:08.759Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-d0ce2df8-9332-4a4f-859f-b829e8b0507f",
+      "type": "fact",
+      "text": "ChatMessage, MessageHistoryItem, and SessionMessage now support string or MessagePart[] payloads to represent mixed text-and-image content consistently across frontend and backend.",
+      "tags": [
+        "types",
+        "api"
+      ],
+      "importance": 0.5,
+      "contentHash": "953a2230f7a87a679370a47e28904f9398f6fef8d1ba779be35cb8a21918e59b",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:14:08.759Z",
+      "updatedAt": "2026-01-03T04:14:08.759Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-7346a058-2a25-4320-a8b7-22fe33473eba",
+      "type": "fact",
+      "text": "The Knowledge Base article 'Multi-modal Prompting Architecture' (ID 0576a8e9-3556-4bb2-af0-4fb385ad5a41) documents the final architecture and data formats for the feature.",
+      "tags": [
+        "documentation",
+        "kb"
+      ],
+      "importance": 0.25,
+      "contentHash": "e13906ed031ab03e568bd5e2c82802e62fb836c9f138b9afaa861ac6b71f1a5d",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:14:08.759Z",
+      "updatedAt": "2026-01-03T04:14:08.759Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-af1f94f1-ae85-4c5c-9d26-3c0645d84543",
+      "type": "fact",
+      "text": "The workspace now supports multi-modal prompting with drag-and-drop image uploads that flow through SessionInput, FlowService, and LM adapters for OpenAI, Anthropic, and Gemini.",
+      "tags": [
+        "feature",
+        "multimodal",
+        "ui"
+      ],
+      "importance": 0.5,
+      "contentHash": "ebab6891a06e475e997312bde3026fdc133634e93c46b80da1a2efd3e91918cc",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:39:06.394Z",
+      "updatedAt": "2026-01-03T04:39:06.394Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-dd9c0084-5d58-4473-b665-4ddc8b2364d8",
+      "type": "constraint",
+      "text": "SessionInput automatically resizes images exceeding 2048x2048px via the canvas API, converting them to image/jpeg at 0.8 quality while leaving smaller images unchanged to keep token usage in check.",
+      "tags": [
+        "image",
+        "constraint",
+        "optimization"
+      ],
+      "importance": 0.75,
+      "contentHash": "5446c71e80c8f2b3f14312abca72fd4785e800a0925eab49b97c1825d70a216e",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:39:06.394Z",
+      "updatedAt": "2026-01-03T04:39:06.394Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-0c1ee09f-6b94-4b47-83b0-5c27af1d5d17",
+      "type": "fact",
+      "text": "Client-side logic now automatically resizes any uploaded image above 2048x2048px while preserving aspect ratio, converts the resized output to JPEG at 0.8 quality, and leaves smaller images in their original format to minimize token payloads.",
+      "tags": [
+        "image",
+        "multimodal",
+        "frontend"
+      ],
+      "importance": 0.75,
+      "contentHash": "4d65ab677559f98dc51ad0cc4d1abb5878fda151db9bb73ac957ebde1a76fb83",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:41:10.071Z",
+      "updatedAt": "2026-01-03T04:41:10.071Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-39ee402f-8e6d-4265-9d8d-3e92825037ee",
+      "type": "fact",
+      "text": "Markdown and StreamingMarkdown components normalize ChatMessagePart[] inputs by extracting and joining text before processing, and SessionPane now uses Mantine Image to render images within multi-modal user messages.",
+      "tags": [
+        "frontend",
+        "multimodal",
+        "bugfix"
+      ],
+      "importance": 0.5,
+      "contentHash": "5963fcb21876da38ccaefcc038660103184c02e137613c4a6ed54804b29d2290",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:41:10.071Z",
+      "updatedAt": "2026-01-03T04:41:10.071Z",
+      "lastUsedAt": "2026-01-03T04:44:21.020Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-2e805d76-ecfe-4cbc-9458-347a6708080f",
+      "type": "fact",
+      "text": "Markdown.tsx and StreamingMarkdown.tsx now normalize multi-modal inputs by joining ChatMessagePart[] text content before running their string-specific logic, preventing result.split errors.",
+      "tags": [
+        "frontend",
+        "multi-modal"
+      ],
+      "importance": 0.5,
+      "contentHash": "258e31db710511b117daa1018efeaf632f5b117e163ea6ed7dfac79a2e2ac8c2",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:45:05.519Z",
+      "updatedAt": "2026-01-03T04:45:05.519Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-951b42cc-17a2-47c3-8812-e3b9a64ac719",
+      "type": "fact",
+      "text": "Session history JSON files under .hifide-private/sessions/<id>.json persist multi-modal images as base64 strings so SessionPane.tsx can reconstruct previews when loading past conversations.",
+      "tags": [
+        "persistence",
+        "session-history"
+      ],
+      "importance": 0.5,
+      "contentHash": "a4b54e35359fef74cb2a82481ada213596ebd1f1424f0b7660003c2e3fde7e14",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:45:05.519Z",
+      "updatedAt": "2026-01-03T04:45:05.519Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-92118a91-8483-4294-ae29-a68221c7f067",
+      "type": "fact",
+      "text": "The renderer chatTimeline store now tracks TimelineMessagePart[] entries and computeSig/hydrateFromSession handle the structured content to keep the UI in sync with persisted multi-modal messages.",
+      "tags": [
+        "store",
+        "state-management"
+      ],
+      "importance": 0.25,
+      "contentHash": "1b1668276e4226e443101e0a4c0a2e66f20e003fedabbf185c52e71575945a13",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:45:05.519Z",
+      "updatedAt": "2026-01-03T04:45:05.519Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-26b661a8-9933-4dde-99df-b0e48c9bd631",
+      "type": "fact",
+      "text": "Session history now persists multi-modal images as base64 strings inside `.hifide-private/sessions/<id>.json`, and the resumeFlow, chatTimeline store, computeSig, hydrateFromSession, and SessionPane logic have all been updated to handle the structured multi-modal timeline data.",
+      "tags": [
+        "persistence",
+        "multimodal",
+        "session-history"
+      ],
+      "importance": 0.75,
+      "contentHash": "fc7761767043e5015c35732bf2fc4cc4f42138a55fbdb8233199675dc6d318ec",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:47:36.699Z",
+      "updatedAt": "2026-01-03T04:47:36.699Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-28c2e3b3-67ae-448d-8ed1-246b8f1bd67c",
+      "type": "fact",
+      "text": "LLMService now keeps `MessagePart[]` arrays intact during normalization, uses deep comparison deduplication for multi-part messages, and formats image blocks as `{ type: 'image', image, mimeType }` to satisfy the Vercel AI SDK before sending payloads to providers.",
+      "tags": [
+        "multimodal",
+        "llm-service",
+        "data-format"
+      ],
+      "importance": 0.75,
+      "contentHash": "103d6626ad610202f194f9a4bb93f780d67e31b8f0e3916e424965c84b999b32",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:47:36.699Z",
+      "updatedAt": "2026-01-03T04:47:36.699Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-14a10fff-4261-4569-bcf4-30cba0b9c1d9",
+      "type": "fact",
+      "text": "LLMService now preserves MessagePart[] arrays when normalizing user messages so image data is not stripped before reaching the context manager.",
+      "tags": [
+        "llm",
+        "multimodal"
+      ],
+      "importance": 0.75,
+      "contentHash": "d4b286092230bbc752403f596a9f4416f9bc62f5c8affa4809ba886b25d0bf4a",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:51:12.880Z",
+      "updatedAt": "2026-01-03T04:51:12.880Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-9d29451c-9d83-4251-b82f-8fb3b210dd46",
+      "type": "fact",
+      "text": "Message history deduplication now uses deep comparison (e.g., JSON.stringify) to treat multi-part text+image messages as unique or identical correctly.",
+      "tags": [
+        "history",
+        "deduplication"
+      ],
+      "importance": 0.5,
+      "contentHash": "6fe0bba9b2e7dc76e97310e1f00ce1fb6c4f9f773050196272ce6321932c7d53",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:51:12.880Z",
+      "updatedAt": "2026-01-03T04:51:12.880Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-19343784-caa9-4435-8ec1-a9f025eba0ec",
+      "type": "fact",
+      "text": "OpenAI payload mapping must emit image blocks as { type: 'image', image, mimeType } to satisfy the Vercel AI SDK requirements.",
+      "tags": [
+        "integration",
+        "payload"
+      ],
+      "importance": 0.5,
+      "contentHash": "d149b1637d541152bfd6446a1ef45a2854bf75f8c2c5c962576d664f6f7fe312",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:51:12.880Z",
+      "updatedAt": "2026-01-03T04:51:12.880Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-3b72682f-a467-4bf3-a56d-58e668f03781",
+      "type": "workflow",
+      "text": "Image uploads are always routed through the canvas pipeline, resized to a maximum of 1568x1568 while preserving aspect ratio, and compressed to JPEG quality 0.7 before being sent to the LLMS to avoid token overflow.",
+      "tags": [
+        "image-processing",
+        "token-budget"
+      ],
+      "importance": 0.75,
+      "contentHash": "6ebc7eedc80e47a8ec9954a1dfb5c8e453de83e214f9b22ec86278323f3b7032",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T04:51:12.880Z",
+      "updatedAt": "2026-01-03T04:51:12.880Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-961c9b3a-ff23-4fa7-84fd-d4152ae88d32",
+      "type": "constraint",
+      "text": "Multi-modal prompts now cap image dimensions at 1568x1568 to stay within vision-model token expectations.",
+      "tags": [
+        "image",
+        "constraint"
+      ],
+      "importance": 0.75,
+      "contentHash": "e9265a394056ecf325c6466804f0d0db65a9c6cc95d00546a43db80ea8c25291",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:01:56.690Z",
+      "updatedAt": "2026-01-03T05:01:56.690Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-8fe89de9-84e1-4eb5-8fa1-3fe784ab8782",
+      "type": "workflow",
+      "text": "Every image is processed through the canvas and recompressed as JPEG with quality 0.7 so large sources are normalized and payloads stay compact.",
+      "tags": [
+        "image",
+        "optimization"
+      ],
+      "importance": 0.5,
+      "contentHash": "526f604c31b21dde37a3fefd7abf6de8b24b75f4f8133515245b7a7827fdd2af",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:01:56.690Z",
+      "updatedAt": "2026-01-03T05:01:56.690Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-d833f72c-db6e-4164-b27c-18754f7b21aa",
+      "type": "workflow",
+      "text": "Context payloads include full image data only for the latest user message, replacing earlier images with a [Image] placeholder while the UI/session history still retains the originals.",
+      "tags": [
+        "context",
+        "workflow"
+      ],
+      "importance": 0.75,
+      "contentHash": "520c39757006095365372df2460203a4aea92c87250948bafafc33ff2ee8e32a",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:01:56.690Z",
+      "updatedAt": "2026-01-03T05:01:56.690Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-5703a34f-84e8-4918-b53d-6662e2dc16bb",
+      "type": "workflow",
+      "text": "The native Gemini provider must manually convert AgentTool definitions into FunctionDeclaration, iterate model.generateContentStream() to emit text/tool events including reasoning parts, handle recursive tool calls with looped generate+tool execution, and map usageMetadata plus sanitized function names before reporting tokens.",
+      "tags": [
+        "implementation",
+        "tooling",
+        "workflow"
+      ],
+      "importance": 0.75,
+      "contentHash": "84b0e354ac35e2e4774ac53091f8f5a0f5d82101dc0256596e9541789fe048ea",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:12:35.137Z",
+      "updatedAt": "2026-01-03T05:12:35.137Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-6a3f04f1-8ca6-4f0f-bfbd-9a371e126458",
+      "type": "fact",
+      "text": "The Gemini provider currently relies on the AI SDK implementation that already handles the agentic multi-step loop, thinking events, function name sanitization, and unified token usage reporting.",
+      "tags": [
+        "architecture",
+        "implementation"
+      ],
+      "importance": 0.5,
+      "contentHash": "32a7dca367e05f85b726f41a4b3e5a0d636f05105ca92a7943ac3405cc152ae5",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:14:34.226Z",
+      "updatedAt": "2026-01-03T05:14:34.226Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-7461eeba-a319-47d1-aea5-ad27578f47c1",
+      "type": "fact",
+      "text": "A native Gemini provider would require manual conversion of AgentTool definitions to Google FunctionDeclarations, streaming chunk parsing for text, tool calls, and reasoning parts, token usage mapping, and implementing the recursive tool-execution loop.",
+      "tags": [
+        "implementation",
+        "technical"
+      ],
+      "importance": 0.5,
+      "contentHash": "bd3ed2af1253568b6638094c091ab138fe5b64bc62ce97869cb47e527dd9c333",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:14:34.226Z",
+      "updatedAt": "2026-01-03T05:14:34.226Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-abc92d6f-e206-4c9f-8a08-1ebed3e96202",
+      "type": "fact",
+      "text": "The Gemini provider’s contentsToMessages helper must preserve inline_data so uploaded images reach the AI SDK as structured chat message parts, preventing hallucinations.",
+      "tags": [
+        "gemini",
+        "multi-modal",
+        "ai-sdk"
+      ],
+      "importance": 0.75,
+      "contentHash": "041060f6af6c7ae8cb527f01aaa03fbe48d50a27c8768e484a2428a1e4f5e5bc",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:17:36.704Z",
+      "updatedAt": "2026-01-03T05:17:36.704Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-9dae2fe6-96c1-4675-961a-83b3189d4bc4",
+      "type": "fact",
+      "text": "electron/providers-ai-sdk/gemini.ts now preserves inline_data parts and maps them to structured ChatMessagePart[] entries so Gemini multi-modal support receives both text and image components.",
+      "tags": [
+        "gemini",
+        "multi-modal",
+        "provider"
+      ],
+      "importance": 0.75,
+      "contentHash": "8b2aa0dc7d0e4c5cafaf886f7001f683f73f0dcc04fdd61d9f5e12e3a2622b97",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:23:46.535Z",
+      "updatedAt": "2026-01-03T05:23:46.535Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-8b55ae5c-4f30-4147-a26c-d535192ea32f",
+      "type": "fact",
+      "text": "The Gemini provider converts base64 image payloads into Node.js Buffers before handing them to @ai-sdk/google, ensuring the SDK receives binary image data instead of plain strings.",
+      "tags": [
+        "gemini",
+        "images",
+        "buffers"
+      ],
+      "importance": 0.75,
+      "contentHash": "bb2a9e12fe47ea00be3faa7ca7c1b6cc7932ee6fe5cf41ef9e81ed35f98cacfc",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:23:46.535Z",
+      "updatedAt": "2026-01-03T05:23:46.535Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-18e0b248-45e7-42d5-be80-846bfb8e097d",
+      "type": "fact",
+      "text": "The @ai-sdk/google provider requires multi-modal inputs (including images/files) to use a { type: 'file', data: Buffer, mediaType } format rather than the other providers' { type: 'image' } schema.",
+      "tags": [
+        "provider",
+        "gemini",
+        "multimodal"
+      ],
+      "importance": 0.75,
+      "contentHash": "c2df912e89a2f629b0fd54eca26a2451df12dfae25dec06fec1c6318ac330988",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:28:39.427Z",
+      "updatedAt": "2026-01-03T05:28:39.427Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-d32b0c93-5351-47a9-9411-fc5f43a63cde",
+      "type": "workflow",
+      "text": "Before sending image data to Gemini via AI SDK, convert the inline base64 payload into a Node.js Buffer so the SDK transmits the binary correctly.",
+      "tags": [
+        "image",
+        "conversion",
+        "sdk"
+      ],
+      "importance": 0.5,
+      "contentHash": "e0b677f0ef7ba15dc29def50824cd85c11d87472ddaba51b5b65df59f8776af5",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:28:39.427Z",
+      "updatedAt": "2026-01-03T05:28:39.427Z",
       "usageCount": 0
     }
   ]

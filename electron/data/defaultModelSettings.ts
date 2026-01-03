@@ -72,25 +72,38 @@ function validateModelDefaultsConfig(value: unknown): value is ModelDefaultsConf
 
 export function getDefaultModelSettingsPath(): string {
   // Single source of truth rules:
-  // - In dev/test: always read from the source tree so editing `electron/data/defaultModelSettings.json`
-  //   immediately affects the running app.
-  // - In packaged builds: read from the packaged resources directory.
-  //
-  // IMPORTANT: Do not prefer `dist-electron/defaultModelSettings.json` in dev.
-  // That output can be stale and silently diverge from the source tree.
+  // - In dev/test: Prefer public/defaultModelSettings.json so edits are immediate.
+  // - In production: Prefer the packaged location (typically dist/ or resources/).
+  // - We use process.env.VITE_PUBLIC if set (by main.ts) as the primary hint.
 
+  // 1. Check process.env.VITE_PUBLIC (set in main.ts to point to public/ in dev or dist/ in prod)
+  if (process.env.VITE_PUBLIC) {
+    const envPath = path.join(process.env.VITE_PUBLIC, SETTINGS_FILENAME)
+    if (fs.existsSync(envPath)) return envPath
+  }
+
+  // 2. Fallback to process.resourcesPath (standard Electron packaged resources)
   const packagedPath = process.resourcesPath
     ? path.resolve(process.resourcesPath, SETTINGS_FILENAME)
     : null
-  const sourcePath = path.resolve(process.cwd(), 'electron', 'data', SETTINGS_FILENAME)
-
   if (packagedPath && fs.existsSync(packagedPath)) return packagedPath
-  if (fs.existsSync(sourcePath)) return sourcePath
 
-  // If we can't find either canonical path, fail loudly with context.
+  // 3. Fallback to common dev locations relative to CWD
+  const publicPath = path.resolve(process.cwd(), 'public', SETTINGS_FILENAME)
+  if (fs.existsSync(publicPath)) return publicPath
+
+  const distPath = path.resolve(process.cwd(), 'dist', SETTINGS_FILENAME)
+  if (fs.existsSync(distPath)) return distPath
+
+  // 4. Legacy location (for transition)
+  const legacyPath = path.resolve(process.cwd(), 'electron', 'data', SETTINGS_FILENAME)
+  if (fs.existsSync(legacyPath)) return legacyPath
+
+  // If we can't find it anywhere, fail loudly with context.
   throw new Error(
-    `[defaultModelSettings] Could not locate ${SETTINGS_FILENAME}. Looked for: ` +
-      `${packagedPath ?? '(no process.resourcesPath)'} and ${sourcePath}`,
+    `[defaultModelSettings] Could not locate ${SETTINGS_FILENAME}. ` +
+      `Looked in VITE_PUBLIC, resourcesPath, ./public, and ./dist. ` +
+      `CWD: ${process.cwd()}, VITE_PUBLIC: ${process.env.VITE_PUBLIC ?? 'unset'}`
   )
 }
 

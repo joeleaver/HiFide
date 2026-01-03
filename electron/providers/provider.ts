@@ -1,6 +1,13 @@
 import type { EmitExecutionEvent } from '../flow-engine/execution-events'
 
-export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string }
+export type ChatMessagePart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; image: string; mimeType: string }
+
+export type ChatMessage = {
+  role: 'system' | 'user' | 'assistant'
+  content: string | ChatMessagePart[]
+}
 
 export interface StreamHandle {
   cancel: () => void

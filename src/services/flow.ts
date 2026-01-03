@@ -1,5 +1,5 @@
 import { getBackendClient } from '../lib/backend/bootstrap'
-import type { FlowExecutionArgs } from '@/../../electron/flow-engine/types'
+import type { FlowExecutionArgs, MessagePart } from '@/../../electron/flow-engine/types'
 
 export interface FlowToolDefinition {
   name: string
@@ -47,7 +47,7 @@ export const FlowService = {
 
   async resume(
     requestId: string | undefined,
-    userInput: string,
+    userInput: string | MessagePart[],
     options?: { userInputContext?: unknown }
   ): Promise<{ ok: boolean; error?: string }> {
     const client = getBackendClient()
@@ -115,4 +115,3 @@ export const FlowService = {
     return client.rpc('session.newContext', {})
   }
 }
-

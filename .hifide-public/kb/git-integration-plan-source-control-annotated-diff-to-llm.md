@@ -1,64 +1,31 @@
 ---
 id: a2701f97-f8ed-4c58-82f5-81f844d81cf4
 title: Git Integration plan: Source Control + annotated diff-to-LLM
-tags: [git, source-control, llm, diff, annotations, architecture, zustand, history]
-files: [src/store/sourceControl.ts, src/components/SourceControlView.tsx, src/components/sourceControl/HistoryView.tsx, src/components/sourceControl/CommitDetailsView.tsx, electron/backend/ws/handlers/ui-handlers.ts, electron/services/GitCommitService.ts, shared/gitCommit.ts, electron/services/GitLogService.ts, src/store/sourceControl/commitGraph.ts, src/store/sourceControl/__tests__/commitGraph.test.ts]
+tags: [git, source-control, history, diff, architecture]
+files: [electron/services/GitLogService.ts, electron/services/GitCommitService.ts, electron/services/GitDiffService.ts, src/store/sourceControl.ts, src/components/SourceControlView.tsx, src/components/sourceControl/HistoryView.tsx, src/components/sourceControl/CommitDetailsView.tsx, shared/gitLog.ts, shared/gitCommit.ts]
 createdAt: 2025-12-16T03:35:40.542Z
-updatedAt: 2025-12-16T17:22:17.169Z
+updatedAt: 2026-01-03T03:53:43.858Z
 ---
 
-# Git Integration plan: Source Control + annotated diff-to-LLM
+# Git Integration: commit graph / log view (v1)
 
-## Scope (v1)
-- Repositories (discover/select)
-- Changed files (status, staged/unstaged)
-- Diff viewer + annotations (line + hunk)
-- Commit (message + stage/unstage)
-- History tab: commit list + commit details
-- **History decorations**: local + remote branches, tags, HEAD
-- **History graph lanes**: renderer-side lane assignment + compact graph column
+## Implementation Details
 
-## Architecture constraints
-- **No `useEffect` and no business logic in React components.**
-- Orchestration lives in Zustand stores and backend services.
+### Backend
+- **GitLogService**: Provides paginated git log with parent SHAs and ref decorations (branches, tags).
+- **GitCommitService**: Provides full commit metadata and list of changed files.
+- **GitDiffService**: Enhanced with `getCommitDiff` to provide `GitFileDiff` for any file in any commit using `git show`.
 
-## Diff annotations → LLM context
-(unchanged)
+### Frontend
+- **HistoryView**: Displays the commit log with a deterministic commit graph (v1). Shows SHAs, subjects, authors, dates, and ref decorations.
+- **CommitDetailsView**: Displays selected commit details (subject, body, author, committer).
+  - Includes a file list with status indicators (implicitly by path for now).
+  - **Integrated Diff Viewer**: Selecting a file in the commit details view loads and displays its diff using the same `DiffViewer` component used for the working tree.
+- **SourceControlStore**: 
+  - Tracks `history` (commits, cursor, busy/error state).
+  - Tracks `commitDetails` and `commitDiffsByPath` for the selected commit.
+  - Automatically fetches the first file's diff when a commit is selected.
 
-## History API (implemented)
-### `git.getLog`
-- Input: `{ repoRoot, limit, cursor? }`
-- Output: `{ commits: GitLogCommit[], nextCursor }`
-- Each `GitLogCommit` includes:
-  - `sha`, `parents[]`, `authorName`, `authorEmail`, `authorDateIso`, `subject`, `body`
-  - `refs?: string[]` decorations including:
-    - `HEAD`
-    - local branches (`main`)
-    - **remote branches** (`origin/main`)
-    - tags (`tag:v1.2.3`)
-
-### `git.getCommitDetails`
-- Input: `{ repoRoot, sha }`
-- Output: metadata + file list
-
-## History Graph (v1 implemented)
-- We are not depending on VSCode internal graph code.
-- Renderer-side lane assignment is computed from `parents[]`.
-- Current rendering:
-  - A compact **graph column** is rendered next to each commit row.
-  - It renders:
-    - commit nodes
-    - **best-effort connector lines** (vertical continuity + merge diagonals) within the loaded window
-- Limitations:
-  - Connectors are deterministic for the loaded window but do not provide cross-page continuity.
-  - Paging: lanes may change if the loaded window changes.
-
-## Follow-up tasks
-- Improve connector accuracy + lane stability when paging (tracked on Kanban).
-
-## Files
-- `electron/services/GitLogService.ts`
-- `electron/services/utils/gitRefs.ts`
-- `src/components/sourceControl/HistoryView.tsx`
-- `src/store/sourceControl.ts`
-- `src/store/sourceControl/commitGraph.ts`
+### Architecture
+- The system uses a side-by-side layout for history: the list on the left, and the detail panel on the right.
+- Unified shared types (`GitLogCommit`, `GitCommitDetails`, `GitFileDiff`) ensure consistency between Electron and React.

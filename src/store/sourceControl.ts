@@ -65,6 +65,9 @@ export type SourceControlState = {
   commitDetailsBusy: boolean
   commitDetailsError: string | null
 
+  selectedCommitFile: string | null
+  commitDiffsByPath: Record<string, GitFileDiff | undefined>
+
   ui: {
     statusText: string
   }
@@ -116,6 +119,8 @@ export type SourceControlState = {
     loadMoreLog: () => Promise<void>
     selectCommit: (sha: string) => void
     fetchCommitDetails: (sha: string) => Promise<void>
+
+    selectCommitFile: (sha: string, path: string) => Promise<void>
   }
 }
 
@@ -157,6 +162,9 @@ export const useSourceControlStore = create<SourceControlState>()((set, get) => 
   commitDetailsBusy: false,
   commitDetailsError: null,
 
+  selectedCommitFile: null,
+  commitDiffsByPath: {},
+
   ui: {
     statusText: 'Git integration coming soon',
   },
@@ -176,6 +184,8 @@ export const useSourceControlStore = create<SourceControlState>()((set, get) => 
         commitDetails: null,
         commitDetailsBusy: false,
         commitDetailsError: null,
+        selectedCommitFile: null,
+        commitDiffsByPath: {},
       })
     },
 
@@ -328,7 +338,11 @@ export const useSourceControlStore = create<SourceControlState>()((set, get) => 
     },
 
     selectCommit: (sha) => {
-      set((s) => ({ history: { ...s.history, selectedSha: sha } }))
+      set((s) => ({ 
+        history: { ...s.history, selectedSha: sha },
+        selectedCommitFile: null,
+        commitDiffsByPath: {}
+      }))
       void get().actions.fetchCommitDetails(sha)
     },
 
@@ -343,9 +357,38 @@ export const useSourceControlStore = create<SourceControlState>()((set, get) => 
 
         const res: any = await client.rpc('git.getCommitDetails', { repoRoot, sha })
         if (!res?.ok) throw new Error(res?.error || 'git.getCommitDetails failed')
-        set({ commitDetails: res.details as GitCommitDetails, commitDetailsBusy: false })
+        
+        const details = res.details as GitCommitDetails
+        set({ commitDetails: details, commitDetailsBusy: false })
+
+        // Auto-select first file if available
+        if (details.files.length > 0) {
+          void get().actions.selectCommitFile(sha, details.files[0]!)
+        }
       } catch (e: any) {
         set({ commitDetailsBusy: false, commitDetailsError: e?.message || String(e) })
+      }
+    },
+
+    selectCommitFile: async (sha, path) => {
+      set({ selectedCommitFile: path })
+      
+      const existing = get().commitDiffsByPath[path]
+      if (existing) return
+
+      const repoRoot = get().activeRepoRoot
+      if (!repoRoot) return
+
+      try {
+        const client = getBackendClient()
+        if (!client) return
+
+        const res: any = await client.rpc('git.getCommitDiff', { repoRoot, sha, path })
+        if (res?.ok && res.diff) {
+          set((s) => ({ commitDiffsByPath: { ...s.commitDiffsByPath, [path]: res.diff as GitFileDiff } }))
+        }
+      } catch (e) {
+        console.warn('[sourceControl] Failed to load commit diff', e)
       }
     },
 

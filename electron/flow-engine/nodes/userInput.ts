@@ -31,20 +31,24 @@ export const userInputNode: NodeFunction = async (flow, _context, _dataIn, _inpu
   // Wait for user input via FlowAPI
   // This creates a promise that will be resolved when the user submits
   const userInput = await flow.waitForUserInput()
-  const message = typeof userInput === 'string' ? userInput : ''
-  const trimmed = message.trim()
-
-  if (trimmed.length > 0) {
-    flow.context.addMessage({ role: 'user', content: trimmed })
-    flow.log.debug('Appended user input to context history', { length: trimmed.length })
-  } else {
-    flow.log.warn('Received empty user input; skipping context mutation')
+  
+  if (typeof userInput === 'string') {
+    const trimmed = userInput.trim()
+    if (trimmed.length > 0) {
+      flow.context.addMessage({ role: 'user', content: trimmed })
+      flow.log.debug('Appended user input to context history', { length: trimmed.length })
+    } else {
+      flow.log.warn('Received empty user input; skipping context mutation')
+    }
+  } else if (Array.isArray(userInput)) {
+    // Multi-modal input
+    flow.context.addMessage({ role: 'user', content: userInput as any })
+    flow.log.debug('Appended multi-modal user input to context history', { parts: userInput.length })
   }
 
   return {
     context: flow.context.get(),
-    data: message,
+    data: userInput,
     status: 'success'
   }
 }
-

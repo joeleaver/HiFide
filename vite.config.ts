@@ -93,22 +93,6 @@ export default defineConfig({
         }
       },
     },
-    // Copy editable model defaults into dist-electron so the main process can load it at runtime.
-    {
-      name: 'copy-default-model-settings',
-      closeBundle() {
-        const srcFile = path.join(__dirname, 'electron', 'data', 'defaultModelSettings.json')
-        const destFile = path.join(__dirname, 'dist-electron', 'defaultModelSettings.json')
-
-        try {
-          mkdirSync(path.dirname(destFile), { recursive: true })
-          copyFileSync(srcFile, destFile)
-          console.log('Copied defaultModelSettings.json to dist-electron')
-        } catch (error) {
-          console.error('Failed to copy defaultModelSettings.json:', error)
-        }
-      },
-    }
   ],
   resolve: {
     alias: {

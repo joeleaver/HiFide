@@ -15,10 +15,17 @@ import '../styles/markdown.css'
  * - Unclosed code blocks
  * - Unclosed inline code and formatting markers
  */
-function normalizeMarkdown(text: string): string {
-  if (!text) return text
+function normalizeMarkdown(text: any): string {
+  if (!text) return ''
 
-  let result = text
+  let result = ''
+  if (Array.isArray(text)) {
+    result = text
+      .map((part) => (typeof part === 'string' ? part : part.text || ''))
+      .join('\n')
+  } else {
+    result = String(text)
+  }
 
   // First pass: fix malformed closing fences (`` instead of ```)
   // OpenAI sometimes outputs only 2 backticks for closing fences
@@ -131,7 +138,7 @@ function normalizeMarkdown(text: string): string {
   return result
 }
 
-export default memo(function Markdown({ content }: { content: string }) {
+export default memo(function Markdown({ content }: { content: any }) {
   const md = useMemo(() => new MarkdownIt({
     html: false,
     linkify: true,

@@ -10,7 +10,7 @@ import '../styles/markdown.css'
  * It completes unclosed code blocks, lists, and other markdown structures
  * to prevent rendering issues during streaming.
  */
-export default memo(function StreamingMarkdown({ content, showCursor = true }: { content: string; showCursor?: boolean }) {
+export default memo(function StreamingMarkdown({ content, showCursor = true }: { content: any; showCursor?: boolean }) {
   const md = useMemo(() => new MarkdownIt({
     html: false,
     linkify: true,
@@ -68,10 +68,17 @@ export default memo(function StreamingMarkdown({ content, showCursor = true }: {
  * - Unclosed bold/italic markers
  * - Incomplete lists
  */
-function completeIncompleteMarkdown(text: string): string {
-  if (!text) return text
+function completeIncompleteMarkdown(text: any): string {
+  if (!text) return ''
 
-  let result = text
+  let result = ''
+  if (Array.isArray(text)) {
+    result = text
+      .map((part) => (typeof part === 'string' ? part : part.text || ''))
+      .join('\n')
+  } else {
+    result = String(text)
+  }
 
   // Count code block markers (```)
   const codeBlockMatches = text.match(/```/g)

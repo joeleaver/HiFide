@@ -71,6 +71,41 @@ export class GitDiffService extends Service<GitDiffState> {
       throw error
     }
   }
+
+  async getCommitDiff(repoRoot: string, sha: string, filePath: string): Promise<GitFileDiff> {
+    const normalizedRoot = this.normalizeWorkspace(repoRoot)
+
+    // We want the diff of the commit. For a specific file, we use 'git show <sha> -- <path>'
+    // which generates the patch format for that file in that commit.
+    const args = ['show', '--no-color', '--unified=3', sha, '--', filePath]
+
+    try {
+      const { stdout } = await execFileAsync('git', args, {
+        cwd: normalizedRoot,
+        maxBuffer: 1024 * 1024 * 8,
+      })
+
+      const patchText = stdout ? stdout.toString() : ''
+      const parsed = parseUnifiedDiff(patchText, { lenient: true })
+
+      const rel = toPosixPath(filePath)
+
+      return {
+        repoRoot: normalizedRoot,
+        relativePath: rel,
+        path: path.resolve(normalizedRoot, filePath),
+        staged: false,
+        hunks: parsed.hunks,
+        isBinary: parsed.isBinary,
+      }
+    } catch (error: any) {
+      const stderr: string = error?.stderr?.toString?.('utf8') ?? ''
+      if (stderr.includes('Not a git repository')) {
+        throw new Error('not-a-git-repo')
+      }
+      throw error
+    }
+  }
 }
 
 function toPosixPath(p: string): string {

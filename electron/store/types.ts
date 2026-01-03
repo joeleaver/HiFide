@@ -154,11 +154,15 @@ export type SessionItem =
   | SessionMessage
   | NodeExecutionBox
 
+export type MessagePart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; image: string; mimeType: string }
+
 export type SessionMessage = {
   type: 'message'
   id: string
   role: 'user' | 'assistant'
-  content: string
+  content: string | MessagePart[]
   timestamp: number
 }
 
@@ -218,7 +222,7 @@ export type Session = {
     temperature?: number
     messageHistory?: Array<{
       role: 'system' | 'user' | 'assistant'
-      content: string
+      content: string | MessagePart[]
       reasoning?: string
       metadata?: {
         id: string
@@ -511,4 +515,3 @@ export type AgentMetrics = {
   maxIterations: number
   percentageUsed: number
 }
-

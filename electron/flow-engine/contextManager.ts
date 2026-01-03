@@ -2,9 +2,13 @@ import type { MainFlowContext } from './types'
 
 export type Role = 'system' | 'user' | 'assistant'
 
+export type MessagePart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; image: string; mimeType: string }
+
 export interface Message {
   role: Role
-  content: string
+  content: string | MessagePart[]
   // Allow extra provider-specific fields (e.g. reasoning)
   // without forcing them into MainFlowContext core type.
   [key: string]: any

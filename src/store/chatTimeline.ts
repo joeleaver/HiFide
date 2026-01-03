@@ -3,8 +3,12 @@ import { getBackendClient } from '../lib/backend/bootstrap'
 import { useFlowEditorLocal } from './flowEditorLocal'
 
 
+export type TimelineMessagePart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; image: string; mimeType: string }
+
 export type TimelineItem =
-  | { type: 'message'; id: string; role: 'user' | 'assistant'; content: string }
+  | { type: 'message'; id: string; role: 'user' | 'assistant'; content: string | TimelineMessagePart[] }
   | { type: 'node-execution'; id: string; nodeId: string; executionId?: string; nodeLabel?: string; nodeKind?: string; provider?: string; model?: string; cost?: any; content: Array<{ type: 'text'; text: string } | { type: 'reasoning'; text: string } | { type: 'badge'; badge: any }>; badges?: any[] }
 
 interface ChatTimelineState {
@@ -22,7 +26,7 @@ interface ChatTimelineState {
   clear: () => void
   hydrateFromSession: (items: TimelineItem[]) => void
   appendRawItem: (item: TimelineItem) => void
-  addUserMessage: (text: string) => void
+  addUserMessage: (content: string | TimelineMessagePart[]) => void
   openNodeExecution: (nodeId: string, nodeLabel?: string, nodeKind?: string, executionId?: string) => string /* boxId */
   appendText: (nodeId: string, text: string, executionId?: string) => void
   appendReasoning: (nodeId: string, text: string, executionId?: string) => void
@@ -35,7 +39,10 @@ interface ChatTimelineState {
 function computeSig(items: TimelineItem[]): string {
   if (!items.length) return '0'
   const last = items[items.length - 1]
-  if (last.type === 'message') return `${items.length}:${last.type}:${last.role}:${last.content.length}`
+  if (last.type === 'message') {
+    const contentLen = typeof last.content === 'string' ? last.content.length : last.content.length
+    return `${items.length}:${last.type}:${last.role}:${contentLen}`
+  }
   const len = last.content?.length || 0
   const lc = len ? last.content[len - 1] : undefined
   if (!lc) return `${items.length}:${last.type}:none`
@@ -136,11 +143,11 @@ function createChatTimelineStore() {
       set({ items, sig: computeSig(items) })
     },
 
-    addUserMessage: (text) => {
+    addUserMessage: (content) => {
       const id = `msg-${Date.now()}`
       const items = [
         ...get().items,
-        { type: 'message' as const, id, role: 'user' as const, content: text },
+        { type: 'message' as const, id, role: 'user' as const, content },
       ] as TimelineItem[]
       set({ items, sig: computeSig(items) })
     },

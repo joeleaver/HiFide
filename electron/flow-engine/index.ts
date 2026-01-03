@@ -7,7 +7,7 @@
 import type { WebContents } from 'electron'
 import { FlowScheduler } from './scheduler'
 import { emitFlowEvent } from './events'
-import type { FlowExecutionArgs } from './types'
+import type { FlowExecutionArgs, MessagePart } from './types'
 import type { Session, SessionMessage } from '../store/types.js'
 import { startTimelineListener } from './timeline-event-handler.js'
 
@@ -71,10 +71,10 @@ export async function executeFlow(
 export async function resumeFlow(
   _wc: WebContents | undefined,
   requestId: string,
-  userInput: string,
+  userInput: string | MessagePart[],
   userInputContext?: unknown
 ): Promise<{ ok: boolean; error?: string }> {
-  console.log('[resumeFlow] Called with:', { requestId, userInputLength: userInput.length })
+  console.log('[resumeFlow] Called with:', { requestId, hasUserInput: !!userInput })
 
   const scheduler = activeFlows.get(requestId)
 
@@ -88,7 +88,7 @@ export async function resumeFlow(
     const sessionId = scheduler.getSessionId()
     const workspaceId = scheduler.getWorkspaceId()
 
-    console.log('[resumeFlow] Adding user message to timeline:', { sessionId, workspaceId, userInputLength: userInput.length })
+    console.log('[resumeFlow] Adding user message to timeline:', { sessionId, workspaceId })
 
     if (sessionId && workspaceId) {
       const { getSessionService } = await import('../services/index.js')
@@ -110,7 +110,7 @@ export async function resumeFlow(
           type: 'message',
           id: `msg-${Date.now()}`,
           role: 'user',
-          content: userInput,
+          content: userInput as any,
           timestamp: Date.now()
         }
 
@@ -150,13 +150,19 @@ export async function resumeFlow(
     // Resolve the promise that the userInput node is awaiting
     // The scheduler knows which node is waiting - just resolve any waiting input
     // Provider/model will be refreshed from session context before next node execution
-    const mergedUserInput =
-      userInputContext !== undefined
-        ? `${userInput}\n\n---\n\n[attached_context]\n${safeStringify(userInputContext)}`
-        : userInput
+    let finalInput = userInput
+    if (userInputContext !== undefined) {
+      const contextStr = `\n\n---\n\n[attached_context]\n${safeStringify(userInputContext)}`
+      if (typeof userInput === 'string') {
+        finalInput = `${userInput}${contextStr}`
+      } else if (Array.isArray(userInput)) {
+        // If multi-modal, append a text part with the context
+        finalInput = [...userInput, { type: 'text', text: contextStr }]
+      }
+    }
 
-    console.log('[resumeFlow] Calling scheduler.resolveAnyWaitingUserInput with input:', mergedUserInput.substring(0, 50))
-    scheduler.resolveAnyWaitingUserInput(mergedUserInput)
+    console.log('[resumeFlow] Calling scheduler.resolveAnyWaitingUserInput')
+    scheduler.resolveAnyWaitingUserInput(finalInput)
     console.log('[resumeFlow] resolveAnyWaitingUserInput returned successfully')
 
     return { ok: true }

@@ -230,6 +230,22 @@ export function createUiHandlers(
     }
   })
 
+  addMethod('git.getCommitDiff', async ({ repoRoot, sha, path }: { repoRoot?: string; sha: string; path: string }) => {
+    try {
+      const workspaceRoot = await getConnectionWorkspaceId(connection)
+      if (!workspaceRoot) return { ok: false, error: 'no-workspace' }
+      if (!sha) return { ok: false, error: 'sha-required' }
+      if (!path) return { ok: false, error: 'path-required' }
+
+      const gitDiffService = getGitDiffService()
+      const effectiveRepoRoot = repoRoot ?? workspaceRoot
+      const diff = await gitDiffService.getCommitDiff(effectiveRepoRoot, sha, path)
+      return { ok: true, diff }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
   addMethod('git.stageFile', async ({ repoRoot, path }: { repoRoot?: string; path: string }) => {
     try {
       const workspaceRoot = await getConnectionWorkspaceId(connection)

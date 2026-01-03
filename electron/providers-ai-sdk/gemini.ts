@@ -61,12 +61,42 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
   return { tools: map, nameMap }
 }
 
-function contentsToMessages(contents: Array<{ role: string; parts: Array<{ text?: string }> }>): ChatMessage[] {
+function contentsToMessages(contents: Array<{ role: string; parts: Array<any> }>): ChatMessage[] {
   try {
     return (contents || []).map((c) => {
       const role = c?.role === 'model' ? 'assistant' : 'user'
-      const text = Array.isArray(c?.parts) ? c.parts.map((p) => (typeof p?.text === 'string' ? p.text : '')).filter(Boolean).join('\n') : ''
-      return { role: role as any, content: text }
+      const parts = Array.isArray(c?.parts) ? c.parts : []
+      
+      if (parts.length === 0) return { role: role as any, content: '' }
+
+      const contentParts = parts.map((p) => {
+        if (typeof p?.text === 'string') {
+          return { type: 'text' as const, text: p.text }
+        }
+        if (p?.inline_data) {
+          // Gemini / AI-SDK Google Provider uses the 'file' type for images, PDFs, etc.
+          // Ref: https://ai-sdk.dev/providers/ai-sdk-providers/google-generative-ai#file-inputs
+          try {
+            const buffer = Buffer.from(p.inline_data.data, 'base64');
+            return {
+              type: 'file' as const,
+              data: buffer,
+              mediaType: p.inline_data.mime_type || 'image/png'
+            };
+          } catch (e) {
+            console.error('[ai-sdk:gemini] failed to decode base64 file data', e);
+            return null;
+          }
+        }
+        return null
+      }).filter((p): p is any => p !== null)
+
+      // If it's just one text part, return string content for compatibility
+      if (contentParts.length === 1 && contentParts[0].type === 'text') {
+        return { role: role as any, content: contentParts[0].text }
+      }
+
+      return { role: role as any, content: contentParts }
     })
   } catch {
     return []
@@ -276,4 +306,3 @@ export const GeminiAiSdkProvider: ProviderAdapter = {
     }
   }
 }
-

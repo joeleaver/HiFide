@@ -195,11 +195,19 @@ class LLMService {
         : []
       const lastEntry = existingHistory[existingHistory.length - 1]
       const normalizedLast = normalizeUserMessageContent(lastEntry?.content)
+
+      const isContentEqual = (a: any, b: any) => {
+        if (typeof a === 'string' && typeof b === 'string') return a === b
+        if (Array.isArray(a) && Array.isArray(b)) return JSON.stringify(a) === JSON.stringify(b)
+        return false
+      }
+
       const alreadyAppended =
         !!lastEntry &&
         lastEntry.role === 'user' &&
-        normalizedIncoming.length > 0 &&
-        normalizedIncoming === normalizedLast
+        ((typeof normalizedIncoming === 'string' && normalizedIncoming.length > 0) ||
+          Array.isArray(normalizedIncoming)) &&
+        isContentEqual(normalizedIncoming, normalizedLast)
 
       if (!alreadyAppended) {
         const contentToStore = normalizedIncoming || message
@@ -737,8 +745,10 @@ class LLMService {
 // Singleton instance
 export const llmService = new LLMService()
 
-function normalizeUserMessageContent(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
+function normalizeUserMessageContent(value: unknown): string | import('./types').MessagePart[] {
+  if (typeof value === 'string') return value.trim()
+  if (Array.isArray(value)) return value as import('./types').MessagePart[]
+  return ''
 }
 
 function hydrateAgentTools(

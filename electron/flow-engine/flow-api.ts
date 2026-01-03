@@ -8,7 +8,7 @@
 
 import type { ContextManager } from './contextManager'
 import type { EmitExecutionEvent } from './execution-events'
-import type { MainFlowContext } from './types'
+import type { MainFlowContext, MessagePart } from './types'
 import type { CreateIsolatedContextOptions } from './context-options'
 
 export type { CreateIsolatedContextOptions } from './context-options'
@@ -198,7 +198,7 @@ export interface FlowAPI {
    * Used by userInput node to break loops naturally
    * Sets flow status to 'waitingForInput' and waits for user submission
    */
-  waitForUserInput: () => Promise<string>
+  waitForUserInput: () => Promise<string | MessagePart[]>
 
   // ===== Portal Nodes =====
 
@@ -238,4 +238,3 @@ export interface FlowAPI {
    */
   emitExecutionEvent: EmitExecutionEvent
 }
-

@@ -33,6 +33,8 @@ export default function SourceControlView() {
   const commitDetails = useSourceControlStore((s) => s.commitDetails)
   const commitDetailsBusy = useSourceControlStore((s) => s.commitDetailsBusy)
   const commitDetailsError = useSourceControlStore((s) => s.commitDetailsError)
+  const selectedCommitFile = useSourceControlStore((s) => s.selectedCommitFile)
+  const commitDiffsByPath = useSourceControlStore((s) => s.commitDiffsByPath)
 
   const editingAnnotation = vm.annotationsForActiveFile.find((a) => a.id === editingId) ?? null
 
@@ -149,6 +151,13 @@ export default function SourceControlView() {
                     details={commitDetails}
                     busy={commitDetailsBusy}
                     error={commitDetailsError}
+                    selectedFile={selectedCommitFile}
+                    diff={selectedCommitFile ? (commitDiffsByPath[selectedCommitFile] ?? null) : null}
+                    onSelectFile={(path) => {
+                      if (commitDetails?.sha) {
+                        void actions.selectCommitFile(commitDetails.sha, path)
+                      }
+                    }}
                   />
                 </Box>
               </>

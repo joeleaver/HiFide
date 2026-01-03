@@ -1,4 +1,4 @@
-import { Stack, Card, ScrollArea, Text, Skeleton } from '@mantine/core'
+import { Stack, Card, ScrollArea, Text, Skeleton, Image } from '@mantine/core'
 
 // zubridge removed from session pane reads
 // import { useAppStore, useDispatch, selectCurrentId, selectCurrentSession } from './store'
@@ -153,6 +153,7 @@ function SessionPane() {
     return sessionItems.map((item: any) => {
       // User message
       if (item.type === 'message' && item.role === 'user') {
+        const parts = Array.isArray(item.content) ? item.content : [{ type: 'text', text: item.content || '' }]
         return (
           <Card
             key={item.id}
@@ -160,7 +161,26 @@ function SessionPane() {
             p="xs"
             className={classes.userMessageCard}
           >
-            <Markdown content={item.content || ''} />
+            <Stack gap="xs">
+              {parts.map((part: any, idx: number) => {
+                if (typeof part === 'string') return <Markdown key={idx} content={part} />
+                if (part.type === 'text') return <Markdown key={idx} content={part.text} />
+                if (part.type === 'image') {
+                  return (
+                    <Image
+                      key={idx}
+                      src={`data:${part.mimeType};base64,${part.image}`}
+                      radius="sm"
+                      h={120}
+                      w="auto"
+                      fit="contain"
+                      style={{ alignSelf: 'flex-start' }}
+                    />
+                  )
+                }
+                return null
+              })}
+            </Stack>
           </Card>
         )
       }

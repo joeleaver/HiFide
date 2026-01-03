@@ -1,9 +1,14 @@
+import type { GitFileDiff } from '../../../shared/git'
 import type { GitCommitDetails } from '../../../shared/gitCommit'
+import { DiffViewer } from './DiffViewer'
 
 export type CommitDetailsViewProps = {
   details: GitCommitDetails | null
   busy: boolean
   error: string | null
+  selectedFile: string | null
+  diff: GitFileDiff | null
+  onSelectFile: (path: string) => void
 }
 
 export function CommitDetailsView(props: CommitDetailsViewProps) {
@@ -39,19 +44,53 @@ export function CommitDetailsView(props: CommitDetailsViewProps) {
           <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit', opacity: 0.9 }}>{message || '(empty)'}</pre>
         </div>
 
-        <div>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Files ({props.details.files.length})</div>
-          {props.details.files.length === 0 ? (
-            <div style={{ opacity: 0.75 }}>No files</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {props.details.files.map((f) => (
-                <code key={f} style={{ opacity: 0.9 }}>
-                  {f}
-                </code>
-              ))}
+        <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 10 }}>
+          <div style={{ width: 240, display: 'flex', flexDirection: 'column', borderRight: '1px solid rgba(255,255,255,0.05)' }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Files ({props.details.files.length})</div>
+            <div style={{ overflow: 'auto', flex: 1 }}>
+              {props.details.files.length === 0 ? (
+                <div style={{ opacity: 0.75 }}>No files</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {props.details.files.map((f) => {
+                    const isSelected = f === props.selectedFile
+                    return (
+                      <div
+                        key={f}
+                        onClick={() => props.onSelectFile(f)}
+                        style={{
+                          cursor: 'pointer',
+                          padding: '4px 6px',
+                          background: isSelected ? 'rgba(255,255,255,0.08)' : 'transparent',
+                          borderRadius: 4,
+                          fontSize: 12,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                        title={f}
+                      >
+                        <code style={{ opacity: isSelected ? 1 : 0.8 }}>{f}</code>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
-          )}
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+             <div style={{ fontWeight: 700, marginBottom: 6 }}>Diff {props.selectedFile ? `- ${props.selectedFile}` : ''}</div>
+             <div style={{ flex: 1, border: '1px solid rgba(255,255,255,0.05)', borderRadius: 4, overflow: 'hidden' }}>
+                {props.diff ? (
+                  <DiffViewer diff={props.diff} />
+                ) : (
+                  <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.5, fontSize: 13 }}>
+                    {props.selectedFile ? 'Loading diff...' : 'Select a file to view diff'}
+                  </div>
+                )}
+             </div>
+          </div>
         </div>
       </div>
     </div>

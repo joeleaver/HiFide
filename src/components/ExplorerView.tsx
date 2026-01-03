@@ -357,7 +357,7 @@ export default function ExplorerView() {
                     className="open-files-resizer"
                     onMouseDown={handleOpenFilesPaneResizeStart}
                   />
-                  <div style={{ flex: 1, minHeight: 0 }}>
+                  <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                     <ExplorerTree />
                   </div>
                 </>
