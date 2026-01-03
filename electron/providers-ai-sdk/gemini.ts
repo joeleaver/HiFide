@@ -74,14 +74,24 @@ function contentsToMessages(contents: Array<{ role: string; parts: Array<any> }>
           return { type: 'text' as const, text: p.text }
         }
         if (p?.inline_data) {
-          // Gemini / AI-SDK Google Provider uses the 'file' type for images, PDFs, etc.
+          // Gemini / AI-SDK Google Provider uses 'image' for images and 'file' for PDFs, etc.
+          // Ref: https://ai-sdk.dev/providers/ai-sdk-providers/google-generative-ai#image-inputs
           // Ref: https://ai-sdk.dev/providers/ai-sdk-providers/google-generative-ai#file-inputs
           try {
             const buffer = Buffer.from(p.inline_data.data, 'base64');
+            const mimeType = p.inline_data.mime_type || 'image/png';
+            
+            if (mimeType.startsWith('image/')) {
+              return {
+                type: 'image' as const,
+                image: buffer,
+              };
+            }
+            
             return {
               type: 'file' as const,
               data: buffer,
-              mediaType: p.inline_data.mime_type || 'image/png'
+              mediaType: mimeType
             };
           } catch (e) {
             console.error('[ai-sdk:gemini] failed to decode base64 file data', e);

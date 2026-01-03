@@ -5,7 +5,7 @@
  * handled via the scheduler-owned ContextManager exposed on FlowAPI.
  */
 
-import type { NodeFunction, NodeExecutionPolicy, MainFlowContext } from '../types'
+import type { NodeFunction, NodeExecutionPolicy, MainFlowContext, MessagePart } from '../types'
 import { llmService } from '../llm-service'
 import { markMemoriesUsed, retrieveWorkspaceMemoriesForQuery } from '../../store/utils/memories'
 
@@ -91,15 +91,15 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
   }
 }
 
-async function resolveMessage(dataIn: any, inputs: any): Promise<string> {
-  if (typeof dataIn === 'string') return dataIn
+async function resolveMessage(dataIn: any, inputs: any): Promise<string | MessagePart[]> {
+  if (typeof dataIn === 'string' || Array.isArray(dataIn)) return dataIn
   if (dataIn !== undefined && dataIn !== null) {
     return safeString(dataIn)
   }
 
   if (inputs?.has?.('data')) {
     const pulled = await inputs.pull('data')
-    if (typeof pulled === 'string') return pulled
+    if (typeof pulled === 'string' || Array.isArray(pulled)) return pulled
     if (pulled !== undefined && pulled !== null) {
       return safeString(pulled)
     }

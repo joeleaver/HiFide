@@ -18,7 +18,7 @@
  * - Easy to implement context windowing (scheduler controls what messages are sent)
  */
 
-import type { MainFlowContext } from './types'
+import type { MainFlowContext, MessagePart } from './types'
 import type { FlowAPI, Tool as FlowTool } from './flow-api'
 import type { ContextManager } from './contextManager'
 import type { AgentTool, ProviderAdapter } from '../providers/provider'
@@ -52,7 +52,7 @@ const DEBUG_USAGE = process.env.HF_DEBUG_USAGE === '1' || process.env.HF_DEBUG_T
  */
 export interface LLMServiceRequest {
   /** User message to send */
-  message: string
+  message: string | MessagePart[]
 
   /** Optional tools for agent mode */
   tools?: Array<AgentTool | FlowTool>
@@ -237,9 +237,26 @@ class LLMService {
         }
       } else if (effectiveProvider === 'gemini') {
         // Include systemInstruction even in stateless mode (skipHistory)
+        const parts: any[] = []
+        if (typeof message === 'string') {
+          parts.push({ text: message })
+        } else if (Array.isArray(message)) {
+          for (const part of message) {
+            if (part.type === 'text') {
+              parts.push({ text: part.text })
+            } else if (part.type === 'image') {
+              parts.push({
+                inline_data: {
+                  mime_type: part.mimeType,
+                  data: part.image,
+                },
+              })
+            }
+          }
+        }
         formattedMessages = {
           systemInstruction: request.systemInstructions ?? context.systemInstructions ?? '',
-          contents: [{ role: 'user', parts: [{ text: message }] }]
+          contents: [{ role: 'user', parts }]
         }
       } else {
         // OpenAI and others — include a system message first if present

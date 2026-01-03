@@ -84,6 +84,26 @@ export async function resumeFlow(
   }
 
   try {
+    // Resolve the promise that the userInput node is awaiting
+    // The scheduler knows which node is waiting - just resolve any waiting input
+    // Provider/model will be refreshed from session context before next node execution
+    let finalInput = userInput
+    
+    // Only append context if it's non-empty and not just null/undefined
+    const hasMeaningfulContext = userInputContext !== undefined && 
+                                userInputContext !== null && 
+                                (typeof userInputContext !== 'object' || Object.keys(userInputContext as any).length > 0)
+
+    if (hasMeaningfulContext) {
+      const contextStr = `\n\n---\n\n[attached_context]\n${safeStringify(userInputContext)}`
+      if (typeof userInput === 'string') {
+        finalInput = `${userInput}${contextStr}`
+      } else if (Array.isArray(userInput)) {
+        // If multi-modal, append a text part with the context
+        finalInput = [...userInput, { type: 'text', text: contextStr }]
+      }
+    }
+
     // Add user message to session timeline
     const sessionId = scheduler.getSessionId()
     const workspaceId = scheduler.getWorkspaceId()
@@ -110,7 +130,7 @@ export async function resumeFlow(
           type: 'message',
           id: `msg-${Date.now()}`,
           role: 'user',
-          content: userInput as any,
+          content: finalInput as any,
           timestamp: Date.now()
         }
 
@@ -145,20 +165,6 @@ export async function resumeFlow(
       }
     } else {
       console.warn('[resumeFlow] Missing sessionId or workspaceId:', { sessionId, workspaceId })
-    }
-
-    // Resolve the promise that the userInput node is awaiting
-    // The scheduler knows which node is waiting - just resolve any waiting input
-    // Provider/model will be refreshed from session context before next node execution
-    let finalInput = userInput
-    if (userInputContext !== undefined) {
-      const contextStr = `\n\n---\n\n[attached_context]\n${safeStringify(userInputContext)}`
-      if (typeof userInput === 'string') {
-        finalInput = `${userInput}${contextStr}`
-      } else if (Array.isArray(userInput)) {
-        // If multi-modal, append a text part with the context
-        finalInput = [...userInput, { type: 'text', text: contextStr }]
-      }
     }
 
     console.log('[resumeFlow] Calling scheduler.resolveAnyWaitingUserInput')

@@ -50,8 +50,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:35:38.203Z",
       "updatedAt": "2025-12-16T01:35:38.203Z",
-      "lastUsedAt": "2026-01-03T05:28:17.693Z",
-      "usageCount": 68
+      "lastUsedAt": "2026-01-03T05:40:11.978Z",
+      "usageCount": 70
     },
     {
       "id": "mem-d24a8682-801b-43a8-a7e7-33d96cf3cc22",
@@ -102,8 +102,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:38:26.728Z",
       "updatedAt": "2025-12-16T01:38:26.728Z",
-      "lastUsedAt": "2026-01-03T05:28:17.693Z",
-      "usageCount": 61
+      "lastUsedAt": "2026-01-03T05:36:33.770Z",
+      "usageCount": 62
     },
     {
       "id": "mem-c4920107-b77c-4b00-83ea-c20c2bcc757a",
@@ -120,8 +120,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:38:26.728Z",
       "updatedAt": "2025-12-16T01:38:26.728Z",
-      "lastUsedAt": "2026-01-03T05:23:28.789Z",
-      "usageCount": 54
+      "lastUsedAt": "2026-01-03T05:36:33.770Z",
+      "usageCount": 55
     },
     {
       "id": "mem-2f1074a0-847d-420e-932c-12566a70eebf",
@@ -173,8 +173,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:42:38.074Z",
       "updatedAt": "2025-12-16T01:42:38.074Z",
-      "lastUsedAt": "2026-01-03T05:28:17.693Z",
-      "usageCount": 53
+      "lastUsedAt": "2026-01-03T05:36:33.770Z",
+      "usageCount": 54
     },
     {
       "id": "mem-88fdf959-78ce-45e5-981c-b79516b96c98",
@@ -207,8 +207,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:45:50.069Z",
       "updatedAt": "2025-12-16T01:45:50.069Z",
-      "lastUsedAt": "2026-01-03T05:28:17.693Z",
-      "usageCount": 60
+      "lastUsedAt": "2026-01-03T05:36:33.770Z",
+      "usageCount": 61
     },
     {
       "id": "mem-942bfd83-eb77-4632-92bf-c72bf6d0f279",
@@ -1019,8 +1019,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T03:20:18.990Z",
       "updatedAt": "2025-12-16T03:20:18.990Z",
-      "lastUsedAt": "2026-01-03T05:16:45.476Z",
-      "usageCount": 5
+      "lastUsedAt": "2026-01-03T05:40:11.978Z",
+      "usageCount": 6
     },
     {
       "id": "mem-535740a6-0dc0-48fb-bd25-d3d43c03ba97",
@@ -1698,8 +1698,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T15:45:48.105Z",
       "updatedAt": "2025-12-16T15:45:48.105Z",
-      "lastUsedAt": "2026-01-03T05:28:17.693Z",
-      "usageCount": 15
+      "lastUsedAt": "2026-01-03T05:40:11.978Z",
+      "usageCount": 17
     },
     {
       "id": "mem-32ba16d4-50ce-4dc2-b82d-390e0f1f84f2",
@@ -1732,8 +1732,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T15:50:37.503Z",
       "updatedAt": "2025-12-16T15:50:37.503Z",
-      "lastUsedAt": "2026-01-03T05:28:17.693Z",
-      "usageCount": 17
+      "lastUsedAt": "2026-01-03T05:40:11.978Z",
+      "usageCount": 19
     },
     {
       "id": "mem-231d3676-cfbc-4cf7-b062-475eaedd1aaa",
@@ -2854,7 +2854,8 @@
       "enabled": true,
       "createdAt": "2026-01-03T04:08:32.369Z",
       "updatedAt": "2026-01-03T04:08:32.369Z",
-      "usageCount": 0
+      "lastUsedAt": "2026-01-03T05:40:11.978Z",
+      "usageCount": 2
     },
     {
       "id": "mem-b6a74856-bf9a-4a9d-b3c4-304bb2f9e9ed",
@@ -2870,7 +2871,8 @@
       "enabled": true,
       "createdAt": "2026-01-03T04:14:08.759Z",
       "updatedAt": "2026-01-03T04:14:08.759Z",
-      "usageCount": 0
+      "lastUsedAt": "2026-01-03T05:40:11.978Z",
+      "usageCount": 1
     },
     {
       "id": "mem-d0ce2df8-9332-4a4f-859f-b829e8b0507f",
@@ -3248,7 +3250,8 @@
       "enabled": true,
       "createdAt": "2026-01-03T05:23:46.535Z",
       "updatedAt": "2026-01-03T05:23:46.535Z",
-      "usageCount": 0
+      "lastUsedAt": "2026-01-03T05:40:11.978Z",
+      "usageCount": 1
     },
     {
       "id": "mem-8b55ae5c-4f30-4147-a26c-d535192ea32f",
@@ -3282,7 +3285,8 @@
       "enabled": true,
       "createdAt": "2026-01-03T05:28:39.427Z",
       "updatedAt": "2026-01-03T05:28:39.427Z",
-      "usageCount": 0
+      "lastUsedAt": "2026-01-03T05:40:11.978Z",
+      "usageCount": 1
     },
     {
       "id": "mem-d32b0c93-5351-47a9-9411-fc5f43a63cde",
@@ -3299,6 +3303,121 @@
       "enabled": true,
       "createdAt": "2026-01-03T05:28:39.427Z",
       "updatedAt": "2026-01-03T05:28:39.427Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-dcaff297-cff4-46cf-9e79-401ab81a8d3b",
+      "type": "fact",
+      "text": "electron/providers-ai-sdk/gemini.ts now converts inline_data into AI SDK file parts by sending a Buffer with mediaType to satisfy Google&#39;s file-input format.",
+      "tags": [
+        "gemini",
+        "ai-sdk",
+        "file-inputs"
+      ],
+      "importance": 0.75,
+      "contentHash": "6c01d51fe041d110b5863a912ba2d09ca1c51889750155e8cc36a38692facb1c",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:38:42.181Z",
+      "updatedAt": "2026-01-03T05:38:42.181Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-ca2d7932-8f44-498b-be4d-89b189f077f1",
+      "type": "workflow",
+      "text": "llmRequest and the downstream llm-service now handle MessagePart[] natively without stringifying, ensuring multi-modal buffers reach the provider adapter intact.",
+      "tags": [
+        "pipeline",
+        "multimodal",
+        "flow-engine"
+      ],
+      "importance": 0.75,
+      "contentHash": "ed17b9a856fe9c19d8e1b434d1bcc9451c06e1a4a4c9ea05510225bf5640dc90",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:38:42.181Z",
+      "updatedAt": "2026-01-03T05:38:42.181Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-04f28094-5d47-4010-8478-1241da03de60",
+      "type": "constraint",
+      "text": "flow-engine/index.ts skips appending the [attached_context] footer whenever the context is null or undefined so empty context values are not injected.",
+      "tags": [
+        "flow-engine",
+        "context",
+        "constraint"
+      ],
+      "importance": 0.25,
+      "contentHash": "fc4393ca53d3ff11cf3fdfff042575cb088ba61b12d1fa77930ce66a32ac7cb9",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:38:42.181Z",
+      "updatedAt": "2026-01-03T05:38:42.181Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-e3375f77-cf45-4564-91b5-55049ab85fd8",
+      "type": "fact",
+      "text": "Gemini, Claude 3.5, and GPT-4o multi-modal providers support multiple files in one turn and our UI/backend already accept multiple uploads.",
+      "tags": [
+        "multi-modal",
+        "provider-support"
+      ],
+      "importance": 0.5,
+      "contentHash": "867b91d2aff52c69db47f47096b13197f3681f75d9772e71379371350b10cf6e",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:42:16.125Z",
+      "updatedAt": "2026-01-03T05:42:16.125Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-27bb89e4-bc5b-4d87-971f-2b7299e842fd",
+      "type": "fact",
+      "text": "The llmRequest node now preserves MessagePart[] without stringifying, and LMServiceRequest handles the multi-modal parts as native data so binary buffers flow through to the provider adapters.",
+      "tags": [
+        "pipeline",
+        "llm-service"
+      ],
+      "importance": 0.5,
+      "contentHash": "7d2b14064f72f5a267052f5a3465855d57e21d475789d381922303b104a5468e",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:42:16.125Z",
+      "updatedAt": "2026-01-03T05:42:16.125Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-529455e4-2bb9-43f9-9ce0-40ed780f580d",
+      "type": "fact",
+      "text": "electron/flow-engine/index now appends context before recording the message timeline and skips adding a null/undefined context footer, preventing duplicate turns and image stripping.",
+      "tags": [
+        "context",
+        "flow-engine"
+      ],
+      "importance": 0.75,
+      "contentHash": "cb2cb20a7a42af3765e5421daa8bb203cbd0b20834c6be028508f62ea49edfde",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:42:16.125Z",
+      "updatedAt": "2026-01-03T05:42:16.125Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-022546b7-93a5-4f22-b1be-3b18b8009536",
+      "type": "fact",
+      "text": "The Gemini adapter in electron/providers-ai-sdk/gemini.ts maps inline_data to the AI SDK file type with data and mediaType buffers and distinguishes image vs. file types per the SDK spec.",
+      "tags": [
+        "gemini",
+        "ai-sdk"
+      ],
+      "importance": 0.5,
+      "contentHash": "7859dc1166cfc75e8d922681705e068a7a2233159333dba0495051d1f6175b09",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-03T05:42:16.125Z",
+      "updatedAt": "2026-01-03T05:42:16.125Z",
       "usageCount": 0
     }
   ]
