@@ -1,5 +1,5 @@
-import { streamText, tool as aiTool, stepCountIs, jsonSchema } from 'ai'
-import { createXai } from '@ai-sdk/xai'
+import { streamText, tool as aiTool, stepCountIs, jsonSchema, wrapLanguageModel, extractReasoningMiddleware } from 'ai'
+import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 import { z } from 'zod'
 import { UiPayloadCache } from '../core/uiPayloadCache'
 import { AGENT_MAX_STEPS } from '../../src/store/utils/constants'
@@ -20,12 +20,12 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
     const safe = sanitizeName(t.name)
     if (nameMap.has(safe) && nameMap.get(safe) !== t.name) {
       const DEBUG = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
-      if (DEBUG) console.warn('[ai-sdk:xai] tool name collision after sanitize', { safe, a: nameMap.get(safe), b: t.name })
+      if (DEBUG) console.warn('[ai-sdk:openrouter] tool name collision after sanitize', { safe, a: nameMap.get(safe), b: t.name })
     }
     nameMap.set(safe, t.name)
     // Prefer the tool's declared JSON Schema; fallback to permissive schema
     const inputSchema = t.parameters && typeof t.parameters === 'object' ? jsonSchema(t.parameters) : z.any()
-    map[safe] = aiTool<any, any>({
+    map[safe] = aiTool({
       description: t.description || undefined,
       inputSchema,
       execute: async (input: any) => {
@@ -47,91 +47,125 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
   return { tools: map, nameMap }
 }
 
-// We intentionally avoid ad-hoc text sanitization. Text emission is gated by
-// AI SDK step boundaries to avoid surfacing provider-specific artifacts that may
-// appear during tool-call steps.
+export const OpenRouterAiSdkProvider: ProviderAdapter = {
+  id: 'openrouter',
 
-export const XaiAiSdkProvider: ProviderAdapter = {
-  id: 'xai',
-
-  async agentStream({ apiKey, model, system, messages, temperature, tools, responseSchema: _responseSchema, emit: _emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError, onStep }): Promise<StreamHandle> {
-    const xai = createXai({ apiKey })
-    const llm = xai(model)
+  async agentStream({ apiKey, model, system, messages, temperature, tools, responseSchema: _responseSchema, emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError, onStep }): Promise<StreamHandle> {
+    const or = createOpenRouter({ apiKey })
+    const llm = or(model)
+    
+    // Wrap model to extract <think> reasoning into separate reasoning chunks
+    // This is crucial for models like DeepSeek R1 via OpenRouter
+    const enhancedModel = wrapLanguageModel({
+      model: llm as any,
+      middleware: extractReasoningMiddleware({ tagName: 'think' })
+    })
 
     const { tools: aiTools, nameMap } = buildAiSdkTools(tools, toolMeta)
-
     const seenStarts = new Set<string>()
-
     const ac = new AbortController()
 
     // Expect system to be provided top-level (string) and messages without system-role
     const systemText: string | undefined = typeof system === 'string' ? system : undefined
-    const msgs = (messages || []) as any
+    const msgs = (messages || []) as any[]
+
+    // Buffer for text chunks to filter out "None" artifacts
+    let textBuffer = ''
+    let hasEmittedText = false
+
+    const processTextChunk = (text: string) => {
+      // Accumulate buffer
+      textBuffer += text
+      
+      // Heuristic: If we haven't emitted yet, and buffer is exactly "None" or "None\n" or similar, wait.
+      // If buffer gets longer than "None" and doesn't match, flush.
+      // If buffer IS "None" and we finish, we drop it (handled in onFinish/flush).
+      
+      const trimmed = textBuffer.trim()
+      
+      // If strictly "None", wait (don't emit yet)
+      if (!hasEmittedText && (trimmed === 'None' || 'None'.startsWith(trimmed))) {
+         return
+      }
+
+      // If we have "None" prefix but now more text, check if it was just "None" artifact or real text starting with None
+      // But typically the artifact is standalone.
+      // For now, simple flush if it's not the exact match or we already emitted.
+      
+      if (textBuffer.length > 0) {
+        // Double check the "None" start if strictly waiting
+        if (!hasEmittedText && textBuffer.trim() === 'None') {
+          return // Still wait
+        }
+        
+        onTextChunk?.(textBuffer)
+        hasEmittedText = true
+        textBuffer = ''
+      }
+    }
+
+    const flushText = () => {
+      if (textBuffer) {
+        const trimmed = textBuffer.trim()
+        if (!hasEmittedText && trimmed === 'None') {
+          // Drop it
+          textBuffer = ''
+          return
+        }
+        onTextChunk?.(textBuffer)
+        hasEmittedText = true
+        textBuffer = ''
+      }
+    }
 
     const DEBUG = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
 
-    // Buffer text per step; only emit if the step has no tool calls
-    const hasTools = Object.keys(aiTools).length > 0
-    let pendingText = ''
-
     try {
       if (DEBUG) {
-        console.log('[ai-sdk:xai] streamText start', { model, msgs: msgs.length, tools: Object.keys(aiTools).length })
+        console.log('[ai-sdk:openrouter] streamText start', { model, msgs: msgs.length, tools: Object.keys(aiTools).length })
       }
+      
       const result = streamText({
-        model: llm,
+        model: enhancedModel,
         system: systemText,
-        messages: msgs as any,
+        messages: msgs,
         tools: Object.keys(aiTools).length ? aiTools : undefined,
         toolChoice: Object.keys(aiTools).length ? 'auto' : 'none',
-        parallelToolCalls: false,
+        // AI SDK typing differs across providers; omit parallelToolCalls for broad compatibility.
         temperature: typeof temperature === 'number' ? temperature : undefined,
-        // Note: do NOT forward reasoningEffort; xAI currently does not require it here
         abortSignal: ac.signal,
         stopWhen: stepCountIs(AGENT_MAX_STEPS),
-        includeRawChunks: DEBUG,
-        // Stream mapping (AI SDK v5 onChunk passes { chunk })
+        
         onChunk({ chunk }: any) {
           try {
             if (DEBUG) {
-              const brief = typeof (chunk as any).text === 'string' ? (chunk as any).text.slice(0, 40) : undefined
-              console.log('[ai-sdk:xai] onChunk', { type: chunk.type, tool: (chunk as any).toolName, brief })
+               const brief = typeof (chunk as any).text === 'string' ? (chunk as any).text.slice(0, 40) : undefined
+               console.log('[ai-sdk:openrouter] onChunk', { type: chunk.type, brief })
             }
+            
             switch (chunk.type) {
               case 'text-delta': {
                 const d = chunk.text || ''
-                if (!d) break
-                if (hasTools) {
-                  // Buffer text until we know whether this step used tools
-                  pendingText += d
-                } else {
-                  onTextChunk?.(d)
-                }
+                if (d) processTextChunk(d)
                 break
               }
-              case 'tool-input-start': {
-                const callId = chunk.toolCallId || chunk.id || ''
-                if (callId) {
-                  const args = (chunk as any).input
-                  if (args !== undefined) {
-                    const safe = String(chunk.toolName || '')
-                    const original = nameMap.get(safe) || safe
-                    onToolStart?.({ callId, name: original, arguments: args })
-                    seenStarts.add(callId)
-                  }
+              case 'reasoning': { 
+                // If middleware emits reasoning chunks
+                const r = chunk.textDelta || chunk.text || ''
+                if (r) {
+                  emit?.({ type: 'reasoning', provider: 'openrouter', model, reasoning: r })
                 }
-                break
-              }
-              case 'tool-input-delta': {
-                // Ignore deltas; wait for 'tool-call' which includes full arguments.
                 break
               }
               case 'tool-call': {
+                // Ensure pending text is flushed before tool call
+                flushText()
+                
                 const callId = chunk.toolCallId || chunk.id || ''
                 if (callId) {
                   const safe = String(chunk.toolName || '')
                   const original = nameMap.get(safe) || safe
-                  onToolStart?.({ callId, name: original, arguments: (chunk as any).input })
+                  onToolStart?.({ callId, name: original, arguments: (chunk as any).args })
                   seenStarts.add(callId)
                 }
                 break
@@ -140,11 +174,11 @@ export const XaiAiSdkProvider: ProviderAdapter = {
                 const callId = chunk.toolCallId || chunk.id || ''
                 const safe = String(chunk.toolName || '')
                 const original = nameMap.get(safe) || safe
-                const output = (chunk as any).output
+                const output = (chunk as any).result
                 onToolEnd?.({ callId, name: original, result: output })
                 break
               }
-              case 'tool-error': {
+               case 'tool-error': {
                 const callId = chunk.toolCallId || chunk.id || ''
                 const safe = String(chunk.toolName || '')
                 const original = nameMap.get(safe) || safe
@@ -152,12 +186,6 @@ export const XaiAiSdkProvider: ProviderAdapter = {
                 onToolError?.({ callId, name: original, error })
                 break
               }
-              case 'finish-step': {
-                // Usage emitted in onStepFinish
-                break
-              }
-              default:
-                break
             }
           } catch (err: any) {
             onStreamError?.(String(err?.message || err))
@@ -165,8 +193,9 @@ export const XaiAiSdkProvider: ProviderAdapter = {
         },
         onStepFinish(step: any) {
           try {
-            const calls = Array.isArray(step?.toolCalls) ? step.toolCalls.length : 0
-            if (DEBUG) console.log('[ai-sdk:xai] onStepFinish', { calls, finishReason: step?.finishReason, usage: step?.usage })
+            flushText() // Ensure text is flushed at end of step
+            
+            if (DEBUG) console.log('[ai-sdk:openrouter] onStepFinish', { finishReason: step?.finishReason, usage: step?.usage })
 
             if (onStep) {
               onStep({
@@ -175,16 +204,6 @@ export const XaiAiSdkProvider: ProviderAdapter = {
                 toolCalls: step.toolCalls,
                 toolResults: step.toolResults
               })
-            }
-
-            // If this step had tool calls, drop any buffered text from this step
-            if (hasTools) {
-              if (calls > 0) {
-                pendingText = ''
-              } else if (pendingText) {
-                onTextChunk?.(pendingText)
-                pendingText = ''
-              }
             }
 
             if (step?.usage && onTokenUsage) {
@@ -201,29 +220,27 @@ export const XaiAiSdkProvider: ProviderAdapter = {
         },
         onFinish() {
           try {
-            if (DEBUG) console.log('[ai-sdk:xai] onFinish')
-            // Flush any remaining buffered text (final step without tools)
-            if (pendingText) onTextChunk?.(pendingText)
-            pendingText = ''
+            if (DEBUG) console.log('[ai-sdk:openrouter] onFinish')
+            flushText()
             onStreamDone?.()
           } catch {}
         },
         onError(ev: any) {
-          const err = ev?.error ?? ev
-          try {
-            if (DEBUG) console.error('[ai-sdk:xai] onError', err)
-            onStreamError?.(String(err?.message || err))
-          } catch {}
+           const err = ev?.error ?? ev
+           if (DEBUG) console.error('[ai-sdk:openrouter] onError', err)
+           onStreamError?.(String(err?.message || err))
         }
       } as any)
-      // Ensure the stream is consumed so callbacks fire reliably
+
+      // CRITICAL: Consume the stream to ensure callbacks fire
       result.consumeStream().catch((err: any) => {
-        if (DEBUG) console.error('[ai-sdk:xai] consumeStream error', err)
+        if (DEBUG) console.error('[ai-sdk:openrouter] consumeStream error', err)
         try { onStreamError?.(String(err?.message || err)) } catch {}
       })
+
     } catch (err: any) {
-      if (DEBUG) console.error('[ai-sdk:xai] adapter exception', err)
-      try { onStreamError?.(String(err?.message || err)) } catch {}
+      if (DEBUG) console.error('[ai-sdk:openrouter] adapter exception', err)
+      onStreamError?.(String(err?.message || err))
     }
 
     return {
@@ -233,4 +250,3 @@ export const XaiAiSdkProvider: ProviderAdapter = {
     }
   }
 }
-

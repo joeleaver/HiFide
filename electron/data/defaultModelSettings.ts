@@ -32,10 +32,9 @@ function isNumber(value: unknown): value is number {
 function validatePricingConfig(value: unknown): value is PricingConfig {
   if (!isObject(value)) return false
   // best-effort structural checks (keep light to avoid brittleness)
-  for (const k of ['openai', 'anthropic', 'gemini', 'fireworks', 'xai']) {
+  for (const k of ['openai', 'anthropic', 'gemini', 'fireworks', 'xai', 'openrouter']) {
     if (!isObject((value as any)[k])) return false
   }
-  if (typeof (value as any).customRates !== 'boolean') return false
   return true
 }
 
@@ -124,6 +123,10 @@ export function loadDefaultModelSettingsFile(): DefaultModelSettingsFileV1 {
 
   if (!isObject(parsed) || parsed.version !== 1) {
     throw new Error(`[defaultModelSettings] Invalid or missing version in ${filePath}`)
+  }
+
+  if (typeof (parsed as any).customRates !== 'boolean') {
+    throw new Error(`[defaultModelSettings] Invalid customRates (must be boolean) in ${filePath}`)
   }
 
   const pricing = (parsed as any).pricing

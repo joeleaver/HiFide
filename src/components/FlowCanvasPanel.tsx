@@ -18,6 +18,7 @@ import { useFlowEditor } from '../store/flowEditor'
 import { useRerenderTrace } from '../utils/perf'
 import { splitFlowsByLibrary, getLibraryLabel } from '../utils/flowLibraries'
 import { useFlowRuntime } from '../store/flowRuntime'
+import { computeGraphSignature } from '../store/flowEditorLocalTransforms'
 
 
 import { Button, Group, Badge, TextInput, Modal, Text, Menu } from '@mantine/core'
@@ -68,6 +69,9 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   const localNodes = useFlowEditorLocal((s) => s.nodes) as FlowNode[]
   const setLocalNodes = useFlowEditorLocal((s) => s.setNodes)
   const localEdges = useFlowEditorLocal((s) => s.edges) as Edge[]
+  const isSaving = useFlowEditorLocal((s) => s.isSaving)
+  const hasUnsavedChanges = useFlowEditorLocal((s) => s.isDirty)
+
   const applyLocalNodeChanges = useFlowEditorLocal((s) => s.applyNodeChanges)
   const applyLocalEdgeChanges = useFlowEditorLocal((s) => s.applyEdgeChanges)
 
@@ -119,8 +123,6 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
   const templatesLoaded = useFlowEditor((s) => s.templatesLoaded)
   const selectedTemplate = useFlowEditor((s) => s.selectedTemplate)
 
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false)
-
   // Helper to check if a template is from system library
   const isSystemTemplate = useCallback((templateId: string) => {
     const template = availableTemplates.find((t: any) => t.id === templateId)
@@ -163,10 +165,13 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
     try {
       const res = await useFlowEditor.getState().loadTemplate(value)
       if (res?.ok) {
-        // Graph will be updated automatically via store event subscription
-        // No manual hydration needed
+        notifications.show({ color: 'green', title: 'Flow Loaded', message: `Profile "${value}" loaded successfully.` })
+      } else {
+        notifications.show({ color: 'red', title: 'Load Failed', message: res?.error || 'Unable to load flow profile.' })
       }
-    } catch {}
+    } catch (err: any) {
+      notifications.show({ color: 'red', title: 'Load Failed', message: err?.message || 'An unexpected error occurred.' })
+    }
   }, [hasUnsavedChanges])
 
   // Handle save as (create new profile)
@@ -178,17 +183,18 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
       if (res?.ok) {
         setLocalProfileName('')
         setSaveAsModalOpen(false)
-        // After save, update last loaded signature using current local graph
+        notifications.show({ color: 'green', title: 'Profile Saved', message: `Flow profile "${name}" has been saved.` })
+        // After save, update last synced signature in local store to clear unsaved changes flag
         try {
-          const n = (localNodes || []).map((x: any) => ({ id: x?.id, p: x?.position, t: x?.data?.nodeType, l: x?.data?.labelBase ?? x?.data?.label, c: x?.data?.config ?? null }))
-          const e = (localEdges || []).map((x: any) => ({ id: x?.id, s: x?.source, t: x?.target, sh: (x as any)?.sourceHandle ?? undefined, th: (x as any)?.targetHandle ?? undefined }))
-          const sig = JSON.stringify({ n, e })
-          ;(lastLoadedTemplateRef as any).currentSig = sig
-          lastSyncedSigRef.current = sig
-          setHasUnsavedChanges(false)
+          const currentSig = computeGraphSignature(localNodes, localEdges)
+          useFlowEditorLocal.setState({ lastSavedSignature: currentSig, isDirty: false })
         } catch {}
+      } else {
+        notifications.show({ color: 'red', title: 'Save Failed', message: res?.error || 'Unable to save flow profile.' })
       }
-    } catch {}
+    } catch (err: any) {
+      notifications.show({ color: 'red', title: 'Save Failed', message: err?.message || 'An unexpected error occurred.' })
+    }
   }, [localProfileName, localNodes, localEdges, saveAsLibrary])
 
   // Actually load the template/profile (called from modal)
@@ -199,9 +205,13 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
       if (res?.ok) {
         setLoadTemplateModalOpen(false)
         setPendingSelection(null)
-        // Graph will be updated automatically via store event subscription
+        notifications.show({ color: 'green', title: 'Flow Loaded', message: `Profile "${pendingSelection}" loaded successfully.` })
+      } else {
+        notifications.show({ color: 'red', title: 'Load Failed', message: res?.error || 'Unable to load flow profile.' })
       }
-    } catch {}
+    } catch (err: any) {
+      notifications.show({ color: 'red', title: 'Load Failed', message: err?.message || 'An unexpected error occurred.' })
+    }
   }, [pendingSelection])
 
   // Handle modal cancel
@@ -210,12 +220,9 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
     setPendingSelection(null)
   }, [])
 
-  // ===== HYDRATION: Load templates and graph from backend =====
-  const lastLoadedTemplateRef = useRef<string | null>(null)
-  // Keep a ref of last synced signature to avoid sending unchanged graphs to backend
-  const lastSyncedSigRef = useRef<string | null>(null)
 
-  // No useEffect needed! Store automatically:
+
+  // No useEffect needed for persistence! Store automatically:
   // 1. Hydrates from main via events
   // 2. Debounced-saves to main when nodes/edges change
 
@@ -634,13 +641,18 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
             disabled={!selectedTemplate || isSystemTemplate(selectedTemplate)}
             onClick={async () => {
               if (!selectedTemplate || isSystemTemplate(selectedTemplate)) return
-              if (confirm(`Delete profile "${selectedTemplate}"?`)) {
+              const targetToDelete = selectedTemplate
+              if (confirm(`Delete profile "${targetToDelete}"?`)) {
                 try {
-                  const res = await useFlowEditor.getState().deleteProfile(selectedTemplate)
+                  const res = await useFlowEditor.getState().deleteProfile(targetToDelete)
                   if (res?.ok) {
-                    // Graph will be updated automatically via store event subscription
+                    notifications.show({ color: 'green', title: 'Profile Deleted', message: `Flow profile "${targetToDelete}" has been deleted.` })
+                  } else {
+                    notifications.show({ color: 'red', title: 'Delete Failed', message: res?.error || 'Unable to delete flow profile.' })
                   }
-                } catch {}
+                } catch (err: any) {
+                  notifications.show({ color: 'red', title: 'Delete Failed', message: err?.message || 'An unexpected error occurred.' })
+                }
               }
             }}
           >
@@ -649,14 +661,14 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
 
 
           {/* Auto-save indicator for user flows */}
-          {selectedTemplate && !isSystemTemplate(selectedTemplate) && hasUnsavedChanges && (
+          {selectedTemplate && !isSystemTemplate(selectedTemplate) && (
             <Badge
               size="xs"
               variant="dot"
-              color="blue"
-              title="Auto-saving..."
+              color={isSaving ? 'blue' : hasUnsavedChanges ? 'yellow' : 'green'}
+              title={isSaving ? 'Auto-saving...' : hasUnsavedChanges ? 'Unsaved changes' : 'All changes saved'}
             >
-              Saving...
+              {isSaving ? 'Saving...' : hasUnsavedChanges ? 'Unsaved' : 'Saved'}
             </Badge>
           )}
         </Group>
@@ -698,9 +710,13 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
               try {
                 const res = await useFlowEditor.getState().createNewFlowNamed(name)
                 if (res?.ok) {
-                  // Graph will be updated automatically via store event subscription
+                  notifications.show({ color: 'green', title: 'Flow Created', message: `New flow "${name}" has been created.` })
+                } else {
+                  notifications.show({ color: 'red', title: 'Create Failed', message: res?.error || 'Unable to create flow.' })
                 }
-              } catch {}
+              } catch (err: any) {
+                notifications.show({ color: 'red', title: 'Create Failed', message: err?.message || 'An unexpected error occurred.' })
+              }
               resetNewFlowModal()
             }
           }}
@@ -735,9 +751,13 @@ export default function FlowCanvasPanel({}: FlowCanvasPanelProps) {
               try {
                 const res = await useFlowEditor.getState().createNewFlowNamed(name)
                 if (res?.ok) {
-                  // Graph will be updated automatically via store event subscription
+                  notifications.show({ color: 'green', title: 'Flow Created', message: `New flow "${name}" has been created.` })
+                } else {
+                  notifications.show({ color: 'red', title: 'Create Failed', message: res?.error || 'Unable to create flow.' })
                 }
-              } catch {}
+              } catch (err: any) {
+                notifications.show({ color: 'red', title: 'Create Failed', message: err?.message || 'An unexpected error occurred.' })
+              }
               resetNewFlowModal()
             }}
             disabled={!newFlowName.trim()}

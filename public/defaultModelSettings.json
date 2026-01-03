@@ -18,7 +18,6 @@
       "gpt-4.1-nano": { "inputCostPer1M": 0.1, "outputCostPer1M": 0.4, "cachedInputCostPer1M": 0.01 },
       "computer-use-preview": { "inputCostPer1M": 3, "outputCostPer1M": 12, "cachedInputCostPer1M": 0.3 }
     },
-
     "anthropic": {
       "claude-opus-4.1": { "inputCostPer1M": 15, "outputCostPer1M": 75, "cachedInputCostPer1M": 1.5 },
       "claude-opus-4-20250514": { "inputCostPer1M": 15, "outputCostPer1M": 75, "cachedInputCostPer1M": 1.5 },
@@ -35,7 +34,6 @@
       "claude-3-sonnet-20240229": { "inputCostPer1M": 3, "outputCostPer1M": 15, "cachedInputCostPer1M": 0.3 },
       "claude-3-haiku-20240307": { "inputCostPer1M": 0.25, "outputCostPer1M": 1.25, "cachedInputCostPer1M": 0.03 }
     },
-
     "gemini": {
       "gemini-3-flash-preview": { "inputCostPer1M": 0.5, "outputCostPer1M": 3, "cachedInputCostPer1M": 0.05 },
       "gemini-3-pro-preview": { "inputCostPer1M": 2, "outputCostPer1M": 12, "cachedInputCostPer1M": 0.2 },
@@ -50,7 +48,6 @@
       "gemini-2.5-pro-preview-tts": { "inputCostPer1M": 1, "outputCostPer1M": 20 },
       "gemini-2.5-computer-use-preview-10-2025": { "inputCostPer1M": 1.25, "outputCostPer1M": 10 }
     },
-
     "fireworks": {
       "accounts/fireworks/models/qwen3-coder-480b-a35b-instruct": { "inputCostPer1M": 0.45, "outputCostPer1M": 1.8, "cachedInputCostPer1M": 0.045 },
       "accounts/fireworks/models/glm-4p6": { "inputCostPer1M": 0.55, "outputCostPer1M": 2.19, "cachedInputCostPer1M": 0.055 },
@@ -60,7 +57,6 @@
       "accounts/fireworks/models/kimi-k2-thinking": { "inputCostPer1M": 0.6, "outputCostPer1M": 2.5, "cachedInputCostPer1M": 0.06 },
       "accounts/fireworks/models/minimax-m2": { "inputCostPer1M": 0.3, "outputCostPer1M": 1.2, "cachedInputCostPer1M": 0.03 }
     },
-
     "xai": {
       "grok-code-fast-1": { "inputCostPer1M": 0.2, "outputCostPer1M": 1.5, "cachedInputCostPer1M": 0.02 },
       "grok-4-fast-reasoning": { "inputCostPer1M": 0.2, "outputCostPer1M": 0.5, "cachedInputCostPer1M": 0.02 },
@@ -68,12 +64,10 @@
       "grok-4-fast-non-reasoning": { "inputCostPer1M": 0.2, "outputCostPer1M": 0.5, "cachedInputCostPer1M": 0.02 },
       "grok-4-0709": { "inputCostPer1M": 3, "outputCostPer1M": 15, "cachedInputCostPer1M": 0.3 }
     },
-
-    "customRates": false
+    "openrouter": {}
   },
   "modelDefaults": {
-    "openai": {
-    },
+    "openai": {},
     "anthropic": {
       "claude-sonnet-4.5": { "includeThoughts": true, "thinkingBudget": 2048 },
       "claude-opus-4.1": { "includeThoughts": true, "thinkingBudget": 4096 }
@@ -81,6 +75,8 @@
     "gemini": {
       "gemini-2.5-pro": { "includeThoughts": true, "thinkingBudget": 2048 },
       "gemini-2.5-flash": { "includeThoughts": true, "thinkingBudget": 1024 }
-    }
-  }
+    },
+    "openrouter": {}
+  },
+  "customRates": false
 }

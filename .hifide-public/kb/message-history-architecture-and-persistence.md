@@ -1,8 +1,17 @@
 ---
 id: 7305761e-7555-41ed-8731-c157bca72770
 title: Message history architecture and persistence
-tags: [architecture, messages, messageHistory, llm, context]
+tags: [architecture, messages, messageHistory, llm, context, multi-modal]
 files: [electron/flow-engine/llm-service.ts, electron/flow-engine/context-api.ts, electron/flow-engine/nodes/defaultContextStart.ts, electron/flow-engine/nodes/newContext.ts, electron/services/SessionService.ts]
+createdAt: 2025-12-02T23:30:20.708Z
+updatedAt: 2026-01-03T06:23:40.068Z
+---
+
+---
+id: 7305761e-7555-41ed-8731-c157bca72770
+title: Message history architecture and persistence
+tags: [architecture, messages, messageHistory, llm, context, multi-modal]
+files: [electron/flow-engine/llm-service.ts, electron/flow-engine/context-api.ts, electron/flow-engine/nodes/defaultContextStart.ts, electron/flow-engine/nodes/newContext.ts, electron/services/SessionService.ts, electron/flow-engine/types.ts]
 createdAt: 2025-12-02T23:30:20.708Z
 updatedAt: 2025-12-02T23:30:20.708Z
 ---
@@ -11,41 +20,51 @@ updatedAt: 2025-12-02T23:30:20.708Z
 
 ## Overview
 
-Message history tracks the ordered list of user/assistant messages associated with a session or flow execution. It is used to build prompts for LLM requests and to render the context inspector in the UI. Recent regressions have shown issues with message history being overwritten or mis-shared across isolated contexts.
+Message history tracks the ordered list of user/assistant messages associated with a session or flow execution. It is used to build prompts for LLM requests and to render the context inspector in the UI.
+
+## Data Structure
+
+The `MessageHistoryItem` (defined in `electron/flow-engine/types.ts`) supports multi-modal content:
+
+```typescript
+export type MessagePart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; image: string; mimeType: string }
+
+export interface MessageHistoryItem {
+  role: 'system' | 'user' | 'assistant'
+  content: string | MessagePart[]
+  reasoning?: string
+  metadata?: {
+    id: string
+    pinned?: boolean
+    priority?: number
+  }
+}
+```
 
 ## Key responsibilities
 - Persist message history across turns in a session.
-- Ensure correct isolation between independent contexts (e.g., `newContext` nodes / bootstrap flows).
+- Ensure correct isolation between independent contexts.
 - Provide sanitized, model-ready message lists for LLM providers.
+- **Multi-modal Handling**: Handle conversion between `string | MessagePart[]` and model-specific formats (OpenAI, Anthropic, Gemini).
 
 ## Primary components
+- `electron/flow-engine/llm/payloads.ts`
+  - contains `normalizeContentToText` utility to convert complex content back to plain text when needed (e.g. for RAG or logging).
+  - Handles provider-specific message formatting (stripping images for older models, etc).
 - `electron/flow-engine/llm-service.ts`
   - Reads `context.messageHistory` and converts it into provider-specific chat formats.
-  - Strips metadata fields the providers do not accept.
-- `electron/flow-engine/context-api.ts`
-  - Clones and merges `messageHistory` when building or updating context objects for the scheduler and flow API.
 - `electron/flow-engine/nodes/defaultContextStart.ts`
-  - Sanitizes message history to guarantee correctly paired user/assistant messages at the tail.
-  - Receives session-level context (including message history) from the scheduler.
-- `electron/flow-engine/nodes/newContext.ts`
-  - Creates isolated execution contexts that should not inherit message history from parent flows.
+  - Sanitizes message history (removes trailing blank messages, ensures user/assistant pairs).
 - `electron/services/SessionService.ts`
-  - Manages session context at the application level, including message history, provider, and model.
+  - Primary persistence layer for message history in the application state.
 
-## Known pitfalls and bugs
-- Message history being **overwritten** instead of **appended** when merging new context updates.
-- Duplicate context objects (e.g., scheduler vs. flow API) getting out of sync.
-- `messageHistory` sometimes being a non-array value, causing runtime errors (`context.messageHistory is not iterable`).
-- Incorrect sharing of message history between contexts that should be isolated.
+## Implementation details
+- **Text Normalization**: When a string is required (e.g., for `retrieveWorkspaceMemoriesForQuery`), use `normalizeContentToText` from `payloads.ts`.
+- **Validation**: `defaultContextStart` uses an `isBlank` helper that accounts for both string and `MessagePart[]` content.
 
 ## Design constraints
-- `messageHistory` must always be an **array of chat messages** in engine/internal data structures.
-- LLM-specific transformations should occur at the service boundary (e.g., `llm-service.ts`) without mutating the underlying history.
-- Merging context updates must treat `messageHistory` as **append-only**, unless explicitly resetting the session (e.g., `startNewContext()`).
-
-## Open work
-- Audit context merging logic across scheduler, context API, and LLM nodes.
-- Add tests that:
-  - Verify history is appended per-turn for a single session.
-  - Verify `newContext` flows do not inherit parent history.
-  - Verify sanitization preserves all prior turns while enforcing user/assistant tail pairing.
+- `messageHistory` must always be an **array of MessageHistoryItem** objects.
+- LLM-specific transformations (like adding `<think>` tags for reasoning) occur at the service boundary.
+- Merging context updates is generally append-only.

@@ -26,12 +26,22 @@ jest.mock('../../tools/agentToolRegistry', () => ({
 jest.mock('../../core/state', () => {
   const mockProvider = {
     id: 'mock',
-    async agentStream({ tools, onChunk, onDone, onError }: any) {
+    async agentStream({ tools, onChunk, onDone, onError, onStep }: any) {
       try {
         const tool = tools?.[0]
         if (!tool) throw new Error('No tool provided')
         const result = await tool.run({ path: 'README.md' })
-        onChunk(JSON.stringify(result))
+        const text = JSON.stringify(result)
+        
+        if (onStep) {
+          onStep({
+            text,
+            toolCalls: [],
+            toolResults: []
+          })
+        }
+
+        onChunk(text)
         onDone?.()
       } catch (error: any) {
         onError?.(error?.message || String(error))
@@ -70,5 +80,11 @@ describe('llmService tool hydration', () => {
     expect(result.error).toBeUndefined()
     expect(runSpy).toHaveBeenCalledTimes(1)
     expect(JSON.parse(result.text || '{}').tool).toBe('fsReadFile')
+    
+    // Verify context history was updated via onStep
+    const history = flow.context.get().messageHistory
+    expect(history.length).toBe(2) // User message + Assistant message
+    expect(history[1].role).toBe('assistant')
+    expect(history[1].content).toBe(result.text)
   })
 })

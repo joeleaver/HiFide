@@ -6,30 +6,30 @@ import type { DiffAnnotation } from '../../../shared/sourceControlAnnotations'
 
 export type DiffViewerProps = {
   diff: GitFileDiff | null
-  annotations: DiffAnnotation[]
+  annotations?: DiffAnnotation[]
   selected?:
     | { kind: 'hunk'; filePath: string; hunkIndex: number }
     | { kind: 'line'; filePath: string; hunkIndex: number; side: 'left' | 'right'; lineOffsetInHunk: number }
     | null
 
-  onSelectHunk: (args: { filePath: string; hunkIndex: number }) => void
-  onSelectLine: (args: {
+  onSelectHunk?: (args: { filePath: string; hunkIndex: number }) => void
+  onSelectLine?: (args: {
     filePath: string
     hunkIndex: number
     side: 'left' | 'right'
     lineOffsetInHunk: number
   }) => void
 
-  onCreateHunkAnnotation: (args: { filePath: string; hunkIndex: number }) => void
-  onCreateLineAnnotation: (args: {
+  onCreateHunkAnnotation?: (args: { filePath: string; hunkIndex: number }) => void
+  onCreateLineAnnotation?: (args: {
     filePath: string
     hunkIndex: number
     side: 'left' | 'right'
     lineOffsetInHunk: number
   }) => void
 
-  onEditAnnotation: (id: string) => void
-  onDeleteAnnotation: (id: string) => void
+  onEditAnnotation?: (id: string) => void
+  onDeleteAnnotation?: (id: string) => void
 
   onStageFile?: (path: string) => void
   onUnstageFile?: (path: string) => void
@@ -118,7 +118,7 @@ export function DiffViewer(props: DiffViewerProps) {
             props.selected.filePath === diff.relativePath &&
             props.selected.hunkIndex === hunkIndex
 
-          const hunkAnnCount = findAnnotationCountForHunk(props.annotations, diff.relativePath, hunkIndex)
+          const hunkAnnCount = findAnnotationCountForHunk(props.annotations || [], diff.relativePath, hunkIndex)
 
           return (
             <Box key={`${hunk.header}-${hunkIndex}`} style={{ borderBottom: '1px solid #222' }}>
@@ -130,7 +130,7 @@ export function DiffViewer(props: DiffViewerProps) {
                   borderBottom: '1px solid #2a2a2a',
                   cursor: 'pointer',
                 }}
-                onClick={() => props.onSelectHunk({ filePath: diff.relativePath, hunkIndex })}
+                onClick={() => props.onSelectHunk?.({ filePath: diff.relativePath, hunkIndex })}
               >
                 <Group justify="space-between" wrap="nowrap">
                   <Text size="xs" c="dimmed" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}>
@@ -142,18 +142,20 @@ export function DiffViewer(props: DiffViewerProps) {
                         {hunkAnnCount}
                       </Badge>
                     )}
-                    <ActionIcon
-                      variant="subtle"
-                      size="sm"
-                      color="gray"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        props.onCreateHunkAnnotation({ filePath: diff.relativePath, hunkIndex })
-                      }}
-                      aria-label="Add hunk comment"
-                    >
-                      <IconMessagePlus size={16} />
-                    </ActionIcon>
+                    {props.onCreateHunkAnnotation && (
+                      <ActionIcon
+                        variant="subtle"
+                        size="sm"
+                        color="gray"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          props.onCreateHunkAnnotation?.({ filePath: diff.relativePath, hunkIndex })
+                        }}
+                        aria-label="Add hunk comment"
+                      >
+                        <IconMessagePlus size={16} />
+                      </ActionIcon>
+                    )}
                   </Group>
                 </Group>
               </Box>
@@ -168,7 +170,7 @@ export function DiffViewer(props: DiffViewerProps) {
                     props.selected.lineOffsetInHunk === lineOffsetInHunk
 
                   const lineAnnCount = findAnnotationCountForLine(
-                    props.annotations,
+                    props.annotations || [],
                     diff.relativePath,
                     hunkIndex,
                     'right',
@@ -190,7 +192,7 @@ export function DiffViewer(props: DiffViewerProps) {
                         cursor: 'pointer',
                       }}
                       onClick={() =>
-                        props.onSelectLine({
+                        props.onSelectLine?.({
                           filePath: diff.relativePath,
                           hunkIndex,
                           side: 'right',
@@ -215,23 +217,25 @@ export function DiffViewer(props: DiffViewerProps) {
                             {lineAnnCount}
                           </Badge>
                         )}
-                        <ActionIcon
-                          variant="subtle"
-                          size="sm"
-                          color="gray"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            props.onCreateLineAnnotation({
-                              filePath: diff.relativePath,
-                              hunkIndex,
-                              side: 'right',
-                              lineOffsetInHunk,
-                            })
-                          }}
-                          aria-label="Add line comment"
-                        >
-                          <IconMessagePlus size={16} />
-                        </ActionIcon>
+                        {props.onCreateLineAnnotation && (
+                          <ActionIcon
+                            variant="subtle"
+                            size="sm"
+                            color="gray"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              props.onCreateLineAnnotation?.({
+                                filePath: diff.relativePath,
+                                hunkIndex,
+                                side: 'right',
+                                lineOffsetInHunk,
+                              })
+                            }}
+                            aria-label="Add line comment"
+                          >
+                            <IconMessagePlus size={16} />
+                          </ActionIcon>
+                        )}
                       </Group>
                     </Box>
                   )

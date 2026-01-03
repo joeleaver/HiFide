@@ -19,6 +19,7 @@ interface ProviderState {
   defaultModels: Record<string, string>
   routeHistory: RouteRecord[]
   fireworksAllowedModels: string[]
+  openrouterAllowedModels: string[]
 }
 
 export class ProviderService extends Service<ProviderState> {
@@ -35,6 +36,7 @@ export class ProviderService extends Service<ProviderState> {
           gemini: false,
           fireworks: false,
           xai: false,
+          openrouter: false,
         },
         modelsByProvider: {
           openai: [],
@@ -42,12 +44,14 @@ export class ProviderService extends Service<ProviderState> {
           gemini: [],
           fireworks: [],
           xai: [],
+          openrouter: [],
         },
         defaultModels: {},
         routeHistory: [],
         // NOTE: defaults are loaded from defaultModelSettings.json via getDefaultPricingConfig()
         // Users may still add their own Fireworks model overrides at runtime.
         fireworksAllowedModels: [],
+        openrouterAllowedModels: [],
       },
       'provider'
     )
@@ -60,13 +64,15 @@ export class ProviderService extends Service<ProviderState> {
       const oldAutoRetry = this.persistence.load<boolean>('autoRetry', false)
       const oldDefaultModels = this.persistence.load<Record<string, string>>('defaultModels', {})
       const oldFireworksModels = this.persistence.load<string[]>('fireworksAllowedModels', [])
+      const oldOpenRouterModels = this.persistence.load<string[]>('openrouterAllowedModels', [])
 
       if (
         oldModel !== 'gpt-4o' ||
         oldProvider !== 'openai' ||
         oldAutoRetry !== false ||
         Object.keys(oldDefaultModels).length > 0 ||
-        oldFireworksModels.length > 0
+        oldFireworksModels.length > 0 ||
+        oldOpenRouterModels.length > 0
       ) {
         this.state = {
           ...this.state,
@@ -76,6 +82,8 @@ export class ProviderService extends Service<ProviderState> {
           defaultModels: oldDefaultModels,
           fireworksAllowedModels:
             oldFireworksModels.length > 0 ? oldFireworksModels : this.state.fireworksAllowedModels,
+          openrouterAllowedModels:
+            oldOpenRouterModels.length > 0 ? oldOpenRouterModels : this.state.openrouterAllowedModels,
         }
         // Save to new format
         this.persistState()
@@ -85,6 +93,7 @@ export class ProviderService extends Service<ProviderState> {
         this.persistence.delete('autoRetry')
         this.persistence.delete('defaultModels')
         this.persistence.delete('fireworksAllowedModels')
+        this.persistence.delete('openrouterAllowedModels')
       }
     }
 
@@ -101,6 +110,19 @@ export class ProviderService extends Service<ProviderState> {
       }
     }
 
+    // Initialize OpenRouter allowlist from defaultModelSettings.json (single source of truth).
+    // If the user has previously customized the allowlist, the persisted state will already
+    // contain values and we should preserve them.
+    if (!this.state.openrouterAllowedModels || this.state.openrouterAllowedModels.length === 0) {
+      const orDefaults = Object.keys(getDefaultPricingConfig().openrouter || {})
+      if (orDefaults.length > 0) {
+        this.state = {
+          ...this.state,
+          openrouterAllowedModels: orDefaults,
+        }
+      }
+    }
+
     // Defensive clamp: if persisted state or some other code path populated large model lists,
     // ensure we only expose allowlisted defaults (plus Fireworks user overrides).
     this.ensureModelsByProviderAllowlist()
@@ -113,7 +135,8 @@ export class ProviderService extends Service<ProviderState> {
       updates.selectedProvider !== undefined ||
       updates.autoRetry !== undefined ||
       updates.defaultModels !== undefined ||
-      updates.fireworksAllowedModels !== undefined
+      updates.fireworksAllowedModels !== undefined ||
+      updates.openrouterAllowedModels !== undefined
     ) {
       this.persistState()
     }
@@ -131,12 +154,14 @@ export class ProviderService extends Service<ProviderState> {
       updates.modelsByProvider !== undefined ||
       updates.providerValid !== undefined ||
       updates.fireworksAllowedModels !== undefined ||
+      updates.openrouterAllowedModels !== undefined ||
       updates.defaultModels !== undefined
     ) {
       this.events.emit('provider:models:changed', {
         providerValid: this.state.providerValid,
         modelsByProvider: this.state.modelsByProvider,
         fireworksAllowedModels: this.state.fireworksAllowedModels,
+        openrouterAllowedModels: this.state.openrouterAllowedModels,
         defaultModels: this.state.defaultModels,
       })
     }
@@ -159,6 +184,9 @@ export class ProviderService extends Service<ProviderState> {
 
     const fwAllowed = new Set((this.state.fireworksAllowedModels || []).filter(Boolean))
     next.fireworks = (Array.isArray(next.fireworks) ? next.fireworks : []).filter((m) => fwAllowed.has(m.value))
+
+    const orAllowed = new Set((this.state.openrouterAllowedModels || []).filter(Boolean))
+    next.openrouter = (Array.isArray(next.openrouter) ? next.openrouter : []).filter((m) => orAllowed.has(m.value))
 
     try {
       if (JSON.stringify(this.state.modelsByProvider) !== JSON.stringify(next)) {
@@ -215,6 +243,10 @@ export class ProviderService extends Service<ProviderState> {
 
   getFireworksAllowedModels(): string[] {
     return [...this.state.fireworksAllowedModels]
+  }
+
+  getOpenRouterAllowedModels(): string[] {
+    return [...this.state.openrouterAllowedModels]
   }
 
   // Setters
@@ -274,6 +306,9 @@ export class ProviderService extends Service<ProviderState> {
     } else if (provider === 'fireworks') {
       const allowed = new Set((this.state.fireworksAllowedModels || []).filter(Boolean))
       nextMap.fireworks = (nextMap.fireworks || []).filter((m) => allowed.has(m.value))
+    } else if (provider === 'openrouter') {
+      const allowed = new Set((this.state.openrouterAllowedModels || []).filter(Boolean))
+      nextMap.openrouter = (nextMap.openrouter || []).filter((m) => allowed.has(m.value))
     }
 
     this.setState({ modelsByProvider: nextMap })
@@ -299,8 +334,8 @@ export class ProviderService extends Service<ProviderState> {
 
     // Get list of valid providers, or all providers if none are validated yet
     const providerOptions = anyValidated
-      ? (['openai', 'anthropic', 'gemini', 'fireworks', 'xai'] as const).filter((p) => validMap[p])
-      : (['openai', 'anthropic', 'gemini', 'fireworks', 'xai'] as const)
+      ? (['openai', 'anthropic', 'gemini', 'fireworks', 'xai', 'openrouter'] as const).filter((p) => validMap[p])
+      : (['openai', 'anthropic', 'gemini', 'fireworks', 'xai', 'openrouter'] as const)
 
     let provider = this.state.selectedProvider
 
@@ -375,8 +410,50 @@ export class ProviderService extends Service<ProviderState> {
     this.ensureProviderModelConsistency()
   }
 
+  // OpenRouter allowlist
+  async setOpenRouterAllowedModels(models: string[]): Promise<void> {
+    this.setState({ openrouterAllowedModels: models })
+    this.ensureModelsByProviderAllowlist()
+    await this.refreshOpenRouterModelsSafely()
+  }
+
+  async addOpenRouterModel(model: string): Promise<void> {
+    const trimmed = model.trim()
+    if (!trimmed) return
+    const current = this.state.openrouterAllowedModels
+    if (!current.includes(trimmed)) {
+      this.setState({ openrouterAllowedModels: [...current, trimmed] })
+      this.ensureModelsByProviderAllowlist()
+      await this.refreshOpenRouterModelsSafely()
+    }
+  }
+
+  async removeOpenRouterModel(model: string): Promise<void> {
+    this.setState({
+      openrouterAllowedModels: this.state.openrouterAllowedModels.filter((m) => m !== model),
+    })
+    this.ensureModelsByProviderAllowlist()
+    await this.refreshOpenRouterModelsSafely()
+  }
+
+  async loadOpenRouterRecommendedDefaults(): Promise<void> {
+    const defaults = Object.keys(getDefaultPricingConfig().openrouter || {})
+    this.setState({ openrouterAllowedModels: defaults })
+    this.ensureModelsByProviderAllowlist()
+    await this.refreshOpenRouterModelsSafely()
+  }
+
+  private async refreshOpenRouterModelsSafely(): Promise<void> {
+    try {
+      await this.refreshModels('openrouter')
+    } catch (e) {
+      console.warn('[provider] refresh openrouter failed', e)
+    }
+    this.ensureProviderModelConsistency()
+  }
+
   // Async operations
-  async refreshModels(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai'): Promise<void> {
+  async refreshModels(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter'): Promise<void> {
     try {
       // Get API key from settings service
       const settingsService = getSettingsService()
@@ -388,6 +465,7 @@ export class ProviderService extends Service<ProviderState> {
       else if (provider === 'gemini') key = (keys.gemini || '').trim()
       else if (provider === 'fireworks') key = (keys.fireworks || '').trim()
       else if (provider === 'xai') key = (keys.xai || '').trim()
+      else if (provider === 'openrouter') key = (keys.openrouter || '').trim()
 
       // Fallback to environment variables
       if (!key) {
@@ -399,6 +477,7 @@ export class ProviderService extends Service<ProviderState> {
         else if (provider === 'fireworks' && process.env.FIREWORKS_API_KEY)
           key = process.env.FIREWORKS_API_KEY.trim()
         else if (provider === 'xai' && process.env.XAI_API_KEY) key = process.env.XAI_API_KEY.trim()
+        else if (provider === 'openrouter' && process.env.OPENROUTER_API_KEY) key = process.env.OPENROUTER_API_KEY.trim()
       }
 
       if (!key) {
@@ -426,11 +505,15 @@ export class ProviderService extends Service<ProviderState> {
         list = await this.fetchFireworksModels()
       } else if (provider === 'xai') {
         list = this.filterToDefaults('xai', await this.fetchXAIModels(key))
+      } else if (provider === 'openrouter') {
+        list = await this.fetchOpenRouterModels(key)
       }
 
       // IMPORTANT: Always go through setModelsForProvider so allowlisting is enforced
       // consistently (single source of truth: defaultModelSettings.json).
       this.setModelsForProvider(provider, list)
+
+      this.setProviderValid(provider, true)
 
       // Auto-select first model as default if no default is set OR if current default is not in the list
       const currentDefault = this.state.defaultModels?.[provider]
@@ -443,6 +526,8 @@ export class ProviderService extends Service<ProviderState> {
     } catch (e) {
       console.error('[provider] Failed to refresh models for', provider, ':', e)
 
+      this.setProviderValid(provider, false)
+
       // Fallback to defaults on error
       const defaults = getDefaultPricingConfig()[provider] || {}
       const fallbackList = Object.keys(defaults).map((id) => ({ value: id, label: id }))
@@ -454,12 +539,13 @@ export class ProviderService extends Service<ProviderState> {
   }
 
   async refreshAllModels(): Promise<void> {
-    const providers: Array<'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai'> = [
+    const providers: Array<'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter'> = [
       'openai',
       'anthropic',
       'gemini',
       'fireworks',
       'xai',
+      'openrouter',
     ]
 
     for (const provider of providers) {
@@ -598,6 +684,13 @@ export class ProviderService extends Service<ProviderState> {
     // Do not apply additional heuristics here; just return the provider's list
     // (downstream will clamp via filterToDefaults / setModelsForProvider).
     const uniq = Array.from(new Set(ids))
+    return uniq.map((id) => ({ value: id, label: id }))
+  }
+
+  private async fetchOpenRouterModels(key: string): Promise<ModelOption[]> {
+    // OpenRouter uses an allowlist from settings (similar to Fireworks)
+    const orAllowed = this.state.openrouterAllowedModels || []
+    const uniq = Array.from(new Set(orAllowed.filter(Boolean)))
     return uniq.map((id) => ({ value: id, label: id }))
   }
 }

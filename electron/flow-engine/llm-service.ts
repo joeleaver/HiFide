@@ -330,6 +330,33 @@ class LLMService {
       eventHandlers.onToolEnd(ev as any)
     }
 
+    const onStepWrapped = (step: { text: string; reasoning?: string; toolCalls?: any[]; toolResults?: any[] }) => {
+      if (skipHistory) return
+
+      // 1. Add assistant message for this step (if it has text, reasoning, or tool calls)
+      if (step.text || step.reasoning || (step.toolCalls && step.toolCalls.length > 0)) {
+        const assistantMessage: any = {
+          role: 'assistant',
+          content: step.text || '',
+        }
+        if (step.reasoning) assistantMessage.reasoning = step.reasoning
+        if (step.toolCalls && step.toolCalls.length > 0) assistantMessage.tool_calls = step.toolCalls
+
+        contextManager.addMessage(assistantMessage)
+      }
+
+      // 2. Add tool result messages for this step
+      if (step.toolResults && step.toolResults.length > 0) {
+        for (const result of step.toolResults) {
+          contextManager.addMessage({
+            role: 'tool',
+            tool_call_id: result.toolCallId,
+            content: typeof result.result === 'string' ? result.result : JSON.stringify(result.result)
+          })
+        }
+      }
+    }
+
     const onTokenUsageWrapped = (usage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number; reasoningTokens?: number }) => {
       usageAccumulator.recordProviderUsage(
         usage,
@@ -560,7 +587,8 @@ class LLMService {
                 toolMeta: { requestId: context.contextId, workspaceId: (flowAPI as any)?.workspaceId }, // Include workspace for tool scoping
                 onToolStart: onToolStartWrapped,
                 onToolEnd: onToolEndWrapped,
-                onToolError: eventHandlers.onToolError
+                onToolError: eventHandlers.onToolError,
+                onStep: onStepWrapped
               }
 
               try {
@@ -721,17 +749,8 @@ class LLMService {
         console.warn('[LLM] failed to emit usage_breakdown', e)
       }
 
-      // 7. Add assistant response to context (unless skipHistory)
-      if (!skipHistory) {
-        const assistantMessage: { role: 'assistant'; content: string; reasoning?: string } = {
-          role: 'assistant',
-          content: response,
-        }
-        if (reasoning.trim()) {
-          assistantMessage.reasoning = reasoning
-        }
-        contextManager.addMessage(assistantMessage)
-      }
+      // 7. Context is now updated incrementally via onStepWrapped.
+      // We no longer need to add the final response here as it was already added in the last step.
 
       return {
         text: response,
@@ -748,7 +767,8 @@ class LLMService {
       }
 
       return {
-        text: '',
+        text: response, // Return partial text on error
+        reasoning: reasoning.trim() || undefined, // Return partial reasoning on error
         error: errorMessage
       }
     } finally {

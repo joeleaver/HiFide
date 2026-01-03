@@ -17,6 +17,7 @@ function buildSettingsSnapshot(): SettingsSnapshot {
     gemini: providerService.getProviderValid('gemini'),
     fireworks: providerService.getProviderValid('fireworks'),
     xai: providerService.getProviderValid('xai'),
+    openrouter: providerService.getProviderValid('openrouter'),
   }
 
   const modelsByProvider: Record<string, ModelOption[]> = {
@@ -25,6 +26,7 @@ function buildSettingsSnapshot(): SettingsSnapshot {
     gemini: providerService.getModelsForProvider('gemini'),
     fireworks: providerService.getModelsForProvider('fireworks'),
     xai: providerService.getModelsForProvider('xai'),
+    openrouter: providerService.getModelsForProvider('openrouter'),
   }
 
   // Always-on diagnostics to identify unexpected wide model catalogs.
@@ -39,6 +41,7 @@ function buildSettingsSnapshot(): SettingsSnapshot {
       gemini: (modelsByProvider.gemini || []).length,
       fireworks: (modelsByProvider.fireworks || []).length,
       xai: (modelsByProvider.xai || []).length,
+      openrouter: (modelsByProvider.openrouter || []).length,
     })
     console.log('[settings.get] defaultPricingConfig counts', {
       openai: defaultOpenaiIds.length,
@@ -46,6 +49,7 @@ function buildSettingsSnapshot(): SettingsSnapshot {
       gemini: Object.keys(defaults?.gemini || {}).length,
       fireworks: Object.keys(defaults?.fireworks || {}).length,
       xai: Object.keys(defaults?.xai || {}).length,
+      openrouter: Object.keys(defaults?.openrouter || {}).length,
     })
     console.log('[settings.get] defaultPricingConfig.openai keys (first 30)', defaultOpenaiIds.slice(0, 30))
     console.log('[settings.get] openai extra vs defaults (first 20)', extra.slice(0, 20))
@@ -59,6 +63,7 @@ function buildSettingsSnapshot(): SettingsSnapshot {
     gemini: providerService.getDefaultModel('gemini'),
     fireworks: providerService.getDefaultModel('fireworks'),
     xai: providerService.getDefaultModel('xai'),
+    openrouter: providerService.getDefaultModel('openrouter'),
   }
 
   return {
@@ -72,6 +77,7 @@ function buildSettingsSnapshot(): SettingsSnapshot {
     selectedModel: providerService.getSelectedModel(),
     autoRetry: providerService.getAutoRetry(),
     fireworksAllowedModels: providerService.getFireworksAllowedModels(),
+    openrouterAllowedModels: providerService.getOpenRouterAllowedModels(),
     startupMessage: appService.getStartupMessage(),
     pricingConfig: settingsService.getPricingConfig(),
     defaultPricingConfig: settingsService.getDefaultPricingConfig(),
@@ -97,6 +103,7 @@ export function createSettingsHandlers(
     if (apiKeys.gemini !== undefined) settingsService.setGeminiApiKey(apiKeys.gemini)
     if (apiKeys.fireworks !== undefined) settingsService.setFireworksApiKey(apiKeys.fireworks)
     if (apiKeys.xai !== undefined) settingsService.setXaiApiKey(apiKeys.xai)
+    if (apiKeys.openrouter !== undefined) settingsService.setOpenRouterApiKey(apiKeys.openrouter)
     
     return { ok: true }
   })
@@ -106,33 +113,10 @@ export function createSettingsHandlers(
     return { ok: true }
   })
 
-  addMethod('settings.validateKeys', async () => {    const settingsService = getSettingsService()
-    const providerService = getProviderService()
-
-    // Actually trigger validation instead of just returning cached result
-    const result = await settingsService.validateApiKeys()
-
-    // Update provider valid states based on validation result
-    if (result.ok && result.failures.length === 0) {
-      // All providers validated successfully
-      const keys = settingsService.getApiKeys()
-      providerService.setProviderValid('openai', !!keys.openai?.trim())
-      providerService.setProviderValid('anthropic', !!keys.anthropic?.trim())
-      providerService.setProviderValid('gemini', !!keys.gemini?.trim())
-      providerService.setProviderValid('fireworks', !!keys.fireworks?.trim())
-      providerService.setProviderValid('xai', !!keys.xai?.trim())
-    } else {
-      // Some providers failed - update based on failures
-      const keys = settingsService.getApiKeys()
-      const failures = result.failures || []
-      providerService.setProviderValid('openai', !!keys.openai?.trim() && !failures.some((f: string) => f.toLowerCase().includes('openai')))
-      providerService.setProviderValid('anthropic', !!keys.anthropic?.trim() && !failures.some((f: string) => f.toLowerCase().includes('anthropic')))
-      providerService.setProviderValid('gemini', !!keys.gemini?.trim() && !failures.some((f: string) => f.toLowerCase().includes('gemini')))
-      providerService.setProviderValid('fireworks', !!keys.fireworks?.trim() && !failures.some((f: string) => f.toLowerCase().includes('fireworks')))
-      providerService.setProviderValid('xai', !!keys.xai?.trim() && !failures.some((f: string) => f.toLowerCase().includes('xai')))
-    }
-
-    return result
+  addMethod('settings.validateKeys', async () => {
+    const settingsService = getSettingsService()
+    // validateApiKeys updates ProviderService providerValid map internally.
+    return await settingsService.validateApiKeys()
   })
 
   addMethod('settings.clearResults', async () => {    const settingsService = getSettingsService()
@@ -149,7 +133,10 @@ export function createSettingsHandlers(
     }
   })
 
-  addMethod('settings.resetProviderPricing', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {    const settingsService = getSettingsService()
+  addMethod(
+    'settings.resetProviderPricing',
+    async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter' }) => {
+      const settingsService = getSettingsService()
     settingsService.resetProviderPricing(provider)
     return {
       ok: true,
@@ -166,7 +153,10 @@ export function createSettingsHandlers(
   })
 
   // Provider handlers
-  addMethod('provider.refreshModels', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {    const providerService = getProviderService()
+  addMethod(
+    'provider.refreshModels',
+    async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter' }) => {
+      const providerService = getProviderService()
     await providerService.refreshModels(provider)
     const models = providerService.getModelsForProvider(provider)
     return { ok: true, models }
@@ -202,7 +192,7 @@ export function createSettingsHandlers(
     }
   })
 
-  addMethod('provider.setSelectedProvider', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' }) => {    const providerService = getProviderService()
+  addMethod('provider.setSelectedProvider', async ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter' }) => {    const providerService = getProviderService()
     providerService.setSelectedProvider(provider)
     return {
       ok: true,
@@ -223,6 +213,36 @@ export function createSettingsHandlers(
       ok: true,
       fireworksAllowedModels: providerService.getFireworksAllowedModels(),
       models: providerService.getModelsForProvider('fireworks'),
+    }
+  })
+
+  addMethod('provider.addOpenRouterModel', async ({ model }: { model: string }) => {
+    const providerService = getProviderService()
+    await providerService.addOpenRouterModel(model)
+    return {
+      ok: true,
+      openrouterAllowedModels: providerService.getOpenRouterAllowedModels(),
+      models: providerService.getModelsForProvider('openrouter'),
+    }
+  })
+
+  addMethod('provider.removeOpenRouterModel', async ({ model }: { model: string }) => {
+    const providerService = getProviderService()
+    await providerService.removeOpenRouterModel(model)
+    return {
+      ok: true,
+      openrouterAllowedModels: providerService.getOpenRouterAllowedModels(),
+      models: providerService.getModelsForProvider('openrouter'),
+    }
+  })
+
+  addMethod('provider.openrouter.loadDefaults', async () => {
+    const providerService = getProviderService()
+    await providerService.loadOpenRouterRecommendedDefaults()
+    return {
+      ok: true,
+      openrouterAllowedModels: providerService.getOpenRouterAllowedModels(),
+      models: providerService.getModelsForProvider('openrouter'),
     }
   })
 }

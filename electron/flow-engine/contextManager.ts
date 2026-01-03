@@ -1,6 +1,6 @@
 import type { MainFlowContext } from './types'
 
-export type Role = 'system' | 'user' | 'assistant'
+export type Role = 'system' | 'user' | 'assistant' | 'tool'
 
 export type MessagePart =
   | { type: 'text'; text: string }

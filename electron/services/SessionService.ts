@@ -14,7 +14,7 @@
  */
 
 import { Service } from './base/Service.js'
-import type { Session, ActivityEvent, TokenUsage } from '../store/types.js'
+import type { Session, ActivityEvent, TokenUsage, MessagePart } from '../store/types.js'
 import { loadAllSessions, sessionSaver, deleteSessionFromDisk } from '../store/utils/session-persistence.js'
 import { getProviderService } from './index.js'
 
@@ -327,8 +327,11 @@ export class SessionService extends Service<SessionState> {
     workspaceId: string
     sessionId: string
     messageHistory: Array<{
-      role: 'system' | 'user' | 'assistant'
-      content: string
+      role: 'system' | 'user' | 'assistant' | 'tool'
+      content: string | MessagePart[]
+      reasoning?: string
+      tool_calls?: any[]
+      tool_call_id?: string
       metadata?: {
         id: string
         pinned?: boolean
@@ -373,7 +376,7 @@ export class SessionService extends Service<SessionState> {
     sessionId: string
     messageHistory: Array<{
       role: 'system' | 'user' | 'assistant'
-      content: string
+      content: string | MessagePart[]
       metadata?: {
         id: string
         pinned?: boolean

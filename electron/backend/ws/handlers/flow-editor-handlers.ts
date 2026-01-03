@@ -241,11 +241,16 @@ export function createFlowEditorHandlers(
   addMethod('flowEditor.saveAsProfile', async ({ name, library, nodes, edges }: { name: string; library?: 'system' | 'user' | 'workspace'; nodes: any[]; edges: any[] }) => {
     try {
       const flowProfileService = getFlowProfileService()
+      const flowGraphService = getFlowGraphService()
       const workspaceId = await getConnectionWorkspaceId(connection)
       if (!workspaceId) {
         return { ok: false, error: 'No workspace ID' }
       }
       await flowProfileService.saveProfile({ workspaceId, name, library: library || 'user', nodes, edges })
+
+      // After saving, set this as the selected template so subsequent autosaves work
+      flowGraphService.setGraph({ workspaceId, nodes, edges, templateId: name, reason: 'flow-switch' })
+
       return { ok: true }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
@@ -255,11 +260,31 @@ export function createFlowEditorHandlers(
   addMethod('flowEditor.deleteProfile', async ({ name }: { name: string }) => {
     try {
       const flowProfileService = getFlowProfileService()
+      const flowGraphService = getFlowGraphService()
       const workspaceId = await getConnectionWorkspaceId(connection)
       if (!workspaceId) {
         return { ok: false, error: 'No workspace ID' }
       }
+
+      // Check if this profile is currently selected
+      const isSelected = flowGraphService.getSelectedTemplateId({ workspaceId }) === name
+
+      // If it was selected, clear the selection in the service FIRST.
+      // This ensures that any concurrent or pending autosave RPCs (flowEditor.setGraph)
+      // will not find a selected template and thus won't try to re-create the deleted file.
+      if (isSelected) {
+        console.log(`[flowEditor] Deleted profile "${name}" was selected. Clearing selection before deletion.`)
+        flowGraphService.setGraph({
+          workspaceId,
+          nodes: [],
+          edges: [],
+          templateId: '',
+          reason: 'flow-switch'
+        })
+      }
+
       await flowProfileService.deleteProfile({ workspaceId, name })
+
       return { ok: true }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }

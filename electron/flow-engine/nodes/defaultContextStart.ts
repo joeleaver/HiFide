@@ -11,6 +11,7 @@
  */
 
 import type { NodeFunction, NodeExecutionPolicy, MainFlowContext } from '../types'
+import { normalizeContentToText } from '../llm/payloads'
 
 // Sanitize message history to ensure exact user/assistant pairs at the tail.
 // - Drops trailing unmatched user message
@@ -23,7 +24,10 @@ function sanitizeMessageHistory(
   const sanitized = [...history]
   let removed = 0
 
-  const isBlank = (s: string | undefined | null) => !s || s.trim().length === 0
+  const isBlank = (s: string | any[] | undefined | null) => {
+    const text = typeof s === 'string' ? s : normalizeContentToText(s as any)
+    return !text || text.trim().length === 0
+  }
   const isNonSystem = (m: MainFlowContext['messageHistory'][number]) => m.role === 'user' || m.role === 'assistant'
 
   // Helper to find last non-system index

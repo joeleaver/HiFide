@@ -11,6 +11,7 @@ export interface SettingsSnapshot {
   selectedModel: string
   autoRetry: boolean
   fireworksAllowedModels: string[]
+  openrouterAllowedModels: string[]
   startupMessage: string | null
   pricingConfig: PricingConfig
   defaultPricingConfig: PricingConfig

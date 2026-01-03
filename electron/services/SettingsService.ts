@@ -31,6 +31,7 @@ export class SettingsService extends Service<SettingsState> {
           gemini: '',
           fireworks: '',
           xai: '',
+          openrouter: '',
         },
         settingsSaving: false,
         settingsSaved: false,
@@ -205,6 +206,16 @@ export class SettingsService extends Service<SettingsState> {
     })
   }
 
+  setOpenRouterApiKey(value: string): void {
+    this.setState({
+      settingsApiKeys: {
+        ...this.state.settingsApiKeys,
+        openrouter: value || '',
+      },
+      settingsSaved: false,
+    })
+  }
+
   // API Key Operations
   async loadSettingsApiKeys(): Promise<void> {
     // API keys are loaded from persistence automatically in constructor
@@ -362,6 +373,30 @@ export class SettingsService extends Service<SettingsState> {
         )
       }
 
+      if (keys.openrouter?.trim()) {
+        checks.push(
+          (async () => {
+            try {
+              const resp = await fetchWithTimeout('https://openrouter.ai/api/v1/models', {
+                method: 'GET',
+                headers: {
+                  Authorization: `Bearer ${keys.openrouter}`,
+                  'HTTP-Referer': 'https://hifide.ai/',
+                  'X-Title': 'Hifide AI',
+                },
+              })
+              if (!resp.ok) {
+                const txt = await resp.text().catch(() => '')
+                return `OpenRouter: HTTP ${resp.status}: ${txt.slice(0, 100)}`
+              }
+            } catch (e: any) {
+              return `OpenRouter: ${e?.message || String(e)}`
+            }
+            return null
+          })()
+        )
+      }
+
       const results = await Promise.all(checks)
       const failures = results.filter((r): r is string => !!r)
 
@@ -389,6 +424,7 @@ export class SettingsService extends Service<SettingsState> {
           gemini: !!keys.gemini?.trim() && !lc.some((f) => f.includes('gemini')),
           fireworks: !!keys.fireworks?.trim() && !lc.some((f) => f.includes('fireworks')),
           xai: !!keys.xai?.trim() && !lc.some((f) => f.includes('xai')),
+          openrouter: !!keys.openrouter?.trim() && !lc.some((f) => f.includes('openrouter')),
         }
         const providerService = getProviderService()
         providerService.setProvidersValid(map)
@@ -396,7 +432,7 @@ export class SettingsService extends Service<SettingsState> {
         void providerService.refreshAllModels()
 
         // Clear startup banner if at least one provider is valid
-        if (map.openai || map.anthropic || map.gemini || map.fireworks || map.xai) {
+        if (map.openai || map.anthropic || map.gemini || map.fireworks || map.xai || map.openrouter) {
           const appService = getAppService()
           if (appService?.setStartupMessage) {
             appService.setStartupMessage(null)
@@ -448,7 +484,7 @@ export class SettingsService extends Service<SettingsState> {
     this.setState({ pricingConfig: getDefaultPricingConfig() })
   }
 
-  resetProviderPricing(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai'): void {
+  resetProviderPricing(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter'): void {
     const DEFAULT_PRICING = getDefaultPricingConfig()
     const newConfig = {
       ...this.state.pricingConfig,

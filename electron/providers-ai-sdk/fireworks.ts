@@ -52,7 +52,7 @@ function buildAiSdkTools(tools: AgentTool[] | undefined, meta?: { requestId?: st
 export const FireworksAiSdkProvider: ProviderAdapter = {
   id: 'fireworks',
 
-  async agentStream({ apiKey, model, system, messages, temperature, tools, responseSchema: _responseSchema, emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, system, messages, temperature, tools, responseSchema: _responseSchema, emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError, onStep }): Promise<StreamHandle> {
     const fw = createFireworks({ apiKey })
     const llm = fw(model)
     // Wrap model to extract <think> reasoning into separate reasoning chunks
@@ -260,10 +260,18 @@ export const FireworksAiSdkProvider: ProviderAdapter = {
         },
         onStepFinish(step: any) {
           try {
-            if (DEBUG) {
-              const calls = Array.isArray(step?.toolCalls) ? step.toolCalls.length : 0
-              console.log('[ai-sdk:fireworks] onStepFinish', { calls, finishReason: step?.finishReason, usage: step?.usage })
+            const calls = Array.isArray(step?.toolCalls) ? step.toolCalls.length : 0
+            if (DEBUG) console.log('[ai-sdk:fireworks] onStepFinish', { calls, finishReason: step?.finishReason, usage: step?.usage })
+
+            if (onStep) {
+              onStep({
+                text: step.text,
+                reasoning: step.reasoning,
+                toolCalls: step.toolCalls,
+                toolResults: step.toolResults
+              })
             }
+
             if (step?.usage && onTokenUsage) {
               const u: any = step.usage
               const usage = {

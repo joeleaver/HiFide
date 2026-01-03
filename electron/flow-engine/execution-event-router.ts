@@ -30,11 +30,12 @@ export function createExecutionEventRouter(options: ExecutionEventRouterOptions)
       }
     }
 
-    if (event.type === 'tool_start' || event.type === 'tool_end' || event.type === 'tool_error') {
+    if (event.type === 'tool_start' || event.type === 'tool_end' || event.type === 'tool_error' || event.type === 'badge_add' || event.type === 'badge_update') {
       const tool = event.tool
       const name = tool?.toolName
       const callId = tool?.toolCallId
-      console.log(`[FlowAPI] Tool event ${event.type} node=${event.nodeId} exec=${event.executionId} name=${name} callId=${callId} provider=${event.provider} model=${event.model}`)
+      const badgeId = event.badge?.badgeId
+      console.log(`[FlowAPI] Event ${event.type} node=${event.nodeId} exec=${event.executionId} name=${name} callId=${callId} badgeId=${badgeId} provider=${event.provider} model=${event.model}`)
       console.log(util.inspect(event, { depth: null, colors: false, maxArrayLength: 200 }))
     }
 
@@ -107,13 +108,43 @@ export function createExecutionEventRouter(options: ExecutionEventRouterOptions)
 
       case 'error':
         if (event.error) {
-          try { emitFlowEvent(requestId, { type: 'error', nodeId: event.nodeId, error: event.error, sessionId }) } catch {}
+          try { emitFlowEvent(requestId, { type: 'error', nodeId: event.nodeId, executionId: event.executionId, error: event.error, sessionId }) } catch {}
         }
         break
 
       case 'rate_limit_wait':
         if (event.rateLimitWait && process.env.HF_FLOW_DEBUG === '1') {
           console.log('[ExecutionEvent] rate_limit_wait', event.rateLimitWait)
+        }
+        break
+
+      case 'badge_add':
+        if (event.badge) {
+          try {
+            emitFlowEvent(requestId, {
+              type: 'badgeAdd',
+              nodeId: event.nodeId,
+              executionId: event.executionId,
+              badgeId: event.badge.badgeId,
+              badge: event.badge.data,
+              sessionId
+            })
+          } catch {}
+        }
+        break
+
+      case 'badge_update':
+        if (event.badge) {
+          try {
+            emitFlowEvent(requestId, {
+              type: 'badgeUpdate',
+              nodeId: event.nodeId,
+              executionId: event.executionId,
+              badgeId: event.badge.badgeId,
+              updates: event.badge.data,
+              sessionId
+            })
+          } catch {}
         }
         break
 

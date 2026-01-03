@@ -305,7 +305,7 @@ export default function KnowledgeBaseView() {
           <TagsInput placeholder="Filter tags" value={tags} onChange={setTags} mt="sm" />
         </div>
         <Divider />
-        <ScrollArea style={{ flex: 1 }}>
+        <ScrollArea style={{ flex: 1 }} offsetScrollbars>
           <Stack gap={0}>
             {list.map((it: any) => (
               <div key={it.id} onClick={() => setSelectedId(it.id)} style={{ padding: 8, cursor: 'pointer', backgroundColor: selectedId === it.id ? '#2a2a2a' : 'transparent', borderBottom: '1px solid #2a2a2a' }}>
@@ -458,7 +458,7 @@ export default function KnowledgeBaseView() {
               </Group>
             </div>
             <Divider />
-            <ScrollArea style={{ maxHeight: 420 }}>
+            <ScrollArea style={{ maxHeight: 420 }} offsetScrollbars>
               <Stack gap={0}>
                 {filtered.map((f: string, idx: number) => (
                   <div
@@ -490,7 +490,7 @@ export default function KnowledgeBaseView() {
         </Modal>
 
             </Group>
-            <ScrollArea style={{ flex: 1 }}>
+            <ScrollArea style={{ flex: 1 }} offsetScrollbars>
               <Stack gap={6}>
                 {editFiles.map((f, i) => (
                   <Group key={f + i} gap={6} justify="space-between" style={{ border: '1px solid #333', borderRadius: 6, padding: 6 }}>

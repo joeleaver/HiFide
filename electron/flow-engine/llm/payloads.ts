@@ -9,7 +9,8 @@ export function estimateTokensFromText(value: string | undefined | null): number
   return Math.ceil(asciiWeightedLen / 4)
 }
 
-function normalizeContentToText(content: string | MessagePart[]): string {
+export function normalizeContentToText(content: string | MessagePart[]): string {
+  if (!content) return ''
   if (typeof content === 'string') return content
   return content
     .filter((p) => p.type === 'text')
@@ -134,7 +135,21 @@ export function formatMessagesForOpenAI(
       }
     }
 
-    messages.push({ role: msg.role, content })
+    const out: any = { role: msg.role, content }
+    if (msg.role === 'assistant' && msg.tool_calls) {
+      out.tool_calls = msg.tool_calls.map((tc: any) => ({
+        id: tc.id || tc.toolCallId,
+        type: 'function',
+        function: {
+          name: tc.name || tc.toolName,
+          arguments: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args || tc.toolArgs || {})
+        }
+      }))
+    }
+    if (msg.role === 'tool') {
+      out.tool_call_id = msg.tool_call_id
+    }
+    messages.push(out)
   }
   return messages
 }
@@ -159,10 +174,23 @@ export function formatMessagesForAnthropic(
 
   const messages = history
     .filter((msg) => msg.role !== 'system')
-    .map((entry, i) => {
+    .map((entry) => {
       // Adjusted index for history after system filter
       const originalIndex = history.indexOf(entry)
       const isLastUserMessage = originalIndex === actualLastUserIndex
+
+      if (entry.role === 'tool') {
+        return {
+          role: 'user' as const,
+          content: [
+            {
+              type: 'tool_result' as const,
+              tool_use_id: entry.tool_call_id,
+              content: typeof entry.content === 'string' ? entry.content : JSON.stringify(entry.content),
+            },
+          ],
+        }
+      }
 
       let content: any
       if (typeof entry.content === 'string') {
@@ -185,9 +213,24 @@ export function formatMessagesForAnthropic(
             return null
           })
           .filter((p) => p !== null)
-        
+
         content = parts.length > 0 ? parts : '[Image]'
       }
+
+      if (entry.role === 'assistant' && entry.tool_calls) {
+        if (!Array.isArray(content)) {
+          content = content ? [{ type: 'text', text: content }] : []
+        }
+        for (const tc of entry.tool_calls) {
+          content.push({
+            type: 'tool_use',
+            id: tc.id || tc.toolCallId,
+            name: tc.name || tc.toolName,
+            input: tc.args || tc.toolArgs || {},
+          })
+        }
+      }
+
       return { role: entry.role as 'user' | 'assistant', content }
     })
 
@@ -214,15 +257,43 @@ export function formatMessagesForGemini(
       const isLastUserMessage = originalIndex === actualLastUserIndex
       const parts: Array<any> = []
 
+      if (msg.role === 'tool') {
+        return {
+          role: 'user',
+          parts: [
+            {
+              tool_response: {
+                name: 'unused', // Gemini uses call_id to match
+                content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+              },
+            },
+          ],
+        }
+      }
+
       if (msg.role === 'assistant') {
         const trimmedReasoning = msg.reasoning ? String(msg.reasoning).trim() : ''
         if (trimmedReasoning) {
           parts.push({ text: `<think>${trimmedReasoning}</think>` })
         }
+
+        if (msg.tool_calls) {
+          for (const tc of msg.tool_calls) {
+            parts.push({
+              tool_call: {
+                function_call: {
+                  name: tc.name || tc.toolName,
+                  args: tc.args || tc.toolArgs || {},
+                },
+                call_id: tc.id || tc.toolCallId,
+              },
+            })
+          }
+        }
       }
 
       if (typeof msg.content === 'string') {
-        parts.push({ text: msg.content })
+        if (msg.content) parts.push({ text: msg.content })
       } else {
         for (const part of msg.content) {
           if (part.type === 'text') {
@@ -236,7 +307,7 @@ export function formatMessagesForGemini(
             })
           }
         }
-        if (parts.length === 0) {
+        if (parts.length === 0 && (!msg.tool_calls || msg.tool_calls.length === 0)) {
           parts.push({ text: '[Image]' })
         }
       }

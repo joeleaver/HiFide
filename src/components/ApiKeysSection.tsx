@@ -3,7 +3,7 @@ import { Button, Divider, Group, Stack } from '@mantine/core'
 import { ApiKeysForm } from './ApiKeysForm'
 import { useApiKeyManagement } from '../hooks/useApiKeyManagement'
 
-const PROVIDERS = ['openai', 'anthropic', 'gemini', 'fireworks', 'xai'] as const
+const PROVIDERS = ['openai', 'anthropic', 'gemini', 'fireworks', 'xai', 'openrouter'] as const
 
 type ProviderKey = (typeof PROVIDERS)[number]
 

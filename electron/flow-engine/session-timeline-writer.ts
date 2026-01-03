@@ -39,11 +39,12 @@ export class SessionTimelineWriter {
       text?: string
       reasoning?: string
       toolCalls?: any[]
+      error?: string
       boxId?: string
     }
   ): string {
-    const { text, reasoning, toolCalls = [], boxId: existingBoxId } = data
-    if (!text && !reasoning && toolCalls.length === 0) return existingBoxId || ''
+    const { text, reasoning, toolCalls = [], error, boxId: existingBoxId } = data
+    if (!text && !reasoning && toolCalls.length === 0 && !error) return existingBoxId || ''
 
     const ws = this.getWorkspaceId()
     if (!ws) return existingBoxId || ''
@@ -72,6 +73,7 @@ export class SessionTimelineWriter {
       // Initial content
       if (reasoning) newBox.content.push({ type: 'reasoning', text: reasoning })
       if (text) newBox.content.push({ type: 'text', text })
+      if (error) newBox.content.push({ type: 'error', text: error })
       for (const tool of toolCalls) {
         newBox.content.push({ type: 'badge', badge: tool })
       }
@@ -86,6 +88,7 @@ export class SessionTimelineWriter {
 
         if (reasoning) content.push({ type: 'reasoning', text: reasoning })
         if (text) content.push({ type: 'text', text })
+        if (error) content.push({ type: 'error', text: error })
 
         for (const tool of toolCalls) {
           // Update or Append Badge
@@ -110,7 +113,7 @@ export class SessionTimelineWriter {
     this.sessionService.saveSessionFor({ workspaceId: ws, sessionId: this.sessionId }, false)
 
     // 4. Broadcast Deltas
-    this.broadcastDeltas(ws, nodeId, executionId, text, reasoning, toolCalls)
+    this.broadcastDeltas(ws, nodeId, executionId, text, reasoning, toolCalls, error)
 
     return boxId
   }
@@ -277,10 +280,11 @@ export class SessionTimelineWriter {
     executionId: string | undefined,
     text: string | undefined, 
     reasoning: string | undefined, 
-    toolCalls: any[]
+    toolCalls: any[],
+    error?: string
   ) {
-    // Text/Reasoning Delta
-    if (text || reasoning) {
+    // Text/Reasoning/Error Delta
+    if (text || reasoning || error) {
       broadcastWorkspaceNotification(ws, 'session.timeline.delta', {
         op: 'appendToBox',
         nodeId,
@@ -288,6 +292,7 @@ export class SessionTimelineWriter {
         append: {
           text: text || undefined,
           reasoning: reasoning || undefined,
+          error: error || undefined,
         },
       })
     }

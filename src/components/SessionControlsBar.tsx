@@ -33,6 +33,7 @@ export default function SessionControlsBar() {
       { id: 'anthropic', name: 'Anthropic' },
       { id: 'gemini', name: 'Gemini' },
       { id: 'fireworks', name: 'Fireworks' },
+      { id: 'openrouter', name: 'OpenRouter' },
       { id: 'xai', name: 'xAI' },
     ] as const
     const anyValidated = Object.values(providerValid || {}).some(Boolean)

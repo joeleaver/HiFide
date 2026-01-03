@@ -8,7 +8,7 @@ import { useSettingsSnapshot } from './hooks/useSettingsSnapshot'
 import type { ModelOption } from '../electron/store/types'
 import { useSettingsPricingDraft } from './store/settingsPricingDraft'
 
-type ProviderName = 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai'
+type ProviderName = 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter'
 
 
 type FireworksUpdatePayload = {
@@ -45,6 +45,7 @@ export default function SettingsPane() {
   }, [persistPricingDraft, mergeSnapshot])
 
   const [newFwModel, setNewFwModel] = useState('')
+  const [newOrModel, setNewOrModel] = useState('')
 
 
   if (!snapshot) {
@@ -66,6 +67,8 @@ export default function SettingsPane() {
   const startupMessage = snapshot.startupMessage
   const fireworksAllowed = snapshot.fireworksAllowedModels || []
   const fireworksOptions = modelsByProvider.fireworks || []
+  const openrouterAllowed = snapshot.openrouterAllowedModels || []
+  const openrouterOptions = modelsByProvider.openrouter || []
   const xaiOptions = modelsByProvider.xai || []
 
 
@@ -108,6 +111,20 @@ export default function SettingsPane() {
       modelsByProvider: {
         ...prev.modelsByProvider,
         fireworks: Array.isArray(payload.models) ? payload.models : prev.modelsByProvider.fireworks,
+      },
+    }))
+  }
+
+  const applyOpenRouterState = (payload?: FireworksUpdatePayload | null) => {
+    if (!payload) return
+    mergeSnapshot((prev) => ({
+      ...prev,
+      openrouterAllowedModels: Array.isArray(payload.fireworksAllowedModels)
+        ? payload.fireworksAllowedModels
+        : prev.openrouterAllowedModels,
+      modelsByProvider: {
+        ...prev.modelsByProvider,
+        openrouter: Array.isArray(payload.models) ? payload.models : prev.modelsByProvider.openrouter,
       },
     }))
   }
@@ -159,6 +176,61 @@ export default function SettingsPane() {
           modelsByProvider: {
             ...prev.modelsByProvider,
             fireworks: Array.isArray(res.models) ? res.models : prev.modelsByProvider.fireworks,
+          },
+        }))
+      }
+    } catch (err) {
+      notifications.show({ color: 'red', title: 'Error', message: String(err) })
+    }
+  }
+
+  const addOpenRouterModel = async () => {
+    const value = newOrModel.trim()
+    if (!value) return
+    const client = getBackendClient()
+    if (!client) return
+    try {
+      const res = await client.rpc<FireworksRpcResponse>('provider.addOpenRouterModel', { model: value })
+      applyOpenRouterState(res)
+      setNewOrModel('')
+    } catch (err) {
+      notifications.show({ color: 'red', title: 'Error', message: String(err) })
+    }
+  }
+
+  const removeOpenRouterModel = async (model: string) => {
+    const client = getBackendClient()
+    if (!client) return
+    try {
+      const res = await client.rpc<FireworksRpcResponse>('provider.removeOpenRouterModel', { model })
+      applyOpenRouterState(res)
+    } catch (err) {
+      notifications.show({ color: 'red', title: 'Error', message: String(err) })
+    }
+  }
+
+  const loadOpenRouterDefaults = async () => {
+    const client = getBackendClient()
+    if (!client) return
+    try {
+      const res = await client.rpc<FireworksRpcResponse>('provider.openrouter.loadDefaults', {})
+      applyOpenRouterState(res)
+    } catch (err) {
+      notifications.show({ color: 'red', title: 'Error', message: String(err) })
+    }
+  }
+
+  const refreshOpenRouterModels = async () => {
+    const client = getBackendClient()
+    if (!client) return
+    try {
+      const res = await client.rpc<RefreshModelsResponse>('provider.refreshModels', { provider: 'openrouter' })
+      if (res?.ok) {
+        mergeSnapshot((prev) => ({
+          ...prev,
+          modelsByProvider: {
+            ...prev.modelsByProvider,
+            openrouter: Array.isArray(res.models) ? res.models : prev.modelsByProvider.openrouter,
           },
         }))
       }
@@ -233,6 +305,46 @@ export default function SettingsPane() {
               </Stack>
             </Stack>
           )}
+          {providerState.openrouter && (
+            <Stack gap="xs">
+              <Title order={4}>OpenRouter Models</Title>
+              <Text size="sm" c="dimmed">Select which OpenRouter models to expose in the app. Start with recommended defaults or add specific model IDs.</Text>
+
+              <Group align="flex-end">
+                <TextInput
+                  style={{ flex: 1 }}
+                  label="Add model by ID"
+                  placeholder="e.g., openrouter/meta-llama/llama-3.1-8b-instruct:free"
+                  value={newOrModel}
+                  onChange={(e) => setNewOrModel(e.currentTarget.value)}
+                />
+                <Button onClick={addOpenRouterModel} disabled={!newOrModel.trim()}>
+                  Add
+                </Button>
+                <Button variant="light" onClick={loadOpenRouterDefaults}>
+                  Load Recommended Defaults
+                </Button>
+                <Button variant="light" onClick={refreshOpenRouterModels}>
+                  Refresh
+                </Button>
+              </Group>
+
+              <Stack gap={4}>
+                {openrouterAllowed.length === 0 ? (
+                  <Text size="xs" c="dimmed">No allowed models yet.</Text>
+                ) : (
+                  openrouterAllowed.map((m) => (
+                    <Group key={m} justify="space-between" wrap="nowrap">
+                      <Text size="xs" c="#ccc" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</Text>
+                      <Button size="xs" variant="light" color="red" onClick={() => removeOpenRouterModel(m)}>
+                        Remove
+                      </Button>
+                    </Group>
+                  ))
+                )}
+              </Stack>
+            </Stack>
+          )}
         </ApiKeysSection>
       </Stack>
 
@@ -277,6 +389,16 @@ export default function SettingsPane() {
               disabled={fireworksOptions.length === 0}
               disabledMessage="Populate allowlist or refresh models"
               onChange={(value) => updateDefaultModel('fireworks', value)}
+            />
+          )}
+          {providerState.openrouter && (
+            <ProviderSelect
+              label="OpenRouter Default Model"
+              options={openrouterOptions}
+              value={defaultModels.openrouter || null}
+              disabled={openrouterOptions.length === 0}
+              disabledMessage="Populate allowlist or refresh models"
+              onChange={(value) => updateDefaultModel('openrouter', value)}
             />
           )}
           <ProviderSelect

@@ -9,6 +9,7 @@
  */
 
 import type { NodeFunction, NodeExecutionPolicy, MainFlowContext } from '../types'
+import { normalizeContentToText } from '../llm/payloads'
 import { llmService } from '../llm-service'
 import { applyMemoryCandidates } from '../../store/utils/memories'
 
@@ -194,7 +195,10 @@ function buildTranscript(ctx: MainFlowContext, lookbackPairs: number): string {
     const a = history[i]
     const u = history[i - 1]
     if (a?.role === 'assistant' && u?.role === 'user') {
-      pairs.push({ user: u.content, assistant: a.content })
+      pairs.push({
+        user: normalizeContentToText(u.content),
+        assistant: normalizeContentToText(a.content),
+      })
       i -= 2
       continue
     }

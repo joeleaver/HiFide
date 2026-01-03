@@ -189,7 +189,7 @@ export default function MemoriesView() {
           <Text size="sm" c="dimmed">
             {loading ? 'Loading…' : `${items.length} memories`}
           </Text>
-          <ScrollArea style={{ flex: 1 }}>
+          <ScrollArea style={{ flex: 1 }} offsetScrollbars>
             <Stack gap={6}>
               {items.map((m) => (
                 <Button
@@ -213,11 +213,12 @@ export default function MemoriesView() {
           </ScrollArea>
         </Stack>
 
-        <Stack style={{ flex: 1, minWidth: 0 }} gap="sm">
-          {!draft ? (
-            <Text c="dimmed">Select a memory to edit</Text>
-          ) : (
-            <>
+        <ScrollArea style={{ flex: 1, minWidth: 0 }} offsetScrollbars>
+          <Stack gap="sm" style={{ paddingRight: 12 }}>
+            {!draft ? (
+              <Text c="dimmed">Select a memory to edit</Text>
+            ) : (
+              <>
               <Group justify="space-between">
                 <Group gap="xs">
                   <Badge variant="light">{draft.type}</Badge>
@@ -292,7 +293,8 @@ export default function MemoriesView() {
               </Group>
             </>
           )}
-        </Stack>
+          </Stack>
+        </ScrollArea>
       </Group>
 
       {loading && (

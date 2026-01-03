@@ -191,7 +191,7 @@ function SessionPane() {
 
         // Merge consecutive text items to fix markdown rendering
         // (debounced flushing can split markdown syntax across multiple text items)
-        const mergedContent: Array<{ type: 'text'; text: string } | { type: 'reasoning'; text: string } | { type: 'badge'; badge: any }> = []
+        const mergedContent: Array<{ type: 'text'; text: string } | { type: 'reasoning'; text: string } | { type: 'badge'; badge: any } | { type: 'error'; text: string }> = []
         let textBuffer = ''
         let reasoningBuffer = ''
 
@@ -264,6 +264,15 @@ function SessionPane() {
                 if (contentItem.type === 'badge') {
                   const badge = contentItem.badge
                   return <Badge key={`badge-${badge.id}`} badge={badge} />
+                }
+                if (contentItem.type === 'error') {
+                  return (
+                    <div key={idx} style={{ padding: '8px 12px', backgroundColor: 'rgba(255, 0, 0, 0.05)', borderLeft: '3px solid #ff4d4f', borderRadius: '4px' }}>
+                      <Text size="xs" c="red.4" style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                        {contentItem.text}
+                      </Text>
+                    </div>
+                  )
                 }
                 return null
               })}

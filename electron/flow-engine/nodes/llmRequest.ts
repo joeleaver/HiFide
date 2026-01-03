@@ -7,6 +7,7 @@
 
 import type { NodeFunction, NodeExecutionPolicy, MainFlowContext, MessagePart } from '../types'
 import { llmService } from '../llm-service'
+import { normalizeContentToText } from '../llm/payloads'
 import { markMemoriesUsed, retrieveWorkspaceMemoriesForQuery } from '../../store/utils/memories'
 
 const DEFAULT_PROVIDER = 'openai'
@@ -39,7 +40,7 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
   let injectedSystemInstructions: string | undefined
   if (flow?.workspaceId) {
     try {
-      const memories = await retrieveWorkspaceMemoriesForQuery(message, {
+      const memories = await retrieveWorkspaceMemoriesForQuery(normalizeContentToText(message), {
         workspaceId: flow.workspaceId,
         maxItems: 8,
         maxChars: 2400,

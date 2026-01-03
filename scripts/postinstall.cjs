@@ -2,7 +2,6 @@ const { spawnSync } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
 
-
 function tryRun(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, {
     stdio: 'inherit',
@@ -12,39 +11,45 @@ function tryRun(cmd, args, opts = {}) {
   return r.status === 0
 }
 
-
 function buildEnv() {
-  const env = { ...process.env, ELECTRON_BUILDER_DISABLE_NPM_REBUILD: 'true' }
+  const env = { ...process.env }
+  // Prevent electron-builder from being confused by pnpm's npm_execpath on Windows
   if (process.platform === 'win32') {
-    if (env.npm_execpath && /pnpm[\\/]bin[\\/]pnpm\.cjs$/i.test(env.npm_execpath)) {
-      delete env.npm_execpath
-    }
-    if (env.npm_config_user_agent && /pnpm/i.test(env.npm_config_user_agent)) {
-      env.npm_config_user_agent = 'npm'
+    // If we're using pnpm, ensure we point to the .cmd wrapper, not the .cjs file
+    // which Windows can't execute directly.
+    try {
+      const pnpmCmd = spawnSync('where.exe', ['pnpm'], { encoding: 'utf8' })
+        .stdout.split('\r\n')
+        .find(l => l.trim().endsWith('.cmd'))
+      if (pnpmCmd) {
+        env.npm_execpath = pnpmCmd.trim()
+      }
+    } catch {
+      // Fallback or ignore if where.exe fails
     }
   }
   return env
 }
 
 try {
-  // Ensure native deps match the local Electron version on ALL platforms (best-effort)
-  const cliJs = path.join('node_modules', 'electron-builder', 'out', 'cli', 'cli.js')
+  console.log('[postinstall] Running electron-builder install-app-deps...')
   const env = buildEnv()
-  if (process.platform !== 'win32') {
-    const ok = fs.existsSync(cliJs)
-      ? tryRun(process.execPath, [cliJs, 'install-app-deps'], { env })
-      : tryRun('electron-builder', ['install-app-deps'], { shell: process.platform === 'win32', env })
-    if (!ok) {
-      console.warn('[postinstall] electron-builder install-app-deps failed; continuing. PTY/native deps may need manual rebuild.')
-    }
+  // Try to find electron-builder in node_modules first for speed/reliability
+  const cliJs = path.join('node_modules', 'electron-builder', 'out', 'cli', 'cli.js')
+  
+  let ok = false
+  if (fs.existsSync(cliJs)) {
+    ok = tryRun(process.execPath, [cliJs, 'install-app-deps'], { env })
   } else {
-    console.warn('[postinstall] Skipping electron-builder install-app-deps on Windows; native deps are rebuilt during packaging and via scripts/rebuild if needed.')
+    ok = tryRun('npx', ['electron-builder', 'install-app-deps'], { shell: true, env })
   }
 
+  if (!ok) {
+    console.warn('[postinstall] electron-builder install-app-deps failed. PTY/native deps may need manual rebuild.')
+  }
 
   process.exit(0)
 } catch (e) {
   console.error('[postinstall] Failed:', e && e.message)
   process.exit(1)
 }
-

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { getBackendClient } from '@/lib/backend/bootstrap'
+import { useFlowEditorLocal } from './flowEditorLocal'
 import { shouldHydrateFlowGraphChange, type FlowGraphChangedEventPayload } from '../../shared/flowGraph'
 
 interface FlowEditorStore {
@@ -15,10 +16,10 @@ interface FlowEditorStore {
 
 
   // All flow editor actions - components should call these instead of RPC
-  loadTemplate: (templateId: string) => Promise<{ ok: boolean }>
-  saveAsProfile: (params: { name: string; library: string; nodes: any[]; edges: any[] }) => Promise<{ ok: boolean }>
-  deleteProfile: (name: string) => Promise<{ ok: boolean }>
-  createNewFlowNamed: (name: string) => Promise<{ ok: boolean }>
+  loadTemplate: (templateId: string) => Promise<{ ok: boolean; error?: string }>
+  saveAsProfile: (params: { name: string; library: string; nodes: any[]; edges: any[] }) => Promise<{ ok: boolean; error?: string }>
+  deleteProfile: (name: string) => Promise<{ ok: boolean; error?: string }>
+  createNewFlowNamed: (name: string) => Promise<{ ok: boolean; error?: string }>
   setGraph: (params: { nodes: any[]; edges: any[] }) => Promise<void>
 }
 
@@ -58,6 +59,9 @@ export const useFlowEditor = create<FlowEditorStore>((set, get) => ({
     const client = getBackendClient()
     if (!client) return { ok: false }
 
+    // Cancel any pending auto-saves for the current flow before switching
+    useFlowEditorLocal.getState().cancelSave()
+
     try {
       const res: any = await client.rpc('flowEditor.loadTemplate', { templateId })
       if (res?.ok) {
@@ -77,10 +81,13 @@ export const useFlowEditor = create<FlowEditorStore>((set, get) => ({
     const client = getBackendClient()
     if (!client) return { ok: false }
 
+    // Cancel pending auto-save since we are doing a manual save now
+    useFlowEditorLocal.getState().cancelSave()
+
     try {
       // Sync graph to backend first
       await client.rpc('flowEditor.setGraph', { nodes, edges })
-      const res: any = await client.rpc('flowEditor.saveAsProfile', { name, library })
+      const res: any = await client.rpc('flowEditor.saveAsProfile', { name, library, nodes, edges })
       if (res?.ok) {
         // Refresh templates
         await get().hydrateTemplates()
@@ -96,17 +103,58 @@ export const useFlowEditor = create<FlowEditorStore>((set, get) => ({
     const client = getBackendClient()
     if (!client) return { ok: false }
 
+    // Crucial: Cancel any pending auto-saves before deleting.
+    // This prevents a debounced save from re-creating the profile file
+    // after we've deleted it.
+    useFlowEditorLocal.getState().cancelSave()
+
+    const oldTemplates = get().availableTemplates
+    const deletedTemplate = oldTemplates.find(t => t.id === name)
+    const wasSelected = get().selectedTemplate === name
+
     try {
       const res: any = await client.rpc('flowEditor.deleteProfile', { name })
       if (res?.ok) {
-        // Refresh templates and graph
+        // Refresh templates list
         await get().hydrateTemplates()
 
+        // If it was selected, we need to switch to a new one
+        if (wasSelected) {
+          // Get the FRESH list after hydration to ensure we don't pick the deleted one
+          const newTemplates = get().availableTemplates.filter(t => t.id !== name)
+          
+          if (newTemplates.length > 0) {
+            // Find successor in the same library if possible
+            const sameLibrary = newTemplates.filter(t => t.library === deletedTemplate?.library)
+            let successor = null
 
+            if (sameLibrary.length > 0) {
+              // Try to find the one at the same relative position
+              const oldInLibrary = oldTemplates.filter(t => t.library === deletedTemplate?.library)
+              const oldIdxInLibrary = oldInLibrary.findIndex(t => t.id === name)
+              const nextIdx = Math.min(oldIdxInLibrary, sameLibrary.length - 1)
+              successor = sameLibrary[nextIdx]
+            } else {
+              // Fallback to system default or first available
+              successor = newTemplates.find(t => t.library === 'system') || newTemplates[0]
+            }
+
+            if (successor) {
+              console.log(`[flowEditor] Switching to successor after delete: ${successor.id}`)
+              // Important: We call the RPC directly or use a version of loadTemplate 
+              // that doesn't trigger secondary hydrations if possible, but for now 
+              // calling the existing action is safest.
+              await get().loadTemplate(successor.id)
+            }
+          } else {
+            // No templates left, clear selection
+            set({ selectedTemplate: '' })
+          }
+        }
       }
       return res
-    } catch {
-      return { ok: false }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
     }
   },
 
@@ -114,6 +162,9 @@ export const useFlowEditor = create<FlowEditorStore>((set, get) => ({
   createNewFlowNamed: async (name: string) => {
     const client = getBackendClient()
     if (!client) return { ok: false }
+
+    // Cancel any pending auto-saves for the current flow
+    useFlowEditorLocal.getState().cancelSave()
 
     try {
       const res: any = await client.rpc('flowEditor.createNewFlowNamed', { name })

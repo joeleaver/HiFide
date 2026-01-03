@@ -116,7 +116,7 @@ function contentsToMessages(contents: Array<{ role: string; parts: Array<any> }>
 export const GeminiAiSdkProvider: ProviderAdapter = {
   id: 'gemini',
 
-  async agentStream({ apiKey, model, systemInstruction, contents, temperature, includeThoughts, thinkingBudget, tools, responseSchema: _responseSchema, emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, systemInstruction, contents, temperature, includeThoughts, thinkingBudget, tools, responseSchema: _responseSchema, emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError, onStep }): Promise<StreamHandle> {
     const google = createGoogleGenerativeAI({ apiKey })
     const llm = google(model)
 
@@ -255,6 +255,16 @@ export const GeminiAiSdkProvider: ProviderAdapter = {
               const calls = Array.isArray(step?.toolCalls) ? step.toolCalls.length : 0
               console.log('[ai-sdk:gemini] onStepFinish', { calls, finishReason: step?.finishReason, usage: step?.usage })
             }
+
+            if (onStep) {
+              onStep({
+                text: step.text,
+                reasoning: step.reasoning,
+                toolCalls: step.toolCalls,
+                toolResults: step.toolResults
+              })
+            }
+
             if (step?.usage && onTokenUsage) {
               const u: any = step.usage
               // Gemini 2.0 Flash Thinking: reasoning tokens are part of output tokens in some views,

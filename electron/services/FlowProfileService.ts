@@ -204,10 +204,11 @@ export class FlowProfileService extends Service<FlowProfileState> {
     console.log('[FlowProfile] Deleting profile:', { workspaceId, name })
 
     try {
-      // Try workspace library first, then user library
-      try {
-        await deleteWorkspaceFlowProfile(name, workspaceId)
-      } catch {
+      // Try workspace library first
+      const wsResult = await deleteWorkspaceFlowProfile(name, workspaceId)
+      
+      // If not in workspace, or deletion failed for non-existence, try user library
+      if (!wsResult.success) {
         await deleteFlowProfile(name)
       }
 

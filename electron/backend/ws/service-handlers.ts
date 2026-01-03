@@ -237,7 +237,7 @@ export const kanbanHandlers = {
 
 // Provider handlers
 export const providerHandlers = {
-  async refreshModels(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai') {
+  async refreshModels(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter') {
     const providerService = getProviderService()
     await providerService.refreshModels(provider)
     const models = providerService.getModelsForProvider(provider)
@@ -276,7 +276,46 @@ export const providerHandlers = {
     }
   },
 
-  async setSelectedProvider(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai') {
+  async refreshOpenRouterModels() {
+    const providerService = getProviderService()
+    await providerService.refreshModels('openrouter')
+    return {
+      ok: true,
+      models: providerService.getModelsForProvider('openrouter'),
+    }
+  },
+
+  async loadOpenRouterDefaults() {
+    const providerService = getProviderService()
+    await providerService.loadOpenRouterRecommendedDefaults()
+    return {
+      ok: true,
+      openrouterAllowedModels: providerService.getOpenRouterAllowedModels(),
+      models: providerService.getModelsForProvider('openrouter'),
+    }
+  },
+
+  async addOpenRouterModel(model: string) {
+    const providerService = getProviderService()
+    await providerService.addOpenRouterModel(model)
+    return {
+      ok: true,
+      openrouterAllowedModels: providerService.getOpenRouterAllowedModels(),
+      models: providerService.getModelsForProvider('openrouter'),
+    }
+  },
+
+  async removeOpenRouterModel(model: string) {
+    const providerService = getProviderService()
+    await providerService.removeOpenRouterModel(model)
+    return {
+      ok: true,
+      openrouterAllowedModels: providerService.getOpenRouterAllowedModels(),
+      models: providerService.getModelsForProvider('openrouter'),
+    }
+  },
+
+  async setSelectedProvider(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter') {
     const providerService = getProviderService()
     providerService.setSelectedProvider(provider)
     return {
@@ -316,6 +355,7 @@ export const settingsHandlers = {
       gemini: providerService.getProviderValid('gemini'),
       fireworks: providerService.getProviderValid('fireworks'),
       xai: providerService.getProviderValid('xai'),
+      openrouter: providerService.getProviderValid('openrouter'),
     }
 
     // Build modelsByProvider object
@@ -325,6 +365,7 @@ export const settingsHandlers = {
       gemini: providerService.getModelsForProvider('gemini'),
       fireworks: providerService.getModelsForProvider('fireworks'),
       xai: providerService.getModelsForProvider('xai'),
+      openrouter: providerService.getModelsForProvider('openrouter'),
     }
 
     // Build defaultModels object
@@ -334,6 +375,7 @@ export const settingsHandlers = {
       gemini: providerService.getDefaultModel('gemini'),
       fireworks: providerService.getDefaultModel('fireworks'),
       xai: providerService.getDefaultModel('xai'),
+      openrouter: providerService.getDefaultModel('openrouter'),
     }
 
     return {
@@ -357,6 +399,7 @@ export const settingsHandlers = {
     if (apiKeys.gemini !== undefined) settingsService.setGeminiApiKey(apiKeys.gemini)
     if (apiKeys.fireworks !== undefined) settingsService.setFireworksApiKey(apiKeys.fireworks)
     if (apiKeys.xai !== undefined) settingsService.setXaiApiKey(apiKeys.xai)
+    if (apiKeys.openrouter !== undefined) settingsService.setOpenRouterApiKey(apiKeys.openrouter)
     return { ok: true }
   },
 
@@ -387,7 +430,7 @@ export const settingsHandlers = {
     }
   },
 
-  async resetProviderPricing(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai') {
+  async resetProviderPricing(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter') {
     const settingsService = getSettingsService()
     settingsService.resetProviderPricing(provider)
     return { ok: true, pricingConfig: settingsService.getPricingConfig() }

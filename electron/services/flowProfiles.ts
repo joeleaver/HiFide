@@ -443,9 +443,10 @@ export async function deleteWorkspaceFlowProfile(
     try {
       await fs.unlink(filePath)
     } catch (error: any) {
-      if (!error || (error as any).code !== 'ENOENT') {
-        throw error
+      if (error?.code === 'ENOENT') {
+        return { success: false, error: 'File not found' }
       }
+      throw error
     }
 
     // Update workspace templates cache for this root

@@ -1,7 +1,7 @@
 import { TextInput, Loader, Text } from '@mantine/core'
 
 interface ApiKeyInputProps {
-  provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai'
+  provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter'
   value: string
   onChange: (value: string) => void
   isValid?: boolean
@@ -23,6 +23,10 @@ const PROVIDER_CONFIG = {
     label: 'Gemini API Key',
     placeholder: 'AIza...',
   },
+   openrouter: {
+    label: 'OpenRouter API Key',
+    placeholder: 'sk-or-...',
+  }, 
   fireworks: {
     label: 'Fireworks API Key',
     placeholder: 'fk-...',

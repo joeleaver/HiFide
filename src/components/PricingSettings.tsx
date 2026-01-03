@@ -3,7 +3,7 @@ import { Card, Stack, Group, Text, Button, Accordion, Table, NumberInput, Badge 
 import type { ModelPricing, ModelOption } from '../../electron/store/types'
 import { useSettingsPricingDraft } from '../store/settingsPricingDraft'
 
-type ProviderName = 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai'
+type ProviderName = 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter'
 
 interface PricingSettingsProps {
   modelsByProvider: Record<string, ModelOption[]>
@@ -123,6 +123,18 @@ export default function PricingSettings({ modelsByProvider, providerValid }: Pri
               defaultPricing={getDefaultPricingFor('fireworks')}
               onReset={() => resetProviderToDefault('fireworks')}
               onUpdate={(model, pricing) => updateModelPricing('fireworks', model, pricing)}
+            />
+          )}
+
+          {providerValid.openrouter && (
+            <PricingSection
+              value="openrouter"
+              label="OpenRouter Models"
+              models={getModelsFor('openrouter')}
+              pricing={getPricingFor('openrouter')}
+              defaultPricing={getDefaultPricingFor('openrouter')}
+              onReset={() => resetProviderToDefault('openrouter')}
+              onUpdate={(model, pricing) => updateModelPricing('openrouter', model, pricing)}
             />
           )}
 

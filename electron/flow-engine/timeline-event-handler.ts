@@ -394,6 +394,16 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
         }
         break
 
+      case 'error':
+        // Handle node/execution error
+        if (ev.error) {
+          writer.write(nodeId, executionId, {
+            error: ev.error,
+            boxId: buffers.openBoxIds.get(key),
+          })
+        }
+        break
+
       case 'done':
         // Flush any remaining content
         flush(key)

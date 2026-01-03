@@ -179,6 +179,7 @@ export type NodeExecutionBox = {
     | { type: 'text'; text: string }
     | { type: 'reasoning'; text: string }
     | { type: 'badge'; badge: Badge }
+    | { type: 'error'; text: string }
   >
 
   // Metadata
@@ -221,9 +222,12 @@ export type Session = {
     systemInstructions?: string
     temperature?: number
     messageHistory?: Array<{
-      role: 'system' | 'user' | 'assistant'
+      role: 'system' | 'user' | 'assistant' | 'tool'
       content: string | MessagePart[]
       reasoning?: string
+      tool_calls?: any[]
+      tool_call_id?: string
+      error?: string
       metadata?: {
         id: string
         pinned?: boolean
@@ -400,6 +404,7 @@ export type PricingConfig = {
   gemini: ProviderPricing
   fireworks: ProviderPricing
   xai: ProviderPricing
+  openrouter: ProviderPricing
   customRates?: boolean
 }
 
@@ -501,6 +506,7 @@ export type ApiKeys = {
   gemini: string
   fireworks: string
   xai: string
+  openrouter: string
 }
 
 // ============================================================================

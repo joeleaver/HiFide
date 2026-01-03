@@ -55,7 +55,7 @@ const supportsReasoningEffort = (id: string) => /^o[13](-|$)/i.test(id)
 export const OpenAiSdkProvider: ProviderAdapter = {
   id: 'openai',
 
-  async agentStream({ apiKey, model, system, messages, temperature, reasoningEffort, tools, responseSchema: _responseSchema, emit: _emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, system, messages, temperature, reasoningEffort, tools, responseSchema: _responseSchema, emit: _emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError, onStep }): Promise<StreamHandle> {
     const oai = createOpenAI({ apiKey })
     const llm = oai(model)
 
@@ -162,6 +162,15 @@ export const OpenAiSdkProvider: ProviderAdapter = {
           try {
             const calls = Array.isArray(step?.toolCalls) ? step.toolCalls.length : 0
             if (DEBUG) console.log('[ai-sdk:openai] onStepFinish', { calls, finishReason: step?.finishReason, usage: step?.usage })
+
+            if (onStep) {
+              onStep({
+                text: step.text,
+                reasoning: step.reasoning,
+                toolCalls: step.toolCalls,
+                toolResults: step.toolResults
+              })
+            }
 
             if (step?.usage && onTokenUsage) {
               const u: any = step.usage

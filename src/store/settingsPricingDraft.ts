@@ -3,7 +3,7 @@ import { notifications } from '@mantine/notifications'
 import { getBackendClient } from '../lib/backend/bootstrap'
 import type { PricingConfig, ModelPricing, ProviderPricing } from '../../electron/store/types'
 
-const PROVIDERS = ['openai', 'anthropic', 'gemini', 'fireworks', 'xai'] as const
+const PROVIDERS = ['openai', 'anthropic', 'gemini', 'fireworks', 'xai', 'openrouter'] as const
 
 type ProviderName = (typeof PROVIDERS)[number]
 
@@ -21,6 +21,7 @@ function cloneConfig(config?: PricingConfig | null): PricingConfig {
       gemini: {},
       fireworks: {},
       xai: {},
+      openrouter: {},
       customRates: false,
     }
   }

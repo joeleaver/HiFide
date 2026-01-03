@@ -28,7 +28,7 @@ const summarizeUsagePayload = (payload: any) => ({
 
 function buildPricingAllowlistByProvider(defaultPricingConfig?: PricingConfig): Record<string, Set<string>> {
   const cfg = (defaultPricingConfig || {}) as any
-  const providers = ['openai', 'anthropic', 'gemini', 'fireworks', 'xai'] as const
+  const providers = ['openai', 'anthropic', 'gemini', 'fireworks', 'xai', 'openrouter'] as const
   const out: Record<string, Set<string>> = {}
   for (const p of providers) {
     const models = (cfg[p] || {}) as Record<string, unknown>
@@ -54,6 +54,7 @@ function clampModelsByProviderToAllowlist(
   if (!cfg || Object.keys(cfg).length === 0) {
     return {
       fireworks: Array.isArray((map as any).fireworks) ? (map as any).fireworks : [],
+      openrouter: Array.isArray((map as any).openrouter) ? (map as any).openrouter : [],
     }
   }
 
@@ -89,7 +90,7 @@ function filterModelsByPricingAllowlist(
     if (!allow) continue
     // Fireworks allowlist is managed server-side (defaults + user overrides).
     // Renderer clamps only the providers that should be *strictly* allowlisted by defaults.
-    if (provider === 'fireworks') {
+    if (provider === 'fireworks' || provider === 'openrouter') {
       next[provider] = list
       continue
     }
@@ -460,6 +461,7 @@ export async function hydrateSessionUiSettingsAndFlows(): Promise<void> {
       anthropic: !!String(rawKeys.anthropic ?? '').trim(),
       gemini: !!String(rawKeys.gemini ?? '').trim(),
       fireworks: !!String(rawKeys.fireworks ?? '').trim(),
+      openrouter: !!String((rawKeys as any).openrouter ?? '').trim(),
       xai: !!String((rawKeys as any).xai ?? '').trim(),
     }
 

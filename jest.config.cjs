@@ -32,7 +32,9 @@ module.exports = {
     '^\.\./store/utils/kanban\.js$': '<rootDir>/electron/store/utils/kanban.ts',
     '^\.\./utils/workspace\.js$': '<rootDir>/electron/utils/workspace.ts',
     '^\.\./services/(.*)\.js$': '<rootDir>/electron/services/$1.ts',
+    '^\.\./vector/(.*)\.js$': '<rootDir>/electron/services/vector/$1.ts',
     '^\./base/(.*)\.js$': '<rootDir>/electron/services/base/$1.ts',
+    '^(\\.{1,2}/.*)\\.js$': '$1',
     '^(?:\.\.\/)+tools/agentToolRegistry\.js$': '<rootDir>/electron/tools/agentToolRegistry.ts',
     '^\.\.\/\.\.\/utils/ripgrep\.js$': '<rootDir>/electron/utils/ripgrep.ts'
   },

@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { discoverWorkspaceFiles } from '../../utils/fileDiscovery'
 import { resolveWithinWorkspace } from '../utils'
+import { getVectorService } from '../../services/index.js'
+import { resolveWorkspaceRoot } from '../../utils/workspace.js'
 
 /**
  * Simplified workspace search tool powered entirely by ripgrep.
@@ -51,6 +53,13 @@ type PathSearchMeta = {
   filesScanned: number
 }
 
+type SemanticSearchMeta = {
+  results: SearchWorkspaceResult[]
+  filesMatched: number
+  summary: string
+  mode: 'semantic'
+}
+
 function mapMatches(matches: any[]): SearchWorkspaceResult[] {
   return matches.map((m: any) => ({
     path: m.file,
@@ -77,6 +86,48 @@ function tokenizeQuery(query: string): string[] {
   }
 
   return unique
+}
+
+async function runSemanticSearch({
+  query,
+  maxResults,
+  meta
+}: {
+  query: string
+  maxResults: number
+  meta?: any
+}): Promise<SemanticSearchMeta | null> {
+  try {
+    const vectorService = getVectorService()
+    const workspaceRoot = resolveWorkspaceRoot(meta?.workspaceId)
+
+    await vectorService.init(workspaceRoot)
+    const matches = await vectorService.search(query, maxResults)
+
+    if (!matches || matches.length === 0) return null
+
+    const results: SearchWorkspaceResult[] = matches
+      .filter(m => m.score < 0.8)
+      .map((m) => {
+        const type = m.metadata.symbolType ? `${m.metadata.symbolType} ` : ''
+        const name = m.metadata.symbolName ? `${m.metadata.symbolName}: ` : ''
+        return {
+          path: m.metadata.filePath || 'unknown',
+          lineNumber: m.metadata.startLine || 0,
+          line: `[semantic match] ${type}${name}${m.text.split('\n')[0]}...`
+        }
+      })
+
+    return {
+      results,
+      filesMatched: new Set(results.map((r) => r.path)).size,
+      summary: `Semantic search found ${results.length} match(es) in Vector DB`,
+      mode: 'semantic'
+    }
+  } catch (error) {
+    // Silently fail and allow other fallbacks to continue
+    return null
+  }
 }
 
 function countOccurrences(target: string, needle: string): number {
@@ -430,6 +481,31 @@ export const searchWorkspaceTool: AgentTool = {
             filesMatched,
             truncated: grepResult.data?.summary?.truncated || false,
             mode: 'pattern'
+          }
+        }
+      }
+    }
+
+    // 2. Semantic search
+    const semanticSearch = await runSemanticSearch({
+      query,
+      maxResults,
+      meta
+    })
+
+    if (semanticSearch && semanticSearch.results.length > 0) {
+      const elapsedMs = Date.now() - t0
+      return {
+        ok: true,
+        data: {
+          results: semanticSearch.results,
+          count: semanticSearch.results.length,
+          summary: semanticSearch.summary,
+          meta: {
+            elapsedMs,
+            filesMatched: semanticSearch.filesMatched,
+            truncated: false,
+            mode: 'semantic'
           }
         }
       }

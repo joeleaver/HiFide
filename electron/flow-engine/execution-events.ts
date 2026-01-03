@@ -97,7 +97,7 @@ export interface ExecutionEvent {
   model: string            // 'claude-haiku-4-5-20251001', etc.
 
   // Event type and data
-  type: 'chunk' | 'reasoning' | 'tool_start' | 'tool_end' | 'tool_error' | 'usage' | 'usage_breakdown' | 'done' | 'error' | 'rate_limit_wait'
+  type: 'chunk' | 'reasoning' | 'tool_start' | 'tool_end' | 'tool_error' | 'usage' | 'usage_breakdown' | 'done' | 'error' | 'rate_limit_wait' | 'badge_add' | 'badge_update'
 
   // Event-specific data (only one will be populated based on type)
   chunk?: string
@@ -107,6 +107,10 @@ export interface ExecutionEvent {
   usageBreakdown?: UsageBreakdownEventData
   error?: string
   rateLimitWait?: RateLimitWaitEventData
+  badge?: {
+    badgeId: string
+    data: any // Badge interface from flow-api.ts
+  }
 }
 
 /**

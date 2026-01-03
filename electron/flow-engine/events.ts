@@ -8,7 +8,7 @@ export type FlowEvent = (
   | { type: 'nodeStart'; nodeId: string; executionId: string }
   | { type: 'nodeEnd'; nodeId: string; executionId: string; durationMs?: number }
   | { type: 'io'; nodeId: string; data: string }
-  | { type: 'error'; nodeId?: string; error: string }
+  | { type: 'error'; nodeId?: string; executionId?: string; error: string }
   | { type: 'waitingforinput'; nodeId: string }
   | { type: 'done' }
   | { type: 'chunk'; nodeId: string; text: string; executionId: string }
@@ -19,6 +19,8 @@ export type FlowEvent = (
   | { type: 'intentDetected'; nodeId: string; intent: string; executionId: string }
   | { type: 'tokenUsage'; nodeId: string; provider: string; model: string; usage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number }; cost?: any; executionId: string }
   | { type: 'usageBreakdown'; nodeId: string; provider: string; model: string; breakdown: any; executionId: string }
+  | { type: 'badgeAdd'; nodeId: string; executionId: string; badgeId: string; badge: any }
+  | { type: 'badgeUpdate'; nodeId: string; executionId: string; badgeId: string; updates: any }
 ) & { sessionId?: string }
 
 /**

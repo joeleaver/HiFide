@@ -98,7 +98,7 @@ export type MessagePart =
   | { type: 'image'; image: string; mimeType: string }
 
 export interface MessageHistoryItem {
-  role: 'system' | 'user' | 'assistant'
+  role: 'system' | 'user' | 'assistant' | 'tool'
   content: string | MessagePart[]
 
   /**
@@ -107,6 +107,21 @@ export interface MessageHistoryItem {
    * This is the model's internal reasoning process, separate from the final response.
    */
   reasoning?: string
+
+  /**
+   * Optional tool calls made by the assistant
+   */
+  tool_calls?: any[]
+
+  /**
+   * Optional tool call ID for tool results
+   */
+  tool_call_id?: string
+
+  /**
+   * Optional error message if this message (e.g. assistant response) failed/crashed
+   */
+  error?: string
 
   /**
    * Optional metadata for message management and context windowing

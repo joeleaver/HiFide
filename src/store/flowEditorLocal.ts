@@ -20,24 +20,10 @@ export type LocalFlowNode = any
 export type LocalFlowEdge = any
 
 let lastGraphSignature = computeGraphSignature([], [])
-let lastSavedGraphSignature = lastGraphSignature
 
 // Debounced save to backend
 let saveTimeout: any = null
 let savesEnabled = true
-
-const warnIfMutatingWhileSavesDisabled = (action: string) => {
-  // In tests we allow mutations; we just disable background persistence.
-  if (process.env.NODE_ENV === 'test') return false
-
-  if (!savesEnabled) {
-    // This can happen during hydration. Mutations during this window are risky because
-    // they won't be persisted and can also fight with in-flight hydration updates.
-    console.warn(`[flowEditorLocal] Mutation '${action}' while saves disabled (hydrating). Ignoring.`)
-    return true
-  }
-  return false
-}
 
 interface FlowEditorLocalState {
   nodes: LocalFlowNode[]
@@ -56,6 +42,11 @@ interface FlowEditorLocalState {
   addEdge: (edge: LocalFlowEdge) => void
   removeEdgeById: (edgeId: string) => void
   reset: () => void
+  cancelSave: () => void
+
+  isSaving: boolean
+  isDirty: boolean
+  lastSavedSignature: string
 }
 
 
@@ -63,26 +54,26 @@ export const useFlowEditorLocal = create<FlowEditorLocalState>((set) => ({
   nodes: [],
   edges: [],
   isHydrated: false,
+  isSaving: false,
+  isDirty: false,
+  lastSavedSignature: lastGraphSignature,
 
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
 
   applyNodeChanges: (changes) => {
-    if (warnIfMutatingWhileSavesDisabled('applyNodeChanges')) return
     set((state) => ({
       nodes: applyNodeChanges(changes as any, state.nodes as any) as any,
     }))
   },
 
   applyEdgeChanges: (changes) => {
-    if (warnIfMutatingWhileSavesDisabled('applyEdgeChanges')) return
     set((state) => ({
       edges: applyEdgeChanges(changes as any, state.edges as any) as any,
     }))
   },
 
   updateNodeData: (nodeId, patch) => {
-    if (warnIfMutatingWhileSavesDisabled('updateNodeData')) return
     set((state) => ({
       nodes: state.nodes.map((n: any) =>
         n?.id === nodeId
@@ -99,7 +90,6 @@ export const useFlowEditorLocal = create<FlowEditorLocalState>((set) => ({
   },
 
   updateNodeConfig: (nodeId, patch) => {
-    if (warnIfMutatingWhileSavesDisabled('updateNodeConfig')) return
     set((state) => ({
       nodes: state.nodes.map((n: any) => {
         if (n?.id !== nodeId) return n
@@ -120,28 +110,24 @@ export const useFlowEditorLocal = create<FlowEditorLocalState>((set) => ({
   },
 
   addEdge: (edge) => {
-    if (warnIfMutatingWhileSavesDisabled('addEdge')) return
     set((state) => ({
       edges: [...(Array.isArray(state.edges) ? state.edges : []), edge],
     }))
   },
 
   removeEdgeById: (edgeId) => {
-    if (warnIfMutatingWhileSavesDisabled('removeEdgeById')) return
     set((state) => ({
       edges: (Array.isArray(state.edges) ? state.edges : []).filter((e: any) => e?.id !== edgeId),
     }))
   },
 
   addNode: (node) => {
-    if (warnIfMutatingWhileSavesDisabled('addNode')) return
     set((state) => ({
       nodes: [...(Array.isArray(state.nodes) ? state.nodes : []), node],
     }))
   },
 
   removeNodeById: (nodeId) => {
-    if (warnIfMutatingWhileSavesDisabled('removeNodeById')) return
     set((state) => ({
       nodes: (Array.isArray(state.nodes) ? state.nodes : []).filter((n: any) => n?.id !== nodeId),
       edges: (Array.isArray(state.edges) ? state.edges : []).filter(
@@ -151,6 +137,14 @@ export const useFlowEditorLocal = create<FlowEditorLocalState>((set) => ({
   },
 
   reset: () => set({ nodes: [], edges: [], isHydrated: false }),
+
+  cancelSave: () => {
+    if (saveTimeout) {
+      clearTimeout(saveTimeout)
+      saveTimeout = null
+    }
+    set({ isSaving: false, isDirty: false })
+  },
 }))
 
 const scheduleSave = () => {
@@ -163,14 +157,27 @@ const scheduleSave = () => {
     const { nodes, edges } = useFlowEditorLocal.getState()
     const sanitizedGraph = sanitizeGraphSnapshot(nodes, edges)
     const pendingSignature = fingerprintSanitizedGraph(sanitizedGraph)
+
+    useFlowEditorLocal.setState({ isSaving: true })
+
     try {
       const mod = (await import('../lib/backend/bootstrap')) as unknown as {
         getBackendClient: () => BackendClient | null
       }
       await mod.getBackendClient()?.rpc('flowEditor.setGraph', sanitizedGraph)
-      lastSavedGraphSignature = pendingSignature
+      
+      const currentState = useFlowEditorLocal.getState()
+      // If the signature hasn't changed since we started saving, it's no longer dirty
+      const stillDirty = computeGraphSignature(currentState.nodes, currentState.edges) !== pendingSignature
+      
+      useFlowEditorLocal.setState({ 
+        lastSavedSignature: pendingSignature, 
+        isSaving: false,
+        isDirty: stillDirty
+      })
     } catch (e) {
       console.error('[flowEditorLocal] Save failed:', e)
+      useFlowEditorLocal.setState({ isSaving: false })
     }
   }, 500)
 }
@@ -182,6 +189,12 @@ useFlowEditorLocal.subscribe((state, prevState) => {
 
   if (nodesChanged || edgesChanged) {
     lastGraphSignature = computeGraphSignature(state.nodes, state.edges)
+    
+    // Update dirty flag
+    const isDirty = lastGraphSignature !== state.lastSavedSignature
+    if (isDirty !== state.isDirty) {
+      useFlowEditorLocal.setState({ isDirty })
+    }
   }
 
   // Only save if hydrated and nodes/edges actually changed
@@ -256,29 +269,30 @@ export async function initFlowEditorLocalEvents(): Promise<void> {
         const decision = decideHydrationStrategy({
           isHydrated: state.isHydrated,
           localSignature,
-          savedSignature: lastSavedGraphSignature,
+          savedSignature: state.lastSavedSignature,
           incomingSignature: nextSignature,
         })
 
         if (decision === 'skip-identical') {
           console.log('[flowEditorLocal] Skipping hydration – graph is unchanged compared to local store')
+          useFlowEditorLocal.setState({ lastSavedSignature: nextSignature, isDirty: false })
         } else if (decision === 'skip-stale-snapshot') {
           console.log('[flowEditorLocal] Skipping hydration – backend snapshot matches last save but local has newer edits')
         } else {
           useFlowEditorLocal.setState({
             nodes: sanitizedGraph.nodes,
             edges: sanitizedGraph.edges,
-            isHydrated: true
+            isHydrated: true,
+            lastSavedSignature: nextSignature,
+            isDirty: false
           })
           lastGraphSignature = nextSignature
-          lastSavedGraphSignature = nextSignature
         }
       }
     } catch (e) {
       console.error('[flowEditorLocal] Failed to fetch graph:', e)
     } finally {
-      // Re-enable saves after a short delay
-      setTimeout(() => { savesEnabled = true }, 750)
+      savesEnabled = true
     }
   }
 

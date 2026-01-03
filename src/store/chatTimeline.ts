@@ -9,7 +9,7 @@ export type TimelineMessagePart =
 
 export type TimelineItem =
   | { type: 'message'; id: string; role: 'user' | 'assistant'; content: string | TimelineMessagePart[] }
-  | { type: 'node-execution'; id: string; nodeId: string; executionId?: string; nodeLabel?: string; nodeKind?: string; provider?: string; model?: string; cost?: any; content: Array<{ type: 'text'; text: string } | { type: 'reasoning'; text: string } | { type: 'badge'; badge: any }>; badges?: any[] }
+  | { type: 'node-execution'; id: string; nodeId: string; executionId?: string; nodeLabel?: string; nodeKind?: string; provider?: string; model?: string; cost?: any; content: Array<{ type: 'text'; text: string } | { type: 'reasoning'; text: string } | { type: 'badge'; badge: any } | { type: 'error'; text: string }>; badges?: any[] }
 
 interface ChatTimelineState {
   items: TimelineItem[]
@@ -32,6 +32,7 @@ interface ChatTimelineState {
   appendReasoning: (nodeId: string, text: string, executionId?: string) => void
 
   addToolBadge: (nodeId: string, badge: any, executionId?: string) => void
+  appendError: (nodeId: string, error: string, executionId?: string) => void
   updateBadge: (nodeId: string, badgeId: string, updates: any, executionId?: string) => void
   updateBoxMeta: (nodeId: string, meta: Partial<{ provider: string; model: string; cost: any }>, executionId?: string) => void
 }
@@ -212,6 +213,24 @@ function createChatTimelineStore() {
       set({ items, sig: computeSig(items) })
     },
 
+    appendError: (nodeId, error, executionId) => {
+      const err = (error ?? '').toString()
+      if (err.length === 0) return
+      let items = [...get().items] as TimelineItem[]
+      let box = items.slice().reverse().find((it) => it.type === 'node-execution' && it.nodeId === nodeId && (!executionId || (it as any).executionId === executionId)) as any
+      if (!box) {
+        const node = useFlowEditorLocal.getState().nodes.find((n: any) => n.id === nodeId)
+        const label = node?.data?.label || node?.data?.labelBase || 'Node'
+        const kind = node?.data?.nodeType || 'unknown'
+          ; (get() as any).openNodeExecution(nodeId, label, kind, executionId)
+        items = [...get().items] as TimelineItem[]
+        box = items.slice().reverse().find((it) => it.type === 'node-execution' && it.nodeId === nodeId && (!executionId || (it as any).executionId === executionId)) as any
+        if (!box) return
+      }
+      box.content.push({ type: 'error', text: err } as any)
+      set({ items, sig: computeSig(items) })
+    },
+
     addToolBadge: (nodeId, badge, executionId) => {
       let items = [...get().items] as TimelineItem[]
       let box = items.slice().reverse().find((it) => it.type === 'node-execution' && it.nodeId === nodeId && (!executionId || (it as any).executionId === executionId)) as any
@@ -338,6 +357,7 @@ export function initChatTimelineEvents(): void {
       const append = msg.append || {}
       if (append.reasoning) useChatTimeline.getState().appendReasoning(msg.nodeId, append.reasoning, msg.executionId)
       if (append.text) useChatTimeline.getState().appendText(msg.nodeId, append.text, msg.executionId)
+      if (append.error) useChatTimeline.getState().appendError(msg.nodeId, append.error, msg.executionId)
       if (Array.isArray(append.badges)) {
         for (const b of append.badges) useChatTimeline.getState().addToolBadge(msg.nodeId, b, msg.executionId)
       }

@@ -10,7 +10,7 @@ interface ApiKeysFormProps {
   size?: 'xs' | 'sm' | 'md' | 'lg'
 }
 
-const PROVIDERS = ['openai', 'anthropic', 'gemini', 'fireworks', 'xai'] as const
+const PROVIDERS = ['openai', 'anthropic', 'gemini', 'openrouter', 'fireworks', 'xai'] as const
 
 export function ApiKeysForm({
   apiKeys,

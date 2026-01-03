@@ -80,9 +80,27 @@ export function createFlowApiFactory(deps: FlowApiFactoryDeps): FlowApiFactory {
       context: binding.manager,
       contexts: contextsHelper,
       conversation: {
-        streamChunk: (_chunk: string) => {},
-        addBadge: (_badge: Badge) => `badge-${Date.now()}`,
-        updateBadge: (_badgeId: string, _updates: Partial<Badge>) => {},
+        streamChunk: (chunk: string) => {
+          emit({ type: 'chunk', provider: 'unknown', model: 'unknown', chunk })
+        },
+        addBadge: (badge: Badge) => {
+          const badgeId = `badge-${crypto.randomUUID()}`
+          emit({
+            type: 'badge_add',
+            provider: 'unknown',
+            model: 'unknown',
+            badge: { badgeId, data: badge }
+          })
+          return badgeId
+        },
+        updateBadge: (badgeId: string, updates: Partial<Badge>) => {
+          emit({
+            type: 'badge_update',
+            provider: 'unknown',
+            model: 'unknown',
+            badge: { badgeId, data: updates }
+          })
+        },
       },
       log: {
         debug: (message: string, data?: any) => console.log(`[Flow Debug] ${nodeId}:`, message, data),

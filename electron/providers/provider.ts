@@ -70,6 +70,8 @@ export interface ProviderAdapter {
     onToolStart?: (ev: { callId?: string; name: string; arguments?: any }) => void
     onToolEnd?: (ev: { callId?: string; name: string; result?: any }) => void
     onToolError?: (ev: { callId?: string; name: string; error: string }) => void
+    // Callback when an intermediate step (in an agent loop) finishes
+    onStep?: (step: { text: string; reasoning?: string; toolCalls?: any[]; toolResults?: any[] }) => void
     // Optional metadata passed to tools (e.g., requestId for session tracking)
     toolMeta?: { requestId?: string; [key: string]: any }
   }) => Promise<StreamHandle>

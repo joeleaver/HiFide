@@ -22,6 +22,8 @@ import { GitDiffService } from './GitDiffService'
 import { GitCommitService } from './GitCommitService'
 import { GitLogService } from './GitLogService'
 import { WorkspaceSearchService } from './WorkspaceSearchService'
+import { VectorService, vectorService } from './vector/VectorService.js'
+import { CodeIndexerService } from './vector/CodeIndexerService.js'
 
 import { SessionService } from './SessionService'
 import { FlowProfileService } from './FlowProfileService'
@@ -50,6 +52,8 @@ let gitDiffService: GitDiffService | null = null
 let gitCommitService: GitCommitService | null = null
 let gitLogService: GitLogService | null = null
 let workspaceSearchService: WorkspaceSearchService | null = null
+let vectorServiceInstance: VectorService | null = null
+let codeIndexerService: CodeIndexerService | null = null
 
 let sessionService: SessionService | null = null
 let flowProfileService: FlowProfileService | null = null
@@ -77,6 +81,8 @@ export function initializeServices(): void {
   gitCommitService = new GitCommitService()
   gitLogService = new GitLogService()
   workspaceSearchService = new WorkspaceSearchService()
+  vectorServiceInstance = vectorService
+  codeIndexerService = new CodeIndexerService(vectorServiceInstance)
   try {
     gitStatusService.attachExplorerService(explorerService)
   } catch (error) {
@@ -122,6 +128,8 @@ export function initializeServices(): void {
   registry.register('gitCommit', gitCommitService)
   registry.register('gitLog', gitLogService)
   registry.register('workspaceSearch', workspaceSearchService)
+  registry.register('vector', vectorServiceInstance)
+  registry.register('codeIndexer', codeIndexerService)
 
   registry.register('session', sessionService)
   registry.register('flowCache', flowCacheService)
@@ -229,6 +237,16 @@ export function getGitLogService(): GitLogService {
 export function getWorkspaceSearchService(): WorkspaceSearchService {
   if (!workspaceSearchService) throw new Error('[Services] WorkspaceSearchService not initialized')
   return workspaceSearchService
+}
+
+export function getVectorService(): VectorService {
+  if (!vectorServiceInstance) throw new Error('[Services] VectorService not initialized')
+  return vectorServiceInstance
+}
+
+export function getCodeIndexerService(): CodeIndexerService {
+  if (!codeIndexerService) throw new Error('[Services] CodeIndexerService not initialized')
+  return codeIndexerService
 }
 
 export function getSessionService(): SessionService {

@@ -75,7 +75,7 @@ const supportsThinking = (id: string) => {
 export const AnthropicAiSdkProvider: ProviderAdapter = {
   id: 'anthropic',
 
-  async agentStream({ apiKey, model, system, messages, temperature, includeThoughts, thinkingBudget, tools, responseSchema: _responseSchema, emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError }): Promise<StreamHandle> {
+  async agentStream({ apiKey, model, system, messages, temperature, includeThoughts, thinkingBudget, tools, responseSchema: _responseSchema, emit, onChunk: onTextChunk, onDone: onStreamDone, onError: onStreamError, onTokenUsage, toolMeta, onToolStart, onToolEnd, onToolError, onStep }): Promise<StreamHandle> {
     const anthropic = createAnthropic({ apiKey })
     const llm = anthropic(model)
 
@@ -220,6 +220,16 @@ export const AnthropicAiSdkProvider: ProviderAdapter = {
               const calls = Array.isArray(step?.toolCalls) ? step.toolCalls.length : 0
               console.log('[ai-sdk:anthropic] onStepFinish', { calls, finishReason: step?.finishReason, usage: step?.usage })
             }
+
+            if (onStep) {
+              onStep({
+                text: step.text,
+                reasoning: step.reasoning,
+                toolCalls: step.toolCalls,
+                toolResults: step.toolResults
+              })
+            }
+
             if (step?.usage && onTokenUsage) {
               const u: any = step.usage
               // Check for reasoning tokens in usage (Claude 3.7)

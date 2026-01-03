@@ -15,6 +15,7 @@ import { GeminiAiSdkProvider } from '../providers-ai-sdk/gemini'
 import { FireworksAiSdkProvider } from '../providers-ai-sdk/fireworks'
 import { OpenAiSdkProvider } from '../providers-ai-sdk/openai'
 import { XaiAiSdkProvider } from '../providers-ai-sdk/xai'
+import { OpenRouterAiSdkProvider } from '../providers-ai-sdk/openrouter'
 import { activeConnections, broadcastWorkspaceNotification } from '../backend/ws/broadcast'
 import { getSettingsService, getWorkspaceService } from '../services/index.js'
 import { readKanbanBoard } from '../store/utils/kanban.js'
@@ -78,6 +79,7 @@ export async function getProviderKey(provider: string): Promise<string | null> {
     if (provider === 'gemini' && keys.gemini?.trim()) return keys.gemini
     if (provider === 'fireworks' && (keys as any).fireworks?.trim()) return (keys as any).fireworks
     if (provider === 'xai' && (keys as any).xai?.trim()) return (keys as any).xai
+    if (provider === 'openrouter' && (keys as any).openrouter?.trim()) return (keys as any).openrouter
   }
 
   // 2) Fallback: environment variables
@@ -88,6 +90,7 @@ export async function getProviderKey(provider: string): Promise<string | null> {
       gemini: 'GEMINI_API_KEY',
       fireworks: 'FIREWORKS_API_KEY',
       xai: 'XAI_API_KEY',
+      openrouter: 'OPENROUTER_API_KEY',
     }
     const envVar = envMap[provider]
     if (envVar && process?.env?.[envVar]?.trim()) return process.env[envVar]!
@@ -111,6 +114,7 @@ export const providerCapabilities: Record<string, Record<string, boolean>> = {
   gemini: { tools: true, jsonSchema: false, vision: true, streaming: true },
   fireworks: { tools: true, jsonSchema: true, vision: false, streaming: true },
   xai: { tools: true, jsonSchema: true, vision: false, streaming: true },
+  openrouter: { tools: true, jsonSchema: true, vision: false, streaming: true },
 }
 
 /**
@@ -250,6 +254,7 @@ export const providers: Record<string, ProviderAdapter> = {
   gemini: GeminiAiSdkProvider,
   fireworks: FireworksAiSdkProvider,
   xai: XaiAiSdkProvider,
+  openrouter: OpenRouterAiSdkProvider,
 }
 
 
