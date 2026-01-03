@@ -74,6 +74,40 @@ export class SettingsService extends Service<SettingsState> {
         continue
       }
 
+      // Special handling for providers that allow custom models (fireworks, openrouter)
+      // Allow merging defaults with ALL persisted keys (user overrides + custom models)
+      if (provider === 'fireworks' || provider === 'openrouter') {
+        const merged: Record<string, ModelPricing> = { ...defaultsForProvider }
+        // Copy all persisted keys, overwriting defaults if collision (user override)
+        // and adding new keys (user custom models)
+        for (const key of Object.keys(persistedForProvider)) {
+          const val = persistedForProvider[key]
+          if (val && typeof val === 'object') {
+            merged[key] = val as ModelPricing
+          }
+        }
+        
+        // Detect if anything changed vs persisted
+        // If merged differs from what we loaded, we need to mark as changed so we save the new state
+        const mergedKeys = Object.keys(merged)
+        const persistedKeys = persistedForProvider ? Object.keys(persistedForProvider) : []
+        if (mergedKeys.length !== persistedKeys.length) {
+          changed = true
+        } else {
+          for (const k of mergedKeys) {
+            // If we have a key in merged that wasn't in persisted (e.g. new default), it changed
+            if (!(k in persistedForProvider)) {
+              changed = true
+              break
+            }
+          }
+        }
+        
+        ;(next as any)[provider] = merged
+        // Skip the strict clamping loop below
+        continue
+      }
+
       // Only keep overrides for models that exist in defaults.
       const clampedProvider: Record<string, ModelPricing> = { ...defaultsForProvider }
       for (const model of Object.keys(defaultsForProvider)) {
@@ -459,7 +493,7 @@ export class SettingsService extends Service<SettingsState> {
     const DEFAULT_PRICING = getDefaultPricingConfig() as any
     const defaultsForProvider = DEFAULT_PRICING?.[provider]
     const isAllowed =
-      provider === 'fireworks'
+      provider === 'fireworks' || provider === 'openrouter'
         ? true
         : !!(defaultsForProvider && typeof defaultsForProvider === 'object' && defaultsForProvider[model])
 
