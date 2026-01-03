@@ -20,10 +20,12 @@ import {
   getMcpService,
   getExplorerService,
   getLanguageServerService,
+  getGitStatusService,
 } from '../../services/index.js'
 import type { ExplorerFsEvent } from '../../store/types.js'
 import type { LspDiagnosticsEvent, LspLanguageStatusPayload } from '../../../shared/lsp.js'
 import { LSP_NOTIFICATION_DIAGNOSTICS, LSP_NOTIFICATION_LANGUAGE_STATUS } from '../../../shared/lsp.js'
+import { GIT_NOTIFICATION_STATUS } from '../../../shared/git.js'
 
 /**
  * Subscription configuration
@@ -134,6 +136,10 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
   }
   explorerService.on('explorer:fs:event', explorerFsHandler)
   subscriptions.push({ service: explorerService, event: 'explorer:fs:event', handler: explorerFsHandler, workspaceScoped: true })
+
+  // Git status (workspace-scoped)
+  const gitStatusService = getGitStatusService()
+  addWorkspaceSubscription(gitStatusService, 'git:status', GIT_NOTIFICATION_STATUS, (snapshot) => snapshot)
 
   const languageServerService = getLanguageServerService()
   const lspDiagnosticsHandler = async (payload: LspDiagnosticsEvent) => {

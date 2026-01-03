@@ -32,6 +32,8 @@ interface UiStore {
 
   // Input State
   sessionInputValue: string
+  /** Optional structured context to attach to the next user submission (transient; not persisted) */
+  sessionInputContext: unknown | null
 
   // Collapsible Panel States (renderer store; persisted to main debounced)
   metaPanelOpen: boolean
@@ -59,6 +61,8 @@ interface UiStore {
   setCurrentViewLocal: (view: ViewType) => void
   setShouldAutoScroll: (should: boolean) => void
   setSessionInputValue: (value: string) => void
+  setSessionInputContext: (ctx: unknown | null) => void
+  clearSessionInputContext: () => void
   setMetaPanelOpen: (open: boolean) => void
   setDebugPanelCollapsed: (collapsed: boolean) => void
   setDebugPanelHeight: (height: number) => void
@@ -129,6 +133,7 @@ export const useUiStore = create<UiStore>((set) => ({
   isDraggingMetaPanel: false,
   shouldAutoScroll: true,
   sessionInputValue: '',
+  sessionInputContext: null,
   debugPanelUserScrolledUp: false,
 
   // Diff Preview state (transient)
@@ -199,6 +204,8 @@ export const useUiStore = create<UiStore>((set) => ({
   setIsDraggingMetaPanel: (dragging) => set({ isDraggingMetaPanel: dragging }),
   setShouldAutoScroll: (should) => set({ shouldAutoScroll: should }),
   setSessionInputValue: (value) => set({ sessionInputValue: value }),
+  setSessionInputContext: (ctx) => set({ sessionInputContext: ctx }),
+  clearSessionInputContext: () => set({ sessionInputContext: null }),
   setDebugPanelUserScrolledUp: (scrolledUp) => set({ debugPanelUserScrolledUp: scrolledUp }),
   setMainCollapsed: (collapsed) => set({ mainCollapsed: collapsed }),
   // Diff actions (transient)

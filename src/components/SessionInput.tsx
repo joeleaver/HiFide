@@ -8,6 +8,8 @@ import { MDXEditor, BoldItalicUnderlineToggles, CreateLink, InsertTable, ListsTo
 export default memo(function SessionInput() {
   const inputValue = useUiStore((s) => s.sessionInputValue || '')
   const setInputValue = useUiStore((s) => s.setSessionInputValue)
+  const inputContext = useUiStore((s) => s.sessionInputContext)
+  const clearInputContext = useUiStore((s) => s.clearSessionInputContext)
   const requestId = useFlowRuntime((s) => s.requestId)
   const editorRef = useRef<MDXEditorMethods | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -45,6 +47,7 @@ export default memo(function SessionInput() {
     if (!text) return
     // Clear input, reset editor content, and resume flow via WebSocket JSON-RPC
     setInputValue('')
+    clearInputContext()
     try { editorRef.current?.setMarkdown('\u00A0') } catch {}
     placeCaret()
 
@@ -54,7 +57,7 @@ export default memo(function SessionInput() {
       return
     }
 
-    await FlowService.resume(requestId, text).catch((e) => {
+    await FlowService.resume(requestId, text, { userInputContext: inputContext }).catch((e) => {
       console.error('[SessionInput] Failed to resume flow:', e)
     })
   }

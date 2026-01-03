@@ -71,7 +71,8 @@ export async function executeFlow(
 export async function resumeFlow(
   _wc: WebContents | undefined,
   requestId: string,
-  userInput: string
+  userInput: string,
+  userInputContext?: unknown
 ): Promise<{ ok: boolean; error?: string }> {
   console.log('[resumeFlow] Called with:', { requestId, userInputLength: userInput.length })
 
@@ -149,8 +150,13 @@ export async function resumeFlow(
     // Resolve the promise that the userInput node is awaiting
     // The scheduler knows which node is waiting - just resolve any waiting input
     // Provider/model will be refreshed from session context before next node execution
-    console.log('[resumeFlow] Calling scheduler.resolveAnyWaitingUserInput with input:', userInput.substring(0, 50))
-    scheduler.resolveAnyWaitingUserInput(userInput)
+    const mergedUserInput =
+      userInputContext !== undefined
+        ? `${userInput}\n\n---\n\n[attached_context]\n${safeStringify(userInputContext)}`
+        : userInput
+
+    console.log('[resumeFlow] Calling scheduler.resolveAnyWaitingUserInput with input:', mergedUserInput.substring(0, 50))
+    scheduler.resolveAnyWaitingUserInput(mergedUserInput)
     console.log('[resumeFlow] resolveAnyWaitingUserInput returned successfully')
 
     return { ok: true }
@@ -160,6 +166,14 @@ export async function resumeFlow(
     console.error('[resumeFlow] Stack:', e?.stack)
     emitFlowEvent(requestId, { type: 'error', error })
     return { ok: false, error }
+  }
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return JSON.stringify({ error: 'userInputContext-unserializable' })
   }
 }
 

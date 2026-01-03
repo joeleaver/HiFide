@@ -14,6 +14,7 @@ import { initFlowEditorLocalEvents } from '../../store/flowEditorLocal'
 import { initFlowEditorScreenController } from '../../store/flowEditorScreenController'
 import { initExplorerEvents } from '../../store/explorer'
 import { initExplorerScreenController } from '../../store/explorerScreenController'
+import { initSourceControlEvents } from '../../store/sourceControl'
 import { initHydrationEvents, useHydration } from '../../store/hydration'
 import { initWorkspaceSearchEvents } from '../../store/workspaceSearch'
 import { initUiEvents, reloadUiStateForWorkspace } from '../../store/ui'
@@ -82,6 +83,7 @@ export function bootstrapBackendFromPreload(): void {
   initTerminalTabsEvents()
   initFlowEditorEvents()
   initExplorerEvents()
+  initSourceControlEvents()
   initWorkspaceSearchEvents()
   initLspEvents()
   initLanguageSupportEvents()

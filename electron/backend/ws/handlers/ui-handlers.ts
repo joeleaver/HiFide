@@ -6,7 +6,7 @@
  */
 
 import { BrowserWindow } from 'electron'
-import { getExplorerService, getGitStatusService, getWorkspaceSearchService } from '../../../services/index.js'
+import { getExplorerService, getGitCommitService, getGitDiffService, getGitLogService, getGitStatusService, getWorkspaceSearchService } from '../../../services/index.js'
 import { activeConnections, getConnectionWorkspaceId } from '../broadcast.js'
 import type { RpcConnection } from '../types'
 import type { RendererMenuStatePayload } from '../../../../shared/menu.js'
@@ -168,14 +168,146 @@ export function createUiHandlers(
     }
   })
 
-  addMethod('git.getStatus', async () => {
+  addMethod('git.discoverRepos', async () => {
+    try {
+      const workspaceRoot = await getConnectionWorkspaceId(connection)
+      if (!workspaceRoot) return { ok: false, error: 'no-workspace' }
+
+      const { discoverGitRepos } = await import('../../../services/utils/gitRepoDiscovery.js')
+      const repos = await discoverGitRepos(workspaceRoot)
+      return { ok: true, repos }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('git.initRepo', async ({ repoRoot }: { repoRoot: string }) => {
+    try {
+      const workspaceRoot = await getConnectionWorkspaceId(connection)
+      if (!workspaceRoot) return { ok: false, error: 'no-workspace' }
+      if (!repoRoot) return { ok: false, error: 'repoRoot-required' }
+      if (repoRoot !== workspaceRoot) {
+        return { ok: false, error: 'repoRoot-must-equal-workspaceRoot' }
+      }
+
+      const { execFile } = await import('node:child_process')
+      const { promisify } = await import('node:util')
+      const execFileAsync = promisify(execFile)
+
+      await execFileAsync('git', ['init'], { cwd: repoRoot, maxBuffer: 1024 * 1024 * 4 })
+      return { ok: true }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('git.getStatus', async ({ repoRoot }: { repoRoot?: string } = {}) => {
     try {
       const workspaceRoot = await getConnectionWorkspaceId(connection)
       if (!workspaceRoot) return { ok: false, error: 'no-workspace' }
 
       const gitStatusService = getGitStatusService()
-      const snapshot = await gitStatusService.getStatusSnapshot(workspaceRoot, { refresh: true })
+      const effectiveRepoRoot = repoRoot ?? workspaceRoot
+      const snapshot = await gitStatusService.getStatusSnapshot(effectiveRepoRoot, { refresh: true })
       return { ok: true, snapshot }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('git.getDiff', async ({ repoRoot, path, staged }: { repoRoot?: string; path: string; staged?: boolean }) => {
+    try {
+      const workspaceRoot = await getConnectionWorkspaceId(connection)
+      if (!workspaceRoot) return { ok: false, error: 'no-workspace' }
+      if (!path) return { ok: false, error: 'path-required' }
+
+      const gitDiffService = getGitDiffService()
+      const effectiveRepoRoot = repoRoot ?? workspaceRoot
+      const diff = await gitDiffService.getWorkingTreeDiff(effectiveRepoRoot, path, { staged: !!staged })
+      return { ok: true, diff }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('git.stageFile', async ({ repoRoot, path }: { repoRoot?: string; path: string }) => {
+    try {
+      const workspaceRoot = await getConnectionWorkspaceId(connection)
+      if (!workspaceRoot) return { ok: false, error: 'no-workspace' }
+      if (!path) return { ok: false, error: 'path-required' }
+
+      const effectiveRepoRoot = repoRoot ?? workspaceRoot
+      const { execFile } = await import('node:child_process')
+      const { promisify } = await import('node:util')
+      const execFileAsync = promisify(execFile)
+
+      await execFileAsync('git', ['add', '--', path], { cwd: effectiveRepoRoot, maxBuffer: 1024 * 1024 * 4 })
+      return { ok: true }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('git.unstageFile', async ({ repoRoot, path }: { repoRoot?: string; path: string }) => {
+    try {
+      const workspaceRoot = await getConnectionWorkspaceId(connection)
+      if (!workspaceRoot) return { ok: false, error: 'no-workspace' }
+      if (!path) return { ok: false, error: 'path-required' }
+
+      const effectiveRepoRoot = repoRoot ?? workspaceRoot
+      const { execFile } = await import('node:child_process')
+      const { promisify } = await import('node:util')
+      const execFileAsync = promisify(execFile)
+
+      await execFileAsync('git', ['reset', '--', path], { cwd: effectiveRepoRoot, maxBuffer: 1024 * 1024 * 4 })
+      return { ok: true }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('git.commit', async ({ repoRoot, message }: { repoRoot?: string; message: string }) => {
+    try {
+      const workspaceRoot = await getConnectionWorkspaceId(connection)
+      if (!workspaceRoot) return { ok: false, error: 'no-workspace' }
+      if (!message?.trim()) return { ok: false, error: 'message-required' }
+
+      const effectiveRepoRoot = repoRoot ?? workspaceRoot
+      const { execFile } = await import('node:child_process')
+      const { promisify } = await import('node:util')
+      const execFileAsync = promisify(execFile)
+
+      await execFileAsync('git', ['commit', '-m', message], { cwd: effectiveRepoRoot, maxBuffer: 1024 * 1024 * 8 })
+      return { ok: true }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('git.getLog', async ({ repoRoot, limit, cursor }: { repoRoot?: string; limit?: number; cursor?: string | null } = {}) => {
+    try {
+      const workspaceRoot = await getConnectionWorkspaceId(connection)
+      if (!workspaceRoot) return { ok: false, error: 'no-workspace' }
+
+      const effectiveRepoRoot = repoRoot ?? workspaceRoot
+      const gitLogService = getGitLogService()
+      const page = await gitLogService.getLog(effectiveRepoRoot, { limit: limit ?? 50, cursor: cursor ?? null })
+      return { ok: true, page }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
+  })
+
+  addMethod('git.getCommitDetails', async ({ repoRoot, sha }: { repoRoot?: string; sha: string }) => {
+    try {
+      const workspaceRoot = await getConnectionWorkspaceId(connection)
+      if (!workspaceRoot) return { ok: false, error: 'no-workspace' }
+      if (!sha) return { ok: false, error: 'sha-required' }
+
+      const effectiveRepoRoot = repoRoot ?? workspaceRoot
+      const gitCommitService = getGitCommitService()
+      const details = await gitCommitService.getCommitDetails(effectiveRepoRoot, sha)
+      return { ok: true, details }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
     }

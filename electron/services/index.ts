@@ -18,6 +18,9 @@ import { AppService } from './AppService'
 import { McpService } from './McpService'
 import { LanguageServerService } from './LanguageServerService'
 import { GitStatusService } from './GitStatusService'
+import { GitDiffService } from './GitDiffService'
+import { GitCommitService } from './GitCommitService'
+import { GitLogService } from './GitLogService'
 import { WorkspaceSearchService } from './WorkspaceSearchService'
 
 import { SessionService } from './SessionService'
@@ -43,6 +46,9 @@ let appService: AppService | null = null
 let mcpService: McpService | null = null
 let languageServerService: LanguageServerService | null = null
 let gitStatusService: GitStatusService | null = null
+let gitDiffService: GitDiffService | null = null
+let gitCommitService: GitCommitService | null = null
+let gitLogService: GitLogService | null = null
 let workspaceSearchService: WorkspaceSearchService | null = null
 
 let sessionService: SessionService | null = null
@@ -67,6 +73,9 @@ export function initializeServices(): void {
   workspaceService = new WorkspaceService()
   explorerService = new ExplorerService()
   gitStatusService = new GitStatusService()
+  gitDiffService = new GitDiffService()
+  gitCommitService = new GitCommitService()
+  gitLogService = new GitLogService()
   workspaceSearchService = new WorkspaceSearchService()
   try {
     gitStatusService.attachExplorerService(explorerService)
@@ -109,6 +118,9 @@ export function initializeServices(): void {
   registry.register('mcp', mcpService)
   registry.register('languageServer', languageServerService)
   registry.register('gitStatus', gitStatusService)
+  registry.register('gitDiff', gitDiffService)
+  registry.register('gitCommit', gitCommitService)
+  registry.register('gitLog', gitLogService)
   registry.register('workspaceSearch', workspaceSearchService)
 
   registry.register('session', sessionService)
@@ -197,6 +209,21 @@ export function getLanguageServerService(): LanguageServerService {
 export function getGitStatusService(): GitStatusService {
   if (!gitStatusService) throw new Error('[Services] GitStatusService not initialized')
   return gitStatusService
+}
+
+export function getGitDiffService(): GitDiffService {
+  if (!gitDiffService) throw new Error('[Services] GitDiffService not initialized')
+  return gitDiffService
+}
+
+export function getGitCommitService(): GitCommitService {
+  if (!gitCommitService) throw new Error('[Services] GitCommitService not initialized')
+  return gitCommitService
+}
+
+export function getGitLogService(): GitLogService {
+  if (!gitLogService) throw new Error('[Services] GitLogService not initialized')
+  return gitLogService
 }
 
 export function getWorkspaceSearchService(): WorkspaceSearchService {

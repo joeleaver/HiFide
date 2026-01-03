@@ -37,6 +37,7 @@
     },
 
     "gemini": {
+      "gemini-3-flash-preview": { "inputCostPer1M": 0.5, "outputCostPer1M": 3, "cachedInputCostPer1M": 0.05 },
       "gemini-3-pro-preview": { "inputCostPer1M": 2, "outputCostPer1M": 12, "cachedInputCostPer1M": 0.2 },
       "gemini-2.5-pro": { "inputCostPer1M": 1.25, "outputCostPer1M": 10, "cachedInputCostPer1M": 0.3125 },
       "gemini-2.5-flash": { "inputCostPer1M": 0.3, "outputCostPer1M": 2.5, "cachedInputCostPer1M": 0.075 },

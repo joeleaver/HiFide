@@ -15,8 +15,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T00:50:08.342Z",
       "updatedAt": "2025-12-16T00:50:08.342Z",
-      "lastUsedAt": "2025-12-16T03:15:22.155Z",
-      "usageCount": 10
+      "lastUsedAt": "2025-12-16T17:20:10.062Z",
+      "usageCount": 11
     },
     {
       "id": "mem-41b78189-d38d-43cf-96d2-f7434d463243",
@@ -50,8 +50,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:35:38.203Z",
       "updatedAt": "2025-12-16T01:35:38.203Z",
-      "lastUsedAt": "2025-12-16T03:24:48.917Z",
-      "usageCount": 26
+      "lastUsedAt": "2025-12-16T17:29:02.460Z",
+      "usageCount": 51
     },
     {
       "id": "mem-d24a8682-801b-43a8-a7e7-33d96cf3cc22",
@@ -102,8 +102,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:38:26.728Z",
       "updatedAt": "2025-12-16T01:38:26.728Z",
-      "lastUsedAt": "2025-12-16T03:24:48.917Z",
-      "usageCount": 22
+      "lastUsedAt": "2025-12-16T17:29:02.460Z",
+      "usageCount": 47
     },
     {
       "id": "mem-c4920107-b77c-4b00-83ea-c20c2bcc757a",
@@ -120,8 +120,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:38:26.728Z",
       "updatedAt": "2025-12-16T01:38:26.728Z",
-      "lastUsedAt": "2025-12-16T03:24:48.917Z",
-      "usageCount": 16
+      "lastUsedAt": "2025-12-16T17:29:02.460Z",
+      "usageCount": 40
     },
     {
       "id": "mem-2f1074a0-847d-420e-932c-12566a70eebf",
@@ -173,8 +173,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:42:38.074Z",
       "updatedAt": "2025-12-16T01:42:38.074Z",
-      "lastUsedAt": "2025-12-16T03:24:48.917Z",
-      "usageCount": 15
+      "lastUsedAt": "2025-12-16T17:29:02.460Z",
+      "usageCount": 38
     },
     {
       "id": "mem-88fdf959-78ce-45e5-981c-b79516b96c98",
@@ -190,8 +190,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:45:50.069Z",
       "updatedAt": "2025-12-16T01:45:50.069Z",
-      "lastUsedAt": "2025-12-16T03:24:48.917Z",
-      "usageCount": 9
+      "lastUsedAt": "2025-12-16T17:06:14.185Z",
+      "usageCount": 22
     },
     {
       "id": "mem-61663769-5b8b-4283-b9b7-f901e8fb753b",
@@ -207,8 +207,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T01:45:50.069Z",
       "updatedAt": "2025-12-16T01:45:50.069Z",
-      "lastUsedAt": "2025-12-16T03:24:48.917Z",
-      "usageCount": 21
+      "lastUsedAt": "2025-12-16T17:29:02.460Z",
+      "usageCount": 46
     },
     {
       "id": "mem-942bfd83-eb77-4632-92bf-c72bf6d0f279",
@@ -326,8 +326,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T02:06:58.162Z",
       "updatedAt": "2025-12-16T02:06:58.162Z",
-      "lastUsedAt": "2025-12-16T03:24:48.917Z",
-      "usageCount": 14
+      "lastUsedAt": "2025-12-16T17:29:02.460Z",
+      "usageCount": 38
     },
     {
       "id": "mem-d5eb05a7-7369-4a1e-9411-2cdee46d9770",
@@ -344,7 +344,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T02:06:58.162Z",
       "updatedAt": "2025-12-16T02:06:58.162Z",
-      "usageCount": 0
+      "lastUsedAt": "2025-12-16T17:12:07.009Z",
+      "usageCount": 1
     },
     {
       "id": "mem-6e6cfd68-8b5c-4300-a47f-192cf9ec33bc",
@@ -378,7 +379,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T02:09:00.653Z",
       "updatedAt": "2025-12-16T02:09:00.653Z",
-      "usageCount": 0
+      "lastUsedAt": "2025-12-16T17:12:07.009Z",
+      "usageCount": 1
     },
     {
       "id": "mem-487153e1-4f81-44e7-8ccf-605f82657312",
@@ -412,8 +414,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T02:12:27.137Z",
       "updatedAt": "2025-12-16T02:12:27.137Z",
-      "lastUsedAt": "2025-12-16T03:24:48.917Z",
-      "usageCount": 12
+      "lastUsedAt": "2025-12-16T17:29:02.460Z",
+      "usageCount": 37
     },
     {
       "id": "mem-cbfef1d8-f6b6-4266-a379-1228513411c7",
@@ -1017,8 +1019,8 @@
       "enabled": true,
       "createdAt": "2025-12-16T03:20:18.990Z",
       "updatedAt": "2025-12-16T03:20:18.990Z",
-      "lastUsedAt": "2025-12-16T03:23:51.181Z",
-      "usageCount": 1
+      "lastUsedAt": "2025-12-16T17:29:02.460Z",
+      "usageCount": 4
     },
     {
       "id": "mem-535740a6-0dc0-48fb-bd25-d3d43c03ba97",
@@ -1181,6 +1183,1477 @@
       "enabled": true,
       "createdAt": "2025-12-16T03:26:14.533Z",
       "updatedAt": "2025-12-16T03:26:14.533Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-dcf2deca-7afa-49d2-9db6-cd3f62ad0686",
+      "type": "fact",
+      "text": "The git integration plan will mirror VS Code’s Source Control layout with Repositories, Graph, Changed Files, and the ability to commit changes with a message.",
+      "tags": [
+        "product",
+        "ui"
+      ],
+      "importance": 0.5,
+      "contentHash": "a12743d80a18f5a228962240622a474ad4541903c83095828e4feeae9e13f2c0",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:36:06.956Z",
+      "updatedAt": "2025-12-16T03:36:06.956Z",
+      "lastUsedAt": "2025-12-16T17:23:31.453Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-4caae5f8-ffe1-43f6-a4c1-483af56e4821",
+      "type": "constraint",
+      "text": "Maintain anchor stability for annotations by starting with hunk header + offset anchors and evolving toward fuzzy anchors based on nearby context hashes.",
+      "tags": [
+        "constraint",
+        "llm"
+      ],
+      "importance": 0.75,
+      "contentHash": "3e48f41bdc07c6bee101b356b3483dcbd27db3f2962e81b52eca17f61fba072b",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:36:06.956Z",
+      "updatedAt": "2025-12-16T03:36:06.956Z",
+      "lastUsedAt": "2025-12-16T15:04:55.189Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-6dba7b50-c7cf-4f98-aee3-91e48bb6a85a",
+      "type": "constraint",
+      "text": "Control diff context size with strict scoping rules (selected files/hunks, annotated hunks only, minimal window) so prompts stay reliable and performant.",
+      "tags": [
+        "constraint",
+        "llm"
+      ],
+      "importance": 0.5,
+      "contentHash": "d099f1ccedab3ef82e7c03c24ca03051ef3137055707634d0139f604b913404c",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:36:06.956Z",
+      "updatedAt": "2025-12-16T03:36:06.956Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-cf7fecf3-2532-4a76-8b94-aa7d138543b1",
+      "type": "constraint",
+      "text": "Package LM payloads deterministically in machine-readable form to keep behavior predictable and debuggable.",
+      "tags": [
+        "constraint",
+        "llm"
+      ],
+      "importance": 0.5,
+      "contentHash": "9139a1697c8bcefc7314747980e5e7abf6d52d41a7fb4d4139711b5f2420fa03",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:36:06.956Z",
+      "updatedAt": "2025-12-16T03:36:06.956Z",
+      "lastUsedAt": "2025-12-16T17:08:58.263Z",
+      "usageCount": 6
+    },
+    {
+      "id": "mem-8d4c4df4-f8b5-4711-9de5-4b90c2ca5227",
+      "type": "constraint",
+      "text": "Treat difs as potential secrets by warning users, detecting common patterns, or requiring explicit selection before sending to the LM.",
+      "tags": [
+        "security",
+        "constraint"
+      ],
+      "importance": 0.75,
+      "contentHash": "d34eee34a6e5d74088ccfa9b99e1cfd3cbac6bd616194001b650edc12c4f3784",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:36:06.956Z",
+      "updatedAt": "2025-12-16T03:36:06.956Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-20599e5d-b33b-4d1b-9b70-67168f3cf0f9",
+      "type": "fact",
+      "text": "The Source Control placeholder UI currently lives in src/components/SourceControlView.tsx and is referenced from src/components/ActivityBar.tsx.",
+      "tags": [
+        "codebase",
+        "navigation"
+      ],
+      "importance": 0.25,
+      "contentHash": "061698a17d13326eff8349b9fc40ecbed1879639b54b9d21daa1d68b8f9c3077",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:36:06.956Z",
+      "updatedAt": "2025-12-16T03:36:06.956Z",
+      "lastUsedAt": "2025-12-16T16:42:48.232Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-9dba4a7a-7eb0-4192-940f-48e2ae2040bf",
+      "type": "fact",
+      "text": "GitStatusService already exists to provide working-tree change snapshots to the renderer as the backend foundation for the integration.",
+      "tags": [
+        "codebase"
+      ],
+      "importance": 0.25,
+      "contentHash": "2a75eef5b8b384093d1abc341158f8c4e465fee1880f04d217d8a28dc1f6d21e",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:36:06.956Z",
+      "updatedAt": "2025-12-16T03:36:06.956Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-3ce0ddf2-ae15-46e2-9cb9-54bd066e9939",
+      "type": "constraint",
+      "text": "Components must remain pure with no useEffect or business logic; all orchestration lives in the Zustand Source Control store and Electron services.",
+      "tags": [
+        "architecture",
+        "zustand"
+      ],
+      "importance": 0.75,
+      "contentHash": "6a9ce9ad525d3e6b94f496fb857a16afbe21632910cc2b0fd59106ecf350c845",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:38:00.684Z",
+      "updatedAt": "2025-12-16T15:05:44.249Z",
+      "lastUsedAt": "2025-12-16T17:23:31.453Z",
+      "usageCount": 2
+    },
+    {
+      "id": "mem-47a1b55f-41b0-4ddb-b255-994afcd6e672",
+      "type": "fact",
+      "text": "Annotation anchors include repoRoot, filePath, hunkHeader, side, lineOffsetInHunk, and a contextHash to keep comments attached as lines shift.",
+      "tags": [
+        "annotations",
+        "git",
+        "annotation",
+        "anchor"
+      ],
+      "importance": 0.5,
+      "contentHash": "732c9f5467f4a30087bf950e84049a01f65828662148943e05e19a9942058b79",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:38:00.684Z",
+      "updatedAt": "2025-12-16T15:05:44.249Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-68bf459d-5626-4631-aa41-1ba952c79363",
+      "type": "workflow",
+      "text": "Send the LM only the annotated hunks plus a small surrounding window via a deterministic JSON payload appended to the user prompt to keep prompts bounded and reproducible.",
+      "tags": [
+        "llm",
+        "diff"
+      ],
+      "importance": 0.5,
+      "contentHash": "1dfb493a583f6ce6b1e569794cccb8218a3d50ad084ec8114a2a08cbdb925b21",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T03:38:00.684Z",
+      "updatedAt": "2025-12-16T03:38:00.684Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-b3c0eb5e-6aa7-41f4-97c3-6277f8f197db",
+      "type": "fact",
+      "text": "V1 annotations operate on working-tree difs with unstaged mode by default, with staged/unstaged selection added later if needed.",
+      "tags": [
+        "diff",
+        "annotation"
+      ],
+      "importance": 0.25,
+      "contentHash": "4f3a7b737a3cc6ca209b289118726958d73f648098c162c26009b9ec38de0962",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:05:44.249Z",
+      "updatedAt": "2025-12-16T15:05:44.249Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-b792ca82-bcf0-4da0-ba70-737f23fcaa4f",
+      "type": "fact",
+      "text": "LM context payloads only include annotated hunks plus adjacent lines and are delivered as deterministic JSON appended to the user prompt.",
+      "tags": [
+        "llm",
+        "context"
+      ],
+      "importance": 0.25,
+      "contentHash": "3c0dc56ae0e089854014ee221af4de452850642358779e98ca917c3fba873443",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:05:44.249Z",
+      "updatedAt": "2025-12-16T15:05:44.249Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-60e9388e-f820-4fb6-be16-1469be73932a",
+      "type": "fact",
+      "text": "Git Integration plan now explicitly supports both hunk- and line-level annotations with anchors that include diffBase (staged|unstaged), hunkIndex+contextHash, and line anchors specified by side, lineOffsetInHunk, and contextHash.",
+      "tags": [
+        "git",
+        "integration",
+        "spec"
+      ],
+      "importance": 0.75,
+      "contentHash": "3481ae90c2ec64e93528c7726a0d44f5b4b8a62d8063f71b6db9801ee0cf7b06",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:12:00.370Z",
+      "updatedAt": "2025-12-16T15:12:00.370Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-709034e0-34fb-4137-af64-dba04254387f",
+      "type": "constraint",
+      "text": "Renderer components must remain pure with no useEffect or business logic, so all orchestration runs through Zustand stores and selectors.",
+      "tags": [
+        "react",
+        "component",
+        "constraint"
+      ],
+      "importance": 0.75,
+      "contentHash": "e4cb66c9b46c74ebe7e6dda963370c345eb91c993fa3ef3cc9f8c7983aea0acd",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:12:00.370Z",
+      "updatedAt": "2025-12-16T15:12:00.370Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-d479fee1-0cc7-4960-a382-7ffb75661208",
+      "type": "workflow",
+      "text": "Next atomic implementation goal is the working-tree diff service plus IPC so the diff viewer and annotation work have a real diff model to render against.",
+      "tags": [
+        "planning",
+        "workflow"
+      ],
+      "importance": 0.5,
+      "contentHash": "a1825d22f6bdb6101ca89357fa8cc5f7e77b409a6cfa9d6c23c29ba34d903dec",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:12:00.370Z",
+      "updatedAt": "2025-12-16T15:12:00.370Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-f69f9dd6-183d-4f6a-9459-97d5012593a9",
+      "type": "fact",
+      "text": "The Source Control view now reads from a minimal Zustand store via selectSourceControlHeader so the component remains pure with no useEffect or business logic.",
+      "tags": [
+        "source-control",
+        "zustand"
+      ],
+      "importance": 0.5,
+      "contentHash": "8e93cbd506241469c5dfb1d00320ecd6615ebd9ec0e49968569b8f54744f6f92",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:20:26.093Z",
+      "updatedAt": "2025-12-16T15:20:26.093Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-42d01fbf-0b76-4b59-b692-6ca48fe5d2f9",
+      "type": "fact",
+      "text": "GitDiffService exposes getWorkingTreeDiff(repoRoot, filePath, { staged }) over IPC using git diff commands and returns structured GitFileDiff data parsed by gitDiffParser.",
+      "tags": [
+        "git",
+        "diff",
+        "ipc"
+      ],
+      "importance": 0.5,
+      "contentHash": "31c755d59eb2891a65daeb9df2f03b2f579e9dfa1b1329637b19f0680527b407",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:20:26.093Z",
+      "updatedAt": "2025-12-16T15:20:26.093Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-72902977-87a5-43b6-95e6-49b80239712b",
+      "type": "fact",
+      "text": "git.getDiff RPC is documented in the KB alongside the parser notes and provides the renderer with structured hunks/lines for diff views.",
+      "tags": [
+        "rpc",
+        "git",
+        "diff"
+      ],
+      "importance": 0.5,
+      "contentHash": "768512d396644c98b10e3511ffbb98f0510e6181dd9c7b574d52b38080ec412d",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:20:26.093Z",
+      "updatedAt": "2025-12-16T15:20:26.093Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-d256dcf0-a66f-435a-ad77-390f1a576de7",
+      "type": "fact",
+      "text": "GitStatusService now forwards git:status events to renderer notifications via git.status so explorer subscriptions receive push updates.",
+      "tags": [
+        "git",
+        "notifications"
+      ],
+      "importance": 0.25,
+      "contentHash": "c0c34d258e3023039d8306e6d00630963f222a2350ce1088aaa5fe5baddbe385",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:20:26.093Z",
+      "updatedAt": "2025-12-16T15:20:26.093Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-dd06dd27-9028-4f2d-9269-c8a8c56578eb",
+      "type": "fact",
+      "text": "The working tree diff service exposed through git.getDiff RPC now returns structured GitFileDiffs (hunks/lines) plus isBinary info so the renderer can request file difs via IPC.",
+      "tags": [
+        "git",
+        "service",
+        "ipc"
+      ],
+      "importance": 0.5,
+      "contentHash": "773449823b3e338ee8d5dca5f8c89a8fcb60bce7541aa7b6752ee623a36307f3",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:27:59.765Z",
+      "updatedAt": "2025-12-16T15:27:59.765Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-ecddba90-473d-4cd6-a71d-449427ba8101",
+      "type": "fact",
+      "text": "Shared diff types GitDiffLine, GitDiffHunk, and GitFileDiff live in shared/git.ts so both backend and renderer handle unified difs in the same structured format.",
+      "tags": [
+        "types",
+        "git",
+        "shared"
+      ],
+      "importance": 0.5,
+      "contentHash": "3c608680abc2b80f142c4d34a28cf43b5ee54413dd24257bf6d502654bb5ce45",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:27:59.765Z",
+      "updatedAt": "2025-12-16T15:27:59.765Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-14fee4c4-17ff-40ac-9444-2a2badef7c5c",
+      "type": "fact",
+      "text": "Backend event subscriptions now forward GitStatusService git:status events to renderer git.status notifications so explorer subscribers receive up-to-date status pushes.",
+      "tags": [
+        "events",
+        "git",
+        "status"
+      ],
+      "importance": 0.25,
+      "contentHash": "882876aa72729c25421670bb7e39c104a1b8b10e81f0d1cbaa21297cfa5d57b1",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:27:59.765Z",
+      "updatedAt": "2025-12-16T15:27:59.765Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-ea8df59f-c595-4e98-a3d0-c26506647ba0",
+      "type": "workflow",
+      "text": "DiffAnnotationsStateV1 is persisted renderer-side in localStorage keyed by the current workspaceId and repoRoot via useBackendBinding.getState().workspaceId.",
+      "tags": [
+        "persistence",
+        "annotations",
+        "workflow"
+      ],
+      "importance": 0.5,
+      "contentHash": "b1d3b21c8b5dd965d0671df3e1bd715ffa59e6df629338e93b7def537ee44bb3",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:27:59.765Z",
+      "updatedAt": "2025-12-16T15:27:59.765Z",
+      "lastUsedAt": "2025-12-16T17:12:07.009Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-9426edaa-e31c-4213-b9ca-fc9843180bfc",
+      "type": "fact",
+      "text": "Anchor helpers computeDiffContextHash over a small window of diff line text using deterministic FNV-1a 32-bit hashing and reattachAnchor first tries stored hunk/neighbors before scanning all hunks.",
+      "tags": [
+        "anchors",
+        "utils",
+        "hashing"
+      ],
+      "importance": 0.25,
+      "contentHash": "0962332ba3fc36e2936615892f0405116e02669df2a1c633b957f617263fbc04",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:27:59.765Z",
+      "updatedAt": "2025-12-16T15:27:59.765Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-e7e10fa3-aaad-47b5-97ed-42716aa70218",
+      "type": "workflow",
+      "text": "Next planned work is task-e6a835fe-50fb-4723-8204-af184e5051a9 to build the compact diff viewer UI with annotation editing, starting by adding a Source Control zustand sub-slice for file diff selection and annotation CRUD/persistence.",
+      "tags": [
+        "planning",
+        "ui",
+        "workflow"
+      ],
+      "importance": 0.25,
+      "contentHash": "04e756d737930becd97f111ada189ad76e1c0f304d31883fe6c66cf81bef3351",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:27:59.765Z",
+      "updatedAt": "2025-12-16T15:27:59.765Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-1bfd24c0-b368-46bd-aa8e-f985c61d0514",
+      "type": "fact",
+      "text": "DiffAnchor now supports both hunk and line anchors with explicit diffBase, hunkIndex, contextHash, and line-specific side/lineOffsetInHunk metadata for the annotation model.",
+      "tags": [
+        "annotations",
+        "source-control"
+      ],
+      "importance": 0.75,
+      "contentHash": "8adc88f398eb24d369c3dfc97f96bf5695aa561c65becc3e146b118cdcf38aa2",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:35:00.230Z",
+      "updatedAt": "2025-12-16T15:35:00.230Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-f7cd27ae-f25a-4f6d-8491-ec9aecc80eb2",
+      "type": "workflow",
+      "text": "DiffAnnotationsStateV1 is persisted in renderer localStorage keyed by (workspaceId, repoRoot) using useBackendBinding.getState().workspaceId to scope annotations to workspace/repo.",
+      "tags": [
+        "persistence",
+        "annotations"
+      ],
+      "importance": 0.75,
+      "contentHash": "37b7dcd86670b7785699a57d35df5eea3c7fa59379b6cc6925b7fa00e1a5f1db",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:35:00.230Z",
+      "updatedAt": "2025-12-16T15:35:00.230Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-ea6c5145-c7dc-4279-85fa-370e8785fa02",
+      "type": "warning",
+      "text": "The Changed Files list is currently populated only by actions.setChangedFiles(...) and must be wired to git.getStatus in the next iteration.",
+      "tags": [
+        "limitations",
+        "source-control"
+      ],
+      "importance": 0.5,
+      "contentHash": "9ce650061b22f50125e1dd87f7394a475020c4b3d346551b8bf03c715f91622e",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:35:00.230Z",
+      "updatedAt": "2025-12-16T15:35:00.230Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-1607d558-d0be-4860-b152-772a1254df1b",
+      "type": "fact",
+      "text": "The Source Control pane now renders the compact diff viewer, annotation editor, and file list purely via the Zustand store without component business logic.",
+      "tags": [
+        "source-control",
+        "ui"
+      ],
+      "importance": 0.5,
+      "contentHash": "4ed94517677ef7b1128fb0ddadc0ead9d219c4ea0393992e9c92d6dd86fe3cb8",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:45:48.105Z",
+      "updatedAt": "2025-12-16T15:45:48.105Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-9ec9e64a-27c8-4556-9a84-f6dd9f79f971",
+      "type": "fact",
+      "text": "The v1 Source Control state in src/store/sourceControl.ts tracks changedFiles, activeFilePath, difsByPath, annotations, selection, editingAnnotationId, and editorDraft plus actions for selecting files and persisting annotations per repo root.",
+      "tags": [
+        "source-control",
+        "store"
+      ],
+      "importance": 0.5,
+      "contentHash": "5015031e6af0aae0d3d4625ef435efdcecedb0578e14258d6e68d652beb73cf3",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:45:48.105Z",
+      "updatedAt": "2025-12-16T15:45:48.105Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-3c686ceb-2d1e-43d1-a451-8a4fed6ee94c",
+      "type": "workflow",
+      "text": "Clicking Attach annotated difs to next prompt builds a structured JSON payload of annotated files/hunks, stores it as sessionInputContext, sends it via FlowService.resume, and appends it under ---\\n[attached_context]\\n<json> in resumeFlow.",
+      "tags": [
+        "source-control",
+        "llm-context",
+        "workflow"
+      ],
+      "importance": 0.75,
+      "contentHash": "1a5730ffaee74ea56a523030bfa5ed7d64493aa15b71d55e70422a8f18cb7160",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:45:48.105Z",
+      "updatedAt": "2025-12-16T15:45:48.105Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-32ba16d4-50ce-4dc2-b82d-390e0f1f84f2",
+      "type": "constraint",
+      "text": "The annotated diff payload builder enforces a 24,000-byte hard budget and deterministically rolls back the last added hunk if the limit would be exceeded.",
+      "tags": [
+        "source-control",
+        "llm-context"
+      ],
+      "importance": 0.75,
+      "contentHash": "33925a9089eb137fb8b8f9d3cd3056efa1b56d4475e237930ae678d4ae2117a1",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:45:48.105Z",
+      "updatedAt": "2025-12-16T15:45:48.105Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-b0334781-a513-4cda-b093-ecdad3f67fa2",
+      "type": "fact",
+      "text": "Annotated diff attachments now build a structured JSON payload containing only annotated hunks, store it transiently as sessionInputContext, and append it to the user message under the `---\\n[attached_context]\\n<json>` delimiter when sending prompts.",
+      "tags": [
+        "source-control",
+        "llm-integration",
+        "payload"
+      ],
+      "importance": 0.75,
+      "contentHash": "789e6a2b7e88dfec70b5e6c7e9d0be5a04dd648c0a61a6594a80daf1ce687ab1",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:50:37.503Z",
+      "updatedAt": "2025-12-16T15:50:37.503Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-231d3676-cfbc-4cf7-b062-475eaedd1aaa",
+      "type": "fact",
+      "text": "The context payload builder enforces a 24,000-byte budget by deterministically including hunks in a stable order and rolling back the last hunk when the budget would be exceeded.",
+      "tags": [
+        "source-control",
+        "size-gating"
+      ],
+      "importance": 0.5,
+      "contentHash": "2d4b0578d4481fc8be6341061f7a5673cfe93da1ce18b19f5b43c334825a392c",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:50:37.503Z",
+      "updatedAt": "2025-12-16T15:50:37.503Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-75ebaa30-fffb-44f2-9337-ddda9e18c067",
+      "type": "fact",
+      "text": "Source Control UI now supports context attach modes (None / Selected file / Annotated) with pure components and actions that pass the selected file path to the builder so the selected-file mode includes every hunk for that file while annotated mode still filters to hunks with annotations.",
+      "tags": [
+        "source-control",
+        "ui",
+        "context"
+      ],
+      "importance": 0.5,
+      "contentHash": "f1956b852da6590e02270b30729e07e513fac4c1fc31bceb542837628eb0bdbf",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:50:37.503Z",
+      "updatedAt": "2025-12-16T15:50:37.503Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-dff8a891-67e0-4caa-893d-75a241fe536e",
+      "type": "workflow",
+      "text": "Next Git integration milestones are to (1) wire GitStatusService into the Source Control store for real git status, (2) add commit UI and staging controls, and (3) support repo discovery and multi-repo workspaces, each via new Kanban tasks respecting the no-effects-in-components constraint.",
+      "tags": [
+        "source-control",
+        "workflow",
+        "roadmap"
+      ],
+      "importance": 0.25,
+      "contentHash": "6e41bf3a8916cf5c87c27981212a5777a49ce5c052d6175c83498edd2e62755e",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:50:37.503Z",
+      "updatedAt": "2025-12-16T15:50:37.503Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-18f20bd5-c0c9-4099-9a03-d0628147b112",
+      "type": "fact",
+      "text": "Context attach modes now include none, selected file, and annotated, where selected file returns every hunk for that file (annotations included when present) while annotated keeps the previous behavior and none sends no payload.",
+      "tags": [
+        "source-control",
+        "llm-context"
+      ],
+      "importance": 0.5,
+      "contentHash": "e8b4ee641cc58e98780a08f53899c6ef4243f4262cba7ee43232efe1d0882e85",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:56:02.804Z",
+      "updatedAt": "2025-12-16T15:56:02.804Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-37819656-618a-4272-bb1c-bab67ba10af8",
+      "type": "fact",
+      "text": "SourceControlView’s SegmentedControl lets users pick None/Selected file/Annotated and the Attach to prompt action uses attachDiffContextToNextPrompt()",
+      "tags": [
+        "ui",
+        "source-control"
+      ],
+      "importance": 0.25,
+      "contentHash": "84d0af5fb13ae5e7ed1c3528c637534f3e43fbf3169f05f6f6d46b2f78eb6206",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:56:02.804Z",
+      "updatedAt": "2025-12-16T15:56:02.804Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-cab08ee0-9fa0-448a-9342-db6af2617e21",
+      "type": "workflow",
+      "text": "Kanban tasks for Git integration include repo discovery/multi-repo support, wiring changed files to git status, staging/commit UI, plus a backlog log/graph view, and the preferred implementation order is repo discovery → changed files → staging/commit → log/graph.",
+      "tags": [
+        "planning",
+        "git-integration"
+      ],
+      "importance": 0.5,
+      "contentHash": "c9c228bb547b59521a720355b24ce5676833b835737470c69f8365555ac88b82",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T15:56:02.804Z",
+      "updatedAt": "2025-12-16T15:56:02.804Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-02677f23-95ab-4f97-8e40-03c6b0ef78a0",
+      "type": "fact",
+      "text": "Repo discovery completed via git.discoverRepos RPC that scans the workspace for .git markers and returns { repoRoot, name } entries while status/diff RPCs now accept an optional repoRoot to scope operations.",
+      "tags": [
+        "git",
+        "backend"
+      ],
+      "importance": 0.75,
+      "contentHash": "9a1f4d4ca106e3edd1bec2123d966a5deb130c29682c6d028b762ffbfe5ca914",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:03:37.115Z",
+      "updatedAt": "2025-12-16T16:03:37.115Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-3b59811f-93b8-489c-8abc-cf3eb73e88ac",
+      "type": "fact",
+      "text": "Source Control store now tracks the detected repos plus activeRepoRoot, refreshes repos through actions.refreshRepos, runs git.getDiff with the active repo root, and keeps repo-specific annotations persisted per (workspaceId, repoRoot).",
+      "tags": [
+        "source-control",
+        "state"
+      ],
+      "importance": 0.5,
+      "contentHash": "45dfdfbb30ae07a0d145ca9aff23fb9d4af33eee5c277fe225c3c48b110f3f64",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:03:37.115Z",
+      "updatedAt": "2025-12-16T16:03:37.115Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-64cf56c6-244b-4936-82b7-70586cbe8979",
+      "type": "workflow",
+      "text": "Follow the Git Integration implementation order: repository discovery → changed files wiring to git status → staging/commit UI → log/graph view.",
+      "tags": [
+        "workflow",
+        "planning"
+      ],
+      "importance": 0.5,
+      "contentHash": "933289b1aa260319f56fd1d3094e19bb79c644f4aa7aa7b60f27493917066fc1",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:03:37.115Z",
+      "updatedAt": "2025-12-16T16:03:37.115Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-38f4a225-c1d1-47b1-b752-cc451f4cfa99",
+      "type": "fact",
+      "text": "Source Control store now tracks multiple repos, persists activeRepoRoot, refreshes repos via actions.refreshRepos, and loads repo-scoped difs/annotations by passing repoRoot to git.getDiff.",
+      "tags": [
+        "source-control",
+        "git",
+        "repos"
+      ],
+      "importance": 0.5,
+      "contentHash": "ee3eaa520716936616b1c763071597e77878d945dc524adb9850aee661cf5e82",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:07:37.702Z",
+      "updatedAt": "2025-12-16T16:07:37.702Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-c7aaf1f0-879a-49db-9206-647d3a55818e",
+      "type": "fact",
+      "text": "Bootstrap now calls initSourceControlEvents so the store subscribes to git.status push notifications and exposes refreshStatus, refreshReposAndStatus, resetForWorkspace, and applyGitStatusSnapshot actions to keep changedFiles current.",
+      "tags": [
+        "source-control",
+        "events",
+        "store",
+        "git"
+      ],
+      "importance": 0.5,
+      "contentHash": "7ffc88d696987f5c44826769c91d39dee513310bf398d192e2cac1766abdf23b",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:07:37.702Z",
+      "updatedAt": "2025-12-16T16:07:37.702Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-92b79967-67a5-4aef-8669-bdba91394655",
+      "type": "fact",
+      "text": "The Source Control store subscribes to git.status push notifications, can refresh via git.getStatus({ repoRoot }), and initializes events like Explorer so React remains pure.",
+      "tags": [
+        "source-control",
+        "store"
+      ],
+      "importance": 0.75,
+      "contentHash": "6cd6fe441be254cbe96124f875966ba29983ca74bacd42b1179e8b40b162b945",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:29:41.063Z",
+      "updatedAt": "2025-12-16T16:29:41.063Z",
+      "lastUsedAt": "2025-12-16T17:23:31.453Z",
+      "usageCount": 3
+    },
+    {
+      "id": "mem-2e8d68c7-5166-4aa5-968f-5808926cccad",
+      "type": "fact",
+      "text": "Backend RPC handlers now expose git.stageFile, git.unstageFile, and git.commit (all repoRoot-scoped) backed by git add/reset/commit commands.",
+      "tags": [
+        "backend",
+        "git"
+      ],
+      "importance": 0.75,
+      "contentHash": "69525a8aecc0c5c88edfbe46d52d28ccc769eae5ca2ca0b180ef76e78357831d",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:29:41.063Z",
+      "updatedAt": "2025-12-16T16:29:41.063Z",
+      "lastUsedAt": "2025-12-16T17:23:31.453Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-0eb35109-ada8-46c5-ba33-0e72bdde779c",
+      "type": "fact",
+      "text": "The renderer store added stageFile/unstageFile actions that call the RPCs and refresh status, tracks commitMessageDraft/commitBusy/commitError, and refreshes status upon successful commit while tracking changedFiles[].staged.",
+      "tags": [
+        "store",
+        "source-control"
+      ],
+      "importance": 0.75,
+      "contentHash": "e7fd8b3ee73150f4325e32dde684338934368ac8d931896e2e42a1f1fcd6a584",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:29:41.063Z",
+      "updatedAt": "2025-12-16T16:29:41.063Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-d8e67f6c-4f45-42eb-a119-f589d62bf1d3",
+      "type": "fact",
+      "text": "Source Control UI now includes CommitBox (message input + commit button + error display) wired to store state and DiffViewer shows Stage/Unstage actions for the selected file.",
+      "tags": [
+        "ui",
+        "source-control"
+      ],
+      "importance": 0.5,
+      "contentHash": "e333f7d10413c8fbd7f235b0809d75d0b59ec7ba0f7db2c89b929a4a2c836897",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:29:41.063Z",
+      "updatedAt": "2025-12-16T16:29:41.063Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-73510c6e-60c3-41b5-a251-f92b35a57e09",
+      "type": "workflow",
+      "text": "A backlog task (task-d8625eb-1b79-411b-afde-a277ece8ab0e) tracks grouping the Changed Files list by staged/unstaged/conflicts before building the grouped UI.",
+      "tags": [
+        "planning",
+        "source-control"
+      ],
+      "importance": 0.25,
+      "contentHash": "544bd3f4d9c27b5f232edf4c1fe670c41a388ee52c0fcdd255bc39a662ff0efa",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:29:41.063Z",
+      "updatedAt": "2025-12-16T16:29:41.063Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-a1d8661c-714f-4ed9-8282-cdbb70443cbe",
+      "type": "fact",
+      "text": "The backend now exposes repoRoot-scoped RPCs for git.stageFile, git.unstageFile, and git.commit to power the new file-level staging/unstaging and commit message UI.",
+      "tags": [
+        "source-control",
+        "backend",
+        "rpc"
+      ],
+      "importance": 0.5,
+      "contentHash": "881766ba3af7065df80e8c78692e7b674271d59e85bd7ec17e5ebc8326a588ad",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:35:15.242Z",
+      "updatedAt": "2025-12-16T16:35:15.242Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-c07e49b0-3b3d-47b9-a18b-74d80c355b96",
+      "type": "fact",
+      "text": "The sourceControl Zustand store tracks commitMessageDraft/commitBusy/commitError, exposes actions to stage/unstage files that refresh status, and keeps changedFiles[].staged so the UI can reflect staging state.",
+      "tags": [
+        "source-control",
+        "renderer",
+        "zustand"
+      ],
+      "importance": 0.5,
+      "contentHash": "db78404c34b7e81b56e7ae2bc7d36af942d4a9b0617cfdda46618c6737664f55",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:35:15.242Z",
+      "updatedAt": "2025-12-16T16:35:15.242Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-29d4601d-80d6-448a-8f93-ba78d76b04e9",
+      "type": "workflow",
+      "text": "SourceControlView now passes derived groups (STAGED CHANGES and CHANGES) from changedFiles[].staged into SourceControlPane, with a future plan to insert a CONFLICTS group once store entries map GitStatusEntry.category === 'conflict'.",
+      "tags": [
+        "source-control",
+        "ui",
+        "grouping"
+      ],
+      "importance": 0.5,
+      "contentHash": "e9b838820e17be6d2da7bba8c4196461b3e3489c38ae748024b2ada32aa56027",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:35:15.242Z",
+      "updatedAt": "2025-12-16T16:35:15.242Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-2655f674-5217-4301-8e2b-2c4fa5d54645",
+      "type": "workflow",
+      "text": "The next scoped work on the commit graph/log view requires adding git.getLog RPCs, parsing git log output into typed entries, storing logEntries/logCursor/logBusy/logError in the source control store, and adding a History/Graph view within Source Control.",
+      "tags": [
+        "source-control",
+        "git",
+        "roadmap"
+      ],
+      "importance": 0.5,
+      "contentHash": "37f2b26d2c244c125ee4b4f613b3de87cd9dac9e5399661eb52c7b4049c124b1",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:35:15.242Z",
+      "updatedAt": "2025-12-16T16:35:15.242Z",
+      "lastUsedAt": "2025-12-16T17:23:31.453Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-ae7050d3-78dc-42a9-84d1-739514b7649e",
+      "type": "workflow",
+      "text": "To build the commit log/graph v1, add a backend git.getLog RPC + helper that parses git log entries, extend src/store/sourceControl.ts with logEntries/logCursor/logBusy/logError plus refresh/loadMore/select actions, and render a History list view under the new tab.",
+      "tags": [
+        "workflow",
+        "source-control",
+        "git"
+      ],
+      "importance": 0.5,
+      "contentHash": "7d355cc7e0a1ec5913728b5730d61797f926fdff54b5a4745d5ce0aaaa328a79",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:39:45.487Z",
+      "updatedAt": "2025-12-16T16:39:45.487Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-5846ba55-9ca1-4758-a945-ccb6954088c4",
+      "type": "fact",
+      "text": "Source Control view now shows a segmented Changes|History control, keeps LM context attach controls on Changes only, and displays a “History view coming next” placeholder until the log implementation is wired.",
+      "tags": [
+        "source-control",
+        "ui",
+        "history"
+      ],
+      "importance": 0.5,
+      "contentHash": "62f855db15e1381bde581af183fb3a43d62456f3ae225bf061f9d5d550ff9f38",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:45:48.496Z",
+      "updatedAt": "2025-12-16T16:45:48.496Z",
+      "lastUsedAt": "2025-12-16T17:23:31.453Z",
+      "usageCount": 1
+    },
+    {
+      "id": "mem-3d8cc4ac-e373-45f5-98ba-a9cb74c76d7a",
+      "type": "workflow",
+      "text": "Source control store now subscribes to uiStore.currentView and refreshes repos/status whenever currentView transitions to 'sourceControl', preventing the placeholder when you enter the view later.",
+      "tags": [
+        "source-control",
+        "store"
+      ],
+      "importance": 0.75,
+      "contentHash": "83752ac2b283d23b6dcff4d1560bbfa5560c0b08c525ad4922a8f8391bb6e3bc",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:45:48.496Z",
+      "updatedAt": "2025-12-16T16:45:48.496Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-348283e7-137c-4072-88a7-5e4c0fb66d45",
+      "type": "workflow",
+      "text": "Next step in the commit log/graph v1 work is to add the backend git.getLog RPC plus a renderer History list component behind the tab switcher.",
+      "tags": [
+        "history",
+        "git"
+      ],
+      "importance": 0.5,
+      "contentHash": "7606be48e1ed9c765ed0e3ad90b47666ef02bb262129b81cb13099c7f17be23c",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:45:48.496Z",
+      "updatedAt": "2025-12-16T16:45:48.496Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-d410e8de-18ba-4851-a326-a9c1df069a3d",
+      "type": "workflow",
+      "text": "The sourceControl store now subscribes to useUiStore.currentView and refreshes repos/status whenever currentView transitions to 'sourceControl', ensuring the view updates whenever the user navigates to it later.",
+      "tags": [
+        "source-control",
+        "workflow"
+      ],
+      "importance": 0.5,
+      "contentHash": "4dae94f673670d6ca22cc21fb0dc70684c3c18489f6b6de3725a7429e1007673",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:52:25.184Z",
+      "updatedAt": "2025-12-16T16:52:25.184Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-5294fa7e-df9f-47af-b9b3-7486acfe2f16",
+      "type": "fact",
+      "text": "History (log) v1 wires a git.getLog RPC through electron/services/GitLogService and shared renderer store actions to populate the HistoryView UI behind the Source Control tab switcher.",
+      "tags": [
+        "git",
+        "history",
+        "renderer"
+      ],
+      "importance": 0.5,
+      "contentHash": "171db94d0f12e22617341a1094dc7c8c48ceab62a1494287826aaec760e533b8",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:52:25.184Z",
+      "updatedAt": "2025-12-16T16:52:25.184Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-f91be6df-0a00-4203-b006-d4011b82125e",
+      "type": "constraint",
+      "text": "Business logic for Source Control and History view stays within the zustand stores so React components remain pure and avoid useEffect-driven flows.",
+      "tags": [
+        "architecture",
+        "constraint"
+      ],
+      "importance": 0.5,
+      "contentHash": "b5c89ec96219954f38a9ff136613a549dfbe33c81ed694408378018d56e88a82",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:52:25.184Z",
+      "updatedAt": "2025-12-16T16:52:25.184Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-188e16cc-f8e0-4523-a3bd-004c463ec9a1",
+      "type": "fact",
+      "text": "The Source Control history tab now renders a pure HistoryView/CommitDetailsView split view so the commit list and selected commit details render side-by-side without components introducing side effects.",
+      "tags": [
+        "ui",
+        "source-control",
+        "history"
+      ],
+      "importance": 0.5,
+      "contentHash": "95be4bb9122b783d4825d54738e96f1dac73323b6fd5c7186b20125b0dbc34e4",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:59:35.603Z",
+      "updatedAt": "2025-12-16T16:59:35.603Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-9be7385a-440e-4122-b179-b046d50c67ad",
+      "type": "fact",
+      "text": "Backend RPCs git.getLog and git.getCommitDetails are implemented via GitLogService and GitCommitService, providing structured commit records and detailed metadata/file lists for a repository.",
+      "tags": [
+        "backend",
+        "rpc",
+        "git"
+      ],
+      "importance": 0.5,
+      "contentHash": "55a7c5f3b3028a97bd6da668dac5584402ef3a3cc9ccfc73f2274c6e6a7aef25",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:59:35.603Z",
+      "updatedAt": "2025-12-16T16:59:35.603Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-a3dacf99-86a2-4a03-ba4c-e08e2b7a8ccc",
+      "type": "workflow",
+      "text": "Selecting a commit triggers the store to fetch and store commit details (busy/error states included) so the details pane stays in sync with the selected SHA.",
+      "tags": [
+        "state",
+        "workflow",
+        "source-control"
+      ],
+      "importance": 0.5,
+      "contentHash": "9db5390a942555684f2f7ed0b18a7b7e6378755bcea9a3bba310cf487a353f83",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T16:59:35.603Z",
+      "updatedAt": "2025-12-16T16:59:35.603Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-9e4bcfb7-db94-451f-8e13-a4456c380e44",
+      "type": "fact",
+      "text": "Source Control's History tab is now a split view with HistoryView on the left and the new pure CommitDetailsView on the right.",
+      "tags": [
+        "ui",
+        "source-control"
+      ],
+      "importance": 0.5,
+      "contentHash": "9027793437298a4e5f9dea89a2aa59df993458de65724268d2ffb29887029c61",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:04:24.222Z",
+      "updatedAt": "2025-12-16T17:04:24.222Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-c8204baa-f5e7-4cfc-8c3d-77be4258dc5e",
+      "type": "fact",
+      "text": "The sourceControl Zustand store now tracks commitDetails, commitDetailsBusy, commitDetailsError, provides fetchCommitDetails, and selectCommit automatically fetches details.",
+      "tags": [
+        "zustand",
+        "state"
+      ],
+      "importance": 0.5,
+      "contentHash": "fdce671683e6731f1cd284d3d083e1a33cc2d6ea5b36aac950db39762e9dd715",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:04:24.222Z",
+      "updatedAt": "2025-12-16T17:04:24.222Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-bdfc9d65-28e9-46da-907e-cc2f62c7b43d",
+      "type": "fact",
+      "text": "The backend now exposes git.getCommitDetails via RPC (repoRoot+sha -> commit metadata and file list) and the KB documents this contract along with the History split view.",
+      "tags": [
+        "backend",
+        "rpc",
+        "docs"
+      ],
+      "importance": 0.5,
+      "contentHash": "0fb69a4f2ca57f5d3679a4e7e27b8d27bc39e215ec13517dc8f5f65af22f3fd4",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:04:24.222Z",
+      "updatedAt": "2025-12-16T17:04:24.222Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-490034c1-b606-4301-b6f2-3c11ff668458",
+      "type": "fact",
+      "text": "GitRefs utilities populate sha-to-refs decorations (local branches, tags, HEAD) and GitLogService now includes refs per commit with tests covering the utility.",
+      "tags": [
+        "backend",
+        "git",
+        "refs"
+      ],
+      "importance": 0.5,
+      "contentHash": "5b3dbf8dca5c4b695307995ce72b4433fa0d6f9b1b2ef67e59bcf0831e27aca4",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:04:24.222Z",
+      "updatedAt": "2025-12-16T17:04:24.222Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-640fbe9a-c396-4297-994b-504a60fae1aa",
+      "type": "fact",
+      "text": "Commit decorations now include local branches, tags, HEAD, and remote branches (with symbolic remote HEAD refs filtered out) so HistoryView can render those refs without extra calls.",
+      "tags": [
+        "git",
+        "refs"
+      ],
+      "importance": 0.5,
+      "contentHash": "99cd65f86164add9722d74c5f4b052b9489ec7d8fc1e7a7b9e283fa7f6f506a9",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:06:31.485Z",
+      "updatedAt": "2025-12-16T17:06:31.485Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-7141c991-3289-4180-a6f9-4c63ac1d8fa8",
+      "type": "fact",
+      "text": "The gitRefs utility queries refs/heads/*, refs/remotes/*, and refs/tags/* via git for-each-ref, builds a sha→refs[] map with HEAD first, and normalizes labels to main, origin/main, tag:..., etc.",
+      "tags": [
+        "git",
+        "refs"
+      ],
+      "importance": 0.5,
+      "contentHash": "f7074232de98ea67807e0ff3dfde3b02b9401ab29e34f98c738ba088ee8a9403",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:06:31.485Z",
+      "updatedAt": "2025-12-16T17:06:31.485Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-ed9c45cf-6714-452d-a15d-b2a9fd47e511",
+      "type": "workflow",
+      "text": "Graph rendering work will first add parents arrays to commits, then assign deterministic lanes, and finally render lanes, merge connectors, and ref pills in HistoryView as pure components.",
+      "tags": [
+        "graph",
+        "workflow"
+      ],
+      "importance": 0.5,
+      "contentHash": "be4fc3a5a96913e53f5a82985834d92da09c685217bb53cbbe6cdf56a5038a9f",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:06:31.485Z",
+      "updatedAt": "2025-12-16T17:06:31.485Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-11b03a50-b16e-4259-9bda-2043dd9eac2a",
+      "type": "fact",
+      "text": "`gitRefs.ts` now queries refs/heads, refs/remotes, and refs/tags, filters out symbolic remote HEAD refs, and normalizes labels so commits show `main`, `origin/main`, `tag:v1.2.3`, and `HEAD` appropriately.",
+      "tags": [
+        "git",
+        "refs"
+      ],
+      "importance": 0.5,
+      "contentHash": "573aa720d81facce4e9bcfee677b3f199b866d46ab26e4883ed642a9b78f3a49",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:10:33.139Z",
+      "updatedAt": "2025-12-16T17:10:33.139Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-946fbae8-e579-42c5-a724-535658a8cdc3",
+      "type": "fact",
+      "text": "`GitLogService` passes `includeRemotes: true` to `getRefs`, so commits on pages receive remote branch decorations when available.",
+      "tags": [
+        "git",
+        "backend"
+      ],
+      "importance": 0.5,
+      "contentHash": "8d38f487cbdb932ec6a5993e64d305ba6ac58baf89d0534120400e46b02a04dc",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:10:33.139Z",
+      "updatedAt": "2025-12-16T17:10:33.139Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-496da2f2-2922-4442-8683-f0eddad11b2b",
+      "type": "fact",
+      "text": "HistoryView renders `commit.refs` as compact pills capped at six entries with a `+N` overflow indicator.",
+      "tags": [
+        "ui",
+        "historyview"
+      ],
+      "importance": 0.25,
+      "contentHash": "27f4851b4e8b6636b6ca07a7aa2750eb97b9f1b18ca2d17e5c08c4cf526718d2",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:10:33.139Z",
+      "updatedAt": "2025-12-16T17:10:33.139Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-ac2dc139-c86d-4b74-95a7-1ef569bfaefc",
+      "type": "fact",
+      "text": "GitLogService now calls getRefs(repoRoot, { includeRemotes: true }) so commits can be decorated with local and remote branch refs.",
+      "tags": [
+        "git",
+        "history",
+        "backend"
+      ],
+      "importance": 0.5,
+      "contentHash": "dc0f87075982f42f321f4290405f07e3aef2f9bf6d46853c13a9250316f48cab",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:16:44.507Z",
+      "updatedAt": "2025-12-16T17:16:44.507Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-de5042fd-60e3-498a-9d85-9f477dbf9673",
+      "type": "fact",
+      "text": "HistoryView renders commit.refs as capped pill decorations (up to six plus overflow) beside each commit.",
+      "tags": [
+        "ui",
+        "history"
+      ],
+      "importance": 0.25,
+      "contentHash": "4c5543abc68ac1e5f1c436878536f89b994973b1c4f5fe899d051ef3e1678a09",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:16:44.507Z",
+      "updatedAt": "2025-12-16T17:16:44.507Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-7971b112-4271-4daa-8f8b-77844f32544d",
+      "type": "fact",
+      "text": "HistoryView now receives graphRows from the source control store to render a compact SVG graph column showing blue nodes for normal commits and yellow nodes for merges.",
+      "tags": [
+        "ui",
+        "graph",
+        "history"
+      ],
+      "importance": 0.5,
+      "contentHash": "2a9bcba20bd754bce2c90be48e4495b1f54ac92de56f118f74d7d068f509f006",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:16:44.507Z",
+      "updatedAt": "2025-12-16T17:16:44.507Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-873f9c77-9a88-451c-895b-5a894e685041",
+      "type": "fact",
+      "text": "Renderer-side lane assignment is now deterministic within the loaded window based on parents, with a compact SVG graph column that draws small blue nodes for normal commits and slightly larger yellow nodes for merges.",
+      "tags": [
+        "rendering",
+        "graph",
+        "source-control"
+      ],
+      "importance": 0.5,
+      "contentHash": "87b03dd954cc95fe2edd73d10e4f5ac40a3505bde1bba6bd3f50ed7d73abf08e",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:19:41.205Z",
+      "updatedAt": "2025-12-16T17:19:41.205Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-68ad8cb2-7c3a-43db-be8f-03c82de0fdea",
+      "type": "workflow",
+      "text": "We created a backlog task to evaluate existing git-graph libraries (e.g., react-git-log) and decide whether to reuse their lane/connector logic before investing further in custom graph code.",
+      "tags": [
+        "planning",
+        "dependency"
+      ],
+      "importance": 0.5,
+      "contentHash": "8c9cc3a901b17646969014448ba1e53e13908f54bd76b0e7569e88d41fc3581a",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:19:41.205Z",
+      "updatedAt": "2025-12-16T17:19:41.205Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-e48360c5-446d-46dd-9365-53f31ea8c3d3",
+      "type": "constraint",
+      "text": "The history list, selection, and details panels remain store-driven (Zustand/orchestrated) so any graph renderer must fit our data orchestration without assuming ownership of fetching or the surrounding UI.",
+      "tags": [
+        "architecture",
+        "constraint",
+        "store"
+      ],
+      "importance": 0.75,
+      "contentHash": "4e54bb9a9689d194487fe4d920f00cd93596fcde34e6d8393bd1b2e180c528c9",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:19:41.205Z",
+      "updatedAt": "2025-12-16T17:19:41.205Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-798d4971-0b9d-4d95-a987-97f781fa7347",
+      "type": "fact",
+      "text": "The history view relies on our custom Zustand store-driven architecture with pure components because external git-log libraries assume ownership of fetching/state and fixed data shapes.",
+      "tags": [
+        "architecture",
+        "state"
+      ],
+      "importance": 0.5,
+      "contentHash": "938a319886da854fa7aa3ca28d33debc578b369a855a5bc0a3baa8e7a77ffb1b",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:22:39.078Z",
+      "updatedAt": "2025-12-16T17:22:39.078Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-da388432-595c-4070-a37f-02126dc37e5a",
+      "type": "fact",
+      "text": "commitGraph now computes per-row connectors that draw vertical lane segments and merge diagonals for parents present in the current window, and GraphColumn renders those as SVG lines alongside commit nodes.",
+      "tags": [
+        "implementation",
+        "ui"
+      ],
+      "importance": 0.5,
+      "contentHash": "2f7ac41312e8420ad4a35202a468b6942d8d4262ae105d6f9faa57bc5deefb4b",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:22:39.078Z",
+      "updatedAt": "2025-12-16T17:22:39.078Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-53055584-78ad-4204-b0e3-9b809f38cc6b",
+      "type": "fact",
+      "text": "The Git Integration KB documents that the history graph displays nodes plus best-effort connector lines that are deterministic only within the loaded window and lack cross-page continuity.",
+      "tags": [
+        "documentation",
+        "limitation"
+      ],
+      "importance": 0.25,
+      "contentHash": "fe58f7e45ff0ac5ff623c16c01ec1e8858eb61702832d5843e792ddb12d0d994",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:22:39.078Z",
+      "updatedAt": "2025-12-16T17:22:39.078Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-93c6ceb6-bfa6-49d8-a458-4e6af1fd3dd9",
+      "type": "fact",
+      "text": "The commitGraph linear-history test asserts each row exposes connectors to keep the rendered graph column lines covered by automated checks.",
+      "tags": [
+        "testing"
+      ],
+      "importance": 0.25,
+      "contentHash": "9b29975b8c44f274b0ae5b3ce0911996445feb12c2b89ec57ca1c0e6e2b5aeab",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:22:39.078Z",
+      "updatedAt": "2025-12-16T17:22:39.078Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-4070d006-4aa0-4843-b3f7-44cd6d0bbc57",
+      "type": "fact",
+      "text": "The History graph now renders best-effort connector lines for each row (vertical segments + merge diagonals) computed in the commitGraph store, but those connectors are deterministic only within the currently loaded window.",
+      "tags": [
+        "history",
+        "graph"
+      ],
+      "importance": 0.5,
+      "contentHash": "caf7abf2e02931239649d00515976b26e2d60967ce6f4bafb7de49227899afda",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:25:11.626Z",
+      "updatedAt": "2025-12-16T17:25:11.626Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-e45b1bbd-e76e-4891-9fce-58748f4c367d",
+      "type": "warning",
+      "text": "If git.discoverRepos returns an empty list you will still see “No repositories detected,” commonly because the workspace root lacks a .git directory, the repo is nested deeper than the discovery depth, or the backend RPC call is failing.",
+      "tags": [
+        "git",
+        "warning"
+      ],
+      "importance": 0.75,
+      "contentHash": "15845f8fd3fc940d3a3a8003bc59ca77c459b24ab712ae4c2c9c90f077a551ae",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:25:11.626Z",
+      "updatedAt": "2025-12-16T17:25:11.626Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-7ad8d06b-4b31-48c9-b95c-e0068eb5205b",
+      "type": "fact",
+      "text": "Source Control now renders the full layout shell with a “No repositories detected” message plus an Initialize repository button when no git repos are discovered, and the button triggers repo refresh after running init.",
+      "tags": [
+        "source-control",
+        "repo",
+        "ui"
+      ],
+      "importance": 0.5,
+      "contentHash": "f95919b27294b2573a20bac12142da2c0dd6f2646b003961fb721c93ec567ef1",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:33:39.932Z",
+      "updatedAt": "2025-12-16T17:33:39.932Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-d4854e7d-6b3d-41d2-9d19-abf573e88950",
+      "type": "constraint",
+      "text": "The git.initRepo RPC only runs when the provided repoRoot equals the workspace root, so the renderer action initRepoInWorkspace must call it with that root before refreshing repos.",
+      "tags": [
+        "source-control",
+        "backend",
+        "git"
+      ],
+      "importance": 0.75,
+      "contentHash": "66d1e73652cda504ad7933ccf7c1f3a0456b28d1f5e1fe2e8770ebe64542e376",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:33:39.932Z",
+      "updatedAt": "2025-12-16T17:33:39.932Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-96f0085b-df08-4abd-a60b-0ab7f4863506",
+      "type": "fact",
+      "text": "Changed files now display only their basenames and the changes pane uses Mantine ScrollArea within a flex container so the list scrolls properly.",
+      "tags": [
+        "source-control",
+        "ui",
+        "scroll"
+      ],
+      "importance": 0.25,
+      "contentHash": "091a3d2c9ab69c3cd1a11da0d4bb3a65897e1a914e716a0b04c56f17b3122563",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:33:39.932Z",
+      "updatedAt": "2025-12-16T17:33:39.932Z",
+      "usageCount": 0
+    },
+    {
+      "id": "mem-8806b0e7-b213-4a69-93a5-0864ea3368af",
+      "type": "fact",
+      "text": "The SourceControlView always calls useSourceControlStore at the top level and passes values through props, preventing the previous history-tab “rendered more hooks” crash.",
+      "tags": [
+        "source-control",
+        "react",
+        "hooks"
+      ],
+      "importance": 0.5,
+      "contentHash": "57bcc47565442b90d91901c1f2748d6e3b44e8c6bab35d563ab0db77eeedb307",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2025-12-16T17:33:39.932Z",
+      "updatedAt": "2025-12-16T17:33:39.932Z",
       "usageCount": 0
     }
   ]

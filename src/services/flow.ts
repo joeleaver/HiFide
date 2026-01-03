@@ -45,11 +45,19 @@ export const FlowService = {
     return client.rpc('flow.start', args || {})
   },
 
-  async resume(requestId: string | undefined, userInput: string): Promise<{ ok: boolean; error?: string }> {
+  async resume(
+    requestId: string | undefined,
+    userInput: string,
+    options?: { userInputContext?: unknown }
+  ): Promise<{ ok: boolean; error?: string }> {
     const client = getBackendClient()
     if (!client) return { ok: false, error: 'backend-not-ready' }
     try { await client.whenReady?.(5000) } catch {}
-    return client.rpc('flow.resume', { requestId, userInput })
+    return client.rpc('flow.resume', {
+      requestId,
+      userInput,
+      ...(options?.userInputContext !== undefined ? { userInputContext: options.userInputContext } : {})
+    })
   },
 
   async cancel(requestId?: string): Promise<{ ok: boolean; error?: string }> {
