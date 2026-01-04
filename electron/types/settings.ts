@@ -14,6 +14,12 @@ export interface SettingsSnapshot {
   startupMessage: string | null
   pricingConfig: PricingConfig
   defaultPricingConfig: PricingConfig
+  vector?: {
+    enabled: boolean
+    provider: 'local' | 'openai'
+    model: string
+    localModel: string
+  }
 }
 
 export type SettingsSnapshotResponse = SettingsSnapshot & { ok: true }

@@ -102,19 +102,19 @@ async function runSemanticSearch({
     const workspaceRoot = resolveWorkspaceRoot(meta?.workspaceId)
 
     await vectorService.init(workspaceRoot)
-    const matches = await vectorService.search(query, maxResults)
+    // Explicitly restrict to 'code' table for workspace search
+    const matches = await vectorService.search(query, maxResults, 'code')
 
     if (!matches || matches.length === 0) return null
 
     const results: SearchWorkspaceResult[] = matches
-      .filter((m: any) => (m.score ?? 0) < 0.8)
       .map((m: any) => {
-        const type = m.metadata.symbolType ? `${m.metadata.symbolType} ` : ''
-        const name = m.metadata.symbolName ? `${m.metadata.symbolName}: ` : ''
+        const type = m.symbolType ? `${m.symbolType} ` : ''
+        const name = m.symbolName ? `${m.symbolName}: ` : ''
         return {
           path: m.filePath || 'unknown',
-          lineNumber: m.startLine || 0,
-          line: `[semantic match] ${type}${name}${m.text.split('\n')[0]}...`
+          lineNumber: m.startLine || 1,
+          line: `[semantic match] (${((m.score || 0) * 100).toFixed(0)}%) ${type}${name}${m.text.split('\n')[0]}...`
         }
       })
 

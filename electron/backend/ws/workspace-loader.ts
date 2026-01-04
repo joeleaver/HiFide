@@ -71,38 +71,37 @@ export async function loadWorkspace(options: WorkspaceLoadOptions): Promise<{ ok
         console.error('[workspace-loader] Failed to bind workspace manager:', err)
       }
 
-      // 2. Load flow profiles for this workspace
-      try {
-        await flowProfileService.initializeFor(workspaceId)
-        console.log('[workspace-loader] Loaded flow profiles for workspace:', workspaceId)
-      } catch (err) {
-        console.error('[workspace-loader] Failed to load flow profiles:', err)
-      }
-
-      // 3. Load sessions from disk for this workspace
-      await sessionService.loadSessionsFor({ workspaceId })
-
-      // 4. Load kanban board for this workspace
-      try {
-        await kanbanService.kanbanLoadFor(workspaceId)
-        console.log('[workspace-loader] Loaded kanban board for workspace:', workspaceId)
-      } catch (err) {
-        console.error('[workspace-loader] Failed to load kanban board:', err)
-      }
-
-      // 5. Load knowledge base items for this workspace
-      try {
-        const { listItems } = await import('../../store/utils/knowledgeBase.js')
-        const items = await listItems(workspaceId)
-        const itemsMap = items.reduce((acc, item) => {
-          acc[item.id] = item
-          return acc
-        }, {} as Record<string, any>)
-        kbService.setKbItems(itemsMap)
-        console.log('[workspace-loader] Loaded KB items for workspace:', workspaceId, 'count:', items.length)
-      } catch (err) {
-        console.error('[workspace-loader] Failed to load KB items:', err)
-      }
+      // Parallelize heavy service initialization
+      console.log('[workspace-loader] Parallel initialization starting for:', workspaceId)
+      await Promise.all([
+        // 2. Load flow profiles
+        flowProfileService.initializeFor(workspaceId).catch(err => {
+          console.error('[workspace-loader] Failed to load flow profiles:', err)
+        }),
+        // 3. Load sessions
+        sessionService.loadSessionsFor({ workspaceId }).catch(err => {
+          console.error('[workspace-loader] Failed to load sessions:', err)
+        }),
+        // 4. Load kanban board
+        kanbanService.kanbanLoadFor(workspaceId).catch(err => {
+          console.error('[workspace-loader] Failed to load kanban board:', err)
+        }),
+        // 5. Load knowledge base items
+        (async () => {
+          try {
+            const { listItems } = await import('../../store/utils/knowledgeBase.js')
+            const items = await listItems(workspaceId)
+            const itemsMap = items.reduce((acc, item) => {
+              acc[item.id] = item
+              return acc
+            }, {} as Record<string, any>)
+            kbService.setKbItems(itemsMap)
+          } catch (err) {
+            console.error('[workspace-loader] Failed to load KB items:', err)
+          }
+        })()
+      ])
+      console.log('[workspace-loader] Parallel initialization complete')
 
       // 6. Ensure at least one session exists
       const created = await sessionService.ensureSessionPresentFor({ workspaceId })

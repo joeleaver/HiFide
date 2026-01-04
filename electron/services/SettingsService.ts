@@ -22,6 +22,13 @@ interface SettingsState {
     enabled: boolean
     provider: 'local' | 'openai'
     model: string
+    localModel: string
+    codeModel?: string
+    codeLocalModel?: string
+    kbModel?: string
+    kbLocalModel?: string
+    memoriesModel?: string
+    memoriesLocalModel?: string
   }
 }
 
@@ -47,7 +54,14 @@ export class SettingsService extends Service<SettingsState> {
         vector: {
           enabled: true,
           provider: 'local',
-          model: 'all-MiniLM-L6-v2',
+          model: 'all-MiniLM-L6-v2 (Local)',
+          localModel: 'Xenova/all-MiniLM-L6-v2',
+          codeModel: 'all-MiniLM-L6-v2 (Local)',
+          codeLocalModel: 'Xenova/all-MiniLM-L6-v2',
+          kbModel: 'all-MiniLM-L6-v2 (Local)',
+          kbLocalModel: 'Xenova/all-MiniLM-L6-v2',
+          memoriesModel: 'all-MiniLM-L6-v2 (Local)',
+          memoriesLocalModel: 'Xenova/all-MiniLM-L6-v2',
         },
       },
       'settings'
@@ -547,6 +561,47 @@ export class SettingsService extends Service<SettingsState> {
         customRates: hasCustomRates,
       },
     })
+  }
+
+  setVectorSettings(settings: Partial<SettingsState['vector']>): void {
+    const nextVector = { ...this.state.vector, ...settings };
+    
+    const mapModel = (uiModel: string) => {
+      if (uiModel.includes('all-MiniLM-L6-v2')) {
+        return { provider: 'local', localModel: 'Xenova/all-MiniLM-L6-v2' };
+      } else if (uiModel.includes('nomic')) {
+        return { provider: 'local', localModel: 'nomic-ai/nomic-embed-text-v1.5' };
+      } else if (uiModel.startsWith('text-embedding-3')) {
+        return { provider: 'openai', localModel: this.state.vector.localModel };
+      }
+      return null;
+    };
+
+    // Map UI model names to backend paths
+    if (settings.model) {
+      const mapped = mapModel(settings.model);
+      if (mapped) {
+        nextVector.provider = mapped.provider as any;
+        nextVector.localModel = mapped.localModel;
+      }
+    }
+
+    if (settings.codeModel) {
+      const mapped = mapModel(settings.codeModel);
+      if (mapped) nextVector.codeLocalModel = mapped.localModel;
+    }
+
+    if (settings.kbModel) {
+      const mapped = mapModel(settings.kbModel);
+      if (mapped) nextVector.kbLocalModel = mapped.localModel;
+    }
+
+    if (settings.memoriesModel) {
+      const mapped = mapModel(settings.memoriesModel);
+      if (mapped) nextVector.memoriesLocalModel = mapped.localModel;
+    }
+
+    this.setState({ vector: nextVector });
   }
 
   calculateCost(provider: string, model: string, usage: TokenUsage): TokenCost | null {

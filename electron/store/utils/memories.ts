@@ -3,6 +3,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import { resolveWorkspaceRootAsync } from '../../utils/workspace.js'
+import { getVectorService } from '../../services/index.js'
 import type { MemoryItemType, WorkspaceMemoriesFile, WorkspaceMemoryItem } from './workspace-helpers'
 
 export type { MemoryItemType, WorkspaceMemoriesFile, WorkspaceMemoryItem } from './workspace-helpers'
@@ -145,10 +146,11 @@ export async function applyMemoryCandidates(
   candidates: MemoryCandidate[],
   opts?: { workspaceId?: string; similarityThreshold?: number; ruleToggles?: Partial<Record<MemoryItemType, boolean>> }
 ): Promise<ApplyCandidatesResult> {
-  const similarityThreshold = typeof opts?.similarityThreshold === 'number' ? opts.similarityThreshold : 0.78
+  const similarityThreshold = typeof opts?.similarityThreshold === 'number' ? opts.similarityThreshold : 0.85
   const workspaceId = opts?.workspaceId
 
   const store = await readWorkspaceMemories(workspaceId)
+  const vs = getVectorService()
 
   // Extraction type gating is now configured on the extractMemories flow node.
   // We keep an optional override for future use, but do not read any store-level rule toggles.
@@ -172,7 +174,7 @@ export async function applyMemoryCandidates(
       continue
     }
 
-    const { type, text, tags, importance, contentHash, tokens } = prepared
+    const { type, text, tags, importance, contentHash } = prepared
 
     // Exact dedupe via contentHash
     const exact = store.items.find((it) => it.contentHash === contentHash)
@@ -184,35 +186,34 @@ export async function applyMemoryCandidates(
       continue
     }
 
-    // Lexical similarity against all existing
-    let bestIdx = -1
-    let bestScore = 0
-    for (let i = 0; i < store.items.length; i++) {
-      const existing = store.items[i]
-      const score = similarityScore({
-        aTokens: tokens,
-        bTokens: tokenizeForSimilarity(existing.text),
-        sameType: existing.type === type,
-        tagOverlap: overlapRatio(tags, existing.tags),
-      })
-      if (score > bestScore) {
-        bestScore = score
-        bestIdx = i
+    // Semantic similarity against existing memories in vector DB
+    let bestMatch: { id: string; score: number } | null = null
+    try {
+      const searchResults = await vs.search(text, 1, 'memories')
+      if (searchResults.length > 0) {
+        const top = searchResults[0]
+        if (top.score >= similarityThreshold) {
+          bestMatch = { id: top.id, score: top.score }
+        }
       }
+    } catch (e) {
+      console.warn('[MemoriesStore] Semantic search for duplicate detection failed, falling back to lexical search', e)
     }
 
-    if (bestIdx >= 0 && bestScore >= similarityThreshold) {
-      const target = store.items[bestIdx]
-      target.updatedAt = now
-      target.tags = mergeTags(target.tags, tags)
-      target.importance = clamp01(Math.max(target.importance, importance))
-      // Prefer clearer/shorter when highly similar
-      if (isClearerReplacement(text, target.text)) {
-        target.text = text
-        target.contentHash = contentHashOf(text)
+    if (bestMatch) {
+      const target = store.items.find((it) => it.id === bestMatch!.id)
+      if (target) {
+        target.updatedAt = now
+        target.tags = mergeTags(target.tags, tags)
+        target.importance = clamp01(Math.max(target.importance, importance))
+        // Prefer clearer/shorter when highly similar
+        if (isClearerReplacement(text, target.text)) {
+          target.text = text
+          target.contentHash = contentHashOf(text)
+        }
+        updated += 1
+        continue
       }
-      updated += 1
-      continue
     }
 
     const item: WorkspaceMemoryItem = {
@@ -323,14 +324,7 @@ function tokenizeForSimilarity(text: string): string[] {
   return out
 }
 
-function overlapRatio(a: string[] | undefined, b: string[] | undefined): number {
-  const as = new Set((a || []).map((t) => t.toLowerCase()))
-  const bs = new Set((b || []).map((t) => t.toLowerCase()))
-  if (as.size === 0 || bs.size === 0) return 0
-  let inter = 0
-  for (const t of as) if (bs.has(t)) inter++
-  return inter / Math.max(as.size, bs.size)
-}
+
 
 function similarityScore(args: { aTokens: string[]; bTokens: string[]; sameType: boolean; tagOverlap: number }): number {
   const { aTokens, bTokens, sameType, tagOverlap } = args
@@ -453,3 +447,5 @@ export async function retrieveWorkspaceMemoriesForQuery(
 
   return out
 }
+// Semantic search is now the primary similarity check for memory deduplication.
+// It leverages VectorService to find visually dissimilar but semantically identical memories.

@@ -117,28 +117,36 @@ export class AppService extends Service<AppState> {
         openrouter: false,
       }
       try {
-        this.setStartupMessage('Validating provider keys…')
-        const t = Date.now()
+        // DO NOT BLOCK INITIALIZATION ON API KEY VALIDATION
+        // This causes the UI to hang on start if keys are invalid or network is slow.
+        // Validation will happen when the WelcomeScreen/Settings calls saveAndValidate, 
+        // or asynchronously after boot.
+        validMap.openai = !!okey
+        validMap.anthropic = !!akey
+        validMap.gemini = !!gkey
+        validMap.fireworks = !!fkey
+        validMap.xai = !!xkey
+        validMap.openrouter = !!orkey
+
+        // Kick off async validation if keys exist, but don't await it
         if (settingsService?.validateApiKeys) {
-          const validationResult = await settingsService.validateApiKeys()
-          log(`validateApiKeys done in ${Date.now() - t}ms`)
-          if (validationResult && validationResult.ok) {
-            validMap.openai = !!okey
-            validMap.anthropic = !!akey
-            validMap.gemini = !!gkey
-            validMap.fireworks = !!fkey
-            validMap.xai = !!xkey
-            validMap.openrouter = !!orkey
-          } else {
-            const failures = validationResult?.failures || []
-            validMap.openai = !!okey && !failures.some((f: string) => f.toLowerCase().includes('openai'))
-            validMap.anthropic = !!akey && !failures.some((f: string) => f.toLowerCase().includes('anthropic'))
-            validMap.gemini = !!gkey && !failures.some((f: string) => f.toLowerCase().includes('gemini'))
-            validMap.fireworks = !!fkey && !failures.some((f: string) => f.toLowerCase().includes('fireworks'))
-            validMap.xai = !!xkey && !failures.some((f: string) => f.toLowerCase().includes('xai'))
-            validMap.openrouter = !!orkey && !failures.some((f: string) => f.toLowerCase().includes('openrouter'))
-          }
-          console.log('[app:init] provider valid map from validateApiKeys', {
+          settingsService.validateApiKeys().then(validationResult => {
+             console.log('[app:init] Async key validation complete:', validationResult?.ok);
+             if (validationResult && validationResult.ok === false) {
+                 const failures = validationResult.failures || [];
+                 const updatedValidMap = {
+                    openai: !!okey && !failures.some((f: string) => f.toLowerCase().includes('openai')),
+                    anthropic: !!akey && !failures.some((f: string) => f.toLowerCase().includes('anthropic')),
+                    gemini: !!gkey && !failures.some((f: string) => f.toLowerCase().includes('gemini')),
+                    fireworks: !!fkey && !failures.some((f: string) => f.toLowerCase().includes('fireworks')),
+                    xai: !!xkey && !failures.some((f: string) => f.toLowerCase().includes('xai')),
+                    openrouter: !!orkey && !failures.some((f: string) => f.toLowerCase().includes('openrouter'))
+                 };
+                 providerService.setProvidersValid(updatedValidMap);
+             }
+          }).catch(err => console.error('[app:init] Async validation failed:', err));
+          
+          console.log('[app:init] provider valid map from validateApiKeys (initial)', {
             validMap,
             hasKeys: {
               openai: !!okey,
@@ -148,7 +156,7 @@ export class AppService extends Service<AppState> {
               xai: !!xkey,
               openrouter: !!orkey,
             },
-          })
+          });
         } else {
           validMap.openai = !!okey
           validMap.anthropic = !!akey

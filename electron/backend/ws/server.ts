@@ -218,7 +218,7 @@ export function startWsBackend(): Promise<WsBootstrap> {
       createMiscHandlers(addMethod, connection)
       createSettingsHandlers(addMethod)
       createKanbanHandlers(addMethod)
-      createVectorHandlers(addMethod)
+      createVectorHandlers(addMethod, connection)
       createMcpHandlers(addMethod, connection)
       createLanguageHandlers(addMethod, connection)
       // Setup all event subscriptions for this connection

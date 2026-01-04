@@ -189,7 +189,15 @@ function createChatTimelineStore() {
 
 
     appendReasoning: (nodeId, text, executionId) => {
-      const txt = (text ?? '').toString()
+      let txt = (text ?? '').toString()
+      if (typeof text === 'object' && text !== null) {
+        try {
+          txt = (text as any).text || (text as any).content || JSON.stringify(text)
+        } catch {
+          txt = String(text)
+        }
+      }
+
       // Do not render a 'thinking' block for blank/whitespace-only content
       if (txt.trim().length === 0) return
       let items = [...get().items] as TimelineItem[]

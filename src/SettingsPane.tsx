@@ -340,8 +340,10 @@ function ProviderSelect({ label, options, value, disabled, onChange }: any) {
 }
 
 import { useVectorStore } from './store/vectorStore'
+import { IconCode, IconBook, IconBrain, IconSearch } from '@tabler/icons-react'
 
 function VectorSettingsSection() {
+  const { snapshot, mergeSnapshot } = useSettingsSnapshot()
   const {
     state,
     error,
@@ -380,12 +382,109 @@ function VectorSettingsSection() {
     )
   }
 
+  const TableCard = ({ title, tableKey, icon: Icon, color }: any) => {
+    const vectorStatus = (state.status as any)
+    const tableState = (state.status.tables as any)?.[tableKey]
+    
+    // Check both global activeTable and individual source progress
+    const tableSource = vectorStatus?.sources?.[tableKey]
+    const hasRemainingWork = tableSource && tableSource.indexed < tableSource.total
+    const isIndexingThisTable = (vectorStatus?.activeTable === tableKey || vectorStatus?.activeTable === 'all') && (hasRemainingWork || vectorStatus?.indexing)
+    
+    // Calculate progress specific to this table if available
+    const tableProgress = tableSource && tableSource.total > 0 
+      ? Math.floor((tableSource.indexed / tableSource.total) * 100) 
+      : 0
+      
+    const settings = (snapshot as any)?.vector
+
+    return (
+      <Box p="md" style={{ backgroundColor: '#252526', borderRadius: 8, border: '1px solid #333', flex: 1 }}>
+        <Stack gap="sm">
+          <Group justify="space-between" wrap="nowrap">
+            <Group gap="xs">
+              <Icon size={18} color={color} />
+              <Text size="sm" fw={600}>{title}</Text>
+            </Group>
+            {tableState?.exists && (
+              <Badge variant="light" color={color} size="sm">{tableState.count} vectors</Badge>
+            )}
+          </Group>
+
+          <Select
+            label="Embedding Model"
+            size="xs"
+            data={[
+              'all-MiniLM-L6-v2 (Local)', 
+              'nomic-embed-text-v1.5 (Local)'
+            ]}
+            value={settings?.[`${tableKey}Model`] || settings?.model || 'all-MiniLM-L6-v2 (Local)'}
+            onChange={(val) => {
+              if (val) {
+                const update: any = {};
+                update[`${tableKey}Model`] = val;
+                useVectorStore.getState().updateVectorSettings(update)
+                // Also update the local snapshot to avoid jitter
+                mergeSnapshot((prev: any) => ({
+                  ...prev,
+                  vector: { ...prev.vector, ...update }
+                }))
+              }
+            }}
+          />
+
+          <Button
+            size="xs"
+            variant="light"
+            fullWidth
+            onClick={() => startIndexing(tableKey)}
+            loading={isIndexingThisTable}
+            leftSection={<IconSearch size={14} />}
+          >
+            Re-index
+          </Button>
+
+          {isIndexingThisTable && (
+            <Stack gap={2}>
+              <Group justify="space-between">
+                <Text size="xs" c="dimmed">Syncing...</Text>
+                <Text size="xs" fw={500}>{tableProgress}%</Text>
+              </Group>
+              <Box h={4} style={{ backgroundColor: '#1a1a1a', borderRadius: 2, overflow: 'hidden' }}>
+                <Box h="100%" w={`${tableProgress}%`} style={{ backgroundColor: color, transition: 'width 0.3s ease' }} />
+              </Box>
+              {tableSource && (
+                <Text size="10px" c="dimmed" ta="right">
+                  {tableSource.indexed} / {tableSource.total} files
+                </Text>
+              )}
+            </Stack>
+          )}
+
+          {tableState?.indexedAt && !isIndexingThisTable && (
+            <Text size="xs" c="dimmed" fs="italic">
+              Updated: {new Date(tableState.indexedAt).toLocaleDateString()}
+            </Text>
+          )}
+        </Stack>
+      </Box>
+    )
+  }
+
   return (
-    <Stack gap="md">
+    <Stack gap="xl">
       <Box>
         <Title order={3}>Vector Search & Indexing</Title>
-        <Text size="sm" c="dimmed">Manage semantic search database and indexing status</Text>
+        <Text size="sm" c="dimmed">Semantic database management for Code, Knowledge Base and Memories</Text>
       </Box>
+
+      <Group align="stretch" grow wrap="wrap">
+        <TableCard title="Codebase" tableKey="code" icon={IconCode} color="#228be6" />
+        <TableCard title="Knowledge Base" tableKey="kb" icon={IconBook} color="#40c057" />
+        <TableCard title="Memories" tableKey="memories" icon={IconBrain} color="#fd7e14" />
+      </Group>
+
+      <Divider />
 
       <Stack gap="sm">
         <Title order={4}>Semantic Search</Title>
@@ -402,6 +501,7 @@ function VectorSettingsSection() {
               { value: 'all', label: 'All' },
               { value: 'code', label: 'Code' },
               { value: 'kb', label: 'Knowledge Base' },
+              { value: 'memories', label: 'Memories' },
             ]}
             value={searchTarget}
             onChange={(val) => setSearchTarget(val as any)}
@@ -425,10 +525,10 @@ function VectorSettingsSection() {
                 >
                   <Group justify="space-between" mb={4}>
                     <Group gap="xs">
-                      <Badge size="xs" color={res.type === 'code' ? 'blue' : 'green'}>{res.type}</Badge>
-                      <Text size="xs" fw={700} c="dimmed">Score: {(1 - res.score).toFixed(4)}</Text>
+                      <Badge size="xs" color={res.type === 'code' ? 'blue' : (res.type === 'kb' ? 'green' : 'gray')}>{res.type}</Badge>
+                      <Text size="xs" fw={700} c="dimmed">Similarity: {Math.max(0, res.score * 100).toFixed(1)}%</Text>
                     </Group>
-                    <Text size="xs" c="dimmed">{res.filePath || res.metadata?.path || 'N/A'}</Text>
+                    <Text size="xs" c="dimmed" truncate style={{ maxWidth: 300 }}>{res.filePath || 'N/A'}</Text>
                   </Group>
                   <Text size="sm" fw={600} mb={4}>{res.symbolName || res.articleTitle || 'Snippet'}</Text>
                   <Box
@@ -448,44 +548,6 @@ function VectorSettingsSection() {
             </Stack>
           </ScrollArea>
         )}
-      </Stack>
-
-      <Divider mt="md" />
-
-      <Stack gap="sm" p="md" style={{ backgroundColor: '#252526', borderRadius: 4 }}>
-        <Group justify="space-between">
-          <Text size="sm" fw={500}>Indexing Status</Text>
-          <Group gap="xs">
-            {state.status.indexing && <Loader size={14} />}
-            <Text size="sm" c={state.status.indexing ? 'blue' : 'dimmed'}>
-              {state.status.indexing ? 'Indexing in progress...' : 'Idle'}
-            </Text>
-          </Group>
-        </Group>
-
-        <Divider color="#3e3e42" />
-
-        <Group justify="space-between">
-          <Stack gap={4}>
-            <Text size="xs" c="dimmed">Progress</Text>
-            <Text size="sm">{state.status.progress}% ({state.status.indexedFiles} / {state.status.totalFiles} files)</Text>
-          </Stack>
-          <Button size="xs" variant="light" onClick={startIndexing} loading={state.status.indexing}>
-            Re-index All
-          </Button>
-        </Group>
-
-        {state.lastIndexedAt && (
-          <Text size="xs" c="dimmed">Last indexed: {new Date(state.lastIndexedAt).toLocaleString()}</Text>
-        )}
-      </Stack>
-
-      <Stack gap="xs">
-        <Title order={4}>Configuration</Title>
-        <Group grow>
-          <TextInput label="Embedding Model" value="all-MiniLM-L6-v2 (Local)" disabled />
-          <TextInput label="Storage" value="LanceDB (Local)" disabled />
-        </Group>
       </Stack>
     </Stack>
   )

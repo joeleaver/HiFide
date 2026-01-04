@@ -2,6 +2,8 @@ import { EmbeddingService } from './vector/EmbeddingService.js';
 import { VectorService } from './vector/VectorService.js';
 import { KBIndexerService } from './vector/KBIndexerService.js';
 import { CodeIndexerService } from './vector/CodeIndexerService.js';
+import { MemoriesIndexerService } from './vector/MemoriesIndexerService.js';
+import { IndexOrchestratorService } from './vector/IndexOrchestratorService.js';
 import { WorkspaceService } from './WorkspaceService.js';
 import { ToolsService } from './ToolsService.js';
 import { AppService } from './AppService.js';
@@ -27,6 +29,8 @@ let embeddingService: EmbeddingService;
 let vectorService: VectorService;
 let kbIndexerService: KBIndexerService;
 let codeIndexerService: CodeIndexerService;
+let memoriesIndexerService: MemoriesIndexerService;
+let indexOrchestratorService: IndexOrchestratorService;
 let workspaceService: WorkspaceService;
 let toolsService: ToolsService;
 let appService: AppService;
@@ -76,6 +80,12 @@ export function initializeServices() {
 
   codeIndexerService = new CodeIndexerService();
   registry.register('codeIndexer', codeIndexerService);
+
+  memoriesIndexerService = new MemoriesIndexerService();
+  registry.register('memoriesIndexer', memoriesIndexerService);
+
+  indexOrchestratorService = new IndexOrchestratorService();
+  registry.register('indexOrchestrator', indexOrchestratorService);
 
   toolsService = new ToolsService();
   registry.register('tools', toolsService);
@@ -130,6 +140,8 @@ export const getEmbeddingService = () => embeddingService;
 export const getVectorService = () => vectorService;
 export const getKBIndexerService = () => kbIndexerService;
 export const getCodeIndexerService = () => codeIndexerService;
+export const getMemoriesIndexerService = () => memoriesIndexerService;
+export const getIndexOrchestratorService = () => indexOrchestratorService;
 export const getWorkspaceService = () => workspaceService;
 export const getToolsService = () => toolsService;
 export const getAppService = () => appService;

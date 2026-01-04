@@ -5,7 +5,8 @@
 import { vectorHandlers, indexerHandlers } from '../service-handlers.js'
 
 export function createVectorHandlers(
-  addMethod: (method: string, handler: (params: any) => any) => void
+  addMethod: (method: string, handler: (params: any) => any) => void,
+  connection: any
 ) {
   addMethod('vector.getState', async () => {
     return vectorHandlers.getState()
@@ -16,10 +17,14 @@ export function createVectorHandlers(
   })
 
   addMethod('codeIndexer.indexWorkspace', async (params: { force?: boolean }) => {
-    return (indexerHandlers as any).indexWorkspace(null, params)
+    return (indexerHandlers as any).indexWorkspace(connection, { ...params, table: 'code' })
   })
 
   addMethod('kbIndexer.indexWorkspace', async (params: { force?: boolean }) => {
-    return (indexerHandlers as any).indexWorkspace(null, params)
+    return (indexerHandlers as any).indexWorkspace(connection, { ...params, table: 'kb' })
+  })
+
+  addMethod('memoriesIndexer.indexWorkspace', async (params: { force?: boolean }) => {
+    return (indexerHandlers as any).indexWorkspace(connection, { ...params, table: 'memories' })
   })
 }

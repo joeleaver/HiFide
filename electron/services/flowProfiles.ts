@@ -156,11 +156,29 @@ async function loadWorkspaceTemplates(workspaceId?: string): Promise<Record<stri
       if (!file.endsWith('.json')) continue
       try {
         const filePath = path.join(flowsDir, file)
+        // Just read enough to get metadata if possible, but for now we'll just read the file
+        // and avoid the expensive deserialization/node mapping until requested.
         const content = await fs.readFile(filePath, 'utf-8')
-        const profile = JSON.parse(content) as FlowProfile
-        const id = profile.name || path.basename(file, '.json')
-        console.log('[loadWorkspaceTemplates] Loaded template:', id, 'from', file)
+        const raw = JSON.parse(content) as any
+        
+        // Metadata-only version for the profile list
+        const profile: FlowProfile = {
+          name: raw.name || path.basename(file, '.json'),
+          description: raw.description || '',
+          version: raw.version || '1.0.0',
+          // We keep the raw nodes/edges but don't process them yet
+          nodes: raw.nodes || [],
+          edges: raw.edges || []
+        }
+        
+        const id = profile.name
+        console.log('[loadWorkspaceTemplates] Loaded template metadata for:', id)
         templates[id] = profile
+        
+        // Yield to event loop every few files
+        if (files.indexOf(file) % 5 === 0) {
+          await new Promise(resolve => setImmediate(resolve))
+        }
       } catch (error) {
         console.error(`[flowProfiles] Failed to load workspace flow ${file}:`, error)
       }

@@ -526,8 +526,18 @@ export function createUiHandlers(
 
   addMethod('app.getBootStatus', async () => {
     try {
-      // Boot status is not tracked - return a default
-      return { ok: true, status: 'ready' }
+      const { getWorkspaceService } = await import('../../../services/index.js');
+      const workspaceService = getWorkspaceService();
+      const workspaces = workspaceService.getAllWindowWorkspaces();
+      const hasWorkspace = Object.keys(workspaces).length > 0;
+      
+      // If a workspace is already being loaded via LoadWorkspace, 
+      // appBootstrapping should be false to let the loadingOverlay/workspace-loader handle it.
+      return { 
+        ok: true, 
+        appBootstrapping: !hasWorkspace, 
+        startupMessage: hasWorkspace ? 'Resuming...' : 'Ready' 
+      };
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
     }

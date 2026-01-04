@@ -111,6 +111,11 @@ export class WorkspaceService extends Service<WorkspaceState> {
     this.setState({ ctxResult: result })
   }
 
+  getActiveWorkspaceRoot(): string | null {
+    const workspaces = Object.values(this.state.windowWorkspaces)
+    return workspaces[0] || null
+  }
+
   async hasUnsavedChanges(): Promise<boolean> {
     // Placeholder - full implementation would check git status
     return false
@@ -120,9 +125,9 @@ export class WorkspaceService extends Service<WorkspaceState> {
     this.setWorkspaceForWindow(windowId, path)
     this.addRecentFolder({ path, lastOpened: Date.now() })
 
-    // Initialize the vector database for the new workspace path
+    // Initialize the vector database and orchestration for the new workspace path
     try {
-      const { getVectorService } = await import('./index.js')
+      const { getVectorService, getIndexOrchestratorService } = await import('./index.js')
       const vectorService = getVectorService()
       if (vectorService) {
         // We don't await this here to avoid blocking the UI window transition,
@@ -130,9 +135,17 @@ export class WorkspaceService extends Service<WorkspaceState> {
         vectorService.init(path).catch(err => {
           console.error('[WorkspaceService] Failed to initialize VectorService:', err)
         })
+
+        // Run startup check: ensures indexes exist and start watching
+        const orchestrator = getIndexOrchestratorService()
+        if (orchestrator) {
+          orchestrator.runStartupCheck().catch(err => {
+            console.error('[WorkspaceService] Startup index check failed:', err)
+          })
+        }
       }
     } catch (error) {
-      console.error('[WorkspaceService] Could not load VectorService for initialization:', error)
+      console.error('[WorkspaceService] Could not load services for initialization:', error)
     }
   }
 

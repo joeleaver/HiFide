@@ -80,6 +80,7 @@ function buildSettingsSnapshot(): SettingsSnapshot {
     startupMessage: appService.getStartupMessage(),
     pricingConfig: settingsService.getPricingConfig(),
     defaultPricingConfig: settingsService.getDefaultPricingConfig(),
+    vector: (settingsService.getState() as any).vector,
   }
 }
 
@@ -149,6 +150,12 @@ export function createSettingsHandlers(
       ok: true,
       pricingConfig: settingsService.getPricingConfig(),
     }
+  })
+
+  addMethod('settings.setVectorSettings', async ({ vector }: { vector: any }) => {
+    const settingsService = getSettingsService()
+    settingsService.setVectorSettings(vector)
+    return { ok: true, vector: (settingsService.getState() as any).vector }
   })
 
   // Provider handlers

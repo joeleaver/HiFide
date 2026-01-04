@@ -15,6 +15,7 @@ import {
   getVectorService,
   getCodeIndexerService,
   getKBIndexerService,
+  getMemoriesIndexerService,
   getWorkspaceService,
 } from '../../services/index.js'
 import type { RpcConnection } from './types.js'
@@ -469,11 +470,10 @@ export const vectorHandlers = {
     }
   },
 
-  async search(query: string, options: { limit?: number; type?: 'code' | 'kb' } = {}) {
+  async search(query: string, options: { limit?: number; type?: 'all' | 'code' | 'kb' | 'memories' } = {}) {
     try {
       const vectorService = getVectorService()
-      const filter = options.type ? `type = '${options.type}'` : undefined;
-      const results = await vectorService.search(query, options.limit || 10, filter);
+      const results = await vectorService.search(query, options.limit || 10, options.type);
       
       // Ensure results are strictly plain objects for RPC serialization
       const sanitizedResults = results.map((r: any) => ({
@@ -498,28 +498,64 @@ export const vectorHandlers = {
 }
 
 export const indexerHandlers = {
-  async indexWorkspace(_connection: RpcConnection, options?: { force?: boolean }) {
-    const ws = getWorkspaceService()
-    const workspaces = ws.getAllWindowWorkspaces()
-    const workspaceRoot = Object.values(workspaces)[0] as string
+  async indexWorkspace(connection: RpcConnection, options?: { force?: boolean, table?: 'all' | 'code' | 'kb' | 'memories' }) {
+    let workspaceRoot = await getConnectionWorkspaceId(connection)
 
-    if (!workspaceRoot) return { ok: false, error: 'no-active-workspace' }
+    // Fallback: If connection isn't bound yet, try to find any workspace associated with the windowId or the system
+    if (!workspaceRoot) {
+      const { getConnectionWindowId } = await import('./broadcast.js')
+      const windowId = getConnectionWindowId(connection)
+      const workspaceService = getWorkspaceService()
+      
+      if (windowId) {
+        workspaceRoot = workspaceService.getWorkspaceForWindow(windowId) || undefined
+      }
 
-    const force = !!options?.force
-
-    // If forcing, purge the vector table first to ensure a clean slate
-    if (force) {
-      console.log('[indexerHandlers] Forced re-index requested. Purging vector table...')
-      try {
-        await getVectorService().purge()
-      } catch (err) {
-        console.error('[indexerHandlers] Error purging vector table during forced re-index:', err)
+      if (!workspaceRoot) {
+        // Final fallback: use the first available workspace in the system
+        const allWorkspaces = Object.values(workspaceService.getAllWindowWorkspaces())
+        workspaceRoot = allWorkspaces[0]
       }
     }
 
-    // Start both code and KB indexing
-    getCodeIndexerService().indexWorkspace(workspaceRoot, force)
-    getKBIndexerService().indexWorkspace(force)
+    if (!workspaceRoot) {
+      console.warn('[indexerHandlers] indexWorkspace failed: No workspace bound to connection or system')
+      return { ok: false, error: 'no-active-workspace' }
+    }
+
+    const force = !!options?.force
+    const targetTable = options?.table || 'all'
+
+    console.log(`[indexerHandlers] re-index requested (table: ${targetTable}, force: ${force})`)
+
+    const vs = getVectorService()
+    vs.startTableIndexing(targetTable as any);
+
+    // If forcing, purge ONLY the target vector table(s)
+    if (force) {
+      try {
+        if (targetTable === 'all') {
+          await vs.purge() // Purges everything
+        } else {
+          await vs.purge(targetTable as any)
+        }
+      } catch (err) {
+        console.error(`[indexerHandlers] Error purging vector table ${targetTable}:`, err)
+      }
+    }
+
+    // Route to the appropriate indexers
+    if (targetTable === 'all' || targetTable === 'code') {
+      getCodeIndexerService().indexWorkspace(workspaceRoot, force)
+    }
+    
+    if (targetTable === 'all' || targetTable === 'kb') {
+      getKBIndexerService().indexWorkspace(workspaceRoot, force) // Note: ensured workspaceRoot consistency
+    }
+
+    if (targetTable === 'all' || targetTable === 'memories') {
+      getMemoriesIndexerService().indexWorkspace(workspaceRoot, force)
+    }
 
     return { ok: true }
   },

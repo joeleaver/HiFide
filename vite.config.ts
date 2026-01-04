@@ -22,9 +22,12 @@ export default defineConfig({
         vite: {
           build: {
             lib: {
-              entry: 'electron/main.ts',
+              entry: {
+                main: 'electron/main.ts',
+                'embedding-worker': 'electron/services/vector/workers/embedding-worker.js',
+              },
               formats: ['es'],
-              fileName: () => 'main.mjs',
+              fileName: (format, entryName) => `${entryName}.mjs`,
             },
             rollupOptions: {
               external: (id) => {
@@ -39,9 +42,18 @@ export default defineConfig({
               },
               output: {
                 format: 'es',
-                entryFileNames: 'main.mjs',
-                chunkFileNames: 'main-[hash].mjs',
-                banner: 'import { fileURLToPath as __fut } from "node:url"; import * as __path from "node:path"; var __filename = __fut(import.meta.url); var __dirname = __path.dirname(__filename);',
+                entryFileNames: '[name].mjs',
+                chunkFileNames: 'chunks/[name]-[hash].mjs',
+                banner: `
+import { fileURLToPath as __fut } from "node:url";
+import * as __path from "node:path";
+if (typeof __filename === "undefined") {
+  globalThis.__filename = __fut(import.meta.url);
+}
+if (typeof __dirname === "undefined") {
+  globalThis.__dirname = __path.dirname(globalThis.__filename);
+}
+`.trim(),
               },
             },
           },

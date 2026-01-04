@@ -2,77 +2,128 @@
   "version": 1,
   "items": [
     {
-      "id": "mem-136a75c1-0ef2-44c3-92b1-65c6528e623f",
+      "id": "mem-e993703a-8d20-4961-b2f0-bfb3f0a504e4",
       "type": "preference",
-      "text": "Before resuming execution on complex plans, review the current state of the codebase against technical documentation to reconcile previous progress.",
+      "text": "Use URL-based resolution via import.meta.url instead of __dirname when resolving paths in ESM Electron modules for better reliability.",
+      "tags": [
+        "esm",
+        "electron",
+        "path-resolution",
+        "coding-standard"
+      ],
+      "importance": 0.5,
+      "contentHash": "d6ff93249513d6ddc4ab32e15d165b79fea0fccbaea0731a39d23786f98cbf42",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-04T00:01:56.608Z",
+      "updatedAt": "2026-01-04T00:01:56.608Z",
+      "lastUsedAt": "2026-01-04T02:40:05.379Z",
+      "usageCount": 87
+    },
+    {
+      "id": "mem-5b13556e-62ca-4ea1-9217-b8e51497a674",
+      "type": "preference",
+      "text": "The settings screen should include progress bars for indexing status to match the status bar indicator.",
+      "tags": [
+        "ui",
+        "ux",
+        "indexing"
+      ],
+      "importance": 0.5,
+      "contentHash": "02e22ac5447252cf4e3ac73574675689b48066ca503cba51ffc7063c997c1139",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-04T00:20:29.113Z",
+      "updatedAt": "2026-01-04T00:20:29.113Z",
+      "lastUsedAt": "2026-01-04T02:40:05.379Z",
+      "usageCount": 73
+    },
+    {
+      "id": "mem-6f385f63-e28e-4a6d-b263-bc917e84b32e",
+      "type": "preference",
+      "text": "The user prefers applying code changes using the applyEdits tool.",
+      "tags": [
+        "tooling",
+        "workflow"
+      ],
+      "importance": 0.25,
+      "contentHash": "a0562776aa7651426dc3dc9ac9f5e4671dbf9d6d911f752fd14103c6bc662270",
+      "source": "implicit-extraction",
+      "enabled": true,
+      "createdAt": "2026-01-04T01:51:15.242Z",
+      "updatedAt": "2026-01-04T01:51:15.242Z",
+      "lastUsedAt": "2026-01-04T02:40:05.379Z",
+      "usageCount": 24
+    },
+    {
+      "id": "mem-624023ab-8d4f-40ed-858f-557ec8389ac9",
+      "type": "preference",
+      "text": "The user prefers applying file changes using the 'applyEdits' tool rather than overwriting files.",
       "tags": [
         "workflow",
-        "consistency",
-        "technical-debt"
+        "tooling"
       ],
       "importance": 0.5,
-      "contentHash": "cd1c3beeeccc3a29556492e264181ecd8565874e8babf4f04f4bbc33726b8d57",
+      "contentHash": "5b96ce7255353814fee081dfad321ed8abda613c8a293cd6b8220ca5bb03d721",
       "source": "implicit-extraction",
       "enabled": true,
-      "createdAt": "2026-01-03T18:57:33.077Z",
-      "updatedAt": "2026-01-03T18:57:33.077Z",
-      "lastUsedAt": "2026-01-03T21:45:52.555Z",
-      "usageCount": 113
+      "createdAt": "2026-01-04T01:52:12.789Z",
+      "updatedAt": "2026-01-04T02:11:25.378Z",
+      "lastUsedAt": "2026-01-04T02:40:05.379Z",
+      "usageCount": 24
     },
     {
-      "id": "mem-3bdaf43d-ccab-422e-add2-d700e6756215",
+      "id": "mem-24372bdf-a474-4862-b059-091e3c10b019",
       "type": "preference",
-      "text": "The UI should include a small indexing status indicator in the status bar and a detailed breakdown of vector search indexing within the settings screen.",
+      "text": "The user prefers to see full file paths in logs during the file discovery phase for debugging purposes.",
       "tags": [
-        "ui-ux",
-        "vector-search",
-        "indexing",
-        "ui",
-        "ux"
+        "logging",
+        "debugging",
+        "discovery"
       ],
       "importance": 0.5,
-      "contentHash": "4ffff790530ac8a3e9c7716f27bfd3f56aa4e45be0ef12eae49d66bc44cf16d1",
+      "contentHash": "d2b13c5ad5d41c76e7d5e097a89d37b0b1054ab3275210d77ade2dc9f8564a72",
       "source": "implicit-extraction",
       "enabled": true,
-      "createdAt": "2026-01-03T19:00:52.349Z",
-      "updatedAt": "2026-01-03T19:08:25.358Z",
-      "lastUsedAt": "2026-01-03T21:45:52.555Z",
-      "usageCount": 112
+      "createdAt": "2026-01-04T02:21:09.243Z",
+      "updatedAt": "2026-01-04T02:21:09.243Z",
+      "lastUsedAt": "2026-01-04T02:40:05.379Z",
+      "usageCount": 8
     },
     {
-      "id": "mem-71b0e4bc-5c74-4493-9c70-b33e42cc0f74",
+      "id": "mem-ea8d842a-2f8c-4c4d-a5fa-236d440a603b",
       "type": "preference",
-      "text": "Prioritize direct code implementation over conceptual explanations when requested changes are identified.",
+      "text": "The user prefers files to be edited using the applyEdits tool rather than just viewing or providing code snippets.",
       "tags": [
-        "interaction-style",
-        "implementation"
+        "tooling",
+        "workflow"
       ],
       "importance": 0.5,
-      "contentHash": "4b4189489382d05a2940f26256d0120834b2213596c02d1fb305ab72b15fdb27",
+      "contentHash": "9264aad4a1d12c831947c2420886b80d94a44bf5abdbb094e27a4dafccf23878",
       "source": "implicit-extraction",
       "enabled": true,
-      "createdAt": "2026-01-03T19:57:10.043Z",
-      "updatedAt": "2026-01-03T19:57:10.043Z",
-      "lastUsedAt": "2026-01-03T21:45:52.555Z",
-      "usageCount": 77
+      "createdAt": "2026-01-04T02:25:28.974Z",
+      "updatedAt": "2026-01-04T02:25:28.974Z",
+      "lastUsedAt": "2026-01-04T02:40:05.379Z",
+      "usageCount": 5
     },
     {
-      "id": "mem-a90634cb-fef7-4744-b625-de847807a31f",
+      "id": "mem-15119174-3e70-42f8-8ef0-cdd60c8bd717",
       "type": "preference",
-      "text": "Avoid using useEffect for side effects that can be managed within state store actions to prevent hook-related render errors.",
+      "text": "The user is interested in increasing concurrency and parallelization for the indexing worker process.",
       "tags": [
-        "react",
-        "hooks",
-        "best-practice"
+        "performance",
+        "scaling",
+        "codeindexerservice"
       ],
       "importance": 0.5,
-      "contentHash": "8349e60cb5423bc86c4b1c15cda994518ce11cbc7377ecd644fb7a84c88506a3",
+      "contentHash": "db4796646c0b877a4168ceba4ad454e161ce1e1c459d429d2b5ba693d10d54b5",
       "source": "implicit-extraction",
       "enabled": true,
-      "createdAt": "2026-01-03T20:35:24.443Z",
-      "updatedAt": "2026-01-03T20:35:24.443Z",
-      "lastUsedAt": "2026-01-03T21:45:52.555Z",
-      "usageCount": 53
+      "createdAt": "2026-01-04T02:37:12.015Z",
+      "updatedAt": "2026-01-04T02:37:12.015Z",
+      "lastUsedAt": "2026-01-04T02:40:05.379Z",
+      "usageCount": 2
     }
   ]
 }

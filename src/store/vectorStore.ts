@@ -1,11 +1,22 @@
 import { create } from 'zustand'
 import { getBackendClient } from '../lib/backend/bootstrap'
 
+export interface TableStatus {
+  count: number;
+  indexedAt: string | null;
+  exists: boolean;
+}
+
 export interface VectorStatus {
   indexing: boolean
   progress: number
   totalFiles: number
   indexedFiles: number
+  tables: {
+    code: TableStatus
+    kb: TableStatus
+    memories: TableStatus
+  }
 }
 
 export interface VectorState {
@@ -41,7 +52,8 @@ interface VectorStore {
   setSearchQuery: (query: string) => void
   setSearchTarget: (target: 'all' | 'code' | 'kb') => void
   search: () => Promise<void>
-  startIndexing: () => Promise<void>
+  startIndexing: (type: 'all' | 'code' | 'kb' | 'memories') => Promise<void>
+  updateVectorSettings: (settings: any) => Promise<void>
 }
 
 export const useVectorStore = create<VectorStore>((set, get) => ({
@@ -123,12 +135,38 @@ export const useVectorStore = create<VectorStore>((set, get) => ({
     }
   },
 
-  startIndexing: async () => {
+  startIndexing: async (type: 'all' | 'code' | 'kb' | 'memories') => {
     const client = getBackendClient()
     if (!client) return
     
-    // Pass force: true to ensure we bypass hashes and actually re-index
-    await client.rpc('codeIndexer.indexWorkspace', { force: true })
-    await client.rpc('kbIndexer.indexWorkspace', { force: true })
+    if (type === 'code' || type === 'all') {
+      await client.rpc('codeIndexer.indexWorkspace', { force: true })
+    }
+    if (type === 'kb' || type === 'all') {
+      await client.rpc('kbIndexer.indexWorkspace', { force: true })
+    }
+    if (type === 'memories') {
+      await client.rpc('memoriesIndexer.indexWorkspace', { force: true })
+    }
+  },
+
+  updateVectorSettings: async (settings: any) => {
+    const client = getBackendClient()
+    if (!client) return
+
+    try {
+      const res = await client.rpc<any>('settings.setVectorSettings', { vector: settings })
+      if (res?.ok) {
+        set((state) => ({
+          state: state.state ? { ...state.state, status: { ...state.state.status, ...res.vector } } : null
+        }))
+        // Note: Full settings state is usually managed by useSettingsSnapshot, 
+        // but we update the local vector store state for immediate UI feedback if needed.
+        // Actually, vector store's 'state' is VectorStatus, we should be careful.
+        // In SettingsPane, we use useSettingsSnapshot for the 'vector' field.
+      }
+    } catch (err) {
+      console.error('Failed to update vector settings:', err)
+    }
   }
 }))

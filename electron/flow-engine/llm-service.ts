@@ -333,25 +333,39 @@ class LLMService {
     const onStepWrapped = (step: { text: string; reasoning?: string; toolCalls?: any[]; toolResults?: any[] }) => {
       if (skipHistory) return
 
-      // 1. Add assistant message for this step (if it has text, reasoning, or tool calls)
-      if (step.text || step.reasoning || (step.toolCalls && step.toolCalls.length > 0)) {
+      // 1. Add assistant message for this step (if it has text or reasoning)
+      // We explicitly exclude tool_calls from history to avoid sending them back as context.
+      if (step.text || step.reasoning) {
         const assistantMessage: any = {
           role: 'assistant',
           content: step.text || '',
         }
-        if (step.reasoning) assistantMessage.reasoning = step.reasoning
-        if (step.toolCalls && step.toolCalls.length > 0) assistantMessage.tool_calls = step.toolCalls
-
+        if (step.reasoning) {
+          if (typeof step.reasoning === 'string') {
+            assistantMessage.reasoning = step.reasoning
+          } else {
+            try {
+              assistantMessage.reasoning = (step.reasoning as any).text || (step.reasoning as any).content || JSON.stringify(step.reasoning)
+            } catch {
+              assistantMessage.reasoning = String(step.reasoning)
+            }
+          }
+        }
+        // DO NOT add tool_calls here. History should only contain human-visible content.
         contextManager.addMessage(assistantMessage)
       }
 
-      // 2. Add tool result messages for this step
+      // 2. Add tool results as standard user-role text messages (if they are human-relevant)
+      // This ensures the information is available to the model in future turns without
+      // requiring the 'tool' role machinery which implies the assistant previously called a tool.
       if (step.toolResults && step.toolResults.length > 0) {
         for (const result of step.toolResults) {
+          const content = typeof result.result === 'string' ? result.result : JSON.stringify(result.result)
+          if (!content) continue
+
           contextManager.addMessage({
-            role: 'tool',
-            tool_call_id: result.toolCallId,
-            content: typeof result.result === 'string' ? result.result : JSON.stringify(result.result)
+            role: 'user',
+            content: `[Tool Result: ${result.toolName || 'unknown'}]\n${content}`
           })
         }
       }

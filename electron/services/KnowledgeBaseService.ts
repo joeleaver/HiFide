@@ -6,6 +6,8 @@
 
 import { Service } from './base/Service.js'
 import type { KbItem, KbHit } from '../store/utils/knowledgeBase.js'
+import { listItems } from '../store/utils/knowledgeBase.js'
+
 
 interface KnowledgeBaseState {
   kbLoading: boolean
@@ -95,6 +97,20 @@ export class KnowledgeBaseService extends Service<KnowledgeBaseState> {
 
   setKbItems(items: Record<string, KbItem>): void {
     this.setState({ kbItems: items })
+  }
+
+  async syncFromDisk(workspaceRoot: string): Promise<void> {
+    try {
+      const items = await listItems(workspaceRoot)
+      const kbItems: Record<string, KbItem> = {}
+      for (const item of items) {
+        kbItems[item.id] = item
+      }
+      this.setKbItems(kbItems)
+    } catch (error) {
+      console.error('[KnowledgeBaseService] Failed to sync from disk:', error)
+      this.setState({ kbLastError: 'Failed to sync from disk' })
+    }
   }
 
   kbClearOpResult(): void {

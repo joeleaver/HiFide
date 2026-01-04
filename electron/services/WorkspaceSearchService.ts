@@ -288,22 +288,25 @@ export class WorkspaceSearchService extends Service<WorkspaceSearchServiceState>
 
     for (const match of results) {
       if (match.type !== 'code') continue;
-      const meta = match.metadata;
-      const relPath = meta.filePath;
+      const relPath = match.filePath;
+      if (!relPath) continue;
+      
       const absPath = path.resolve(workspaceRoot, relPath);
+      const startLine = (match.metadata as any)?.startLine || 1;
+      const endLine = (match.metadata as any)?.endLine || startLine;
 
       const matches = filesMap.get(relPath) || [];
       matches.push({
         id: `semantic:${match.id}`,
         path: absPath,
         relativePath: relPath,
-        line: meta.startLine,
+        line: startLine,
         column: 1,
         matchText: `[Semantic Match] ${match.text.split('\n')[0]}`,
         lineText: match.text.split('\n')[1] || match.text,
         range: {
-          start: { line: meta.startLine, column: 1 },
-          end: { line: meta.endLine || meta.startLine, column: 1 }
+          start: { line: startLine, column: 1 },
+          end: { line: endLine, column: 1 }
         }
       });
       filesMap.set(relPath, matches);

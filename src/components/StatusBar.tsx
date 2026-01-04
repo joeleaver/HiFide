@@ -115,16 +115,38 @@ export default function StatusBar() {
       </Group>
 
       {/* Right side - Combined status for agent view */}
-      <Group gap={8}>
+      <Group gap={8} style={{ paddingRight: 8 }}>
         {status?.indexing && (
           <Tooltip label={`Indexing Vector DB: ${status.indexedFiles}/${status.totalFiles} files (${status.progress}%)`}>
-            <Group gap={4} px={8} style={{ cursor: 'help' }}>
+            <Group gap={4} px={4} style={{ cursor: 'help' }}>
               <Loader size={10} color="white" />
               <IconDatabase size={14} />
               <Text size="xs" style={{ color: '#fff' }}>{status.progress}%</Text>
             </Group>
           </Tooltip>
         )}
+
+        <Group gap={4} px={4}>
+          <Tooltip label="Code Vectors">
+            <Group gap={2} style={{ cursor: 'default' }}>
+              <IconDatabase size={12} color="#60a5fa" />
+              <Text size="xs" fw={500}>{status?.tables?.code?.count || 0}</Text>
+            </Group>
+          </Tooltip>
+          <Tooltip label="Knowledge Base Vectors">
+            <Group gap={2} style={{ cursor: 'default' }}>
+              <IconDatabase size={12} color="#4ade80" />
+              <Text size="xs" fw={500}>{status?.tables?.kb?.count || 0}</Text>
+            </Group>
+          </Tooltip>
+          <Tooltip label="Memory Vectors">
+            <Group gap={2} style={{ cursor: 'default' }}>
+              <IconDatabase size={12} color="#fb923c" />
+              <Text size="xs" fw={500}>{status?.tables?.memories?.count || 0}</Text>
+            </Group>
+          </Tooltip>
+        </Group>
+
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 8px', height: STATUS_BAR_HEIGHT }}>
           {currentView === 'flow' ? (
             // Agent view: Show flow stats + metrics

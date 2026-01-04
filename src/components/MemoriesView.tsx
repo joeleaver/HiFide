@@ -74,12 +74,13 @@ export default function MemoriesView() {
       const res: any = await client?.rpc('memories.list', {})
       if (!res?.ok) throw new Error(res?.error || 'Failed to load memories')
       const next: WorkspaceMemoryItem[] = Array.isArray(res.items) ? res.items : []
-      setItems(next.map((m) => ({ ...m, enabled: m.enabled !== false })))
+      const processed = next.map((m) => ({ ...m, enabled: m.enabled !== false }))
+      setItems(processed)
 
       // keep selection if possible
       setSelectedId((prev) => {
-        if (prev && next.some((m) => m.id === prev)) return prev
-        return next[0]?.id ?? null
+        if (prev && processed.some((m) => m.id === prev)) return prev
+        return processed[0]?.id ?? null
       })
     } catch (e: any) {
       setError(e?.message || String(e))
@@ -213,23 +214,26 @@ export default function MemoriesView() {
           <Text size="sm" c="dimmed">
             {loading ? 'Loading…' : `${items.length} memories`}
           </Text>
-          <ScrollArea style={{ flex: 1 }} offsetScrollbars>
-            <Stack gap={6}>
+          <ScrollArea style={{ flex: 1, display: 'flex' }} offsetScrollbars>
+            <Stack gap={6} style={{ width: '100%' }}>
               {items.map((m) => (
                 <Button
                   key={m.id}
                   variant={m.id === selectedId ? 'light' : 'subtle'}
                   onClick={() => setSelectedId(m.id)}
-                  styles={{ inner: { justifyContent: 'space-between' } }}
+                  styles={{ 
+                    root: { height: 'auto', padding: '8px 12px' },
+                    inner: { justifyContent: 'space-between', display: 'block', width: '100%' } 
+                  }}
                 >
-                  <Group gap="xs" justify="space-between" style={{ width: '100%' }}>
-                    <Text size="sm" lineClamp={2} style={{ flex: 1, textAlign: 'left' }}>
+                  <Group gap="xs" justify="space-between" align="flex-start" wrap="nowrap" style={{ width: '100%' }}>
+                    <Text size="sm" lineClamp={2} style={{ flex: 1, textAlign: 'left', wordBreak: 'break-word', whiteSpace: 'normal' }}>
                       {m.text}
                     </Text>
-                    <Group gap={6}>
-                    {m.enabled === false && <Badge color="gray" variant="light">disabled</Badge>}
-                    <Badge variant="light">{m.type}</Badge>
-                  </Group>
+                    <Stack gap={4} align="flex-end" style={{ flexShrink: 0 }}>
+                      <Badge variant="light" size="xs">{m.type}</Badge>
+                      {m.enabled === false && <Badge color="gray" variant="light" size="xs">disabled</Badge>}
+                    </Stack>
                   </Group>
                 </Button>
               ))}

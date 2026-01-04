@@ -157,15 +157,28 @@ export const OpenRouterAiSdkProvider: ProviderAdapter = {
                 }
                 break
               }
+              case 'tool-input-start': {
+                const callId = chunk.toolCallId || chunk.id || ''
+                if (callId) {
+                  const args = (chunk as any).input
+                  if (args !== undefined) {
+                    const safe = String(chunk.toolName || '')
+                    const original = nameMap.get(safe) || safe
+                    onToolStart?.({ callId, name: original, arguments: args })
+                    seenStarts.add(callId)
+                  }
+                }
+                break
+              }
               case 'tool-call': {
                 // Ensure pending text is flushed before tool call
                 flushText()
-                
+
                 const callId = chunk.toolCallId || chunk.id || ''
                 if (callId) {
                   const safe = String(chunk.toolName || '')
                   const original = nameMap.get(safe) || safe
-                  onToolStart?.({ callId, name: original, arguments: (chunk as any).args })
+                  onToolStart?.({ callId, name: original, arguments: (chunk as any).input || (chunk as any).args })
                   seenStarts.add(callId)
                 }
                 break
@@ -174,7 +187,7 @@ export const OpenRouterAiSdkProvider: ProviderAdapter = {
                 const callId = chunk.toolCallId || chunk.id || ''
                 const safe = String(chunk.toolName || '')
                 const original = nameMap.get(safe) || safe
-                const output = (chunk as any).result
+                const output = (chunk as any).output ?? (chunk as any).result
                 onToolEnd?.({ callId, name: original, result: output })
                 break
               }

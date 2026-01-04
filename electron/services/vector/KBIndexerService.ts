@@ -1,5 +1,5 @@
 import { Service } from '../base/Service.js';
-import { getKnowledgeBaseService, getVectorService, getWorkspaceService } from '../index.js';
+import { getKnowledgeBaseService, getVectorService } from '../index.js';
 import crypto from 'node:crypto';
 
 interface KBIndexerState {
@@ -17,16 +17,11 @@ export class KBIndexerService extends Service<KBIndexerState> {
     this.persistState();
   }
 
-  async indexWorkspace(force = false) {
-    const ws = getWorkspaceService();
+  async indexWorkspace(workspaceRoot: string, force = false) {
     const vs = getVectorService();
 
-    // WorkspaceService holds windowWorkspaces. For indexing, we typically use the first active one or a primary context.
-    const workspaces = ws.getAllWindowWorkspaces();
-    const workspaceRoot = Object.values(workspaces as any)[0] as string;
-
     if (!workspaceRoot) {
-      console.warn('[KBIndexerService] Cannot index: No active workspace found');
+      console.warn('[KBIndexerService] Cannot index: workspaceRoot is required');
       return;
     }
 
@@ -39,8 +34,13 @@ export class KBIndexerService extends Service<KBIndexerState> {
     }
 
     const kbService = getKnowledgeBaseService();
+    
+    // Explicitly sync from disk to ensure we have the latest items before indexing
+    await kbService.syncFromDisk(workspaceRoot);
+    
     const allItems = kbService.getItems();
     const items = Object.values(allItems);
+    console.log(`[KBIndexerService] Discovered ${items.length} articles to index.`);
 
     // Note: KB indexing is usually much faster than code, but we still report it
     if (force) {
@@ -48,10 +48,13 @@ export class KBIndexerService extends Service<KBIndexerState> {
         this.setState({ indexedArticles: {} });
         await this.persistState();
         // Clear status for clean start
-        vs.updateIndexingStatus('kb', 0, 0);
+        await vs.updateIndexingStatus('kb', 0, 0);
         // Wait a moment for persistence to settle
         await new Promise(resolve => setTimeout(resolve, 100));
     }
+
+    // Signal table-specific start
+    await vs.startTableIndexing('kb');
 
     vs.updateIndexingStatus('kb', 0, items.length);
 
@@ -62,6 +65,9 @@ export class KBIndexerService extends Service<KBIndexerState> {
         
         const indexedCount = Math.min(i + batchSize, items.length);
         vs.updateIndexingStatus('kb', indexedCount, items.length);
+
+        // Yield to maintain responsiveness
+        await new Promise(resolve => setTimeout(resolve, 50));
     }
 
     vs.updateIndexingStatus('kb', items.length, items.length);
@@ -96,7 +102,7 @@ export class KBIndexerService extends Service<KBIndexerState> {
                     tags: meta.tags,
                     section: c.section
                 })
-            })));
+            })), 'kb');
 
             this.setState({
                 indexedArticles: {
@@ -131,6 +137,12 @@ export class KBIndexerService extends Service<KBIndexerState> {
             }
         }
 
-        return chunks;
-    }
+    return chunks;
+  }
+
+  async reset() {
+    console.log('[KBIndexerService] Resetting state.');
+    this.setState({ indexedArticles: {} });
+    await this.persistState();
+  }
 }
