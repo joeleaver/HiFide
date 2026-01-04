@@ -173,7 +173,6 @@ export class BackendClient {
     if (this.rpcClient) {
       const handlersForMethod = this.methodSubs.filter(s => s.method === method).map(s => s.handler)
       // Remove old handler and add new combined handler
-      this.rpcClient.rejectAllPendingRequests('reconnecting')
       this.rpcClient.addMethod(method, (params: any) => {
         try { this.opts.onNotify?.(method, params) } catch {}
         for (const h of handlersForMethod) {

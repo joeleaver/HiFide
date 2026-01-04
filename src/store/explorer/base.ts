@@ -47,10 +47,19 @@ export const createExplorerBaseSlice: StateCreator<ExplorerStore, [], [], Explor
     set({ isHydrating: true, lastError: null })
     try {
       const res: any = await client.rpc('explorer.getState', {})
-      if (!res?.ok) throw new Error(res?.error || 'Failed to load explorer state')
+      if (!res?.ok) {
+        if (res?.error === 'no-workspace') {
+          set({ workspaceRoot: null, normalizedRoot: null, entriesByDir: {}, loadedDirs: {} })
+          return
+        }
+        throw new Error(res?.error || 'Failed to load explorer state')
+      }
 
       const workspaceRoot = typeof res.workspaceRoot === 'string' ? res.workspaceRoot : null
-      if (!workspaceRoot) throw new Error('Workspace not attached')
+      if (!workspaceRoot) {
+        set({ workspaceRoot: null, normalizedRoot: null, entriesByDir: {}, loadedDirs: {} })
+        return
+      }
       const normalizedRoot = normalizeFsPath(workspaceRoot)
 
       const children = mapChildrenByDir(res.childrenByDir || {})

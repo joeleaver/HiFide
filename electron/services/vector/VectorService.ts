@@ -61,6 +61,9 @@ export class VectorService {
       }
     }
   };
+  
+  // Defer index creation until after indexing is complete
+  private deferIndexing = new Set<TableType>();
 
   private async ensureInitialized(): Promise<void> {
     if (this.db) return;
@@ -312,6 +315,36 @@ export class VectorService {
     }
   }
 
+  async deferIndexCreation(type: TableType): Promise<void> {
+    console.log(`[VectorService] Deferring index creation for table ${type}`);
+    this.deferIndexing.add(type);
+  }
+
+  async finishDeferredIndexing(type: TableType): Promise<void> {
+    console.log(`[VectorService] Finishing deferred indexing for table ${type}. Creating ANN index...`);
+    this.deferIndexing.delete(type);
+    
+    const table = await this.getOrCreateTable(type);
+    const rowCount = await (table as any).countRows();
+    
+    if (rowCount >= 256) {
+      console.log(`[VectorService] Creating ANN index for ${type} (rows: ${rowCount})...`);
+      try {
+        await (table as any).createIndex('vector', {
+          config: lancedb.Index.ivfPq({
+            numPartitions: 2,
+            numSubVectors: 2,
+          }),
+        });
+        console.log(`[VectorService] Successfully created ANN index for ${type}`);
+      } catch (err: any) {
+        console.warn(`[VectorService] Failed to create index for ${type}:`, err.message);
+      }
+    } else {
+      console.log(`[VectorService] Skipping index for ${type}: only ${rowCount} rows (requires 256).`);
+    }
+  }
+
   private emitChange() {
     // This is a placeholder for the actual event emission logic 
     // Usually handled by the service registry or bridge
@@ -334,15 +367,65 @@ export class VectorService {
     const table = await this.getOrCreateTable(type);
     const embeddingService = getEmbeddingService();
 
-    const vectors = await Promise.all(items.map(item => embeddingService.embed(item.text)));
-    
-    const data = items.map((item, i) => ({
-      ...item,
-      vector: vectors[i],
-      metadata: typeof item.metadata === 'string' ? item.metadata : JSON.stringify(item.metadata)
-    }));
+    // DEBUG: Logging the number of items and start of embedding
+    console.log(`[VectorService] Upserting ${items.length} items to table ${type}. Starting embedding...`);
 
+    // DEBUG: To isolate if embedding is the cause of the crash, we can flip this to true
+    const DISABLE_EMBEDDING_DEBUG = false;
+
+    let data;
+    if (DISABLE_EMBEDDING_DEBUG) {
+      console.log(`[VectorService] DEBUG: Embedding is DISABLED. Using zero-vectors.`);
+      const expectedDim = await embeddingService.getDimension(type);
+      const zeroVector = new Array(expectedDim).fill(0);
+      data = items.map((item) => ({
+        ...item,
+        vector: zeroVector,
+        metadata: typeof item.metadata === 'string' ? item.metadata : JSON.stringify(item.metadata)
+      }));
+    } else {
+      const vectors = await Promise.all(items.map(async (item, idx) => {
+        try {
+          return await embeddingService.embed(item.text);
+        } catch (err) {
+          console.error(`[VectorService] Failed to embed item ${idx}:`, err);
+          throw err;
+        }
+      }));
+      
+      data = items.map((item, i) => ({
+        ...item,
+        vector: vectors[i],
+        metadata: typeof item.metadata === 'string' ? item.metadata : JSON.stringify(item.metadata)
+      }));
+    }
+
+    console.log(`[VectorService] Adding data to LanceDB table ${type}...`);
     await table.add(data as any);
+
+    // Only create index if we're not in deferred indexing mode
+    // During bulk indexing, we defer index creation until the end to save memory and CPU
+    if (!this.deferIndexing.has(type)) {
+      // Check row count before creating index (LanceDB PQ requires >= 256 rows)
+      const rowCount = await (table as any).countRows();
+      if (rowCount >= 256) {
+        console.log(`[VectorService] Creating ANN index for ${type} (rows: ${rowCount})...`);
+        try {
+          await (table as any).createIndex('vector', {
+            config: lancedb.Index.ivfPq({
+              numPartitions: 2,
+              numSubVectors: 2,
+            }),
+          });
+        } catch (err: any) {
+          console.warn(`[VectorService] Failed to create index for ${type}:`, err.message);
+        }
+      } else {
+        console.log(`[VectorService] Skipping index for ${type}: only ${rowCount} rows (requires 256).`);
+      }
+    }
+
+    console.log(`[VectorService] Successfully added ${data.length} items to ${type}.`);
     await this.refreshTableStats();
   }
 
@@ -412,6 +495,34 @@ export class VectorService {
       import('../../backend/ws/broadcast.js').then(({ broadcastWorkspaceNotification }) => {
         broadcastWorkspaceNotification(activePath, 'vector_service.changed', this.state);
       });
+    }
+  }
+
+  /**
+   * Get all unique file paths indexed in a specific table
+   * Used for startup indexing check to identify missing files
+   */
+  async getIndexedFilePaths(type: TableType = 'code'): Promise<Set<string>> {
+    try {
+      await this.ensureInitialized();
+      const table = await this.getOrCreateTable(type);
+      
+      // Query all rows and extract unique filePath values
+      // Using SQL-like query with SELECT to avoid loading all vector data
+      const results = await (table as any).query().select(['filePath']).toArray();
+      
+      const filePaths = new Set<string>();
+      for (const row of results) {
+        if (row.filePath && typeof row.filePath === 'string' && !row.filePath.startsWith('seed-')) {
+          filePaths.add(row.filePath);
+        }
+      }
+      
+      console.log(`[VectorService] Found ${filePaths.size} unique indexed files in ${type} table`);
+      return filePaths;
+    } catch (error) {
+      console.error(`[VectorService] Failed to get indexed file paths from ${type}:`, error);
+      return new Set();
     }
   }
 }

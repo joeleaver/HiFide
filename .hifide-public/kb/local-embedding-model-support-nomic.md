@@ -4,7 +4,7 @@ title: Local Embedding Model Support (Nomic)
 tags: [embeddings, nomic, local-ai]
 files: []
 createdAt: 2026-01-03T23:47:15.325Z
-updatedAt: 2026-01-03T23:48:57.728Z
+updatedAt: 2026-01-04T17:57:51.859Z
 ---
 
 # Local Embedding Model Support (Nomic)
@@ -16,7 +16,8 @@ The system now supports multiple local embedding models via `@xenova/transformer
 The `EmbeddingService` dynamically loads models based on the `settings.vector.localModel` path.
 
 - **Option 1 (Default):** `Xenova/all-MiniLM-L6-v2` (384 Dimensions)
-- **Option 2 (Nomic):** `nomic-ai/nomic-embed-text-v1.5` (768 Dimensions)
+- **Option 2 (Nomic Text):** `nomic-ai/nomic-embed-text-v1.5` (768 Dimensions)
+- **Option 3 (Nomic Code):** `nomic-ai/nomic-embed-code-v1.5` (768 Dimensions) - Optimized for code retrieval.
 
 ## Automatic Integration
 When a model is selected in the UI:

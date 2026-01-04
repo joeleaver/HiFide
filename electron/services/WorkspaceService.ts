@@ -125,24 +125,44 @@ export class WorkspaceService extends Service<WorkspaceState> {
     this.setWorkspaceForWindow(windowId, path)
     this.addRecentFolder({ path, lastOpened: Date.now() })
 
+    // Stop any ongoing indexing before switching workspaces to prevent memory leaks
+    try {
+      const { getIndexOrchestratorService } = await import('./index.js')
+      const orchestrator = getIndexOrchestratorService()
+      if (orchestrator) {
+        console.log('[WorkspaceService] Stopping indexing before workspace switch...')
+        await orchestrator.stopAndCleanup()
+      }
+    } catch (error) {
+      console.warn('[WorkspaceService] Failed to stop indexing:', error)
+    }
+
     // Initialize the vector database and orchestration for the new workspace path
     try {
       const { getVectorService, getIndexOrchestratorService } = await import('./index.js')
       const vectorService = getVectorService()
+      const orchestrator = getIndexOrchestratorService()
+      
       if (vectorService) {
         // We don't await this here to avoid blocking the UI window transition,
         // but it starts the initialization process immediately.
         vectorService.init(path).catch(err => {
           console.error('[WorkspaceService] Failed to initialize VectorService:', err)
         })
+      }
 
-        // Run startup check: ensures indexes exist and start watching
-        const orchestrator = getIndexOrchestratorService()
-        if (orchestrator) {
-          orchestrator.runStartupCheck().catch(err => {
-            console.error('[WorkspaceService] Startup index check failed:', err)
-          })
-        }
+      if (orchestrator) {
+        // ALWAYS start the file watcher on workspace startup (regardless of indexing state)
+        console.log('[WorkspaceService] Starting file watcher for workspace...')
+        orchestrator.startWatcher(path).catch(err => {
+          console.error('[WorkspaceService] Failed to start file watcher:', err)
+        })
+
+        // Run startup check: this checks for missing items and starts indexing if enabled
+        console.log('[WorkspaceService] Running startup check for indexing...')
+        orchestrator.runStartupCheck(path).catch(err => {
+          console.error('[WorkspaceService] Startup index check failed:', err)
+        })
       }
     } catch (error) {
       console.error('[WorkspaceService] Could not load services for initialization:', error)

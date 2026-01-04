@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Group, Text, UnstyledButton, Loader, Tooltip } from '@mantine/core'
-import { IconFolder, IconDatabase } from '@tabler/icons-react'
+import { IconFolder, IconDatabase /* , IconLoader, IconCheck */ } from '@tabler/icons-react'
 import { getBackendClient } from '../lib/backend/bootstrap'
 import { useFlowEditorLocal } from '../store/flowEditorLocal'
 import { useUiStore } from '../store/ui'
 import { useWorkspaceUi } from '../store/workspaceUi'
+import { useIndexingStore } from '../store/indexingStore'
 
 const STATUS_BAR_HEIGHT = 24
 
@@ -12,6 +13,40 @@ export default function StatusBar() {
   // Read current view and workspace from centralized stores
   const currentView = useUiStore((s) => s.currentView)
   const workspaceRoot = useWorkspaceUi((s: any) => s.root)
+
+  // Indexing status
+  const indexingStatus = useIndexingStore((s) => s.status)
+  const indexingLoading = useIndexingStore((s) => s.loading)
+  /* const startIndexing = useIndexingStore((s) => s.startIndexing) */
+  /* const stopIndexing = useIndexingStore((s) => s.stopIndexing) */
+
+  // Subscribe to indexing status updates
+  useEffect(() => {
+    const unsubscribe = useIndexingStore.getState().subscribe()
+    return () => unsubscribe()
+  }, [])
+
+  // Vector service status (for table counts)
+  const [vectorStatus, setVectorStatus] = useState<any>(null)
+  useEffect(() => {
+    const client = getBackendClient()
+    if (!client) return
+    let unsubscribe: any = null
+    ;(async () => {
+      try {
+        const res: any = await client.rpc('vector.getState', {})
+        if (res?.ok) setVectorStatus(res.state?.status)
+
+        unsubscribe = client.subscribe('vector_service.changed', (state: any) => {
+          setVectorStatus(state?.status)
+        })
+      } catch (e) {}
+    })()
+    return () => {
+      if (unsubscribe) unsubscribe()
+    }
+  }, [])
+
   // TODO: Consider moving agentMetrics to a store; keep local UI-only hydration for now
   let agentMetrics: any | null = null
 
@@ -29,28 +64,6 @@ export default function StatusBar() {
         if (met?.ok) agentMetrics = met.metrics || null
       } catch {}
     })()
-  }, [])
-
-
-  const [status, setStatus] = useState<any>(null)
-
-  useEffect(() => {
-    const client = getBackendClient()
-    if (!client) return
-    let unsubscribe: any = null
-    ;(async () => {
-      try {
-        const res: any = await client.rpc('vector.getState', {})
-        if (res?.ok) setStatus(res.state?.status)
-        
-        unsubscribe = client.subscribe('vector_service.changed', (state: any) => {
-          setStatus(state?.status)
-        })
-      } catch (e) {}
-    })()
-    return () => {
-      if (unsubscribe) unsubscribe()
-    }
   }, [])
 
   // Perf: trace rerenders without passing large objects
@@ -116,36 +129,69 @@ export default function StatusBar() {
 
       {/* Right side - Combined status for agent view */}
       <Group gap={8} style={{ paddingRight: 8 }}>
-        {status?.indexing && (
-          <Tooltip label={`Indexing Vector DB: ${status.indexedFiles}/${status.totalFiles} files (${status.progress}%)`}>
+        {/* Indexing status - detailed counts */}
+        {(indexingStatus?.isProcessing || indexingLoading) && (
+          <Tooltip label={
+            indexingStatus?.currentTask 
+              ? `${indexingStatus.currentTask}`
+              : 'Indexing...'
+          }>
             <Group gap={4} px={4} style={{ cursor: 'help' }}>
               <Loader size={10} color="white" />
-              <IconDatabase size={14} />
-              <Text size="xs" style={{ color: '#fff' }}>{status.progress}%</Text>
+              <Text size="xs" style={{ color: '#fff' }}>
+                {indexingStatus?.code?.total || 0}/{indexingStatus?.code?.indexed || 0}
+              </Text>
             </Group>
           </Tooltip>
         )}
 
-        <Group gap={4} px={4}>
-          <Tooltip label="Code Vectors">
-            <Group gap={2} style={{ cursor: 'default' }}>
-              <IconDatabase size={12} color="#60a5fa" />
-              <Text size="xs" fw={500}>{status?.tables?.code?.count || 0}</Text>
-            </Group>
-          </Tooltip>
-          <Tooltip label="Knowledge Base Vectors">
-            <Group gap={2} style={{ cursor: 'default' }}>
-              <IconDatabase size={12} color="#4ade80" />
-              <Text size="xs" fw={500}>{status?.tables?.kb?.count || 0}</Text>
-            </Group>
-          </Tooltip>
-          <Tooltip label="Memory Vectors">
-            <Group gap={2} style={{ cursor: 'default' }}>
-              <IconDatabase size={12} color="#fb923c" />
-              <Text size="xs" fw={500}>{status?.tables?.memories?.count || 0}</Text>
-            </Group>
-          </Tooltip>
-        </Group>
+        {/* Vector counts (from VectorService) - show if indexing is NOT active */}
+        {!(indexingStatus?.isProcessing || indexingLoading) && vectorStatus?.tables && (
+          <Group gap={4} px={4}>
+            <Tooltip label="Code Vectors">
+              <Group gap={2} style={{ cursor: 'default' }}>
+                <IconDatabase size={12} color="#60a5fa" />
+                <Text size="xs" fw={500}>{vectorStatus?.tables?.code?.count || 0}</Text>
+              </Group>
+            </Tooltip>
+            <Tooltip label="Knowledge Base Vectors">
+              <Group gap={2} style={{ cursor: 'default' }}>
+                <IconDatabase size={12} color="#4ade80" />
+                <Text size="xs" fw={500}>{vectorStatus?.tables?.kb?.count || 0}</Text>
+              </Group>
+            </Tooltip>
+            <Tooltip label="Memory Vectors">
+              <Group gap={2} style={{ cursor: 'default' }}>
+                <IconDatabase size={12} color="#fb923c" />
+                <Text size="xs" fw={500}>{vectorStatus?.tables?.memories?.count || 0}</Text>
+              </Group>
+            </Tooltip>
+          </Group>
+        )}
+
+        {/* Vector counts (from VectorService) - keeping this for backward compatibility */}
+        {vectorStatus?.tables && (
+          <Group gap={4} px={4}>
+            <Tooltip label="Code Vectors">
+              <Group gap={2} style={{ cursor: 'default' }}>
+                <IconDatabase size={12} color="#60a5fa" />
+                <Text size="xs" fw={500}>{vectorStatus?.tables?.code?.count || 0}</Text>
+              </Group>
+            </Tooltip>
+            <Tooltip label="Knowledge Base Vectors">
+              <Group gap={2} style={{ cursor: 'default' }}>
+                <IconDatabase size={12} color="#4ade80" />
+                <Text size="xs" fw={500}>{vectorStatus?.tables?.kb?.count || 0}</Text>
+              </Group>
+            </Tooltip>
+            <Tooltip label="Memory Vectors">
+              <Group gap={2} style={{ cursor: 'default' }}>
+                <IconDatabase size={12} color="#fb923c" />
+                <Text size="xs" fw={500}>{vectorStatus?.tables?.memories?.count || 0}</Text>
+              </Group>
+            </Tooltip>
+          </Group>
+        )}
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 8px', height: STATUS_BAR_HEIGHT }}>
           {currentView === 'flow' ? (

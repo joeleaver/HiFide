@@ -10,9 +10,116 @@ import ignore from 'ignore'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
+// Use sync fs for binary detection (small reads only)
+import fsSync from 'node:fs'
+
+/**
+ * Check if a file is binary by reading the first few bytes and looking for null bytes.
+ * This is a fast, cross-platform way to detect binary files without relying on file extensions.
+ * 
+ * @param filePath - Absolute path to the file
+ * @param bufferSize - Number of bytes to check (default: 1024)
+ * @returns true if the file is binary, false if text
+ * 
+ * @example
+ * ```typescript
+ * const isBinary = await isBinaryFile('/path/to/file.exe')
+ * if (isBinary) {
+ *   console.log('Skipping binary file')
+ * }
+ * ```
+ */
+export async function isBinaryFile(filePath: string, bufferSize: number = 1024): Promise<boolean> {
+  try {
+    // Read first N bytes
+    const buffer = Buffer.alloc(bufferSize)
+    const fd = await fs.open(filePath, 'r')
+    const { bytesRead } = await fd.read(buffer, 0, bufferSize, 0)
+    await fd.close()
+
+    // Check for null bytes (characteristic of binary files)
+    // Also check for high ratio of non-printable bytes
+    // let nullByteCount = 0
+    let nonPrintableCount = 0
+    
+    for (let i = 0; i < bytesRead; i++) {
+      const byte = buffer[i]
+      
+      // Null byte is definitive indicator of binary
+      if (byte === 0) {
+        return true
+      }
+      
+      // Count non-printable characters (excluding common text whitespace)
+      if (byte < 9 || (byte > 13 && byte < 32) || byte > 126) {
+        nonPrintableCount++
+      }
+    }
+    
+    // If more than 30% of bytes are non-printable, likely binary
+    if (bytesRead > 0 && (nonPrintableCount / bytesRead) > 0.3) {
+      return true
+    }
+    
+    return false
+  } catch (error) {
+    // If we can't read the file, conservatively assume it's binary
+    return true
+  }
+}
+
+/**
+ * Synchronous version of isBinaryFile for use in synchronous contexts
+ * 
+ * @param filePath - Absolute path to the file
+ * @param bufferSize - Number of bytes to check (default: 1024)
+ * @returns true if the file is binary, false if text
+ */
+export function isBinaryFileSync(filePath: string, bufferSize: number = 1024): boolean {
+  try {
+    const buffer = Buffer.alloc(bufferSize)
+    const fd = fsSync.openSync(filePath, 'r')
+    const bytesRead = fsSync.readSync(fd, buffer, 0, bufferSize, 0)
+    fsSync.closeSync(fd)
+
+    // Check for null bytes (characteristic of binary files)
+    for (let i = 0; i < bytesRead; i++) {
+      const byte = buffer[i]
+      
+      // Null byte is definitive indicator of binary
+      if (byte === 0) {
+        return true
+      }
+    }
+    
+    // Also check for high ratio of non-printable bytes
+    let nonPrintableCount = 0
+    for (let i = 0; i < bytesRead; i++) {
+      const byte = buffer[i]
+      
+      // Count non-printable characters (excluding common text whitespace)
+      if (byte < 9 || (byte > 13 && byte < 32) || byte > 126) {
+        nonPrintableCount++
+      }
+    }
+    
+    // If more than 30% of bytes are non-printable, likely binary
+    if (bytesRead > 0 && (nonPrintableCount / bytesRead) > 0.3) {
+      return true
+    }
+    
+    return false
+  } catch (error) {
+    // If we can't read the file, conservatively assume it's binary
+    return true
+  }
+}
+
 /**
  * Canonical exclude patterns for workspace file discovery
  * These patterns are excluded by default across all tools
+ * Note: Binary file detection is now done by content inspection (see isBinaryFile).
+ * We keep only the most obvious binary archives as an optimization to avoid opening them.
  */
 export const DEFAULT_EXCLUDE_PATTERNS = [
   // Build outputs
@@ -50,6 +157,17 @@ export const DEFAULT_EXCLUDE_PATTERNS = [
   '.hifide_public/**',
   '.hifide-private/**',
   '.hifide_private/**',
+  
+  // Common binary archives (kept as optimization to avoid opening)
+  '*.zip',
+  '*.tar',
+  '*.tar.gz',
+  '*.tgz',
+  '*.rar',
+  '*.7z',
+  '*.bz2',
+  '*.gz',
+  '*.xz',
 ]
 
 /**
@@ -73,6 +191,9 @@ export interface FileDiscoveryOptions {
   
   /** Return absolute paths (defaults to true) */
   absolute?: boolean
+  
+  /** Whether to exclude binary files by content inspection (defaults to true) */
+  excludeBinaryFiles?: boolean
 }
 
 /**
@@ -98,19 +219,35 @@ export async function discoverWorkspaceFiles(options: FileDiscoveryOptions = {})
     respectGitignore = true,
     includeDotfiles = false,
     absolute = true,
+    excludeBinaryFiles = true,
   } = options
 
   // Merge exclude patterns
   const exclude = [...DEFAULT_EXCLUDE_PATTERNS, ...excludeGlobs]
 
   // Discover files using fast-glob
-  const files = await fg(includeGlobs, {
+  let files = await fg(includeGlobs, {
     cwd,
     ignore: exclude,
     absolute,
     onlyFiles: true,
     dot: includeDotfiles,
   })
+
+  // Filter binary files if requested
+  if (excludeBinaryFiles && files.length > 0) {
+    const textFiles = await Promise.all(
+      files.map(async (filePath) => {
+        try {
+          const isBinary = await isBinaryFile(filePath)
+          return isBinary ? null : filePath
+        } catch {
+          return null
+        }
+      })
+    )
+    files = textFiles.filter((filePath): filePath is string => filePath !== null)
+  }
 
   // Apply .gitignore filtering if requested
   if (respectGitignore && files.length > 0) {

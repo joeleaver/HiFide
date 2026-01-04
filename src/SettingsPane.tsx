@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Center, Divider, Group, Loader, Select, Stack, Text, TextInput, Title, NavLink, Box, ScrollArea, Badge } from '@mantine/core'
+import { Alert, Button, Center, Divider, Group, Loader, Select, Stack, Text, TextInput, Title, NavLink, Box, ScrollArea, Badge, Paper } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { IconKey, IconRobot, IconCash, IconDatabase } from '@tabler/icons-react'
 import { getBackendClient } from './lib/backend/bootstrap'
@@ -226,9 +226,11 @@ export default function SettingsPane() {
   const defaultModels = snapshot.defaultModels
   const startupMessage = snapshot.startupMessage
   const fireworksAllowed = snapshot.fireworksAllowedModels || []
-  const fireworksOptions = modelsByProvider.fireworks || []
+  const fireworksOptions = (modelsByProvider.fireworks || []).map((m) => ({ value: m.value, label: m.label }))
+
   const openrouterAllowed = snapshot.openrouterAllowedModels || []
-  const openrouterOptions = modelsByProvider.openrouter || []
+  const openrouterOptions = (modelsByProvider.openrouter || []).map((m) => ({ value: m.value, label: m.label }))
+
   const xaiOptions = modelsByProvider.xai || []
 
   return (
@@ -340,7 +342,8 @@ function ProviderSelect({ label, options, value, disabled, onChange }: any) {
 }
 
 import { useVectorStore } from './store/vectorStore'
-import { IconCode, IconBook, IconBrain, IconSearch } from '@tabler/icons-react'
+import { useIndexingStore } from './store/indexingStore'
+import { IconCode, IconBook, IconBrain, IconSearch, IconPlayerPlay, IconPlayerStop } from '@tabler/icons-react'
 
 function VectorSettingsSection() {
   const { snapshot, mergeSnapshot } = useSettingsSnapshot()
@@ -359,10 +362,45 @@ function VectorSettingsSection() {
     startIndexing
   } = useVectorStore()
 
+  const indexingStatus = useIndexingStore((s) => s.status)
+  const indexingLoading = useIndexingStore((s) => s.loading)
+  const handleStartIndexing = useIndexingStore((s) => s.startIndexing)
+  const handleStopIndexing = useIndexingStore((s) => s.stopIndexing)
+
+  const settings = (snapshot as any)?.vector || {}
+  const indexingWorkers = settings.indexingWorkers || 4
+
+  const handleIndexingWorkersChange = useCallback(async (value: number) => {
+    const update = { ...settings, indexingWorkers: value }
+    
+    // Update both the snapshot and the backend
+    mergeSnapshot((prev: any) => ({
+      ...prev,
+      vector: update
+    }))
+    
+    try {
+      const client = getBackendClient()
+      if (client) {
+        await client.rpc('settings.setVectorSettings', { vector: update })
+        console.log('[VectorSettingsSection] Updated indexingWorkers to', value)
+      }
+    } catch (err) {
+      console.error('[VectorSettingsSection] Failed to update indexingWorkers:', err)
+      notifications.show({ 
+        color: 'red', 
+        title: 'Error', 
+        message: 'Failed to update indexing workers setting' 
+      })
+    }
+  }, [settings, mergeSnapshot])
+
   useEffect(() => {
     fetchState()
     return subscribe()
   }, [fetchState, subscribe])
+
+  const vectorStatus = state ? (state.status as any) : null
 
   if (error) {
     return (
@@ -395,8 +433,6 @@ function VectorSettingsSection() {
     const tableProgress = tableSource && tableSource.total > 0 
       ? Math.floor((tableSource.indexed / tableSource.total) * 100) 
       : 0
-      
-    const settings = (snapshot as any)?.vector
 
     return (
       <Box p="md" style={{ backgroundColor: '#252526', borderRadius: 8, border: '1px solid #333', flex: 1 }}>
@@ -416,7 +452,8 @@ function VectorSettingsSection() {
             size="xs"
             data={[
               'all-MiniLM-L6-v2 (Local)', 
-              'nomic-embed-text-v1.5 (Local)'
+              'nomic-embed-text-v1.5 (Local)',
+              'nomic-embed-code-v1.5 (Local)'
             ]}
             value={settings?.[`${tableKey}Model`] || settings?.model || 'all-MiniLM-L6-v2 (Local)'}
             onChange={(val) => {
@@ -483,6 +520,188 @@ function VectorSettingsSection() {
         <TableCard title="Knowledge Base" tableKey="kb" icon={IconBook} color="#40c057" />
         <TableCard title="Memories" tableKey="memories" icon={IconBrain} color="#fd7e14" />
       </Group>
+
+      <Divider />
+
+      <Stack gap="sm">
+        <Title order={4}>Indexing Performance</Title>
+        <Group align="flex-end" gap="md">
+          <Box style={{ flex: 1 }}>
+            <Text size="sm" mb={4}>Concurrent Workers</Text>
+            <Group gap="xs">
+              <Button
+                size="xs"
+                variant={indexingWorkers === 1 ? 'filled' : 'light'}
+                onClick={() => handleIndexingWorkersChange(1)}
+                disabled={state.indexing || vectorStatus?.indexing}
+              >
+                1
+              </Button>
+              <Button
+                size="xs"
+                variant={indexingWorkers === 2 ? 'filled' : 'light'}
+                onClick={() => handleIndexingWorkersChange(2)}
+                disabled={state.indexing || vectorStatus?.indexing}
+              >
+                2
+              </Button>
+              <Button
+                size="xs"
+                variant={indexingWorkers === 4 ? 'filled' : 'light'}
+                onClick={() => handleIndexingWorkersChange(4)}
+                disabled={state.indexing || vectorStatus?.indexing}
+              >
+                4
+              </Button>
+              <Button
+                size="xs"
+                variant={indexingWorkers === 8 ? 'filled' : 'light'}
+                onClick={() => handleIndexingWorkersChange(8)}
+                disabled={state.indexing || vectorStatus?.indexing}
+              >
+                8
+              </Button>
+              <Button
+                size="xs"
+                variant={indexingWorkers === 16 ? 'filled' : 'light'}
+                onClick={() => handleIndexingWorkersChange(16)}
+                disabled={state.indexing || vectorStatus?.indexing}
+              >
+                16
+              </Button>
+            </Group>
+          </Box>
+          <Text size="xs" c="dimmed" style={{ maxWidth: 400 }}>
+            Number of concurrent worker threads for file indexing. Higher values may improve performance on multi-core systems but use more memory.
+          </Text>
+        </Group>
+        <Text size="xs" c="blue">
+          Current: {indexingWorkers} worker{indexingWorkers !== 1 ? 's' : ''} • Changes apply on next re-index
+        </Text>
+      </Stack>
+
+      <Divider />
+
+      <Stack gap="sm">
+        <Title order={4}>Indexing Status</Title>
+        {indexingStatus && (
+          <Paper p="md" withBorder style={{ borderColor: '#333', backgroundColor: '#1a1a1a' }}>
+            <Stack gap="md">
+              {/* Overall Status */}
+              <Group justify="space-between">
+                <Text size="sm" c="dimmed">Overall Status</Text>
+                <Badge 
+                  color={indexingStatus.indexingEnabled ? 'green' : 'gray'}
+                  size="sm"
+                  variant="light"
+                >
+                  {indexingStatus.indexingEnabled ? 'Enabled' : 'Disabled'}
+                </Badge>
+              </Group>
+              
+              {/* Code Files */}
+              <Box>
+                <Group justify="space-between" mb="xs">
+                  <Group gap="xs">
+                    <IconCode size={16} color="blue" />
+                    <Text size="sm" fw={500}>Code</Text>
+                  </Group>
+                  <Badge color="blue" size="xs" variant="light">
+                    {indexingStatus.code?.indexed || 0} / {indexingStatus.code?.total || 0}
+                  </Badge>
+                </Group>
+                {indexingStatus.code?.missing && indexingStatus.code.missing > 0 && (
+                  <Text size="xs" c="yellow">{indexingStatus.code.missing} files pending indexing</Text>
+                )}
+              </Box>
+
+              {/* Knowledge Base */}
+              <Box>
+                <Group justify="space-between" mb="xs">
+                  <Group gap="xs">
+                    <IconBook size={16} color="purple" />
+                    <Text size="sm" fw={500}>Knowledge Base</Text>
+                  </Group>
+                  <Badge color="purple" size="xs" variant="light">
+                    {indexingStatus.kb?.indexed || 0} / {indexingStatus.kb?.total || 0}
+                  </Badge>
+                </Group>
+                {indexingStatus.kb?.missing && indexingStatus.kb.missing > 0 && (
+                  <Text size="xs" c="yellow">{indexingStatus.kb.missing} articles pending indexing</Text>
+                )}
+              </Box>
+
+              {/* Memories */}
+              <Box>
+                <Group justify="space-between" mb="xs">
+                  <Group gap="xs">
+                    <IconBrain size={16} color="orange" />
+                    <Text size="sm" fw={500}>Memories</Text>
+                  </Group>
+                  <Badge color="orange" size="xs" variant="light">
+                    {indexingStatus.memories?.indexed || 0} / {indexingStatus.memories?.total || 0}
+                  </Badge>
+                </Group>
+                {indexingStatus.memories?.missing && indexingStatus.memories.missing > 0 && (
+                  <Text size="xs" c="yellow">{indexingStatus.memories.missing} memories pending indexing</Text>
+                )}
+              </Box>
+
+              {/* Total Pending */}
+              {indexingStatus.isProcessing && (
+                <Box mt="sm" p="xs" style={{ backgroundColor: '#252526', borderRadius: 4 }}>
+                  <Text size="xs" c="dimmed">
+                    Processing queue ({indexingStatus.queueLength || 0} items remaining)
+                  </Text>
+                </Box>
+              )}
+            </Stack>
+          </Paper>
+        )}
+      </Stack>
+
+      <Divider />
+
+      <Stack gap="sm">
+        <Title order={4}>Indexing Control</Title>
+        <Group align="flex-end">
+          <Box style={{ flex: 1 }}>
+            <Text size="xs" c="dimmed">
+              {indexingStatus?.isProcessing 
+                ? 'Indexing active - see details below'
+                : indexingStatus?.indexingEnabled 
+                  ? 'Indexing enabled'
+                  : 'Indexing disabled'}
+            </Text>
+          </Box>
+          <Group gap="xs">
+            {indexingStatus?.isProcessing ? (
+              <Button
+                size="xs"
+                variant="light"
+                color="red"
+                onClick={handleStopIndexing}
+                leftSection={<IconPlayerStop size={14} />}
+                loading={indexingLoading}
+              >
+                Stop
+              </Button>
+            ) : (
+              <Button
+                size="xs"
+                onClick={handleStartIndexing}
+                leftSection={<IconPlayerPlay size={14} />}
+                loading={indexingLoading}
+              >
+                Start
+              </Button>
+            )}
+          </Group>
+        </Group>
+        <Text size="xs" c="dimmed">
+          Start/pause indexing for all tables. Stopped indexing will resume from where it left off when started again.
+        </Text>
+      </Stack>
 
       <Divider />
 

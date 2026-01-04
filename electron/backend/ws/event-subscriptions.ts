@@ -21,6 +21,7 @@ import {
   getExplorerService,
   getLanguageServerService,
   getGitStatusService,
+  getIndexOrchestratorService,
 } from '../../services/index.js'
 import type { ExplorerFsEvent } from '../../store/types.js'
 import type { LspDiagnosticsEvent, LspLanguageStatusPayload } from '../../../shared/lsp.js'
@@ -110,6 +111,20 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
     saving: !!data.saving,
     error: data.error || null,
     lastLoadedAt: data.lastLoadedAt || null,
+  }))
+
+  // Indexing orchestrator status
+  const indexingOrchestratorService = getIndexOrchestratorService()
+  addWorkspaceSubscription(indexingOrchestratorService, 'index-orchestrator-status', 'indexing.status.changed', (data) => ({
+    isProcessing: !!data.isProcessing,
+    currentTask: data.currentTask || null,
+    queueLength: typeof data.queueLength === 'number' ? data.queueLength : 0,
+    indexedCount: typeof data.indexedCount === 'number' ? data.indexedCount : 0,
+    // Detailed counts
+    code: data.code || { total: 0, indexed: 0, missing: 0 },
+    kb: data.kb || { total: 0, indexed: 0, missing: 0 },
+    memories: data.memories || { total: 0, indexed: 0, missing: 0 },
+    indexingEnabled: typeof data.indexingEnabled === 'boolean' ? data.indexingEnabled : true,
   }))
 
   // Knowledge Base items

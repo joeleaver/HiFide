@@ -25,6 +25,8 @@ export default defineConfig({
               entry: {
                 main: 'electron/main.ts',
                 'embedding-worker': 'electron/services/vector/workers/embedding-worker.js',
+                'workers/indexing/v2-watcher-worker': 'electron/workers/indexing/v2-watcher-worker.ts',
+                'workers/indexing/v2-parser-worker': 'electron/workers/indexing/v2-parser-worker.ts',
               },
               formats: ['es'],
               fileName: (format, entryName) => `${entryName}.mjs`,

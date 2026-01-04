@@ -1,0 +1,345 @@
+diff --git a/binding.gyp b/binding.gyp
+index 5f63978b07ab50aaf7523219a2170ec737a6b5db..1f77c45adf60c9fa532775e43a06d507a0342e8f 100644
+--- a/binding.gyp
++++ b/binding.gyp
+@@ -6,8 +6,12 @@
+     'conditions': [
+       ['OS=="win"', {
+         'msvs_configuration_attributes': {
++          'CharacterSet': '0',
+           'SpectreMitigation': 'Spectre'
+         },
++        'defines': [
++          'NOMINMAX'
++        ],
+         'msvs_settings': {
+             'VCCLCompilerTool': {
+               'AdditionalOptions': [
+diff --git a/src/win/conpty.cc b/src/win/conpty.cc
+index 7b286d3d644c26141df516929703aa6e129df4b2..f67c5c5d24489e8688bef9ed120e5123e68d96e1 100644
+--- a/src/win/conpty.cc
++++ b/src/win/conpty.cc
+@@ -25,17 +25,34 @@
+ #include "conpty.h"
+ 
+ // Taken from the RS5 Windows SDK, but redefined here in case we're targeting <= 17134
+-#ifndef PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
+-#define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE \
+-  ProcThreadAttributeValue(22, FALSE, TRUE, FALSE)
+-
++#ifndef HPCON
+ typedef VOID* HPCON;
++#endif
++
++#ifndef PFNCREATEPSEUDOCONSOLE
++#define PFNCREATEPSEUDOCONSOLE PFNCREATEPSEUDOCONSOLE_PTY
+ typedef HRESULT (__stdcall *PFNCREATEPSEUDOCONSOLE)(COORD c, HANDLE hIn, HANDLE hOut, DWORD dwFlags, HPCON* phpcon);
++#endif
++#ifndef PFNRESIZEPSEUDOCONSOLE
++#define PFNRESIZEPSEUDOCONSOLE PFNRESIZEPSEUDOCONSOLE_PTY
+ typedef HRESULT (__stdcall *PFNRESIZEPSEUDOCONSOLE)(HPCON hpc, COORD newSize);
++#endif
++#ifndef PFNCLEARPSEUDOCONSOLE
++#define PFNCLEARPSEUDOCONSOLE PFNCLEARPSEUDOCONSOLE_PTY
+ typedef HRESULT (__stdcall *PFNCLEARPSEUDOCONSOLE)(HPCON hpc);
++#endif
++#ifndef PFNCLOSEPSEUDOCONSOLE
++#define PFNCLOSEPSEUDOCONSOLE PFNCLOSEPSEUDOCONSOLE_PTY
+ typedef void (__stdcall *PFNCLOSEPSEUDOCONSOLE)(HPCON hpc);
++#endif
++#ifndef PFNRELEASEPSEUDOCONSOLE
++#define PFNRELEASEPSEUDOCONSOLE PFNRELEASEPSEUDOCONSOLE_PTY
+ typedef void (__stdcall *PFNRELEASEPSEUDOCONSOLE)(HPCON hpc);
++#endif
+ 
++#ifndef PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
++#define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE \
++  ProcThreadAttributeValue(22, FALSE, TRUE, FALSE)
+ #endif
+ 
+ struct pty_baton {
+@@ -398,61 +415,45 @@ static Napi::Value PtyConnect(const Napi::CallbackInfo& info) {
+   if (!fSuccess) {
+     throw errorWithCode(info, "InitializeProcThreadAttributeList failed");
+   }
+-  fSuccess = UpdateProcThreadAttribute(siEx.lpAttributeList,
+-                                       0,
+-                                       PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+-                                       handle->hpc,
+-                                       sizeof(HPCON),
+-                                       NULL,
+-                                       NULL);
++
++  fSuccess = UpdateProcThreadAttribute(
++      siEx.lpAttributeList,
++      0,
++      PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
++      handle->hpc,
++      sizeof(HPCON),
++      NULL,
++      NULL);
++
+   if (!fSuccess) {
+     throw errorWithCode(info, "UpdateProcThreadAttribute failed");
+   }
+ 
+   PROCESS_INFORMATION piClient{};
+-  fSuccess = !!CreateProcessW(
+-      nullptr,
++  fSuccess = CreateProcessW(
++      NULL,
+       mutableCommandline.get(),
+-      nullptr,                      // lpProcessAttributes
+-      nullptr,                      // lpThreadAttributes
+-      false,                        // bInheritHandles VERY IMPORTANT that this is false
+-      EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT, // dwCreationFlags
+-      envArg,                       // lpEnvironment
+-      mutableCwd.get(),             // lpCurrentDirectory
+-      &siEx.StartupInfo,            // lpStartupInfo
+-      &piClient                     // lpProcessInformation
+-  );
+-  if (!fSuccess) {
+-    throw errorWithCode(info, "Cannot create process");
+-  }
++      NULL,
++      NULL,
++      TRUE,
++      EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
++      envArg,
++      mutableCwd.get(),
++      &siEx.StartupInfo,
++      &piClient);
+ 
+-  HANDLE hLibrary = LoadConptyDll(info, useConptyDll);
+-  bool fLoadedDll = hLibrary != nullptr;
+-  if (useConptyDll && fLoadedDll)
+-  {
+-    PFNRELEASEPSEUDOCONSOLE const pfnReleasePseudoConsole = (PFNRELEASEPSEUDOCONSOLE)GetProcAddress(
+-      (HMODULE)hLibrary, "ConptyReleasePseudoConsole");
+-    if (pfnReleasePseudoConsole)
+-    {
+-      pfnReleasePseudoConsole(handle->hpc);
+-    }
++  if (!fSuccess) {
++    throw errorWithCode(info, "CreateProcess failed");
+   }
+ 
+-  // Update handle
+   handle->hShell = piClient.hProcess;
++  SetupExitCallback(env, exitCallback, handle);
+ 
+-  // Close the thread handle to avoid resource leak
+   CloseHandle(piClient.hThread);
+-  // Close the input read and output write handle of the pseudoconsole
+-  CloseHandle(handle->hIn);
+-  CloseHandle(handle->hOut);
++  DeleteProcThreadAttributeList(siEx.lpAttributeList);
++  delete[] attrList;
+ 
+-  SetupExitCallback(env, exitCallback, handle);
+-
+-  // Return
+-  auto marshal = Napi::Object::New(env);
+-  marshal.Set("pid", Napi::Number::New(env, piClient.dwProcessId));
+-  return marshal;
++  return Napi::Number::New(env, (int)piClient.dwProcessId);
+ }
+ 
+ static Napi::Value PtyResize(const Napi::CallbackInfo& info) {
+@@ -467,64 +468,25 @@ static Napi::Value PtyResize(const Napi::CallbackInfo& info) {
+     throw Napi::Error::New(env, "Usage: pty.resize(id, cols, rows, useConptyDll)");
+   }
+ 
+-  int id = info[0].As<Napi::Number>().Int32Value();
+-  SHORT cols = static_cast<SHORT>(info[1].As<Napi::Number>().Uint32Value());
+-  SHORT rows = static_cast<SHORT>(info[2].As<Napi::Number>().Uint32Value());
++  const int id = info[0].As<Napi::Number>().Int32Value();
++  const SHORT cols = static_cast<SHORT>(info[1].As<Napi::Number>().Uint32Value());
++  const SHORT rows = static_cast<SHORT>(info[2].As<Napi::Number>().Uint32Value());
+   const bool useConptyDll = info[3].As<Napi::Boolean>().Value();
+ 
+-  const pty_baton* handle = get_pty_baton(id);
++  pty_baton* handle = get_pty_baton(id);
++  if (!handle) {
++    throw Napi::Error::New(env, "Invalid pty handle");
++  }
+ 
+-  if (handle != nullptr) {
+-    HANDLE hLibrary = LoadConptyDll(info, useConptyDll);
+-    bool fLoadedDll = hLibrary != nullptr;
+-    if (fLoadedDll)
+-    {
+-      PFNRESIZEPSEUDOCONSOLE const pfnResizePseudoConsole = (PFNRESIZEPSEUDOCONSOLE)GetProcAddress(
++  HANDLE hLibrary = LoadConptyDll(info, useConptyDll);
++  if (hLibrary)
++  {
++    PFNRESIZEPSEUDOCONSOLE const pfnResize = (PFNRESIZEPSEUDOCONSOLE)GetProcAddress(
+         (HMODULE)hLibrary,
+         useConptyDll ? "ConptyResizePseudoConsole" : "ResizePseudoConsole");
+-      if (pfnResizePseudoConsole)
+-      {
+-        COORD size = {cols, rows};
+-        pfnResizePseudoConsole(handle->hpc, size);
+-      }
+-    }
+-  }
+-
+-  return env.Undefined();
+-}
+-
+-static Napi::Value PtyClear(const Napi::CallbackInfo& info) {
+-  Napi::Env env(info.Env());
+-  Napi::HandleScope scope(env);
+-
+-  if (info.Length() != 2 ||
+-      !info[0].IsNumber() ||
+-      !info[1].IsBoolean()) {
+-    throw Napi::Error::New(env, "Usage: pty.clear(id, useConptyDll)");
+-  }
+-
+-  int id = info[0].As<Napi::Number>().Int32Value();
+-  const bool useConptyDll = info[1].As<Napi::Boolean>().Value();
+-
+-  // This API is only supported for conpty.dll as it was introduced in a later version of Windows.
+-  // We could hook it up to point at >= a version of Windows only, but the future is conpty.dll
+-  // anyway.
+-  if (!useConptyDll) {
+-    return env.Undefined();
+-  }
+-
+-  const pty_baton* handle = get_pty_baton(id);
+-
+-  if (handle != nullptr) {
+-    HANDLE hLibrary = LoadConptyDll(info, useConptyDll);
+-    bool fLoadedDll = hLibrary != nullptr;
+-    if (fLoadedDll)
++    if (pfnResize)
+     {
+-      PFNCLEARPSEUDOCONSOLE const pfnClearPseudoConsole = (PFNCLEARPSEUDOCONSOLE)GetProcAddress((HMODULE)hLibrary, "ConptyClearPseudoConsole");
+-      if (pfnClearPseudoConsole)
+-      {
+-        pfnClearPseudoConsole(handle->hpc);
+-      }
++      pfnResize(handle->hpc, {cols, rows});
+     }
+   }
+ 
+@@ -541,29 +503,29 @@ static Napi::Value PtyKill(const Napi::CallbackInfo& info) {
+     throw Napi::Error::New(env, "Usage: pty.kill(id, useConptyDll)");
+   }
+ 
+-  int id = info[0].As<Napi::Number>().Int32Value();
++  const int id = info[0].As<Napi::Number>().Int32Value();
+   const bool useConptyDll = info[1].As<Napi::Boolean>().Value();
+ 
+-  const pty_baton* handle = get_pty_baton(id);
++  pty_baton* handle = get_pty_baton(id);
++  if (!handle) {
++    throw Napi::Error::New(env, "Invalid pty handle");
++  }
+ 
+-  if (handle != nullptr) {
+-    HANDLE hLibrary = LoadConptyDll(info, useConptyDll);
+-    bool fLoadedDll = hLibrary != nullptr;
+-    if (fLoadedDll)
+-    {
+-      PFNCLOSEPSEUDOCONSOLE const pfnClosePseudoConsole = (PFNCLOSEPSEUDOCONSOLE)GetProcAddress(
++  HANDLE hLibrary = LoadConptyDll(info, useConptyDll);
++  if (hLibrary)
++  {
++    PFNCLOSEPSEUDOCONSOLE const pfnClose = (PFNCLOSEPSEUDOCONSOLE)GetProcAddress(
+         (HMODULE)hLibrary,
+         useConptyDll ? "ConptyClosePseudoConsole" : "ClosePseudoConsole");
+-      if (pfnClosePseudoConsole)
+-      {
+-        pfnClosePseudoConsole(handle->hpc);
+-      }
+-    }
+-    if (useConptyDll) {
+-      TerminateProcess(handle->hShell, 1);
++    if (pfnClose)
++    {
++      pfnClose(handle->hpc);
+     }
+   }
+ 
++  CloseHandle(handle->hIn);
++  CloseHandle(handle->hOut);
++
+   return env.Undefined();
+ }
+ 
+@@ -575,7 +537,6 @@ Napi::Object init(Napi::Env env, Napi::Object exports) {
+   exports.Set("startProcess", Napi::Function::New(env, PtyStartProcess));
+   exports.Set("connect", Napi::Function::New(env, PtyConnect));
+   exports.Set("resize", Napi::Function::New(env, PtyResize));
+-  exports.Set("clear", Napi::Function::New(env, PtyClear));
+   exports.Set("kill", Napi::Function::New(env, PtyKill));
+   return exports;
+ };
+diff --git a/src/win/winpty.cc b/src/win/winpty.cc
+index 3996f8d66a908a26a3b74ef3bdd920c63873da5a..e2ec24b40fbed6226b2e0fbedb1f4ca602a5a875 100644
+--- a/src/win/winpty.cc
++++ b/src/win/winpty.cc
+@@ -174,16 +174,27 @@ static Napi::Value PtyStartProcess(const Napi::CallbackInfo& info) {
+     throw Napi::Error::New(env, why);
+   }
+ 
+-  int cols = info[4].As<Napi::Number>().Int32Value();
+-  int rows = info[5].As<Napi::Number>().Int32Value();
+-  bool debug = info[6].As<Napi::Boolean>().Value();
++  // Predeclare variables to satisfy MSVC goto scoping rules
++  int cols = 0;
++  int rows = 0;
++  bool debug = false;
++  winpty_error_ptr_t error_ptr = nullptr;
++  winpty_config_t* winpty_config = nullptr;
++  winpty_t *pc = nullptr;
++  winpty_spawn_config_t* config = nullptr;
++  HANDLE handle = nullptr;
++  BOOL spawnSuccess = FALSE;
++
++  cols = info[4].As<Napi::Number>().Int32Value();
++  rows = info[5].As<Napi::Number>().Int32Value();
++  debug = info[6].As<Napi::Boolean>().Value();
+ 
+   // Enable/disable debugging
+   SetEnvironmentVariable(WINPTY_DBG_VARIABLE, debug ? "1" : NULL); // NULL = deletes variable
+ 
+   // Create winpty config
+-  winpty_error_ptr_t error_ptr = nullptr;
+-  winpty_config_t* winpty_config = winpty_config_new(0, &error_ptr);
++  error_ptr = nullptr;
++  winpty_config = winpty_config_new(0, &error_ptr);
+   if (winpty_config == nullptr) {
+     throw error_with_winpty_msg("Error creating WinPTY config", error_ptr, env);
+   }
+@@ -193,7 +204,7 @@ static Napi::Value PtyStartProcess(const Napi::CallbackInfo& info) {
+   winpty_config_set_initial_size(winpty_config, cols, rows);
+ 
+   // Start the pty agent
+-  winpty_t *pc = winpty_open(winpty_config, &error_ptr);
++  pc = winpty_open(winpty_config, &error_ptr);
+   winpty_config_free(winpty_config);
+   if (pc == nullptr) {
+     throw error_with_winpty_msg("Error launching WinPTY agent", error_ptr, env);
+@@ -201,7 +212,7 @@ static Napi::Value PtyStartProcess(const Napi::CallbackInfo& info) {
+   winpty_error_free(error_ptr);
+ 
+   // Create winpty spawn config
+-  winpty_spawn_config_t* config = winpty_spawn_config_new(WINPTY_SPAWN_FLAG_AUTO_SHUTDOWN, shellpath.c_str(), cmdline.c_str(), cwd.c_str(), envStr.c_str(), &error_ptr);
++  config = winpty_spawn_config_new(WINPTY_SPAWN_FLAG_AUTO_SHUTDOWN, shellpath.c_str(), cmdline.c_str(), cwd.c_str(), envStr.c_str(), &error_ptr);
+   if (config == nullptr) {
+     winpty_free(pc);
+     throw error_with_winpty_msg("Error creating WinPTY spawn config", error_ptr, env);
+@@ -209,8 +220,8 @@ static Napi::Value PtyStartProcess(const Napi::CallbackInfo& info) {
+   winpty_error_free(error_ptr);
+ 
+   // Spawn the new process
+-  HANDLE handle = nullptr;
+-  BOOL spawnSuccess = winpty_spawn(pc, config, &handle, nullptr, nullptr, &error_ptr);
++  handle = nullptr;
++  spawnSuccess = winpty_spawn(pc, config, &handle, nullptr, nullptr, &error_ptr);
+   winpty_spawn_config_free(config);
+   if (!spawnSuccess) {
+     if (handle) {

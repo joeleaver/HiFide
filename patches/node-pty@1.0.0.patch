@@ -1,42 +1,59 @@
+diff --git a/binding.gyp b/binding.gyp
+index d0e0388..654c86e 100644
+--- a/binding.gyp
++++ b/binding.gyp
+@@ -4,6 +4,11 @@
+     'conditions': [
+       ['OS=="win"', {
+         'msvs_configuration_attributes': {
+-          'CharacterSet': '1',
++          'CharacterSet': '0',
+           'SpectreMitigation': 'Spectre'
+         },
++        'defines': [
++          'NOMINMAX'
++        ],
+         'msvs_settings': {
 diff --git a/src/win/conpty.cc b/src/win/conpty.cc
-index 47af75c2d6dd7687ec1fe55a502f11347c52738a..463a85b7d63fc475b06d905e53f8838254c551bf 100644
+index 47af75c..41743e4 100644
 --- a/src/win/conpty.cc
 +++ b/src/win/conpty.cc
-@@ -26,17 +26,28 @@
+@@ -26,17 +32,32 @@
  
  extern "C" void init(v8::Local<v8::Object>);
  
--// Taken from the RS5 Windows SDK, but redefined here in case we're targeting <= 17134
-+// Ensure required ConPTY typedefs exist across all Windows SDK versions.
-+// Newer SDKs (e.g., 26100) define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE and HPCON
-+// but not the PFN* typedefs. Define missing pieces conditionally.
- #ifndef PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
--#define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE \
--  ProcThreadAttributeValue(22, FALSE, TRUE, FALSE)
-+#define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE ProcThreadAttributeValue(22, FALSE, TRUE, FALSE)
-+#endif
- 
+-// Ensure required ConPTY typedefs exist across all Windows SDK versions.
+-
 +#ifndef HPCON
- typedef VOID* HPCON;
++typedef VOID* HPCON;
 +#endif
 +
 +#ifndef PFNCREATEPSEUDOCONSOLE
- typedef HRESULT (__stdcall *PFNCREATEPSEUDOCONSOLE)(COORD c, HANDLE hIn, HANDLE hOut, DWORD dwFlags, HPCON* phpcon);
++#define PFNCREATEPSEUDOCONSOLE PFNCREATEPSEUDOCONSOLE_PTY
++typedef HRESULT (__stdcall *PFNCREATEPSEUDOCONSOLE)(COORD c, HANDLE hIn, HANDLE hOut, DWORD dwFlags, HPCON* phpcon);
 +#endif
 +#ifndef PFNRESIZEPSEUDOCONSOLE
- typedef HRESULT (__stdcall *PFNRESIZEPSEUDOCONSOLE)(HPCON hpc, COORD newSize);
++#define PFNRESIZEPSEUDOCONSOLE PFNRESIZEPSEUDOCONSOLE_PTY
++typedef HRESULT (__stdcall *PFNRESIZEPSEUDOCONSOLE)(HPCON hpc, COORD newSize);
 +#endif
 +#ifndef PFNCLEARPSEUDOCONSOLE
- typedef HRESULT (__stdcall *PFNCLEARPSEUDOCONSOLE)(HPCON hpc);
++#define PFNCLEARPSEUDOCONSOLE PFNCLEARPSEUDOCONSOLE_PTY
++typedef HRESULT (__stdcall *PFNCLEARPSEUDOCONSOLE)(HPCON hpc);
 +#endif
 +#ifndef PFNCLOSEPSEUDOCONSOLE
- typedef void (__stdcall *PFNCLOSEPSEUDOCONSOLE)(HPCON hpc);
--
- #endif
++#define PFNCLOSEPSEUDOCONSOLE PFNCLOSEPSEUDOCONSOLE_PTY
++typedef void (__stdcall *PFNCLOSEPSEUDOCONSOLE)(HPCON hpc);
++#endif
++
++#ifndef PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
++#define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE ProcThreadAttributeValue(22, FALSE, TRUE, FALSE)
++#endif
++
+
  
  struct pty_baton {
 diff --git a/src/win/winpty.cc b/src/win/winpty.cc
-index b054dee2194226a823f5c98befdecf06cda2e5dd..9841c504bd9e6ffa676aa7b51ed5f66b246caf59 100644
+index b054dee..f753c16 100644
 --- a/src/win/winpty.cc
 +++ b/src/win/winpty.cc
 @@ -159,22 +159,34 @@ static NAN_METHOD(PtyStartProcess) {

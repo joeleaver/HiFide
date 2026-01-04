@@ -35,7 +35,7 @@ async function runExplorerHydration(force: boolean): Promise<void> {
         } catch {}
       }
 
-      await Promise.all([
+      await Promise.allSettled([
         useTerminalTabs.getState().hydrateTabs(),
         useExplorerStore.getState().hydrate(),
         useEditorStore.getState().hydrateFromPersistence(),

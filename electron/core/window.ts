@@ -14,7 +14,7 @@ import { startWsBackend } from '../backend/ws/server'
 
 // Environment variables from Vite
 const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
-const VITE_PUBLIC = process.env['VITE_PUBLIC']
+// const VITE_PUBLIC = process.env['VITE_PUBLIC']
 // Works in both CJS and ESM builds
 const DIRNAME = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url))
 
@@ -204,7 +204,7 @@ export function createWindow(opts?: { offsetFromCurrent?: boolean; workspaceId?:
   }
 
   const win = new BrowserWindow({
-    icon: path.join(VITE_PUBLIC || '', 'hifide-logo.png'),
+    icon: path.join(process.cwd(), 'public', 'hifide-logo.png'),
     frame: false,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     backgroundColor: '#1e1e1e',

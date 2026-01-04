@@ -136,10 +136,16 @@ export function formatMessagesForOpenAI(
     }
 
     const out: any = { role: msg.role, content }
-    // NOTE: tool_calls and tool roles are deliberately ignored here.
-    // The scheduler and llm-service now feed tool results back as user messages
-    // to maintain context without persisting tool-specific protocol fields.
-    if (msg.role !== 'tool') {
+
+    // Handle tool messages (standard OpenAI format)
+    if (msg.role === 'tool') {
+      out.tool_call_id = msg.tool_call_id
+      messages.push(out)
+    } else {
+      // Include tool_calls in assistant messages for context
+      if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+        out.tool_calls = msg.tool_calls
+      }
       messages.push(out)
     }
   }

@@ -218,11 +218,9 @@ export function initFlowEditorEvents(): void {
   }
 
   // Initial hydration - fetch templates on startup
-  // Use multiple attempts with increasing delays to handle timing issues
-  // where the main process may still be loading templates
-  setTimeout(() => hydrateFromBackend('initial-100ms'), 100)
-  setTimeout(() => hydrateFromBackend('initial-500ms'), 500)
-  setTimeout(() => hydrateFromBackend('initial-1500ms'), 1500)
+  // We use a single delayed call to ensure the backend services are initialized
+  // and to avoid a "hydration storm" during the critical boot window.
+  setTimeout(() => hydrateFromBackend('initial-startup'), 1000)
 
   // Graph changed - templates may also change (e.g., template load/save/delete)
   client.subscribe('flowEditor.graph.changed', async (payload: FlowGraphChangedEventPayload) => {

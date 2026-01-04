@@ -1,0 +1,30 @@
+diff --git a/binding.gyp b/binding.gyp
+index bb40aa7e8d41644ba690761e9064fc1d0f2dcd6b..fc0add84852e603124cc033e0df930db56278107 100644
+--- a/binding.gyp
++++ b/binding.gyp
+@@ -25,22 +25,19 @@
+         "NAPI_VERSION=<(napi_build_version)",
+       ],
+       "cflags_cc": [
+-        "-std=c++17"
++        "-std=c++20"
+       ],
+       "conditions": [
+         ["OS=='mac'", {
+           "xcode_settings": {
+             "GCC_SYMBOLS_PRIVATE_EXTERN": "YES", # -fvisibility=hidden
+-            "CLANG_CXX_LANGUAGE_STANDARD": "c++17",
+-            "MACOSX_DEPLOYMENT_TARGET": "10.9",
++            "CLANG_CXX_LANGUAGE_STANDARD": "c++20",
++            "MACOSX_DEPLOYMENT_TARGET": "10.15",
+           },
+         }],
+         ["OS=='win'", {
+           "msvs_settings": {
+             "VCCLCompilerTool": {
+-              "AdditionalOptions": [
+-                "/std:c++17",
+-              ],
+               "RuntimeLibrary": 0,
+             },
+           },

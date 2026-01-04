@@ -17,4 +17,5 @@ export { createKanbanHandlers } from './kanban-handlers.js'
 export { createVectorHandlers } from './vector-handlers.js'
 export { createMcpHandlers } from './mcp-handlers.js'
 export { createLanguageHandlers } from './language-handlers.js'
+export { createIndexingHandlers } from './indexing-handlers.js'
 

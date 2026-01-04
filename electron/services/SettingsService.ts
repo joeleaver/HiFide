@@ -29,6 +29,8 @@ interface SettingsState {
     kbLocalModel?: string
     memoriesModel?: string
     memoriesLocalModel?: string
+    indexingWorkers?: number
+    indexingEnabled?: boolean
   }
 }
 
@@ -62,6 +64,8 @@ export class SettingsService extends Service<SettingsState> {
           kbLocalModel: 'Xenova/all-MiniLM-L6-v2',
           memoriesModel: 'all-MiniLM-L6-v2 (Local)',
           memoriesLocalModel: 'Xenova/all-MiniLM-L6-v2',
+          indexingWorkers: 4,
+          indexingEnabled: true,
         },
       },
       'settings'
@@ -569,6 +573,10 @@ export class SettingsService extends Service<SettingsState> {
     const mapModel = (uiModel: string) => {
       if (uiModel.includes('all-MiniLM-L6-v2')) {
         return { provider: 'local', localModel: 'Xenova/all-MiniLM-L6-v2' };
+      } else if (uiModel.includes('nomic-embed-text')) {
+        return { provider: 'local', localModel: 'nomic-ai/nomic-embed-text-v1.5' };
+      } else if (uiModel.includes('nomic-embed-code')) {
+        return { provider: 'local', localModel: 'nomic-ai/nomic-embed-code-v1.5' };
       } else if (uiModel.includes('nomic')) {
         return { provider: 'local', localModel: 'nomic-ai/nomic-embed-text-v1.5' };
       } else if (uiModel.startsWith('text-embedding-3')) {

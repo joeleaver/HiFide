@@ -19,6 +19,8 @@ export interface SettingsSnapshot {
     provider: 'local' | 'openai'
     model: string
     localModel: string
+    indexingWorkers?: number
+    indexingEnabled?: boolean
   }
 }
 

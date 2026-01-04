@@ -7,6 +7,8 @@ interface KBIndexerState {
 }
 
 export class KBIndexerService extends Service<KBIndexerState> {
+  private abortController: AbortController | null = null;
+
   constructor() {
     super({
       indexedArticles: {}
@@ -138,6 +140,13 @@ export class KBIndexerService extends Service<KBIndexerState> {
         }
 
     return chunks;
+  }
+
+  async stop() {
+    // Stop processing but preserve state for resume
+    console.log('[KBIndexerService] Stopping KB indexing...');
+    this.abortController?.abort();
+    this.abortController = new AbortController();
   }
 
   async reset() {

@@ -133,6 +133,8 @@ let systemTemplatesLoading: Promise<Record<string, FlowProfile>> | null = null
 
 // Cache for workspace templates (keyed by absolute workspace root path)
 const workspaceTemplatesCache = new Map<string, Record<string, FlowProfile>>()
+// Cache for raw workspace file content to avoid re-parsing if mtime hasn't changed
+const workspaceFileCache = new Map<string, { mtime: number; profile: FlowProfile }>()
 
 const DEFAULT_PROFILE_NAME = 'default'
 
@@ -144,20 +146,24 @@ async function loadWorkspaceTemplates(workspaceId?: string): Promise<Record<stri
   const root = await getWorkspaceRoot(workspaceId)
   const absRoot = path.resolve(root)
 
-  console.log('[loadWorkspaceTemplates] workspaceId:', workspaceId, 'resolved root:', absRoot)
-
   const templates: Record<string, FlowProfile> = {}
   const flowsDir = path.join(absRoot, '.hifide-public', 'flows')
 
   try {
     const files = await fs.readdir(flowsDir)
-    console.log('[loadWorkspaceTemplates] Found files in', flowsDir, ':', files)
     for (const file of files) {
       if (!file.endsWith('.json')) continue
       try {
         const filePath = path.join(flowsDir, file)
-        // Just read enough to get metadata if possible, but for now we'll just read the file
-        // and avoid the expensive deserialization/node mapping until requested.
+        const stats = await fs.stat(filePath)
+        const mtime = stats.mtimeMs
+
+        const cached = workspaceFileCache.get(filePath)
+        if (cached && cached.mtime === mtime) {
+          templates[cached.profile.name] = cached.profile
+          continue
+        }
+
         const content = await fs.readFile(filePath, 'utf-8')
         const raw = JSON.parse(content) as any
         
@@ -166,14 +172,12 @@ async function loadWorkspaceTemplates(workspaceId?: string): Promise<Record<stri
           name: raw.name || path.basename(file, '.json'),
           description: raw.description || '',
           version: raw.version || '1.0.0',
-          // We keep the raw nodes/edges but don't process them yet
           nodes: raw.nodes || [],
           edges: raw.edges || []
         }
         
-        const id = profile.name
-        console.log('[loadWorkspaceTemplates] Loaded template metadata for:', id)
-        templates[id] = profile
+        workspaceFileCache.set(filePath, { mtime, profile })
+        templates[profile.name] = profile
         
         // Yield to event loop every few files
         if (files.indexOf(file) % 5 === 0) {

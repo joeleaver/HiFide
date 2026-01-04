@@ -1,29 +1,24 @@
 {
   "name": "hifide",
   "version": "0.0.0",
-  "type": "module",
-  "author": "Joe Leaver",
-  "homepage": "https://github.com/joeleaver/hifide",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/joeleaver/hifide"
-  },
   "description": "Agentic-first IDE",
+  "main": "dist-electron/main.mjs",
+  "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/clean-dist-electron.cjs && vite",
     "build": "tsc && vite build && pnpm -s rebuild:native && pnpm -s package:electron",
+    "preview": "vite preview",
+    "package:electron": "node scripts/package-electron.cjs",
     "prepackage:kill": "node scripts/prepackage-kill.cjs",
     "rebuild:native": "cross-env CL=\"/std:c++20\" npm_config_msvs_version=2022 npx electron-rebuild -f -w node-pty,sharp,tree-sitter",
-    "clean:release": "node --input-type=module -e \"import fs from 'fs'; try{fs.rmSync('release',{recursive:true,force:true})}catch(e){}\"",
-    "package:electron": "node scripts/package-electron.cjs",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:record": "cross-env TEST_MODE=record jest",
     "test:live": "cross-env TEST_MODE=live jest",
-    "postinstall": "node scripts/postinstall.cjs"
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "postinstall": "node scripts/postinstall.cjs",
+    "clean:release": "node --input-type=module -e \"import fs from 'fs'; try{fs.rmSync('release',{recursive:true,force:true})}catch(e){}\""
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.39",
@@ -67,7 +62,7 @@
     "lancedb": "^0.0.1",
     "markdown-it": "^14.1.0",
     "monaco-editor": "^0.54.0",
-    "node-pty": "1.0.0",
+    "node-pty": "1.1.0",
     "openai": "^6.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -104,7 +99,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "cross-env": "^10.1.0",
     "dotenv-cli": "^10.0.0",
-    "electron": "33.2.1",
+    "electron": "34.0.0",
     "electron-builder": "^24.13.3",
     "eslint": "^8.57.0",
     "eslint-plugin-react-hooks": "^4.6.0",
@@ -118,14 +113,14 @@
     "vite-plugin-electron": "^0.28.6",
     "vite-plugin-electron-renderer": "^0.14.5"
   },
-  "main": "dist-electron/main.mjs",
+  "author": "Joe Leaver",
+  "homepage": "https://github.com/joeleaver/hifide",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/joeleaver/hifide"
+  },
   "build": {
-    "asar": true,
-    "asarUnpack": [
-      "**/node-pty/**/*.{node,dll,exe}",
-      "node_modules/node-pty/build/Release/*.{node,dll,exe}",
-      "**/vscode-ripgrep/**"
-    ],
+    "icon": "public/hifide-logo.png",
     "files": [
       "dist/**",
       "dist-electron/**",
@@ -137,35 +132,40 @@
       "!**/*.map",
       "!src/**"
     ],
-    "afterPack": "scripts/afterPack-assert-pty.cjs",
+    "asar": true,
+    "asarUnpack": [
+      "**/node-pty/**/*.{node,dll,exe}",
+      "node-modules/node-pty/build/Release/*.{node,dll,exe}",
+      "**/vscode-ripgrep/**"
+    ],
     "npmRebuild": true,
-    "icon": "public/hifide-logo.png",
-    "mac": {
+    "win": {
       "icon": "public/hifide-logo.png"
     },
-    "win": {
+    "mac": {
       "icon": "public/hifide-logo.png"
     },
     "linux": {
       "icon": "public/hifide-logo.png"
-    }
+    },
+    "afterPack": "scripts/afterPack-assert-pty.cjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "@img/sharp-win32-x64",
       "electron",
       "keytar",
-      "node-pty",
-      "protobufjs",
-      "sharp",
-      "tree-sitter",
-      "vscode-ripgrep"
+      "tree-sitter-go",
+      "tree-sitter-javascript",
+      "tree-sitter-python",
+      "tree-sitter-rust",
+      "tree-sitter-typescript"
     ],
     "public-hoist-pattern": [
       "*"
     ],
     "patchedDependencies": {
-      "node-pty@1.0.0": "patches/node-pty@1.0.0.patch"
+      "node-pty@1.1.0": "patches/node-pty@1.1.0.patch",
+      "tree-sitter@0.25.0": "patches/tree-sitter@0.25.0.patch"
     }
   }
 }

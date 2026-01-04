@@ -14,6 +14,9 @@
 import './logger'
 import { app, ipcMain } from 'electron'
 import path from 'node:path'
+
+// Disable GPU acceleration to prevent SharedImageManager/Skia mailbox errors and hardware-related crashes
+app.disableHardwareAcceleration()
 import { fileURLToPath } from 'node:url'
 
 // Core modules
@@ -178,6 +181,28 @@ async function initialize(): Promise<void> {
 
 }
 
-// Start the application
-initialize()
+// ----------------------------------------------------------------------------
+// Single Instance Lock
+// Prevent multiple instances from running simultaneously, which can cause
+// database locks, IPC conflicts, and file system watcher collisions.
+// ----------------------------------------------------------------------------
+const gotTheLock = app.requestSingleInstanceLock()
+
+if (!gotTheLock) {
+  console.warn('[main] Another instance is already running. Quitting...')
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    // Someone tried to run a second instance, we should focus our window.
+    const appService = getAppService()
+    const mainWindow = appService.getMainWindow()
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
+    }
+  })
+
+  // Start the application
+  initialize()
+}
 

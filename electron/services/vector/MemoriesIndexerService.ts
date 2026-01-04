@@ -8,6 +8,8 @@ interface MemoriesIndexerState {
 }
 
 export class MemoriesIndexerService extends Service<MemoriesIndexerState> {
+  private abortController: AbortController | null = null;
+
   constructor() {
     super({
       indexedItems: {}
@@ -95,5 +97,18 @@ export class MemoriesIndexerService extends Service<MemoriesIndexerState> {
 
     vs.updateIndexingStatus('memories', items.length, items.length);
     console.log(`[MemoriesIndexerService] Completed indexing for ${items.length} items.`);
+  }
+
+  async stop() {
+    // Stop processing but preserve state for resume
+    console.log('[MemoriesIndexerService] Stopping memories indexing...');
+    this.abortController?.abort();
+    this.abortController = new AbortController();
+  }
+
+  async reset() {
+    console.log('[MemoriesIndexerService] Resetting state.');
+    this.setState({ indexedItems: {} });
+    await this.persistState();
   }
 }

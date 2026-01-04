@@ -449,21 +449,29 @@ export class McpService extends Service<McpServiceState> {
     const results: McpToolDefinition[] = []
     let cursor: string | undefined
 
-    do {
-      const response = await client.listTools(cursor ? { cursor } : undefined)
-      const list = Array.isArray(response.tools) ? response.tools : []
-      for (const tool of list) {
-        results.push({
-          name: String(tool.name),
-          description: tool.description,
-          inputSchema: cloneIfObject(tool.inputSchema),
-          outputSchema: cloneIfObject(tool.outputSchema),
-          annotations: cloneIfObject(tool.annotations),
-          execution: tool.execution ? { taskSupport: tool.execution.taskSupport } : null,
-        })
+    try {
+      do {
+        const response = await client.listTools(cursor ? { cursor } : undefined)
+        const list = Array.isArray(response.tools) ? response.tools : []
+        for (const tool of list) {
+          results.push({
+            name: String(tool.name),
+            description: tool.description,
+            inputSchema: cloneIfObject(tool.inputSchema),
+            outputSchema: cloneIfObject(tool.outputSchema),
+            annotations: cloneIfObject(tool.annotations),
+            execution: tool.execution ? { taskSupport: tool.execution.taskSupport } : null,
+          })
+        }
+        cursor = response.nextCursor || undefined
+      } while (cursor)
+    } catch (error) {
+      if (isMethodNotFoundError(error)) {
+        console.log('[mcp] Server does not support listing tools')
+      } else {
+        console.warn('[mcp] Failed to list tools', stringifyError(error))
       }
-      cursor = response.nextCursor || undefined
-    } while (cursor)
+    }
 
     return results
   }
@@ -472,8 +480,8 @@ export class McpService extends Service<McpServiceState> {
     const results: McpResourceSummary[] = []
     let cursor: string | undefined
 
-    do {
-      try {
+    try {
+      do {
         const response = await client.listResources(cursor ? { cursor } : undefined)
         const list = Array.isArray(response.resources) ? response.resources : []
         for (const resource of list) {
@@ -485,11 +493,14 @@ export class McpService extends Service<McpServiceState> {
           })
         }
         cursor = response.nextCursor || undefined
-      } catch (error) {
+      } while (cursor)
+    } catch (error) {
+      if (isMethodNotFoundError(error)) {
+        console.log('[mcp] Server does not support listing resources')
+      } else {
         console.warn('[mcp] Failed to list resources', stringifyError(error))
-        break
       }
-    } while (cursor)
+    }
 
     return results
   }
@@ -783,4 +794,12 @@ function extractPid(transport: Transport): number | null {
 
 function hasTransportChanged(a: McpTransportConfig, b: McpTransportConfig): boolean {
   return JSON.stringify(a) !== JSON.stringify(b)
+}
+
+function isMethodNotFoundError(error: unknown): boolean {
+  if (error && typeof error === 'object' && 'code' in (error as any)) {
+    return (error as any).code === -32601
+  }
+  const message = String(error).toLowerCase()
+  return message.includes('method not found') || message.includes('-32601')
 }

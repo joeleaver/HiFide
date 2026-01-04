@@ -396,52 +396,38 @@ export class ProviderService extends Service<ProviderState> {
   }
 
   async loadFireworksRecommendedDefaults(): Promise<void> {
-    const defaults = Object.keys(getDefaultPricingConfig().fireworks || {})
-    this.setState({ fireworksAllowedModels: defaults })
-    this.ensureModelsByProviderAllowlist()
-    await this.refreshFireworksModelsSafely()
-  }
-
-  private async refreshFireworksModelsSafely(): Promise<void> {
-    try {
-      await this.refreshModels('fireworks')
-    } catch (e) {
-      console.warn('[provider] refresh fireworks failed', e)
+    const fwDefaults = Object.keys(getDefaultPricingConfig().fireworks || {})
+    if (fwDefaults.length > 0) {
+      await this.setFireworksAllowedModels(fwDefaults)
     }
-    this.ensureProviderModelConsistency()
   }
 
   // OpenRouter allowlist
   async setOpenRouterAllowedModels(models: string[]): Promise<void> {
     this.setState({ openrouterAllowedModels: models })
-    this.ensureModelsByProviderAllowlist()
     await this.refreshOpenRouterModelsSafely()
   }
 
   async addOpenRouterModel(model: string): Promise<void> {
-    const trimmed = model.trim()
-    if (!trimmed) return
-    const current = this.state.openrouterAllowedModels
-    if (!current.includes(trimmed)) {
-      this.setState({ openrouterAllowedModels: [...current, trimmed] })
-      this.ensureModelsByProviderAllowlist()
+    const current = new Set(this.state.openrouterAllowedModels || [])
+    if (!current.has(model)) {
+      current.add(model)
+      this.setState({ openrouterAllowedModels: Array.from(current) })
       await this.refreshOpenRouterModelsSafely()
     }
   }
 
   async removeOpenRouterModel(model: string): Promise<void> {
-    this.setState({
-      openrouterAllowedModels: this.state.openrouterAllowedModels.filter((m) => m !== model),
-    })
-    this.ensureModelsByProviderAllowlist()
+    const current = (this.state.openrouterAllowedModels || []).filter((m) => m !== model)
+    this.setState({ openrouterAllowedModels: current })
     await this.refreshOpenRouterModelsSafely()
   }
 
   async loadOpenRouterRecommendedDefaults(): Promise<void> {
-    const defaults = Object.keys(getDefaultPricingConfig().openrouter || {})
-    this.setState({ openrouterAllowedModels: defaults })
-    this.ensureModelsByProviderAllowlist()
-    await this.refreshOpenRouterModelsSafely()
+    const orDefaults = Object.keys(getDefaultPricingConfig().openrouter || {})
+    if (orDefaults.length > 0) {
+      await this.setOpenRouterAllowedModels(orDefaults)
+    }
   }
 
   private async refreshOpenRouterModelsSafely(): Promise<void> {
@@ -449,6 +435,15 @@ export class ProviderService extends Service<ProviderState> {
       await this.refreshModels('openrouter')
     } catch (e) {
       console.warn('[provider] refresh openrouter failed', e)
+    }
+    this.ensureProviderModelConsistency()
+  }
+
+  private async refreshFireworksModelsSafely(): Promise<void> {
+    try {
+      await this.refreshModels('fireworks')
+    } catch (e) {
+      console.warn('[provider] refresh fireworks failed', e)
     }
     this.ensureProviderModelConsistency()
   }

@@ -1,9 +1,8 @@
 import { EmbeddingService } from './vector/EmbeddingService.js';
 import { VectorService } from './vector/VectorService.js';
 import { KBIndexerService } from './vector/KBIndexerService.js';
-import { CodeIndexerService } from './vector/CodeIndexerService.js';
 import { MemoriesIndexerService } from './vector/MemoriesIndexerService.js';
-import { IndexOrchestratorService } from './vector/IndexOrchestratorService.js';
+import { IndexOrchestrator } from './indexing/IndexOrchestrator.js';
 import { WorkspaceService } from './WorkspaceService.js';
 import { ToolsService } from './ToolsService.js';
 import { AppService } from './AppService.js';
@@ -28,9 +27,8 @@ import { WorkspaceSearchService } from './WorkspaceSearchService.js';
 let embeddingService: EmbeddingService;
 let vectorService: VectorService;
 let kbIndexerService: KBIndexerService;
-let codeIndexerService: CodeIndexerService;
 let memoriesIndexerService: MemoriesIndexerService;
-let indexOrchestratorService: IndexOrchestratorService;
+let indexOrchestratorService: IndexOrchestrator;
 let workspaceService: WorkspaceService;
 let toolsService: ToolsService;
 let appService: AppService;
@@ -78,13 +76,10 @@ export function initializeServices() {
   kbIndexerService = new KBIndexerService();
   registry.register('kbIndexer', kbIndexerService);
 
-  codeIndexerService = new CodeIndexerService();
-  registry.register('codeIndexer', codeIndexerService);
-
   memoriesIndexerService = new MemoriesIndexerService();
   registry.register('memoriesIndexer', memoriesIndexerService);
 
-  indexOrchestratorService = new IndexOrchestratorService();
+  indexOrchestratorService = new IndexOrchestrator();
   registry.register('indexOrchestrator', indexOrchestratorService);
 
   toolsService = new ToolsService();
@@ -139,7 +134,6 @@ export function initializeServices() {
 export const getEmbeddingService = () => embeddingService;
 export const getVectorService = () => vectorService;
 export const getKBIndexerService = () => kbIndexerService;
-export const getCodeIndexerService = () => codeIndexerService;
 export const getMemoriesIndexerService = () => memoriesIndexerService;
 export const getIndexOrchestratorService = () => indexOrchestratorService;
 export const getWorkspaceService = () => workspaceService;

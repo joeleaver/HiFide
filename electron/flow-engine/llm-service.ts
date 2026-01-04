@@ -333,39 +333,60 @@ class LLMService {
     const onStepWrapped = (step: { text: string; reasoning?: string; toolCalls?: any[]; toolResults?: any[] }) => {
       if (skipHistory) return
 
-      // 1. Add assistant message for this step (if it has text or reasoning)
-      // We explicitly exclude tool_calls from history to avoid sending them back as context.
-      if (step.text || step.reasoning) {
-        const assistantMessage: any = {
-          role: 'assistant',
-          content: step.text || '',
-        }
-        if (step.reasoning) {
-          if (typeof step.reasoning === 'string') {
-            assistantMessage.reasoning = step.reasoning
-          } else {
-            try {
-              assistantMessage.reasoning = (step.reasoning as any).text || (step.reasoning as any).content || JSON.stringify(step.reasoning)
-            } catch {
-              assistantMessage.reasoning = String(step.reasoning)
-            }
+      //1. Add assistant message for this step (if it has text, reasoning, or tool_calls)
+      // Use standard OpenAI format: assistant message includes content + optional tool_calls
+      const assistantMessage: any = {
+        role: 'assistant',
+        content: step.text || '',
+      }
+
+      // Add reasoning if present
+      if (step.reasoning) {
+        if (typeof step.reasoning === 'string') {
+          assistantMessage.reasoning = step.reasoning
+        } else {
+          try {
+            assistantMessage.reasoning = (step.reasoning as any).text || (step.reasoning as any).content || JSON.stringify(step.reasoning)
+          } catch {
+            assistantMessage.reasoning = String(step.reasoning)
           }
         }
-        // DO NOT add tool_calls here. History should only contain human-visible content.
+      }
+
+      // Add tool_calls if present (standard OpenAI format)
+      if (step.toolCalls && step.toolCalls.length > 0) {
+        assistantMessage.tool_calls = step.toolCalls.map((tc: any) => ({
+          id: tc.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          type: 'function',
+          function: {
+            name: tc.name,
+            arguments: typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments)
+          }
+        }))
+      }
+
+      // Only add assistant message if it has content
+      if (step.text || step.reasoning || (step.toolCalls && step.toolCalls.length > 0)) {
         contextManager.addMessage(assistantMessage)
       }
 
-      // 2. Add tool results as standard user-role text messages (if they are human-relevant)
-      // This ensures the information is available to the model in future turns without
-      // requiring the 'tool' role machinery which implies the assistant previously called a tool.
+      //2. Add tool results using standard OpenAI 'tool' role format
+      // This ensures proper user/assistant/tool alternation in the conversation history
       if (step.toolResults && step.toolResults.length > 0) {
         for (const result of step.toolResults) {
           const content = typeof result.result === 'string' ? result.result : JSON.stringify(result.result)
           if (!content) continue
 
+          // Find matching tool_call_id for this result
+          const matchingToolCall = (step.toolCalls || []).find(
+            (tc: any) => tc.name === result.toolName
+          )
+          const toolCallId = matchingToolCall?.id || result.callId || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+
           contextManager.addMessage({
-            role: 'user',
-            content: `[Tool Result: ${result.toolName || 'unknown'}]\n${content}`
+            role: 'tool',
+            tool_call_id: toolCallId,
+            content: content
           })
         }
       }

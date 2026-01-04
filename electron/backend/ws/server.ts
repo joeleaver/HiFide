@@ -26,6 +26,7 @@ import {
   createVectorHandlers,
   createMcpHandlers,
   createLanguageHandlers,
+  createIndexingHandlers,
 } from './handlers/index.js'
 import { getWorkspaceService } from '../../services/index.js'
 
@@ -218,10 +219,11 @@ export function startWsBackend(): Promise<WsBootstrap> {
       createMiscHandlers(addMethod, connection)
       createSettingsHandlers(addMethod)
       createKanbanHandlers(addMethod)
-      createVectorHandlers(addMethod, connection)
-      createMcpHandlers(addMethod, connection)
-      createLanguageHandlers(addMethod, connection)
-      // Setup all event subscriptions for this connection
+  createVectorHandlers(addMethod, connection)
+  createMcpHandlers(addMethod, connection)
+  createLanguageHandlers(addMethod, connection)
+  createIndexingHandlers(addMethod, connection)
+  // Setup all event subscriptions for this connection
       const cleanupSubscriptions = setupEventSubscriptions(connection)
 
       // Connection registration happens in handshake.init handler (with windowId)

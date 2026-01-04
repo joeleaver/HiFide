@@ -13,9 +13,9 @@ import {
   getProviderService,
   getSettingsService,
   getVectorService,
-  getCodeIndexerService,
   getKBIndexerService,
   getMemoriesIndexerService,
+  getIndexOrchestratorService,
   getWorkspaceService,
 } from '../../services/index.js'
 import type { RpcConnection } from './types.js'
@@ -546,7 +546,8 @@ export const indexerHandlers = {
 
     // Route to the appropriate indexers
     if (targetTable === 'all' || targetTable === 'code') {
-      getCodeIndexerService().indexWorkspace(workspaceRoot, force)
+      // V2: Delegate code indexing to the orchestrator
+      getIndexOrchestratorService().indexAll(force, workspaceRoot);
     }
     
     if (targetTable === 'all' || targetTable === 'kb') {
@@ -558,6 +559,14 @@ export const indexerHandlers = {
     }
 
     return { ok: true }
+  },
+
+  async discover(_params: { workspaceRoot: string }) {
+     return { ok: false, error: 'Legacy discovery not supported in V2' };
+  },
+
+  async parse(_params: { filePath: string; workspaceRoot: string }) {
+     return { ok: false, error: 'Legacy parsing not supported in V2' };
   },
 }
 
