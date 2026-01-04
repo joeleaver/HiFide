@@ -5,6 +5,62 @@ import { AGENT_MAX_STEPS } from '../../src/store/utils/constants'
 
 import type { ProviderAdapter, StreamHandle, AgentTool } from '../providers/provider'
 
+// Convert our JSON Schema-style AgentTool.parameters into a Zod schema.
+// OpenRouter's SDK expects Zod schemas for tool input, but our tools declare
+// parameters using JSON Schema. This helper does a best-effort conversion for
+// the simple schemas we use (objects, strings, numbers, booleans, arrays).
+function jsonSchemaToZod(schema: any): z.ZodTypeAny {
+  if (!schema || typeof schema !== 'object') return z.any()
+
+  const type = schema.type as string | undefined
+
+  // Object type (with nested properties)
+  if (type === 'object' || schema.properties) {
+    const properties = (schema.properties && typeof schema.properties === 'object')
+      ? (schema.properties as Record<string, any>)
+      : {}
+
+    const required = Array.isArray(schema.required) ? (schema.required as string[]) : []
+
+    const shape: Record<string, z.ZodTypeAny> = {}
+    for (const [key, propSchema] of Object.entries(properties)) {
+      const base = jsonSchemaToZod(propSchema)
+      shape[key] = required.includes(key) ? base : base.optional()
+    }
+
+    let obj = z.object(shape)
+
+    // Honor additionalProperties === false by making the object strict.
+    if (schema.additionalProperties === false) {
+      obj = obj.strict()
+    }
+
+    return obj
+  }
+
+  // Primitive & array types
+  switch (type) {
+    case 'string': {
+      return z.string()
+    }
+    case 'number':
+    case 'integer': {
+      return z.number()
+    }
+    case 'boolean': {
+      return z.boolean()
+    }
+    case 'array': {
+      const itemSchema = jsonSchemaToZod(schema.items || {})
+      return z.array(itemSchema)
+    }
+    default: {
+      // Fallback for unsupported or missing type information
+      return z.any()
+    }
+  }
+}
+
 function sanitizeName(name: string): string {
   let safe = (name || 'tool').replace(/[^a-zA-Z0-9_-]/g, '_')
   if (!safe) safe = 'tool'
@@ -19,24 +75,26 @@ function buildOpenRouterTools(tools: AgentTool[] | undefined, meta?: { requestId
   const sdkTools: any[] = []
   const nameMap = new Map<string, string>() // safe -> original
 
-  for (const t of tools || []) {
-    if (!t || !t.name || typeof t.run !== 'function') continue
+	  for (const t of tools || []) {
+	    if (!t || !t.name || typeof t.run !== 'function') continue
 
-    const safe = sanitizeName(t.name)
-    
-    // Detect and warn about name collisions
-    if (nameMap.has(safe) && nameMap.get(safe) !== t.name) {
-      const DEBUG = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
-      if (DEBUG) {
-        console.warn('[openrouter:sdk] tool name collision after sanitize', { safe, a: nameMap.get(safe), b: t.name })
-      }
-    }
-    nameMap.set(safe, t.name)
+	    const safe = sanitizeName(t.name)
+	    
+	    // Detect and warn about name collisions
+	    if (nameMap.has(safe) && nameMap.get(safe) !== t.name) {
+	      const DEBUG = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
+	      if (DEBUG) {
+	        console.warn('[openrouter:sdk] tool name collision after sanitize', { safe, a: nameMap.get(safe), b: t.name })
+	      }
+	    }
+	    nameMap.set(safe, t.name)
 
-    // Build input schema using tool's declared JSON Schema
-    const inputSchema = t.parameters && typeof t.parameters === 'object' 
-      ? z.object(t.parameters)
-      : z.any()
+	    // Build input schema using tool's declared JSON Schema.
+	    // NOTE: OpenRouter's SDK expects a Zod schema here. Our AgentTool.parameters
+	    // are JSON Schema, so we convert them to Zod; on failure we fall back to z.any().
+	    const inputSchema = t.parameters && typeof t.parameters === 'object'
+	      ? jsonSchemaToZod(t.parameters)
+	      : z.any()
 
     // Create tool with execute function that handles toModelResult pattern
     const sdkTool = tool({
