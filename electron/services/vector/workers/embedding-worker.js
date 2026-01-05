@@ -1,17 +1,34 @@
 import { parentPort } from 'worker_threads';
-import { pipeline } from '@xenova/transformers';
 
+// CRITICAL: Set environment variable BEFORE importing @xenova/transformers
+// This prevents it from trying to load onnxruntime-node (which has ABI incompatibility with Electron)
+// and forces it to use the WASM backend (onnxruntime-web) instead.
+process.env.TRANSFORMERS_BACKEND = 'onnxruntime-web';
+
+let transformersModule = null;
 let embeddingPipeline = null;
 let currentModel = null;
+
+async function getTransformers() {
+    if (!transformersModule) {
+        // Dynamic import AFTER setting env var
+        transformersModule = await import('@xenova/transformers');
+        // Additional configuration for WASM backend in worker threads
+        transformersModule.env.useBrowserCache = false;
+        transformersModule.env.allowLocalModels = true;
+    }
+    return transformersModule;
+}
 
 async function getPipeline(modelId) {
     if (embeddingPipeline && currentModel === modelId) {
         return embeddingPipeline;
     }
-    
+
     // Clear old pipeline if it exists
     embeddingPipeline = null;
-    
+
+    const { pipeline } = await getTransformers();
     embeddingPipeline = await pipeline('feature-extraction', modelId);
     currentModel = modelId;
     return embeddingPipeline;
