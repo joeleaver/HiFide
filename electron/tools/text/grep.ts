@@ -4,7 +4,7 @@ import path from 'node:path'
 import ignore from 'ignore'
 import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot } from '../utils'
 import { discoverWorkspaceFiles, DEFAULT_EXCLUDE_PATTERNS } from '../../utils/fileDiscovery'
-import { preferUnpackedRipgrepPath } from '../../utils/ripgrep.js'
+import { preferUnpackedRipgrepPath, findSystemRipgrep } from '../../utils/ripgrep.js'
 
 function escapeRegExp(str: string) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -81,10 +81,30 @@ async function tryRipgrepSearch({ root, pattern, includeGlobs, excludeGlobs, opt
   }
 }): Promise<null | { ok: true; data: { summary: { filesSearched: number; filesMatched: number; linesMatched: number; truncated: boolean }, matches: any[]; nextCursor?: string } }>{
   try {
+    const { existsSync } = await import('node:fs')
+
+    // Try vscode-ripgrep module first
+    let resolvedRgPath: string | null = null
     const mod: any = await import('vscode-ripgrep').catch(() => null)
     const rgPath: string | undefined = mod?.rgPath || mod?.default?.rgPath
-    if (!rgPath) return null
-    const resolvedRgPath = preferUnpackedRipgrepPath(rgPath)
+    if (rgPath) {
+      const preferred = preferUnpackedRipgrepPath(rgPath)
+      if (existsSync(preferred)) {
+        resolvedRgPath = preferred
+      } else {
+        console.warn('[grep] ripgrep binary path exists in module but file not found:', preferred)
+      }
+    }
+
+    // Fallback to system ripgrep if module binary not available
+    if (!resolvedRgPath) {
+      resolvedRgPath = findSystemRipgrep()
+    }
+
+    if (!resolvedRgPath) {
+      return null
+    }
+
     const { spawn } = await import('node:child_process')
 
     const beforeN = Math.max(0, options.before ?? (options.context ?? 0))

@@ -125,7 +125,9 @@ export class EmbeddingService {
       if (type === 'success') {
         deferred.resolve(payload);
       } else {
-        deferred.reject(new Error(payload));
+        // Ensure payload is a string before creating Error
+        const errorMessage = typeof payload === 'string' ? payload : JSON.stringify(payload) || 'Unknown error';
+        deferred.reject(new Error(errorMessage));
       }
       this.pendingRequests.delete(id);
     });

@@ -4,7 +4,7 @@ import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import type { Readable } from 'node:stream'
 import { randomUUID } from 'node:crypto'
 import { Service } from './base/Service.js'
-import { preferUnpackedRipgrepPath } from '../utils/ripgrep.js'
+import { preferUnpackedRipgrepPath, findSystemRipgrep } from '../utils/ripgrep.js'
 import { getVectorService, getSettingsService } from './index.js'
 import type {
   WorkspaceSearchParams,
@@ -223,17 +223,35 @@ export class WorkspaceSearchService extends Service<WorkspaceSearchServiceState>
 
   private async getRipgrepPath(): Promise<string | null> {
     if (this.ripgrepPath) return this.ripgrepPath
+
+    // Try vscode-ripgrep module first
     try {
       const mod: any = await import('vscode-ripgrep')
       const rgPath: string | undefined = mod?.rgPath || mod?.default?.rgPath
       if (rgPath) {
         const resolved = preferUnpackedRipgrepPath(rgPath)
-        this.ripgrepPath = resolved
-        return resolved
+        // Verify the binary actually exists before caching the path
+        const { existsSync } = await import('node:fs')
+        if (existsSync(resolved)) {
+          this.ripgrepPath = resolved
+          return resolved
+        } else {
+          console.warn('[search] ripgrep binary path exists in module but file not found:', resolved)
+        }
       }
     } catch (error) {
-      console.error('[search] Failed to load ripgrep binary:', error)
+      console.error('[search] Failed to load vscode-ripgrep module:', error)
     }
+
+    // Fallback: try to find ripgrep installed on the system
+    const systemRg = findSystemRipgrep()
+    if (systemRg) {
+      console.log('[search] Using system ripgrep:', systemRg)
+      this.ripgrepPath = systemRg
+      return systemRg
+    }
+
+    console.warn('[search] No ripgrep binary available. Text search will use Node.js fallback.')
     return null
   }
 

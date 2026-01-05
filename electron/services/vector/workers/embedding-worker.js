@@ -68,10 +68,13 @@ if (parentPort) {
             parentPort.postMessage({ id, type: 'pong' });
         }
     } catch (error) {
+        // Ensure error message is always a string for proper serialization
+        const errorMessage = error?.message || String(error) || 'Unknown embedding error';
+        console.error('[embedding-worker] Error:', errorMessage);
         parentPort.postMessage({
             id,
             type: 'error',
-            payload: error.message
+            payload: errorMessage
         });
     }
   });
