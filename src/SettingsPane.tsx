@@ -477,7 +477,7 @@ function VectorSettingsSection() {
             data={[
               'all-MiniLM-L6-v2 (Local)',
               'nomic-embed-text-v1.5 (Local)',
-              'nomic-embed-code-v1.5 (Local)'
+              'nomic-embed-code (Local)'
             ]}
             value={settings?.[`${tableKey}Model`] || settings?.model || 'all-MiniLM-L6-v2 (Local)'}
             onChange={(val) => {

@@ -576,7 +576,8 @@ export class SettingsService extends Service<SettingsState> {
       } else if (uiModel.includes('nomic-embed-text')) {
         return { provider: 'local', localModel: 'nomic-ai/nomic-embed-text-v1.5' };
       } else if (uiModel.includes('nomic-embed-code')) {
-        return { provider: 'local', localModel: 'nomic-ai/nomic-embed-code-v1.5' };
+        // Note: The code model is nomic-ai/nomic-embed-code (no version suffix)
+        return { provider: 'local', localModel: 'nomic-ai/nomic-embed-code' };
       } else if (uiModel.includes('nomic')) {
         return { provider: 'local', localModel: 'nomic-ai/nomic-embed-text-v1.5' };
       } else if (uiModel.startsWith('text-embedding-3')) {

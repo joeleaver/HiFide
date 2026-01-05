@@ -1,4 +1,6 @@
 import { parentPort } from 'worker_threads';
+import path from 'node:path';
+import os from 'node:os';
 
 // CRITICAL: Set environment variable BEFORE importing @xenova/transformers
 // This prevents it from trying to load onnxruntime-node (which has ABI incompatibility with Electron)
@@ -13,11 +15,22 @@ async function getTransformers() {
     if (!transformersModule) {
         // Dynamic import AFTER setting env var
         transformersModule = await import('@xenova/transformers');
-        // Configuration for Electron worker context
+
+        // Configuration for Electron/Node.js worker context
         transformersModule.env.useBrowserCache = false;
         transformersModule.env.allowLocalModels = true;
         // CRITICAL: Allow downloading models from Hugging Face
         transformersModule.env.allowRemoteModels = true;
+
+        // Set explicit cache directory to avoid permission issues
+        const cacheDir = path.join(os.homedir(), '.cache', 'hifide', 'transformers');
+        transformersModule.env.cacheDir = cacheDir;
+
+        console.log('[embedding-worker] Transformers.js configured:', {
+            backend: process.env.TRANSFORMERS_BACKEND,
+            cacheDir,
+            allowRemoteModels: transformersModule.env.allowRemoteModels,
+        });
     }
     return transformersModule;
 }
