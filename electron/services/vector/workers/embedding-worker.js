@@ -13,9 +13,11 @@ async function getTransformers() {
     if (!transformersModule) {
         // Dynamic import AFTER setting env var
         transformersModule = await import('@xenova/transformers');
-        // Additional configuration for WASM backend in worker threads
+        // Configuration for Electron worker context
         transformersModule.env.useBrowserCache = false;
         transformersModule.env.allowLocalModels = true;
+        // CRITICAL: Allow downloading models from Hugging Face
+        transformersModule.env.allowRemoteModels = true;
     }
     return transformersModule;
 }
