@@ -155,7 +155,8 @@
       "electron",
       "keytar",
       "node-pty",
-      "tree-sitter"
+      "tree-sitter",
+      "sharp"
     ],
     "public-hoist-pattern": [
       "*"
@@ -163,6 +164,9 @@
     "patchedDependencies": {
       "node-pty@1.1.0": "patches/node-pty@1.1.0.patch",
       "tree-sitter@0.25.0": "patches/tree-sitter@0.25.0.patch"
+    },
+    "overrides": {
+      "@xenova/transformers>sharp": "^0.34.5"
     }
   }
 }
