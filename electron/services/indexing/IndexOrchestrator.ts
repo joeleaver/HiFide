@@ -509,7 +509,7 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
 
     async indexAll(force: boolean = false, rootPath?: string) {
         console.log(`[IndexOrchestrator] Re-index requested (force=${force})`);
-        
+
         // Reload settings to pick up any changes before starting indexing
         this.loadSettings();
 
@@ -532,11 +532,21 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
         // Start watcher with ignoreInitial: false to trigger discovery logs
         console.log('[IndexOrchestrator] Starting with full scan (ignoreInitial: false)');
         this.rootPath = this.rootPath; // Ensure rootPath is set
-        
+
         // Reset progress tracking
         this.indexedCount = 0;
         this.setState({ totalFilesDiscovered: 0 });
-        
+
+        // If forcing, reset all indexed counts since the vector tables were purged
+        if (force) {
+            console.log('[IndexOrchestrator] Force re-index: resetting all indexed counts to 0');
+            this.setState({
+                code: { total: 0, indexed: 0, missing: 0, stale: 0 },
+                kb: { total: 0, indexed: 0, missing: 0, stale: 0 },
+                memories: { total: 0, indexed: 0, missing: 0, stale: 0 }
+            });
+        }
+
         // Create a promise that resolves when watcher is ready and returns total files
         const watcherReadyPromise = new Promise<number>((resolve) => {
             const onReady = (data?: { totalFiles: number }) => {
@@ -548,7 +558,10 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
             this.watcher.on('ready', onReady);
         });
 
-        await this.watcher.start(this.rootPath);
+        // When forcing re-index, use ignoreInitial: false to discover all existing files
+        // This makes chokidar emit 'add' events for all files, which get queued for indexing
+        const watcherOptions = force ? { ignoreInitial: false } : {};
+        await this.watcher.start(this.rootPath, watcherOptions);
 
         // Wait for watcher to discover files BEFORE setting status
         const totalFiles = await watcherReadyPromise;
