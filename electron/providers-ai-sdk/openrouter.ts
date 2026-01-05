@@ -73,37 +73,27 @@ function toOpenAIMessages(
     if (msg.role === 'user') {
       result.push({ role: 'user', content: msg.content })
     } else if (msg.role === 'assistant') {
-      // Check if last message is also assistant - if so, merge
-      const lastMsg = result[result.length - 1]
-      if (lastMsg && lastMsg.role === 'assistant') {
-        // Merge content
-        const existingContent = (lastMsg as any).content || ''
-        const newContent = msg.content || ''
-        if (existingContent && newContent) {
-          (lastMsg as any).content = existingContent + '\n' + newContent
-        } else if (newContent) {
-          (lastMsg as any).content = newContent
-        }
-        // Merge tool_calls
-        if (msg.tool_calls) {
-          if (!(lastMsg as any).tool_calls) {
-            (lastMsg as any).tool_calls = []
+        // Check if last message is also assistant - if so, merge
+        const lastMsg = result[result.length - 1]
+        if (lastMsg && lastMsg.role === 'assistant') {
+          // Merge content
+          const existingContent = (lastMsg as any).content || ''
+          const newContent = msg.content || ''
+          if (existingContent && newContent) {
+            (lastMsg as any).content = existingContent + '\n' + newContent
+          } else if (newContent) {
+            (lastMsg as any).content = newContent
           }
-          (lastMsg as any).tool_calls.push(...msg.tool_calls)
-        }
-        // Merge reasoning_details (for continuation)
-        if (Array.isArray(msg.reasoning_details)) {
-          if (!Array.isArray((lastMsg as any).reasoning_details)) {
-            (lastMsg as any).reasoning_details = []
+          // Merge reasoning_details (for continuation)
+          if (Array.isArray(msg.reasoning_details)) {
+            if (!Array.isArray((lastMsg as any).reasoning_details)) {
+              (lastMsg as any).reasoning_details = []
+            }
+            (lastMsg as any).reasoning_details.push(...msg.reasoning_details)
           }
-          (lastMsg as any).reasoning_details.push(...msg.reasoning_details)
-        }
       } else {
         // New assistant message
         const assistantMsg: any = { role: 'assistant', content: msg.content || null }
-        if (msg.tool_calls) {
-          assistantMsg.tool_calls = msg.tool_calls
-        }
         // Preserve reasoning_details for continuation
         if (Array.isArray(msg.reasoning_details)) {
           assistantMsg.reasoning_details = msg.reasoning_details
@@ -111,11 +101,8 @@ function toOpenAIMessages(
         result.push(assistantMsg)
       }
     } else if (msg.role === 'tool') {
-      result.push({
-        role: 'tool',
-        tool_call_id: msg.tool_call_id,
-        content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
-      })
+      // Skip tool result messages from history (tool results are only added for current turn in agent loop)
+      // This prevents orphaned tool results when tool_calls are not persisted
     }
   }
 
