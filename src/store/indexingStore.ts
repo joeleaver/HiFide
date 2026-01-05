@@ -40,6 +40,7 @@ interface IndexingStore {
   startIndexing: () => Promise<void>
   stopIndexing: () => Promise<void>
   reindex: (force?: boolean) => Promise<void>
+  setEnabled: (enabled: boolean) => Promise<void>
 }
 
 export const useIndexingStore = create<IndexingStore>((set, get) => ({
@@ -137,6 +138,28 @@ export const useIndexingStore = create<IndexingStore>((set, get) => ({
       const res = await client.rpc<any>('indexing.reindex', { force })
       if (!res?.ok) {
         set({ error: res?.error || 'Failed to re-index workspace' })
+      }
+    } catch (err: any) {
+      set({ error: err.message || String(err) })
+    } finally {
+      set({ loading: false })
+    }
+  },
+
+  setEnabled: async (enabled: boolean) => {
+    const client = getBackendClient()
+    if (!client) return
+
+    set({ loading: true, error: null })
+    try {
+      const res = await client.rpc<any>('indexing.setEnabled', { enabled })
+      if (res?.ok) {
+        // Update local status with new enabled state
+        set((state) => ({
+          status: state.status ? { ...state.status, indexingEnabled: enabled } : null
+        }))
+      } else {
+        set({ error: res?.error || 'Failed to update indexing enabled state' })
       }
     } catch (err: any) {
       set({ error: err.message || String(err) })

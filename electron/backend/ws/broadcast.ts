@@ -1,5 +1,6 @@
 import path from 'path'
 import type { HydrationPhase } from '../../../shared/hydration.js'
+import { getWorkspaceService } from '../../services/index.js'
 
 export interface RpcConnection {
   sendNotification(method: string, params: any): void
@@ -90,23 +91,20 @@ export function unregisterConnection(connection: RpcConnection): void {
   activeConnections.delete(connection)
 }
 
+
+
 export function getConnectionWindowId(connection: RpcConnection): number | undefined {
   const meta = activeConnections.get(connection)
   return meta?.windowId
 }
 
-export async function getConnectionWorkspaceId(connection: RpcConnection): Promise<string | undefined> {
+export function getConnectionWorkspaceId(connection: RpcConnection): string | undefined {
   const meta = activeConnections.get(connection)
   if (!meta?.windowId) return undefined
 
   // Get workspace from window→workspace mapping
-  try {
-    const { getWorkspaceService } = await import('../../services/index.js')
-    const workspaceService = getWorkspaceService()
-    return workspaceService.getWorkspaceForWindow(meta.windowId) || undefined
-  } catch {
-    return undefined
-  }
+  const workspaceService = getWorkspaceService()
+  return workspaceService.getWorkspaceForWindow(meta.windowId) || undefined
 }
 
 export function setConnectionSelectedSessionId(connection: RpcConnection, sessionId?: string | null): void {
@@ -135,13 +133,11 @@ function sameWorkspaceId(a?: string | null, b?: string | null): boolean {
   try { return !!a && !!b && path.resolve(String(a)) === path.resolve(String(b)) } catch { return a === b }
 }
 
-export async function broadcastWorkspaceNotification(workspaceId: string, method: string, params: any): Promise<void> {
+export function broadcastWorkspaceNotification(workspaceId: string, method: string, params: any): void {
   let sentCount = 0
   let totalConnections = 0
   const resolvedTarget = path.resolve(workspaceId)
 
-  // Get workspace service to look up window→workspace mappings
-  const { getWorkspaceService } = await import('../../services/index.js')
   const workspaceService = getWorkspaceService()
 
   for (const [conn, meta] of Array.from(activeConnections.entries())) {

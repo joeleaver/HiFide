@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Center, Divider, Group, Loader, Select, Stack, Text, TextInput, Title, NavLink, Box, ScrollArea, Badge, Paper } from '@mantine/core'
+import { Alert, Button, Center, Divider, Group, Loader, Select, Stack, Text, TextInput, Title, NavLink, Box, ScrollArea, Badge, Paper, Switch } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { IconKey, IconRobot, IconCash, IconDatabase } from '@tabler/icons-react'
 import { getBackendClient } from './lib/backend/bootstrap'
@@ -16,7 +16,13 @@ type FireworksUpdatePayload = {
   models?: ModelOption[]
 }
 
+type OpenRouterUpdatePayload = {
+  openrouterAllowedModels?: string[]
+  models?: ModelOption[]
+}
+
 type FireworksRpcResponse = FireworksUpdatePayload & { ok: boolean }
+type OpenRouterRpcResponse = OpenRouterUpdatePayload & { ok: boolean }
 type RefreshModelsResponse = { ok: boolean; models?: ModelOption[] }
 
 export default function SettingsPane() {
@@ -78,12 +84,12 @@ export default function SettingsPane() {
     }))
   }
 
-  const applyOpenRouterState = (payload?: FireworksUpdatePayload | null) => {
+  const applyOpenRouterState = (payload?: OpenRouterUpdatePayload | null) => {
     if (!payload || !snapshot) return
     mergeSnapshot((prev) => ({
       ...prev,
-      openrouterAllowedModels: Array.isArray(payload.fireworksAllowedModels)
-        ? payload.fireworksAllowedModels
+      openrouterAllowedModels: Array.isArray(payload.openrouterAllowedModels)
+        ? payload.openrouterAllowedModels
         : prev.openrouterAllowedModels,
       modelsByProvider: {
         ...prev.modelsByProvider,
@@ -157,7 +163,7 @@ export default function SettingsPane() {
     const client = getBackendClient()
     if (!client) return
     try {
-      const res = await client.rpc<FireworksRpcResponse>('provider.addOpenRouterModel', { model: value })
+      const res = await client.rpc<OpenRouterRpcResponse>('provider.addOpenRouterModel', { model: value })
       applyOpenRouterState(res)
       setNewOrModel('')
     } catch (err) {
@@ -169,7 +175,7 @@ export default function SettingsPane() {
     const client = getBackendClient()
     if (!client) return
     try {
-      const res = await client.rpc<FireworksRpcResponse>('provider.removeOpenRouterModel', { model })
+      const res = await client.rpc<OpenRouterRpcResponse>('provider.removeOpenRouterModel', { model })
       applyOpenRouterState(res)
     } catch (err) {
       notifications.show({ color: 'red', title: 'Error', message: String(err) })
@@ -180,7 +186,7 @@ export default function SettingsPane() {
     const client = getBackendClient()
     if (!client) return
     try {
-      const res = await client.rpc<FireworksRpcResponse>('provider.openrouter.loadDefaults', {})
+      const res = await client.rpc<OpenRouterRpcResponse>('provider.openrouter.loadDefaults', {})
       applyOpenRouterState(res)
     } catch (err) {
       notifications.show({ color: 'red', title: 'Error', message: String(err) })
@@ -343,7 +349,7 @@ function ProviderSelect({ label, options, value, disabled, onChange }: any) {
 
 import { useVectorStore } from './store/vectorStore'
 import { useIndexingStore } from './store/indexingStore'
-import { IconCode, IconBook, IconBrain, IconSearch, IconPlayerPlay, IconPlayerStop } from '@tabler/icons-react'
+import { IconCode, IconBook, IconBrain, IconSearch } from '@tabler/icons-react'
 
 function VectorSettingsSection() {
   const { snapshot, mergeSnapshot } = useSettingsSnapshot()
@@ -354,8 +360,8 @@ function VectorSettingsSection() {
     results,
     searchQuery,
     searchTarget,
+    init,
     fetchState,
-    subscribe,
     setSearchQuery,
     setSearchTarget,
     search,
@@ -364,21 +370,20 @@ function VectorSettingsSection() {
 
   const indexingStatus = useIndexingStore((s) => s.status)
   const indexingLoading = useIndexingStore((s) => s.loading)
-  const handleStartIndexing = useIndexingStore((s) => s.startIndexing)
-  const handleStopIndexing = useIndexingStore((s) => s.stopIndexing)
+  const setIndexingEnabled = useIndexingStore((s) => s.setEnabled)
 
   const settings = (snapshot as any)?.vector || {}
   const indexingWorkers = settings.indexingWorkers || 4
 
   const handleIndexingWorkersChange = useCallback(async (value: number) => {
     const update = { ...settings, indexingWorkers: value }
-    
+
     // Update both the snapshot and the backend
     mergeSnapshot((prev: any) => ({
       ...prev,
       vector: update
     }))
-    
+
     try {
       const client = getBackendClient()
       if (client) {
@@ -387,21 +392,25 @@ function VectorSettingsSection() {
       }
     } catch (err) {
       console.error('[VectorSettingsSection] Failed to update indexingWorkers:', err)
-      notifications.show({ 
-        color: 'red', 
-        title: 'Error', 
-        message: 'Failed to update indexing workers setting' 
+      notifications.show({
+        color: 'red',
+        title: 'Error',
+        message: 'Failed to update indexing workers setting'
       })
     }
   }, [settings, mergeSnapshot])
 
-  useEffect(() => {
-    fetchState()
-    return subscribe()
-  }, [fetchState, subscribe])
+  const handleToggleEnabled = useCallback((checked: boolean) => {
+    setIndexingEnabled(checked)
+  }, [setIndexingEnabled])
+
+  // Initialize store on first access (idempotent)
+  init()
 
   const vectorStatus = state ? (state.status as any) : null
+  const indexingEnabled = indexingStatus?.indexingEnabled ?? true
 
+  // Early returns for loading/error states - placed AFTER all hooks
   if (error) {
     return (
       <Alert color="red" title="Vector Service Error">
@@ -421,17 +430,19 @@ function VectorSettingsSection() {
   }
 
   const TableCard = ({ title, tableKey, icon: Icon, color }: any) => {
-    const vectorStatus = (state.status as any)
     const tableState = (state.status.tables as any)?.[tableKey]
-    
+
+    // Get indexing counts from indexingStatus (from orchestrator)
+    const indexingCounts = indexingStatus?.[tableKey as keyof typeof indexingStatus] as { total: number; indexed: number; missing: number } | undefined
+
     // Check both global activeTable and individual source progress
     const tableSource = vectorStatus?.sources?.[tableKey]
     const hasRemainingWork = tableSource && tableSource.indexed < tableSource.total
     const isIndexingThisTable = (vectorStatus?.activeTable === tableKey || vectorStatus?.activeTable === 'all') && (hasRemainingWork || vectorStatus?.indexing)
-    
+
     // Calculate progress specific to this table if available
-    const tableProgress = tableSource && tableSource.total > 0 
-      ? Math.floor((tableSource.indexed / tableSource.total) * 100) 
+    const tableProgress = tableSource && tableSource.total > 0
+      ? Math.floor((tableSource.indexed / tableSource.total) * 100)
       : 0
 
     return (
@@ -447,11 +458,24 @@ function VectorSettingsSection() {
             )}
           </Group>
 
+          {/* Status: indexed / total counts */}
+          {indexingCounts && (
+            <Group justify="space-between" gap="xs">
+              <Text size="xs" c="dimmed">Indexed</Text>
+              <Group gap="xs">
+                <Text size="xs" fw={500}>{indexingCounts.indexed} / {indexingCounts.total}</Text>
+                {indexingCounts.missing > 0 && (
+                  <Badge size="xs" color="yellow" variant="light">{indexingCounts.missing} pending</Badge>
+                )}
+              </Group>
+            </Group>
+          )}
+
           <Select
             label="Embedding Model"
             size="xs"
             data={[
-              'all-MiniLM-L6-v2 (Local)', 
+              'all-MiniLM-L6-v2 (Local)',
               'nomic-embed-text-v1.5 (Local)',
               'nomic-embed-code-v1.5 (Local)'
             ]}
@@ -510,11 +534,38 @@ function VectorSettingsSection() {
 
   return (
     <Stack gap="xl">
-      <Box>
-        <Title order={3}>Vector Search & Indexing</Title>
-        <Text size="sm" c="dimmed">Semantic database management for Code, Knowledge Base and Memories</Text>
-      </Box>
+      {/* Header with Enable Toggle */}
+      <Group justify="space-between" align="flex-start">
+        <Box>
+          <Title order={3}>Vector Search & Indexing</Title>
+          <Text size="sm" c="dimmed">Semantic database management for Code, Knowledge Base and Memories</Text>
+        </Box>
+        <Switch
+          label="Indexing"
+          labelPosition="left"
+          checked={indexingEnabled}
+          onChange={(e) => handleToggleEnabled(e.currentTarget.checked)}
+          disabled={indexingLoading}
+          size="md"
+          styles={{
+            label: { fontWeight: 500 }
+          }}
+        />
+      </Group>
 
+      {/* Processing status banner - only show when indexing is enabled */}
+      {indexingEnabled && indexingStatus?.isProcessing && (
+        <Paper p="xs" withBorder style={{ borderColor: '#3a6ea5', backgroundColor: '#1a2a3a' }}>
+          <Group gap="sm">
+            <Loader size="xs" color="blue" />
+            <Text size="sm">
+              Processing queue ({indexingStatus.queueLength || 0} items remaining)
+            </Text>
+          </Group>
+        </Paper>
+      )}
+
+      {/* Three-column table cards with status integrated */}
       <Group align="stretch" grow wrap="wrap">
         <TableCard title="Codebase" tableKey="code" icon={IconCode} color="#228be6" />
         <TableCard title="Knowledge Base" tableKey="kb" icon={IconBook} color="#40c057" />
@@ -523,52 +574,23 @@ function VectorSettingsSection() {
 
       <Divider />
 
+      {/* Indexing Performance */}
       <Stack gap="sm">
         <Title order={4}>Indexing Performance</Title>
         <Group align="flex-end" gap="md">
           <Box style={{ flex: 1 }}>
             <Text size="sm" mb={4}>Concurrent Workers</Text>
             <Group gap="xs">
-              <Button
-                size="xs"
-                variant={indexingWorkers === 1 ? 'filled' : 'light'}
-                onClick={() => handleIndexingWorkersChange(1)}
-                disabled={state.indexing || vectorStatus?.indexing}
-              >
-                1
-              </Button>
-              <Button
-                size="xs"
-                variant={indexingWorkers === 2 ? 'filled' : 'light'}
-                onClick={() => handleIndexingWorkersChange(2)}
-                disabled={state.indexing || vectorStatus?.indexing}
-              >
-                2
-              </Button>
-              <Button
-                size="xs"
-                variant={indexingWorkers === 4 ? 'filled' : 'light'}
-                onClick={() => handleIndexingWorkersChange(4)}
-                disabled={state.indexing || vectorStatus?.indexing}
-              >
-                4
-              </Button>
-              <Button
-                size="xs"
-                variant={indexingWorkers === 8 ? 'filled' : 'light'}
-                onClick={() => handleIndexingWorkersChange(8)}
-                disabled={state.indexing || vectorStatus?.indexing}
-              >
-                8
-              </Button>
-              <Button
-                size="xs"
-                variant={indexingWorkers === 16 ? 'filled' : 'light'}
-                onClick={() => handleIndexingWorkersChange(16)}
-                disabled={state.indexing || vectorStatus?.indexing}
-              >
-                16
-              </Button>
+              {[1, 2, 4, 8, 16].map((n) => (
+                <Button
+                  key={n}
+                  size="xs"
+                  variant={indexingWorkers === n ? 'filled' : 'light'}
+                  onClick={() => handleIndexingWorkersChange(n)}
+                >
+                  {n}
+                </Button>
+              ))}
             </Group>
           </Box>
           <Text size="xs" c="dimmed" style={{ maxWidth: 400 }}>
@@ -576,130 +598,7 @@ function VectorSettingsSection() {
           </Text>
         </Group>
         <Text size="xs" c="blue">
-          Current: {indexingWorkers} worker{indexingWorkers !== 1 ? 's' : ''} • Changes apply on next re-index
-        </Text>
-      </Stack>
-
-      <Divider />
-
-      <Stack gap="sm">
-        <Title order={4}>Indexing Status</Title>
-        {indexingStatus && (
-          <Paper p="md" withBorder style={{ borderColor: '#333', backgroundColor: '#1a1a1a' }}>
-            <Stack gap="md">
-              {/* Overall Status */}
-              <Group justify="space-between">
-                <Text size="sm" c="dimmed">Overall Status</Text>
-                <Badge 
-                  color={indexingStatus.indexingEnabled ? 'green' : 'gray'}
-                  size="sm"
-                  variant="light"
-                >
-                  {indexingStatus.indexingEnabled ? 'Enabled' : 'Disabled'}
-                </Badge>
-              </Group>
-              
-              {/* Code Files */}
-              <Box>
-                <Group justify="space-between" mb="xs">
-                  <Group gap="xs">
-                    <IconCode size={16} color="blue" />
-                    <Text size="sm" fw={500}>Code</Text>
-                  </Group>
-                  <Badge color="blue" size="xs" variant="light">
-                    {indexingStatus.code?.indexed || 0} / {indexingStatus.code?.total || 0}
-                  </Badge>
-                </Group>
-                {indexingStatus.code?.missing && indexingStatus.code.missing > 0 && (
-                  <Text size="xs" c="yellow">{indexingStatus.code.missing} files pending indexing</Text>
-                )}
-              </Box>
-
-              {/* Knowledge Base */}
-              <Box>
-                <Group justify="space-between" mb="xs">
-                  <Group gap="xs">
-                    <IconBook size={16} color="purple" />
-                    <Text size="sm" fw={500}>Knowledge Base</Text>
-                  </Group>
-                  <Badge color="purple" size="xs" variant="light">
-                    {indexingStatus.kb?.indexed || 0} / {indexingStatus.kb?.total || 0}
-                  </Badge>
-                </Group>
-                {indexingStatus.kb?.missing && indexingStatus.kb.missing > 0 && (
-                  <Text size="xs" c="yellow">{indexingStatus.kb.missing} articles pending indexing</Text>
-                )}
-              </Box>
-
-              {/* Memories */}
-              <Box>
-                <Group justify="space-between" mb="xs">
-                  <Group gap="xs">
-                    <IconBrain size={16} color="orange" />
-                    <Text size="sm" fw={500}>Memories</Text>
-                  </Group>
-                  <Badge color="orange" size="xs" variant="light">
-                    {indexingStatus.memories?.indexed || 0} / {indexingStatus.memories?.total || 0}
-                  </Badge>
-                </Group>
-                {indexingStatus.memories?.missing && indexingStatus.memories.missing > 0 && (
-                  <Text size="xs" c="yellow">{indexingStatus.memories.missing} memories pending indexing</Text>
-                )}
-              </Box>
-
-              {/* Total Pending */}
-              {indexingStatus.isProcessing && (
-                <Box mt="sm" p="xs" style={{ backgroundColor: '#252526', borderRadius: 4 }}>
-                  <Text size="xs" c="dimmed">
-                    Processing queue ({indexingStatus.queueLength || 0} items remaining)
-                  </Text>
-                </Box>
-              )}
-            </Stack>
-          </Paper>
-        )}
-      </Stack>
-
-      <Divider />
-
-      <Stack gap="sm">
-        <Title order={4}>Indexing Control</Title>
-        <Group align="flex-end">
-          <Box style={{ flex: 1 }}>
-            <Text size="xs" c="dimmed">
-              {indexingStatus?.isProcessing 
-                ? 'Indexing active - see details below'
-                : indexingStatus?.indexingEnabled 
-                  ? 'Indexing enabled'
-                  : 'Indexing disabled'}
-            </Text>
-          </Box>
-          <Group gap="xs">
-            {indexingStatus?.isProcessing ? (
-              <Button
-                size="xs"
-                variant="light"
-                color="red"
-                onClick={handleStopIndexing}
-                leftSection={<IconPlayerStop size={14} />}
-                loading={indexingLoading}
-              >
-                Stop
-              </Button>
-            ) : (
-              <Button
-                size="xs"
-                onClick={handleStartIndexing}
-                leftSection={<IconPlayerPlay size={14} />}
-                loading={indexingLoading}
-              >
-                Start
-              </Button>
-            )}
-          </Group>
-        </Group>
-        <Text size="xs" c="dimmed">
-          Start/pause indexing for all tables. Stopped indexing will resume from where it left off when started again.
+          Current: {indexingWorkers} worker{indexingWorkers !== 1 ? 's' : ''}
         </Text>
       </Stack>
 
@@ -707,65 +606,73 @@ function VectorSettingsSection() {
 
       <Stack gap="sm">
         <Title order={4}>Semantic Search</Title>
-        <Group align="flex-end">
-          <TextInput
-            placeholder="Search for something (e.g. 'how to handle errors' or 'VectorService init')..."
-            style={{ flex: 1 }}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.currentTarget.value)}
-            onKeyDown={(e) => e.key === 'Enter' && search()}
-          />
-          <Select
-            data={[
-              { value: 'all', label: 'All' },
-              { value: 'code', label: 'Code' },
-              { value: 'kb', label: 'Knowledge Base' },
-              { value: 'memories', label: 'Memories' },
-            ]}
-            value={searchTarget}
-            onChange={(val) => setSearchTarget(val as any)}
-            w={160}
-          />
-          <Button onClick={search} loading={searching}>Search</Button>
-        </Group>
+        {!indexingEnabled ? (
+          <Text size="sm" c="dimmed">
+            Semantic search is disabled because indexing is turned off. Enable indexing above to use semantic search.
+          </Text>
+        ) : (
+          <>
+            <Group align="flex-end">
+              <TextInput
+                placeholder="Search for something (e.g. 'how to handle errors' or 'VectorService init')..."
+                style={{ flex: 1 }}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.currentTarget.value)}
+                onKeyDown={(e) => e.key === 'Enter' && search()}
+              />
+              <Select
+                data={[
+                  { value: 'all', label: 'All' },
+                  { value: 'code', label: 'Code' },
+                  { value: 'kb', label: 'Knowledge Base' },
+                  { value: 'memories', label: 'Memories' },
+                ]}
+                value={searchTarget}
+                onChange={(val) => setSearchTarget(val as any)}
+                w={160}
+              />
+              <Button onClick={search} loading={searching}>Search</Button>
+            </Group>
 
-        {results.length > 0 && (
-          <ScrollArea h={400} offsetScrollbars>
-            <Stack gap="xs" p="xs" style={{ backgroundColor: '#1e1e1e', borderRadius: 4 }}>
-              {results.map((res, i) => (
-                <Box
-                  key={i}
-                  p="xs"
-                  style={{
-                    border: '1px solid #333',
-                    borderRadius: 4,
-                    backgroundColor: '#252526'
-                  }}
-                >
-                  <Group justify="space-between" mb={4}>
-                    <Group gap="xs">
-                      <Badge size="xs" color={res.type === 'code' ? 'blue' : (res.type === 'kb' ? 'green' : 'gray')}>{res.type}</Badge>
-                      <Text size="xs" fw={700} c="dimmed">Similarity: {Math.max(0, res.score * 100).toFixed(1)}%</Text>
-                    </Group>
-                    <Text size="xs" c="dimmed" truncate style={{ maxWidth: 300 }}>{res.filePath || 'N/A'}</Text>
-                  </Group>
-                  <Text size="sm" fw={600} mb={4}>{res.symbolName || res.articleTitle || 'Snippet'}</Text>
-                  <Box
-                    p="xs"
-                    style={{
-                      backgroundColor: '#1a1a1a',
-                      borderRadius: 4,
-                      borderLeft: '2px solid #3e3e42'
-                    }}
-                  >
-                    <Text size="xs" style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }} lineClamp={6}>
-                      {res.text}
-                    </Text>
-                  </Box>
-                </Box>
-              ))}
-            </Stack>
-          </ScrollArea>
+            {results.length > 0 && (
+              <ScrollArea h={400} offsetScrollbars>
+                <Stack gap="xs" p="xs" style={{ backgroundColor: '#1e1e1e', borderRadius: 4 }}>
+                  {results.map((res, i) => (
+                    <Box
+                      key={i}
+                      p="xs"
+                      style={{
+                        border: '1px solid #333',
+                        borderRadius: 4,
+                        backgroundColor: '#252526'
+                      }}
+                    >
+                      <Group justify="space-between" mb={4}>
+                        <Group gap="xs">
+                          <Badge size="xs" color={res.type === 'code' ? 'blue' : (res.type === 'kb' ? 'green' : 'gray')}>{res.type}</Badge>
+                          <Text size="xs" fw={700} c="dimmed">Similarity: {Math.max(0, res.score * 100).toFixed(1)}%</Text>
+                        </Group>
+                        <Text size="xs" c="dimmed" truncate style={{ maxWidth: 300 }}>{res.filePath || 'N/A'}</Text>
+                      </Group>
+                      <Text size="sm" fw={600} mb={4}>{res.symbolName || res.articleTitle || 'Snippet'}</Text>
+                      <Box
+                        p="xs"
+                        style={{
+                          backgroundColor: '#1a1a1a',
+                          borderRadius: 4,
+                          borderLeft: '2px solid #3e3e42'
+                        }}
+                      >
+                        <Text size="xs" style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }} lineClamp={6}>
+                          {res.text}
+                        </Text>
+                      </Box>
+                    </Box>
+                  ))}
+                </Stack>
+              </ScrollArea>
+            )}
+          </>
         )}
       </Stack>
     </Stack>

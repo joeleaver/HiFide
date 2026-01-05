@@ -45,8 +45,11 @@ interface VectorStore {
   results: VectorSearchResult[]
   searchQuery: string
   searchTarget: 'all' | 'code' | 'kb'
+  _initialized: boolean
+  _unsubscribe: (() => void) | null
 
   // Actions
+  init: () => void
   fetchState: () => Promise<void>
   subscribe: () => () => void
   setSearchQuery: (query: string) => void
@@ -63,6 +66,17 @@ export const useVectorStore = create<VectorStore>((set, get) => ({
   results: [],
   searchQuery: '',
   searchTarget: 'all',
+  _initialized: false,
+  _unsubscribe: null,
+
+  init: () => {
+    const { _initialized, fetchState, subscribe } = get()
+    if (_initialized) return
+    set({ _initialized: true })
+    fetchState()
+    const unsub = subscribe()
+    set({ _unsubscribe: unsub })
+  },
 
   setSearchQuery: (query) => set({ searchQuery: query }),
   setSearchTarget: (target) => set({ searchTarget: target }),

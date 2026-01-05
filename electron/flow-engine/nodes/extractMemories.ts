@@ -25,11 +25,12 @@ export const metadata = {
 type ExtractMemoriesItem = {
   type: 'decision' | 'constraint' | 'preference' | 'fact' | 'warning' | 'workflow'
   text: string
-  tags: string[]
-  importance: 0.25 | 0.5 | 0.75 | 1
+  tags: string  // Comma-separated string to avoid deeply nested schemas (Gemini limitation)
+  importance: 1 | 2 | 3 | 4  // 1=minor, 2=useful, 3=important, 4=critical (integers for Gemini compatibility)
 }
 
-type ExtractMemoriesResponse = { items: ExtractMemoriesItem[] }
+// Response is a flat array to avoid nested schemas (Gemini limitation with items.items)
+type ExtractMemoriesResponse = ExtractMemoriesItem[]
 
 const SYSTEM_INSTRUCTION = `You are a “Workspace Memory Extractor”. Your job is to produce candidate long-term workspace memories from the provided conversation excerpt.
 
@@ -38,12 +39,12 @@ You must follow these rules:
 1) Output format (hard requirement)
 - Output ONLY valid JSON.
 - Do NOT include markdown, explanations, or extra keys.
-- Your output must match exactly this shape:
+- Your output must match exactly this shape (a JSON array):
 
-{ "items": [ { "type": "decision|constraint|preference|fact|warning|workflow", "text": "string", "tags": ["string"], "importance": 0.25 } ] }
+[ { "type": "decision|constraint|preference|fact|warning|workflow", "text": "string", "tags": "comma,separated,tags", "importance": 1 } ]
 
-If there are no high-quality memories, output:
-{ "items": [] }
+If there are no high-quality memories, output an empty array:
+[]
 
 2) What counts as a memory (include only durable info)
 Only include an item if it is likely to remain true and useful in this workspace for days/weeks and will help future tasks.
@@ -78,11 +79,11 @@ When in doubt, omit it.
 6) Tags
 - Provide 1–5 lowercase tags.
 
-7) Importance (choose one)
-- 0.25 minor convenience
-- 0.5 useful default / common preference
-- 0.75 important decision/constraint
-- 1.0 critical constraint/security/irreversible decision
+7) Importance (choose one integer)
+- 1 minor convenience
+- 2 useful default / common preference
+- 3 important decision/constraint
+- 4 critical constraint/security/irreversible decision
 
 8) Scope
 Assume all memories are workspace-scoped and user-visible.`
@@ -110,29 +111,26 @@ export const extractMemoriesNode: NodeFunction = async (flow, context, dataIn, i
   // IMPORTANT: Do not mutate the flow context (system instructions, provider/model, etc.).
   // This node must be isolated aside from writing to the memories store.
   {
+    // Simplified schema to avoid Gemini's JSON Schema limitations
+    // - Root is an array (not wrapped in { items: [...] })
+    // - Tags are a comma-separated string (not an array)
+    // - No additionalProperties (Gemini doesn't support it)
+    // - Importance uses integer 1-4 instead of decimal enum (Gemini limitations)
     const responseSchema = {
       name: 'workspace_memory_extraction',
       strict: true,
       schema: {
-        type: 'object',
-        properties: {
-          items: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                type: { type: 'string', enum: ['decision', 'constraint', 'preference', 'fact', 'warning', 'workflow'] },
-                text: { type: 'string' },
-                tags: { type: 'array', items: { type: 'string' } },
-                importance: { type: 'number', enum: [0.25, 0.5, 0.75, 1] },
-              },
-              required: ['type', 'text', 'tags', 'importance'],
-              additionalProperties: false,
-            },
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            type: { type: 'string', enum: ['decision', 'constraint', 'preference', 'fact', 'warning', 'workflow'] },
+            text: { type: 'string' },
+            tags: { type: 'string' },
+            importance: { type: 'integer', enum: [1, 2, 3, 4] },
           },
+          required: ['type', 'text', 'tags', 'importance'],
         },
-        required: ['items'],
-        additionalProperties: false,
       },
     }
 
@@ -157,11 +155,24 @@ export const extractMemoriesNode: NodeFunction = async (flow, context, dataIn, i
       return { context: flow.context.get(), data: dataIn, status: 'error' as const, error: `extractMemories: invalid JSON response: ${llmResult.text}` }
     }
 
-    const items = Array.isArray(parsed.items) ? parsed.items : []
+    // Response is now a flat array (not wrapped in { items: [...] })
+    const items = Array.isArray(parsed) ? parsed : []
+
+    // Convert integer importance (1-4) back to decimal (0.25-1.0)
+    const importanceMap: Record<number, number> = { 1: 0.25, 2: 0.5, 3: 0.75, 4: 1 }
+
     const result = await applyMemoryCandidates(
       items
         .filter((it) => enabledTypes[it.type] !== false)
-        .map((it) => ({ type: it.type, text: it.text, tags: it.tags, importance: it.importance })),
+        .map((it) => ({
+          type: it.type,
+          text: it.text,
+          // Parse comma-separated tags string into array
+          tags: typeof it.tags === 'string'
+            ? it.tags.split(',').map(t => t.trim()).filter(Boolean)
+            : (Array.isArray(it.tags) ? it.tags : []),
+          importance: importanceMap[it.importance] ?? 0.5
+        })),
       { workspaceId: flow.workspaceId }
     )
 

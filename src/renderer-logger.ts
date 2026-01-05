@@ -2,7 +2,8 @@ import log from 'electron-log/renderer.js'
 
 
 const envAny = ((import.meta as any)?.env || {}) as any
-const level = (envAny.VITE_HIFIDE_LOG_LEVEL || envAny.VITE_LOG_LEVEL || (envAny.DEV ? 'debug' : 'info')) as
+// Default to 'info' even in development to reduce noise; use VITE_HIFIDE_LOG_LEVEL=debug to enable verbose logging
+const level = (envAny.VITE_HIFIDE_LOG_LEVEL || envAny.VITE_LOG_LEVEL || 'info') as
   | 'silly'
   | 'verbose'
   | 'debug'

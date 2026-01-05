@@ -34,7 +34,6 @@ export async function getSessionsDir(workspaceRoot?: string): Promise<string> {
 export async function saveSessionToDisk(session: Session, workspaceRoot?: string): Promise<void> {
   const sessionsDir = await getSessionsDir(workspaceRoot)
   const filePath = path.join(sessionsDir, `${session.id}.json`)
-  console.log('[saveSessionToDisk] Saving to:', filePath)
 
   // Atomic write: write to temp file with unique suffix, then rename
   // Use timestamp + random to ensure uniqueness and prevent race conditions

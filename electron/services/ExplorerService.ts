@@ -40,17 +40,14 @@ interface ExplorerState {
 
 const DEFAULT_ENCODING: Encoding = 'utf-8'
 
+/**
+ * Explorer watcher ignore list - for PERFORMANCE only, not content filtering.
+ * These are directories with many files that would overwhelm the file watcher.
+ * The UI can still display these directories, we just don't watch for changes inside them.
+ */
 const WATCHER_IGNORE_SEGMENTS = new Set([
-  'node_modules',
-  '.git',
-  '.turbo',
-  '.next',
-  '.cache',
-  '.hifide-private',
-  'dist',
-  'build',
-  'coverage',
-  'out',
+  'node_modules',  // Often 100k+ files
+  '.git',          // Git internals, many small objects
 ])
 
 const WATCHER_EVENT_MAP: Record<string, ExplorerFsEvent['kind']> = {

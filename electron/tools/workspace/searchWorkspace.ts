@@ -4,13 +4,62 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { discoverWorkspaceFiles } from '../../utils/fileDiscovery'
 import { resolveWithinWorkspace } from '../utils'
-import { getVectorService } from '../../services/index.js'
+import { getVectorService, getIndexOrchestratorService } from '../../services/index.js'
 import { resolveWorkspaceRoot } from '../../utils/workspace.js'
 
 /**
- * Simplified workspace search tool powered entirely by ripgrep.
- * Returns simple file paths and line numbers without handles, expand, or jump functions.
+ * Intelligent workspace search tool that adapts based on indexing status.
+ * - If indexing disabled: grep/tokenized search only
+ * - If indexing <50%: combines grep + semantic search
+ * - If indexing >=50%: prioritizes semantic search
  */
+
+interface IndexingStatus {
+  enabled: boolean
+  percentComplete: number
+  isProcessing: boolean
+}
+
+/**
+ * Get current indexing status from the orchestrator
+ */
+function getIndexingStatus(): IndexingStatus {
+  try {
+    const orchestrator = getIndexOrchestratorService()
+    if (!orchestrator) {
+      return { enabled: false, percentComplete: 0, isProcessing: false }
+    }
+
+    const state = orchestrator.getState()
+    const enabled = state.indexingEnabled ?? false
+    const total = state.code?.total || 0
+    const indexed = state.code?.indexed || 0
+    const percentComplete = total > 0 ? Math.round((indexed / total) * 100) : 0
+    const isProcessing = state.status === 'indexing'
+
+    return { enabled, percentComplete, isProcessing }
+  } catch {
+    return { enabled: false, percentComplete: 0, isProcessing: false }
+  }
+}
+
+/**
+ * Generate dynamic tool description based on indexing status
+ */
+function getToolDescription(): string {
+  const status = getIndexingStatus()
+
+  if (!status.enabled) {
+    return 'Workspace search using ripgrep for literal/regex queries, with file-path token search and tokenized content search fallbacks. Semantic search is currently disabled (indexing is off).'
+  }
+
+  if (status.percentComplete < 50) {
+    const pct = status.percentComplete
+    return `Workspace search combining ripgrep and semantic search (index ${pct}% complete). Uses both grep patterns and vector similarity to find relevant code. Results are merged from both methods for best coverage.`
+  }
+
+  return `Workspace search with semantic search enabled (index ${status.percentComplete}% complete). Prioritizes semantic/vector similarity search for natural language queries, with grep fallback for exact patterns.`
+}
 
 export interface SearchWorkspaceParams {
   query: string
@@ -390,31 +439,34 @@ async function runPathSearch({
 
 export const searchWorkspaceTool: AgentTool = {
   name: 'workspaceSearch',
-  description: 'Multi-stage workspace search. Runs ripgrep for literal/regex queries, then falls back to file-path token search and case-insensitive tokenized content search—returning ranked file paths, line numbers, and metadata about how each match was found.',
+  // Dynamic description based on indexing status
+  get description() {
+    return getToolDescription()
+  },
   parameters: {
     type: 'object',
     properties: {
-      query: { 
-        type: 'string', 
-        description: 'Search pattern (literal text or regex). Examples: "function handleClick", "class.*extends", "TODO:"' 
+      query: {
+        type: 'string',
+        description: 'Search pattern (literal text, regex, or natural language query). Examples: "function handleClick", "class.*extends", "how are users authenticated"'
       },
       filters: {
         type: 'object',
         properties: {
-          pathsInclude: { 
-            type: 'array', 
+          pathsInclude: {
+            type: 'array',
             items: { type: 'string' },
             description: 'Glob patterns to include (e.g., ["src/**/*.ts", "electron/**/*.ts"])'
           },
-          pathsExclude: { 
-            type: 'array', 
+          pathsExclude: {
+            type: 'array',
             items: { type: 'string' },
             description: 'Glob patterns to exclude (e.g., ["**/*.test.ts", "dist/**"])'
           },
-          maxResults: { 
-            type: 'integer', 
+          maxResults: {
+            type: 'integer',
             minimum: 1,
-            description: 'Maximum number of results to return (default: 50)'
+            description: 'Maximum number of results to return (default: 10)'
           }
         },
         additionalProperties: false
@@ -426,15 +478,15 @@ export const searchWorkspaceTool: AgentTool = {
 
   run: async (args: SearchWorkspaceParams, meta?: any): Promise<any> => {
     const t0 = Date.now()
-    
+
     if (!args.query || !args.query.trim()) {
       return { ok: false, error: 'query is required' }
     }
 
     const query = args.query.trim()
-    const maxResults = args.filters?.maxResults ?? 50
-    const include = args.filters?.pathsInclude && args.filters.pathsInclude.length 
-      ? args.filters.pathsInclude 
+    const maxResults = args.filters?.maxResults ?? 10
+    const include = args.filters?.pathsInclude && args.filters.pathsInclude.length
+      ? args.filters.pathsInclude
       : ['**/*']
     const exclude = [
       ...(args.filters?.pathsExclude || []),
@@ -449,68 +501,161 @@ export const searchWorkspaceTool: AgentTool = {
       '.git/**'
     ]
 
-    // Use grep tool with ripgrep backend
-    const grepResult: any = await grepTool.run({
-      pattern: query,
-      files: include,
-      options: {
-        exclude,
-        maxResults,
-        lineNumbers: true,
-        ignoreCase: false,
-        literal: false // Allow regex by default
-      }
-    }, meta)
+    // Get indexing status to determine search strategy
+    const indexingStatus = getIndexingStatus()
+    const { enabled: indexingEnabled, percentComplete } = indexingStatus
 
-    if (!grepResult?.ok) {
-      return { ok: false, error: grepResult?.error || 'Search failed' }
+    // Helper to run grep search
+    const runGrepSearch = async () => {
+      const grepResult: any = await grepTool.run({
+        pattern: query,
+        files: include,
+        options: {
+          exclude,
+          maxResults,
+          lineNumbers: true,
+          ignoreCase: false,
+          literal: false
+        }
+      }, meta)
+
+      if (!grepResult?.ok) return null
+      return mapMatches(grepResult.data?.matches || [])
     }
 
-    const results = mapMatches(grepResult.data?.matches || [])
-    if (results.length > 0) {
-      const filesMatched = new Set(results.map((r) => r.path)).size
-      const summary = `Found ${results.length} match${results.length === 1 ? '' : 'es'} in ${filesMatched} file(s)`
-      return {
-        ok: true,
-        data: {
-          results,
-          count: results.length,
-          summary,
-          meta: {
-            elapsedMs: Date.now() - t0,
-            filesMatched,
-            truncated: grepResult.data?.summary?.truncated || false,
-            mode: 'pattern'
+    // STRATEGY 1: Indexing disabled - grep only, no semantic search
+    if (!indexingEnabled) {
+      const grepResults = await runGrepSearch()
+
+      if (grepResults && grepResults.length > 0) {
+        const filesMatched = new Set(grepResults.map((r) => r.path)).size
+        return {
+          ok: true,
+          data: {
+            results: grepResults.slice(0, maxResults),
+            count: Math.min(grepResults.length, maxResults),
+            summary: `Found ${grepResults.length} match(es) in ${filesMatched} file(s) [grep only - indexing disabled]`,
+            meta: {
+              elapsedMs: Date.now() - t0,
+              filesMatched,
+              truncated: grepResults.length > maxResults,
+              mode: 'pattern',
+              indexingStatus: 'disabled'
+            }
+          }
+        }
+      }
+
+      // Fall through to tokenized/path search below
+    }
+
+    // STRATEGY 2: Indexing < 50% - combine grep + semantic for best coverage
+    if (indexingEnabled && percentComplete < 50) {
+      // Run both searches in parallel
+      const [grepResults, semanticResults] = await Promise.all([
+        runGrepSearch(),
+        runSemanticSearch({ query, maxResults, meta })
+      ])
+
+      // Merge and dedupe results (prefer semantic matches for same file/line)
+      const seenKeys = new Set<string>()
+      const merged: SearchWorkspaceResult[] = []
+
+      // Add semantic results first (higher quality when available)
+      if (semanticResults?.results) {
+        for (const r of semanticResults.results) {
+          const key = `${r.path}:${r.lineNumber}`
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key)
+            merged.push(r)
+          }
+        }
+      }
+
+      // Add grep results that weren't already found
+      if (grepResults) {
+        for (const r of grepResults) {
+          const key = `${r.path}:${r.lineNumber}`
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key)
+            merged.push(r)
+          }
+        }
+      }
+
+      if (merged.length > 0) {
+        const limited = merged.slice(0, maxResults)
+        const filesMatched = new Set(limited.map((r) => r.path)).size
+        const modes = []
+        if (semanticResults?.results?.length) modes.push('semantic')
+        if (grepResults?.length) modes.push('grep')
+
+        return {
+          ok: true,
+          data: {
+            results: limited,
+            count: limited.length,
+            summary: `Found ${merged.length} match(es) in ${filesMatched} file(s) [combined: ${modes.join('+')}] (index ${percentComplete}% complete)`,
+            meta: {
+              elapsedMs: Date.now() - t0,
+              filesMatched,
+              truncated: merged.length > maxResults,
+              mode: 'combined',
+              indexingStatus: `${percentComplete}%`
+            }
           }
         }
       }
     }
 
-    // 2. Semantic search
-    const semanticSearch = await runSemanticSearch({
-      query,
-      maxResults,
-      meta
-    })
+    // STRATEGY 3: Indexing >= 50% - prioritize semantic search
+    if (indexingEnabled && percentComplete >= 50) {
+      const semanticResults = await runSemanticSearch({ query, maxResults, meta })
 
-    if (semanticSearch && semanticSearch.results.length > 0) {
-      const elapsedMs = Date.now() - t0
-      return {
-        ok: true,
-        data: {
-          results: semanticSearch.results,
-          count: semanticSearch.results.length,
-          summary: semanticSearch.summary,
-          meta: {
-            elapsedMs,
-            filesMatched: semanticSearch.filesMatched,
-            truncated: false,
-            mode: 'semantic'
+      if (semanticResults && semanticResults.results.length > 0) {
+        const limited = semanticResults.results.slice(0, maxResults)
+        const filesMatched = new Set(limited.map((r) => r.path)).size
+        return {
+          ok: true,
+          data: {
+            results: limited,
+            count: limited.length,
+            summary: `${semanticResults.summary} (index ${percentComplete}% complete)`,
+            meta: {
+              elapsedMs: Date.now() - t0,
+              filesMatched,
+              truncated: semanticResults.results.length > maxResults,
+              mode: 'semantic',
+              indexingStatus: `${percentComplete}%`
+            }
+          }
+        }
+      }
+
+      // Fallback to grep if semantic returned nothing
+      const grepResults = await runGrepSearch()
+      if (grepResults && grepResults.length > 0) {
+        const limited = grepResults.slice(0, maxResults)
+        const filesMatched = new Set(limited.map((r) => r.path)).size
+        return {
+          ok: true,
+          data: {
+            results: limited,
+            count: limited.length,
+            summary: `Found ${grepResults.length} match(es) via grep fallback (semantic found no matches)`,
+            meta: {
+              elapsedMs: Date.now() - t0,
+              filesMatched,
+              truncated: grepResults.length > maxResults,
+              mode: 'pattern-fallback',
+              indexingStatus: `${percentComplete}%`
+            }
           }
         }
       }
     }
 
+    // FALLBACK: Tokenized and path search for all strategies
     const tokens = tokenizeQuery(query)
 
     const pathSearch = await runPathSearch({

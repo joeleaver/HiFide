@@ -7,11 +7,13 @@ import type { LevelOption, LogMessage } from 'electron-log'
 log.initialize()
 
 // Configure levels (env override supported)
-const rawLevel = (process.env.HIFIDE_LOG_LEVEL || (process.env.NODE_ENV === 'development' ? 'debug' : 'info'))
+// Default to 'info' even in development to reduce noise; use HIFIDE_LOG_LEVEL=debug to enable verbose logging
+const rawLevel = (process.env.HIFIDE_LOG_LEVEL || 'info')
 const allowedLevels = ['error','warn','info','verbose','debug','silly'] as const
 const level = (allowedLevels.includes(rawLevel as any) ? (rawLevel as LevelOption) : 'info') as LevelOption
 
 log.transports.file.level = level
+log.transports.console.level = level
 
 // Rotate at ~10MB; keep 7 files
 ;(log.transports.file as any).maxSize = 10 * 1024 * 1024
@@ -78,17 +80,10 @@ log.hooks.push((message: LogMessage) => {
 // Capture unhandled errors without user dialogs
 ;(log as any).catchErrors?.({ showDialog: false })
 
-// Patch console.* to also write to file
+// Patch console.* to route through electron-log (which handles both file and console output)
 let patched = false
 if (!patched) {
   patched = true
-  const orig = {
-    log: console.log.bind(console),
-    info: console.info.bind(console),
-    warn: console.warn.bind(console),
-    error: console.error.bind(console),
-    debug: console.debug ? console.debug.bind(console) : console.log.bind(console),
-  }
   const map: Record<string, keyof typeof log> = {
     log: 'info',
     info: 'info',
@@ -100,9 +95,6 @@ if (!patched) {
     ;(console as any)[fn] = (...args: any[]) => {
       try {
         ;(log as any)[map[fn]]?.(...args)
-      } catch {}
-      try {
-        ;(orig as any)[fn](...args)
       } catch {}
     }
   })

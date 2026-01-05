@@ -208,21 +208,35 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
      */
     async checkMissingItems(rootPath: string): Promise<void> {
         if (!rootPath) return;
-        
+
         console.log('[IndexOrchestrator] Checking for missing items...');
         const vectorService = getVectorService();
-        
+
         // Check code files
+        // Note: codeIndexed contains RELATIVE paths with forward slashes (e.g., "src/foo.ts")
+        // codeDiscovered contains ABSOLUTE paths (e.g., "C:\Users\...\src\foo.ts")
+        // We need to convert discovered paths to relative paths for comparison
         const codeIndexed = await vectorService.getIndexedFilePaths('code');
         const codeDiscovered = await this.discoverWorkspaceFiles(rootPath);
-        const codeMissing = codeDiscovered.filter(path => !codeIndexed.has(path));
+
+        // Convert absolute discovered paths to relative paths with forward slashes for comparison
+        const toRelativePath = (absolutePath: string) => {
+            return path.relative(rootPath, absolutePath).replace(/\\/g, '/');
+        };
+
+        const codeMissing = codeDiscovered.filter(absolutePath => {
+            const relativePath = toRelativePath(absolutePath);
+            return !codeIndexed.has(relativePath);
+        });
         
         this.setState({
             code: {
                 total: codeDiscovered.length,
                 indexed: codeIndexed.size,
                 missing: codeMissing.length
-            }
+            },
+            // Also set totalFilesDiscovered for progress tracking
+            totalFilesDiscovered: codeDiscovered.length
         });
         
         // Check KB articles
@@ -251,6 +265,13 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
             }
         });
         
+        // Debug: log sample paths to verify path formats match
+        if (codeDiscovered.length > 0 && codeIndexed.size > 0) {
+            const sampleDiscovered = toRelativePath(codeDiscovered[0]);
+            const sampleIndexed = [...codeIndexed][0];
+            console.log(`[IndexOrchestrator] Path format check - discovered (converted): "${sampleDiscovered}", indexed: "${sampleIndexed}"`);
+        }
+
         console.log(`[IndexOrchestrator] Status check:`, {
             code: { total: codeDiscovered.length, indexed: codeIndexed.size, missing: codeMissing.length },
             kb: { total: kbDiscovered.length, indexed: kbIndexed.size, missing: kbMissing.length },
@@ -427,6 +448,15 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
     async stopAll() {
         return this.stop();
     }
+
+    /**
+     * Set whether indexing is enabled and emit status
+     */
+    setIndexingEnabled(enabled: boolean) {
+        console.log(`[IndexOrchestrator] Setting indexingEnabled to ${enabled}`);
+        this.setState({ indexingEnabled: enabled });
+        this.emitStatus();
+    }
     
     /**
      * Enhanced stop method for workspace switching
@@ -490,22 +520,23 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
     if (!rootPath && this.watcher.getState().watchedPath) {
       rootPath = this.watcher.getState().watchedPath || '';
     }
-    if (!rootPath) return; // Can't start without path
-    
-    console.log('[IndexOrchestrator] Running startup check...');
-    
-    // Check for missing items and update counts
-    await this.checkMissingItems(rootPath);
-    
-    // Check if indexing is enabled in settings
-    const indexingEnabled = this.state.indexingEnabled;
-    
-    if (!indexingEnabled) {
-      console.log('[IndexOrchestrator] Indexing is disabled in settings, skipping indexing');
+    if (!rootPath) {
+      console.log('[IndexOrchestrator] runStartupCheck: No root path available, skipping');
+      return;
+    }
+
+    console.log(`[IndexOrchestrator] Running startup check for ${rootPath}, indexingEnabled=${this.state.indexingEnabled}`);
+
+    // Check if indexing is enabled FIRST (before expensive checkMissingItems)
+    if (!this.state.indexingEnabled) {
+      console.log('[IndexOrchestrator] Indexing is disabled in settings, skipping startup check');
       this.setState({ status: 'idle' });
       this.emitStatus();
       return;
     }
+
+    // Check for missing items and update counts
+    await this.checkMissingItems(rootPath);
     
     // Queue and index missing items
     const totalMissing = this.state.code.missing + this.state.kb.missing + this.state.memories.missing;
@@ -517,13 +548,24 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
       if (this.state.code.missing > 0) {
         const { getVectorService } = await import('../index.js');
         const vectorService = getVectorService();
+        // Note: indexedFiles contains RELATIVE paths with forward slashes (e.g., "src/foo.ts")
+        // discoveredFiles contains ABSOLUTE paths (e.g., "C:\Users\...\src\foo.ts")
         const indexedFiles = await vectorService.getIndexedFilePaths('code');
         const discoveredFiles = await this.discoverWorkspaceFiles(rootPath);
-        const missingFiles = discoveredFiles.filter(filePath => !indexedFiles.has(filePath));
-        
+
+        // Convert absolute paths to relative paths for comparison
+        const toRelativePath = (absolutePath: string) => {
+            return path.relative(rootPath, absolutePath).replace(/\\/g, '/');
+        };
+
+        const missingFiles = discoveredFiles.filter(absolutePath => {
+            const relativePath = toRelativePath(absolutePath);
+            return !indexedFiles.has(relativePath);
+        });
+
         const events = missingFiles.map(filePath => ({
           type: 'add' as const,
-          path: filePath,
+          path: filePath,  // Keep absolute path for processing
           timestamp: Date.now()
         }));
         this.queue.push(events);
@@ -722,13 +764,24 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
                      }
 
                      console.log(`[IndexOrchestrator] Processed ${item.path}: ${result.chunks.length} chunks, ${totalUpserted} upserted`);
-                     
+
                      // Update progress after successfully processing a file
                      this.indexedCount++;
-                     if (this.state.totalFilesDiscovered > 0) {
-                         vectorService.updateIndexingStatus('code', this.indexedCount, this.state.totalFilesDiscovered);
-                         console.log(`[IndexOrchestrator] Progress: ${this.indexedCount}/${this.state.totalFilesDiscovered} files indexed`);
-                     }
+
+                     // Update the state counts to reflect progress
+                     const newCodeIndexed = this.state.code.indexed + 1;
+                     const newCodeMissing = Math.max(0, this.state.code.missing - 1);
+                     this.setState({
+                         code: {
+                             ...this.state.code,
+                             indexed: newCodeIndexed,
+                             missing: newCodeMissing
+                         }
+                     });
+
+                     // Update VectorService with the same counts for consistency
+                     vectorService.updateIndexingStatus('code', newCodeIndexed, this.state.code.total);
+                     console.log(`[IndexOrchestrator] Progress: ${newCodeIndexed}/${this.state.code.total} files indexed (${newCodeMissing} remaining)`);
                      
                      // Periodically clear embedding cache to prevent memory buildup
                      // Clear every 50 files processed

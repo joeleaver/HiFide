@@ -1,0 +1,3 @@
+Line 1: Initial State
+Line 2: Modified via Search/Replace
+Line 3: Constant

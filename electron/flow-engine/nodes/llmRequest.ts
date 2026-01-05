@@ -50,17 +50,20 @@ export const llmRequestNode: NodeFunction = async (flow, context, dataIn, inputs
       if (memories.length) {
         const base = manager.get()?.systemInstructions || ''
 
+        // Sort by importance descending (most important first)
+        const sorted = [...memories].sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0))
+
         const lines: string[] = []
         if (base && String(base).trim()) lines.push(String(base).trim())
         lines.push('')
         lines.push('## Relevant workspace memories')
-        for (const m of memories) {
-          const tags = Array.isArray(m.tags) && m.tags.length ? ` [tags: ${m.tags.join(', ')}]` : ''
-          lines.push(`- (${m.type}, importance=${m.importance}) ${m.text}${tags} [memory:${m.id}]`)
+        for (const m of sorted) {
+          lines.push(`- ${m.text}`)
         }
 
-        injectedSystemInstructions = lines.filter(Boolean).join('\\n')
+        injectedSystemInstructions = lines.filter(Boolean).join('\n')
 
+        flow.log.info(`llmRequest: injected ${memories.length} memories into system instructions`)
         // Mark used (best-effort)
         await markMemoriesUsed(memories.map((m) => m.id), { workspaceId: flow.workspaceId })
       }

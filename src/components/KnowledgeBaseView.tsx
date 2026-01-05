@@ -324,6 +324,9 @@ export default function KnowledgeBaseView() {
         <div style={{ padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Title order={4} c="#eee">{selected ? 'Edit Item' : 'New Item'}</Title>
           <Group>
+            <Button size="xs" variant="light" color="gray" onClick={() => setSelectedId(null)}>
+              New Item
+            </Button>
             {selected && (
               <Button color="red" size="xs" onClick={async () => {
                 const client = getBackendClient(); if (!client || !selected) return

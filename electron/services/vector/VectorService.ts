@@ -3,6 +3,8 @@ import path from 'path';
 import fs from 'fs/promises';
 import { getEmbeddingService, getWorkspaceService } from '../index.js';
 
+const DEBUG_VECTOR = process.env.HF_VECTOR_DEBUG === '1';
+
 export type TableType = 'code' | 'kb' | 'memories';
 
 export interface VectorItem {
@@ -81,7 +83,7 @@ export class VectorService {
       throw new Error('No active workspace found for VectorService initialization.');
     }
 
-    console.log(`[VectorService] DB missing, attempting late init with: ${activePath}`);
+    if (DEBUG_VECTOR) console.log(`[VectorService] DB missing, attempting late init with: ${activePath}`);
     await this.init(activePath);
   }
 
@@ -92,13 +94,13 @@ export class VectorService {
       try {
         const dbPath = path.join(workspaceRoot, '.hifide-private', 'vectors');
         await fs.mkdir(dbPath, { recursive: true });
-        
-        console.log(`[VectorService] Connecting to LanceDB at: ${dbPath}`);
+
+        if (DEBUG_VECTOR) console.log(`[VectorService] Connecting to LanceDB at: ${dbPath}`);
         this.db = await lancedb.connect(dbPath);
-        
+
         this.state.initialized = true;
         await this.refreshTableStats();
-        console.log('[VectorService] Database initialized successfully.');
+        if (DEBUG_VECTOR) console.log('[VectorService] Database initialized successfully.');
       } catch (error) {
         console.error('[VectorService] Initialization failed:', error);
         this.db = null;
@@ -126,19 +128,19 @@ export class VectorService {
       try {
         const tableNames = await this.db.tableNames();
         if (tableNames.includes(config.tableName)) {
-          console.log(`[VectorService] Opening existing table ${config.tableName} (expected dim: ${expectedDim})`);
+          if (DEBUG_VECTOR) console.log(`[VectorService] Opening existing table ${config.tableName} (expected dim: ${expectedDim})`);
           const table = await this.db.openTable(config.tableName);
           const schema = await table.schema();
-          
+
           const fields = (schema as any).fields || [];
           const vectorField = fields.find((f: any) => f.name === 'vector');
-          
+
           if (vectorField && vectorField.type && vectorField.type.listSize !== expectedDim) {
             console.warn(`[VectorService] Dimension mismatch in ${config.tableName}. Recreating.`);
             await this.db.dropTable(config.tableName);
             return await this.createInitialTable(type, expectedDim);
           }
-          
+
           return table;
         }
         return await this.createInitialTable(type, expectedDim);
@@ -153,7 +155,7 @@ export class VectorService {
 
   private async createInitialTable(type: TableType, dim: number): Promise<lancedb.Table> {
     const config = this.tableConfigs[type];
-    console.log(`[VectorService] Creating new table: ${config.tableName}`);
+    if (DEBUG_VECTOR) console.log(`[VectorService] Creating new table: ${config.tableName}`);
     const seedVector = new Array(dim).fill(0);
     const seed = {
       id: `seed-${type}`,
@@ -190,7 +192,7 @@ export class VectorService {
       const queryVector = await embeddingService.embed(query);
       const safeLimit = Math.max(1, Math.floor(Number(limit) || 10));
 
-      console.log(`[VectorService] Executing search for: "${query}" (limit: ${safeLimit}, tables: ${typesToSearch.join(', ')})`);
+      if (DEBUG_VECTOR) console.log(`[VectorService] Executing search for: "${query}" (limit: ${safeLimit}, tables: ${typesToSearch.join(', ')})`);
 
       const searchPromises = typesToSearch.map(async (t) => {
         try {
@@ -198,9 +200,9 @@ export class VectorService {
           // Re-embed specifically for this table's model if queryVector dimension doesn't match
           const tableDim = await getEmbeddingService().getDimension(t);
           let tableQueryVector = queryVector;
-          
+
           if (queryVector.length !== tableDim) {
-            console.log(`[VectorService] Search vector dim mismatch for ${t} (${queryVector.length} vs ${tableDim}). Re-embedding.`);
+            if (DEBUG_VECTOR) console.log(`[VectorService] Search vector dim mismatch for ${t} (${queryVector.length} vs ${tableDim}). Re-embedding.`);
             tableQueryVector = await getEmbeddingService().embed(query, t);
           }
 
@@ -262,7 +264,7 @@ export class VectorService {
         .sort((a, b) => b.score - a.score)
         .slice(0, safeLimit);
 
-      if (processed.length > 0) {
+      if (process.env.HF_FLOW_DEBUG === '1' && processed.length > 0) {
         console.log('[VectorService] First processed result keys:', Object.keys(processed[0]));
         console.log('[VectorService] First processed result snippet:', String(processed[0].text || '').substring(0, 50));
       }
@@ -316,19 +318,19 @@ export class VectorService {
   }
 
   async deferIndexCreation(type: TableType): Promise<void> {
-    console.log(`[VectorService] Deferring index creation for table ${type}`);
+    if (DEBUG_VECTOR) console.log(`[VectorService] Deferring index creation for table ${type}`);
     this.deferIndexing.add(type);
   }
 
   async finishDeferredIndexing(type: TableType): Promise<void> {
-    console.log(`[VectorService] Finishing deferred indexing for table ${type}. Creating ANN index...`);
+    if (DEBUG_VECTOR) console.log(`[VectorService] Finishing deferred indexing for table ${type}. Creating ANN index...`);
     this.deferIndexing.delete(type);
-    
+
     const table = await this.getOrCreateTable(type);
     const rowCount = await (table as any).countRows();
-    
+
     if (rowCount >= 256) {
-      console.log(`[VectorService] Creating ANN index for ${type} (rows: ${rowCount})...`);
+      if (DEBUG_VECTOR) console.log(`[VectorService] Creating ANN index for ${type} (rows: ${rowCount})...`);
       try {
         await (table as any).createIndex('vector', {
           config: lancedb.Index.ivfPq({
@@ -336,12 +338,12 @@ export class VectorService {
             numSubVectors: 2,
           }),
         });
-        console.log(`[VectorService] Successfully created ANN index for ${type}`);
+        if (DEBUG_VECTOR) console.log(`[VectorService] Successfully created ANN index for ${type}`);
       } catch (err: any) {
         console.warn(`[VectorService] Failed to create index for ${type}:`, err.message);
       }
     } else {
-      console.log(`[VectorService] Skipping index for ${type}: only ${rowCount} rows (requires 256).`);
+      if (DEBUG_VECTOR) console.log(`[VectorService] Skipping index for ${type}: only ${rowCount} rows (requires 256).`);
     }
   }
 
@@ -367,15 +369,12 @@ export class VectorService {
     const table = await this.getOrCreateTable(type);
     const embeddingService = getEmbeddingService();
 
-    // DEBUG: Logging the number of items and start of embedding
-    console.log(`[VectorService] Upserting ${items.length} items to table ${type}. Starting embedding...`);
-
     // DEBUG: To isolate if embedding is the cause of the crash, we can flip this to true
     const DISABLE_EMBEDDING_DEBUG = false;
 
     let data;
     if (DISABLE_EMBEDDING_DEBUG) {
-      console.log(`[VectorService] DEBUG: Embedding is DISABLED. Using zero-vectors.`);
+      if (DEBUG_VECTOR) console.log(`[VectorService] DEBUG: Embedding is DISABLED. Using zero-vectors.`);
       const expectedDim = await embeddingService.getDimension(type);
       const zeroVector = new Array(expectedDim).fill(0);
       data = items.map((item) => ({
@@ -392,7 +391,7 @@ export class VectorService {
           throw err;
         }
       }));
-      
+
       data = items.map((item, i) => ({
         ...item,
         vector: vectors[i],
@@ -400,7 +399,6 @@ export class VectorService {
       }));
     }
 
-    console.log(`[VectorService] Adding data to LanceDB table ${type}...`);
     await table.add(data as any);
 
     // Only create index if we're not in deferred indexing mode
@@ -409,7 +407,7 @@ export class VectorService {
       // Check row count before creating index (LanceDB PQ requires >= 256 rows)
       const rowCount = await (table as any).countRows();
       if (rowCount >= 256) {
-        console.log(`[VectorService] Creating ANN index for ${type} (rows: ${rowCount})...`);
+        if (DEBUG_VECTOR) console.log(`[VectorService] Creating ANN index for ${type} (rows: ${rowCount})...`);
         try {
           await (table as any).createIndex('vector', {
             config: lancedb.Index.ivfPq({
@@ -420,12 +418,9 @@ export class VectorService {
         } catch (err: any) {
           console.warn(`[VectorService] Failed to create index for ${type}:`, err.message);
         }
-      } else {
-        console.log(`[VectorService] Skipping index for ${type}: only ${rowCount} rows (requires 256).`);
       }
     }
 
-    console.log(`[VectorService] Successfully added ${data.length} items to ${type}.`);
     await this.refreshTableStats();
   }
 
@@ -518,7 +513,7 @@ export class VectorService {
         }
       }
       
-      console.log(`[VectorService] Found ${filePaths.size} unique indexed files in ${type} table`);
+      if (DEBUG_VECTOR) console.log(`[VectorService] Found ${filePaths.size} unique indexed files in ${type} table`);
       return filePaths;
     } catch (error) {
       console.error(`[VectorService] Failed to get indexed file paths from ${type}:`, error);

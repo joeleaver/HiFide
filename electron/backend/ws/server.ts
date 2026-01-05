@@ -169,26 +169,28 @@ export function startWsBackend(): Promise<WsBootstrap> {
         }
       })
 
-      // Helper to add RPC methods with logging
+      // Helper to add RPC methods with logging (only when HF_RPC_DEBUG is enabled)
       const addMethod = (method: string, handler: (params: any) => any) => {
         rpcServer.addMethod(method, async (params: any) => {
-          try {
-            if (
-              method.startsWith('handshake.') ||
-              method.startsWith('workspace.') ||
-              method.startsWith('session.') ||
-              method.startsWith('flow.')
-            ) {
-              const meta = activeConnections.get(connection)
-              const workspaceService = getWorkspaceService()
-              const workspace = meta?.windowId ? workspaceService.getWorkspaceForWindow(meta.windowId) : null
-              console.log('[ws-main] rpc', method, {
-                windowId: meta?.windowId || null,
-                workspaceId: workspace || null,
-                params: params ?? null,
-              })
-            }
-          } catch { }
+          if (process.env.HF_RPC_DEBUG === '1') {
+            try {
+              if (
+                method.startsWith('handshake.') ||
+                method.startsWith('workspace.') ||
+                method.startsWith('session.') ||
+                method.startsWith('flow.')
+              ) {
+                const meta = activeConnections.get(connection)
+                const workspaceService = getWorkspaceService()
+                const workspace = meta?.windowId ? workspaceService.getWorkspaceForWindow(meta.windowId) : null
+                console.log('[ws-main] rpc', method, {
+                  windowId: meta?.windowId || null,
+                  workspaceId: workspace || null,
+                  params: params ?? null,
+                })
+              }
+            } catch { }
+          }
           return handler(params)
         })
       }

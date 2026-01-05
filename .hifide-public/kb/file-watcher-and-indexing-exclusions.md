@@ -2,54 +2,56 @@
 id: cd784144-e772-4a9b-bd1a-8cca377bed43
 title: File Watcher and Indexing Exclusions
 tags: [watcher, fs, indexing, exclusions, architecture]
-files: [electron/services/ExplorerService.ts, electron/workers/watcher/watcher-worker.js, electron/services/vector/IndexOrchestratorService.ts]
+files: [electron/utils/fileDiscovery.ts, electron/services/ExplorerService.ts, electron/workers/indexing/v2-watcher-worker.ts]
 createdAt: 2026-01-04T05:31:30.118Z
-updatedAt: 2026-01-04T05:31:30.118Z
+updatedAt: 2026-01-05T00:00:00.000Z
 ---
 
 # File System Watcher & Indexer Exclusions
 
-The system implements two primary file system watchers that monitor workspace changes:
-1.  **Explorer Watcher**: Handles UI updates for the file explorer (`ExplorerService.ts`).
-2.  **Indexing Watcher**: Handles background semantic indexing (`watcher-worker.js` via `IndexOrchestratorService.ts`).
+## Two Different Use Cases
 
-## Core Exclusions (Hardcoded)
-The following directories are ignored by default across both services:
-- `node_modules`
-- `.git`
-- `.hifide-private` (Configuration & sensitive data)
-- Build artifacts: `dist`, `build`, `out`, `.turbo`, `.next`
-- Tool outputs: `coverage`, `.cache`
+### 1. Content Discovery (for indexing, search, workspace map)
+Uses `electron/utils/fileDiscovery.ts` as single source of truth:
+- `discoverWorkspaceFiles()` - respects `.gitignore`, excludes binary files
+- `v2-watcher-worker.ts` - mirrors patterns for file change watching
+- `workspace/map.ts` - uses `discoverWorkspaceFiles()` directly
 
-## Watcher-Specific Logic
+### 2. UI File Explorer (ExplorerService)
+Minimal ignore list for **performance only** (avoiding file descriptor exhaustion):
+- `node_modules` - often 100k+ files
+- `.git` - many small objects
 
-### Explorer Watcher
-- Uses `WATCHER_IGNORE_SEGMENTS` in `ExplorerService.ts`.
-- Evaluates per path segment (e.g., if any part of the path is `node_modules`, it is ignored).
-- **Does not currently respect `.gitignore` or `.hifide-public`**.
+The Explorer watcher does NOT filter content - users should see all files in UI.
 
-### Indexing Watcher
-- Runs in a worker thread (`electron/workers/watcher/watcher-worker.js`).
-- Explicitly ignores `**/.hifide-public/**` to prevent search results from leaking internal database/KB content, except where handled by specific indexers (e.g., KB indexer specifically watches its own subdirectory).
-- **Does not currently respect `.gitignore`**.
+## Canonical Exclude Patterns
 
-## Known Issues & Improvements
-1.  **GITIGNORE Support**: Neither watcher currently parses `.gitignore`. This can lead to excessive events in large repositories with many build artifacts not covered by the hardcoded segments.
-2.  **Consistency**: `ExplorerService` and `watcher-worker` use slightly different exclusion lists and logic. These should be unified.
-3.  **Recursive Search**: Searching for "watcher" reveals fragmented implementations in `GitStatusService` and `ExplorerService`.
-
-## Current Exclusion Reference (ExplorerService)
 ```typescript
-const WATCHER_IGNORE_SEGMENTS = new Set([
-  'node_modules',
-  '.git',
-  '.turbo',
-  '.next',
-  '.cache',
-  '.hifide-private',
-  'dist',
-  'build',
-  'coverage',
-  'out',
-])
+// electron/utils/fileDiscovery.ts
+export const DEFAULT_EXCLUDE_PATTERNS = [
+  // Build outputs
+  'node_modules/**', 'dist/**', 'dist-electron/**', 'release/**',
+  'build/**', 'out/**', 'coverage/**', 'target/**',
+
+  // Framework-specific
+  '.next/**', '.turbo/**', '.cache/**', '.pnpm-store/**', 'vendor/**',
+
+  // Python
+  '.venv/**', 'venv/**', '__pycache__/**', '*.pyc',
+
+  // Version control & IDE
+  '.git/**', '.idea/**', '.vscode/**',
+
+  // HiFide internal
+  '.hifide-public/**', '.hifide-private/**',
+
+  // Binary archives
+  '*.zip', '*.tar', '*.tar.gz', etc.
+]
 ```
+
+## Features
+
+- **`.gitignore` Support**: `discoverWorkspaceFiles()` and `v2-watcher-worker` respect `.gitignore`
+- **Binary Detection**: `discoverWorkspaceFiles()` filters binary files by content inspection
+- **Consistent Indexing**: All LLM-facing tools use same discovery logic

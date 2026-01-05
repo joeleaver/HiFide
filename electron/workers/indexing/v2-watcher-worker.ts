@@ -18,20 +18,58 @@ let eventBuffer: Array<{ type: string; path: string }> = [];
 let debounceTimer: NodeJS.Timeout | null = null;
 let gitignore: ReturnType<typeof ignore> | null = null;
 
-// Built-in patterns to always ignore
+/**
+ * Canonical exclude patterns for workspace file discovery
+ * IMPORTANT: Keep in sync with electron/utils/fileDiscovery.ts DEFAULT_EXCLUDE_PATTERNS
+ * These are in chokidar's glob format (e.g. double-star/pattern/double-star)
+ */
 const IGNORED_PATTERNS = [
+    // Build outputs
     '**/node_modules/**',
-    '**/.git/**',
-    '**/.hifide/**',
-    '**/.hifide-public/**',
-    '**/.hifide-private/**',
     '**/dist/**',
+    '**/dist-electron/**',
+    '**/release/**',
     '**/build/**',
     '**/out/**',
-    '**/.next/**',
-    '**/.cache/**',
+    '**/coverage/**',
     '**/target/**',
-    '**/vendor/**'
+
+    // Framework-specific
+    '**/.next/**',
+    '**/.turbo/**',
+    '**/.cache/**',
+    '**/.pnpm-store/**',
+    '**/vendor/**',
+
+    // Python
+    '**/.venv/**',
+    '**/venv/**',
+    '**/__pycache__/**',
+    '**/*.pyc',
+
+    // Version control
+    '**/.git/**',
+
+    // IDE
+    '**/.idea/**',
+    '**/.vscode/**',
+
+    // HiFide internal
+    '**/.hifide-public/**',
+    '**/.hifide_public/**',
+    '**/.hifide-private/**',
+    '**/.hifide_private/**',
+
+    // Common binary archives
+    '**/*.zip',
+    '**/*.tar',
+    '**/*.tar.gz',
+    '**/*.tgz',
+    '**/*.rar',
+    '**/*.7z',
+    '**/*.bz2',
+    '**/*.gz',
+    '**/*.xz',
 ];
 
 function flushEvents() {
@@ -141,7 +179,7 @@ const watchOptions = {
         return false;
     },
     persistent: true,
-    ignoreInitial: false,
+    ignoreInitial: true, // Don't emit 'add' events for existing files on startup - runStartupCheck handles initial indexing
     awaitWriteFinish: {
         stabilityThreshold: 1000,
         pollInterval: 100

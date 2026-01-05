@@ -270,7 +270,11 @@ class LLMService {
 	  // Normal case: format full conversation history for the provider.
 	  // At this point the user message has already been appended to
 	  // the canonical context via ContextManager.
-	  const latestContext = workingContext
+	  // If request.systemInstructions is provided (e.g., with injected memories),
+	  // use it for this request without mutating the canonical context.
+	  const latestContext: MainFlowContext = request.systemInstructions
+	    ? { ...workingContext, systemInstructions: request.systemInstructions }
+	    : workingContext
 	  if (effectiveProvider === 'anthropic') {
 	    formattedMessages = formatMessagesForAnthropic(latestContext)
 	  } else if (effectiveProvider === 'gemini') {
@@ -404,13 +408,15 @@ class LLMService {
           : undefined
       )
 
-      try {
-        console.log('[LLMService] provider usage event', {
-          provider: effectiveProvider,
-          model: effectiveModel,
-          usage,
-        })
-      } catch {}
+      if (DEBUG_USAGE) {
+        try {
+          console.log('[LLMService] provider usage event', {
+            provider: effectiveProvider,
+            model: effectiveModel,
+            usage,
+          })
+        } catch {}
+      }
     }
 
     const approxInputTokens = estimateInputTokens(effectiveProvider, formattedMessages)
@@ -499,45 +505,10 @@ class LLMService {
               if (process.env.HF_FLOW_DEBUG === '1') {
                 try { console.log(`[llm-service] onChunk node=${flowAPI.nodeId} provider=${effectiveProvider}/${effectiveModel} len=${text?.length}`) } catch { }
               }
-
-              // Robust de-dup/overlap handling for providers that resend accumulated text
-              // Cases handled:
-              // 1) Exact duplicate of full response → drop
-              // 2) Aggregated resend (chunk starts with previous response) → emit only the delta
-              // 3) Overlap resend (chunk repeats trailing suffix of response) → emit only the non-overlapping suffix
-
-              // 1) Exact duplicate of full response
-              if (text === response) return
-
-              // 2) Aggregated resend
-              if (response && text.startsWith(response)) {
-                const delta = text.slice(response.length)
-                if (!delta) return
-                response = text
-                eventHandlers.onChunk(delta)
-                return
-              }
-
-              // 3) Overlap resend
-              let delta = text
-              if (response) {
-                if (response.endsWith(text)) {
-                  // Entire chunk already present at the end → drop
-                  return
-                }
-                // Find the longest suffix of response that is a prefix of text
-                const maxOverlap = Math.min(response.length, text.length)
-                for (let k = maxOverlap; k > 0; k--) {
-                  if (response.slice(response.length - k) === text.slice(0, k)) {
-                    delta = text.slice(k)
-                    break
-                  }
-                }
-              }
-
-              if (!delta) return
-              response += delta
-              eventHandlers.onChunk(delta)
+              // Trust providers to send clean deltas - no deduplication here.
+              // If a provider sends duplicates, fix it at the provider level.
+              response += text
+              eventHandlers.onChunk(text)
             },
             onDone: () => {
 
@@ -626,23 +597,25 @@ class LLMService {
                 onStep: onStepWrapped
               }
 
-              try {
-                const { apiKey: _apiKey, ...loggableConfig } = agentStreamConfig as any
-                const logPayload = {
-                  provider: effectiveProvider,
-                  model: effectiveModel,
-                  config: loggableConfig
-                }
-                console.log(
-                  '[llm-service] agentStream config',
-                  inspect(logPayload, {
-                    depth: null,
-                    maxArrayLength: null,
-                    breakLength: 120,
-                    colors: false
-                  })
-                )
-              } catch {}
+              if (process.env.HF_FLOW_DEBUG === '1') {
+                try {
+                  const { apiKey: _apiKey, ...loggableConfig } = agentStreamConfig as any
+                  const logPayload = {
+                    provider: effectiveProvider,
+                    model: effectiveModel,
+                    config: loggableConfig
+                  }
+                  console.log(
+                    '[llm-service] agentStream config',
+                    inspect(logPayload, {
+                      depth: null,
+                      maxArrayLength: null,
+                      breakLength: 120,
+                      colors: false
+                    })
+                  )
+                } catch {}
+              }
 
               streamHandle = await providerAdapter.agentStream(agentStreamConfig)
 

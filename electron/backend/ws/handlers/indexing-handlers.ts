@@ -72,4 +72,44 @@ export function createIndexingHandlers(
     await orchestrator.indexAll(params?.force || false, workspaceId)
     return { ok: true }
   })
+
+  // Set indexing enabled state and persist to settings
+  addMethod('indexing.setEnabled', async (params: { enabled: boolean }) => {
+    const orchestrator = getIndexOrchestratorService()
+    const { getSettingsService } = await import('../../../services/index.js')
+    const workspaceId = await getConnectionWorkspaceId(connection)
+
+    if (!workspaceId) {
+      return { ok: false, error: 'no-active-workspace' }
+    }
+
+    const enabled = params?.enabled ?? true
+
+    // Update orchestrator state
+    orchestrator.setIndexingEnabled(enabled)
+
+    // Persist to settings
+    const settingsService = getSettingsService()
+    settingsService.setVectorSettings({ indexingEnabled: enabled })
+
+    if (enabled) {
+      // If enabling, run startup check to index any missing files
+      console.log('[indexing-handlers] Indexing enabled, running startup check for workspace:', workspaceId)
+      // Use await to ensure startup check completes before returning
+      try {
+        await orchestrator.runStartupCheck(workspaceId)
+        console.log('[indexing-handlers] Startup check completed after enabling')
+      } catch (err) {
+        console.error('[indexing-handlers] Failed to run startup check after enabling:', err)
+      }
+    } else {
+      // If disabling, stop any active indexing
+      const { getKBIndexerService, getMemoriesIndexerService } = await import('../../../services/index.js')
+      await orchestrator.stop()
+      await getKBIndexerService().stop()
+      await getMemoriesIndexerService().stop()
+    }
+
+    return { ok: true, enabled }
+  })
 }

@@ -1,65 +1,18 @@
-import { tool, fromChatMessages, toChatMessage } from '@openrouter/sdk'
-import { z } from 'zod'
+/**
+ * OpenRouter provider using the native OpenAI SDK.
+ *
+ * OpenRouter is fully compatible with the OpenAI Chat Completions API,
+ * so we use the official OpenAI SDK with a custom baseURL.
+ * This is the approach OpenRouter officially recommends.
+ */
+import OpenAI from 'openai'
 import { UiPayloadCache } from '../core/uiPayloadCache'
 import { AGENT_MAX_STEPS } from '../../src/store/utils/constants'
 
 import type { ProviderAdapter, StreamHandle, AgentTool } from '../providers/provider'
+import type { ChatCompletionMessageParam, ChatCompletionTool, ChatCompletionChunk } from 'openai/resources/chat/completions'
 
-// Convert our JSON Schema-style AgentTool.parameters into a Zod schema.
-// OpenRouter's SDK expects Zod schemas for tool input, but our tools declare
-// parameters using JSON Schema. This helper does a best-effort conversion for
-// the simple schemas we use (objects, strings, numbers, booleans, arrays).
-function jsonSchemaToZod(schema: any): z.ZodTypeAny {
-  if (!schema || typeof schema !== 'object') return z.any()
-
-  const type = schema.type as string | undefined
-
-  // Object type (with nested properties)
-  if (type === 'object' || schema.properties) {
-    const properties = (schema.properties && typeof schema.properties === 'object')
-      ? (schema.properties as Record<string, any>)
-      : {}
-
-    const required = Array.isArray(schema.required) ? (schema.required as string[]) : []
-
-    const shape: Record<string, z.ZodTypeAny> = {}
-    for (const [key, propSchema] of Object.entries(properties)) {
-      const base = jsonSchemaToZod(propSchema)
-      shape[key] = required.includes(key) ? base : base.optional()
-    }
-
-    let obj = z.object(shape)
-
-    // Honor additionalProperties === false by making the object strict.
-    if (schema.additionalProperties === false) {
-      obj = obj.strict()
-    }
-
-    return obj
-  }
-
-  // Primitive & array types
-  switch (type) {
-    case 'string': {
-      return z.string()
-    }
-    case 'number':
-    case 'integer': {
-      return z.number()
-    }
-    case 'boolean': {
-      return z.boolean()
-    }
-    case 'array': {
-      const itemSchema = jsonSchemaToZod(schema.items || {})
-      return z.array(itemSchema)
-    }
-    default: {
-      // Fallback for unsupported or missing type information
-      return z.any()
-    }
-  }
-}
+const DEBUG = true //= process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
 
 function sanitizeName(name: string): string {
   let safe = (name || 'tool').replace(/[^a-zA-Z0-9_-]/g, '_')
@@ -68,190 +21,117 @@ function sanitizeName(name: string): string {
 }
 
 /**
- * Build OpenRouter SDK tools from AgentTool array
- * Handles name sanitization and Zod schema validation
+ * Build OpenAI-format tools from AgentTool array
  */
-function buildOpenRouterTools(tools: AgentTool[] | undefined, meta?: { requestId?: string; [k: string]: any }) {
-  const sdkTools: any[] = []
+function buildOpenAITools(tools: AgentTool[] | undefined): {
+  openaiTools: ChatCompletionTool[]
+  nameMap: Map<string, string>
+  toolMap: Map<string, AgentTool>
+} {
+  const openaiTools: ChatCompletionTool[] = []
   const nameMap = new Map<string, string>() // safe -> original
+  const toolMap = new Map<string, AgentTool>() // safe -> tool
 
-	  for (const t of tools || []) {
-	    if (!t || !t.name || typeof t.run !== 'function') continue
+  for (const t of tools || []) {
+    if (!t || !t.name || typeof t.run !== 'function') continue
+    const safe = sanitizeName(t.name)
+    if (nameMap.has(safe) && nameMap.get(safe) !== t.name) {
+      if (DEBUG) console.warn('[openrouter] tool name collision', { safe, a: nameMap.get(safe), b: t.name })
+    }
+    nameMap.set(safe, t.name)
+    toolMap.set(safe, t)
 
-	    const safe = sanitizeName(t.name)
-	    
-	    // Detect and warn about name collisions
-	    if (nameMap.has(safe) && nameMap.get(safe) !== t.name) {
-	      const DEBUG = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
-	      if (DEBUG) {
-	        console.warn('[openrouter:sdk] tool name collision after sanitize', { safe, a: nameMap.get(safe), b: t.name })
-	      }
-	    }
-	    nameMap.set(safe, t.name)
-
-	    // Build input schema using tool's declared JSON Schema.
-	    // NOTE: OpenRouter's SDK expects a Zod schema here. Our AgentTool.parameters
-	    // are JSON Schema, so we convert them to Zod; on failure we fall back to z.any().
-	    const inputSchema = t.parameters && typeof t.parameters === 'object'
-	      ? jsonSchemaToZod(t.parameters)
-	      : z.any()
-
-    // Create tool with execute function that handles toModelResult pattern
-    const sdkTool = tool({
-      name: safe,
-      description: t.description || undefined,
-      inputSchema,
-      execute: async (input: any, context: any) => {
-        try {
-          // Execute the tool
-          const raw = await t.run(input, meta)
-
-          // Handle toModelResult pattern for reducing tokens
-          const toModel = (t as any).toModelResult
-          if (typeof toModel === 'function') {
-            const res = await toModel(raw)
-            if (res && (res as any).ui && (res as any).previewKey) {
-              UiPayloadCache.put((res as any).previewKey, (res as any).ui)
-            }
-            return (res as any)?.minimal ?? raw
-          }
-        } catch (err: any) {
-          // If toModelResult fails, return raw result
-          if (process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1') {
-            console.error('[openrouter:sdk] toModelResult error', err)
-          }
-          return raw
-        }
-
-        return raw
+    openaiTools.push({
+      type: 'function',
+      function: {
+        name: safe,
+        description: t.description || undefined,
+        parameters: t.parameters || { type: 'object', properties: {} }
       }
     })
-
-    sdkTools.push(sdkTool)
   }
 
-  return { tools: sdkTools, nameMap }
+  return { openaiTools, nameMap, toolMap }
 }
 
 /**
- * Convert our ChatMessage format to OpenRouter-compatible format
- * Handles multi-modal content (text + images)
+ * Convert our message format to OpenAI's ChatCompletionMessageParam.
+ * Consolidates consecutive assistant messages into single messages
+ * to maintain proper user/assistant alternation.
  */
-function convertMessagesToOpenRouter(messages?: any[]): any[] {
-  if (!messages) return []
+function toOpenAIMessages(
+  system: string | undefined,
+  messages: any[]
+): ChatCompletionMessageParam[] {
+  const result: ChatCompletionMessageParam[] = []
 
-  return messages.map((msg: any) => {
-    // Handle string content
-    if (typeof msg.content === 'string') {
-      return {
-        role: msg.role,
-        content: msg.content
-      }
-    }
+  if (system) {
+    result.push({ role: 'system', content: system })
+  }
 
-    // Handle multi-modal content (array of parts)
-    if (Array.isArray(msg.content)) {
-      const parts = msg.content.map((part: any) => {
-        // Text part
-        if (part.type === 'text') {
-          return { type: 'text', text: part.text }
+  for (const msg of messages || []) {
+    if (msg.role === 'user') {
+      result.push({ role: 'user', content: msg.content })
+    } else if (msg.role === 'assistant') {
+      // Check if last message is also assistant - if so, merge
+      const lastMsg = result[result.length - 1]
+      if (lastMsg && lastMsg.role === 'assistant') {
+        // Merge content
+        const existingContent = (lastMsg as any).content || ''
+        const newContent = msg.content || ''
+        if (existingContent && newContent) {
+          (lastMsg as any).content = existingContent + '\n' + newContent
+        } else if (newContent) {
+          (lastMsg as any).content = newContent
         }
-
-        // Image part - convert to image_url format for OpenRouter
-        if (part.type === 'image') {
-          return {
-            type: 'image_url',
-            image_url: {
-              url: `data:${part.mimeType};base64,${part.image}`
-            }
+        // Merge tool_calls
+        if (msg.tool_calls) {
+          if (!(lastMsg as any).tool_calls) {
+            (lastMsg as any).tool_calls = []
           }
+          (lastMsg as any).tool_calls.push(...msg.tool_calls)
         }
-
-        // Unknown part type
-        return { type: 'text', text: String(part.text || '') }
-      })
-
-      return {
-        role: msg.role,
-        content: parts
+        // Merge reasoning_details (for continuation)
+        if (Array.isArray(msg.reasoning_details)) {
+          if (!Array.isArray((lastMsg as any).reasoning_details)) {
+            (lastMsg as any).reasoning_details = []
+          }
+          (lastMsg as any).reasoning_details.push(...msg.reasoning_details)
+        }
+      } else {
+        // New assistant message
+        const assistantMsg: any = { role: 'assistant', content: msg.content || null }
+        if (msg.tool_calls) {
+          assistantMsg.tool_calls = msg.tool_calls
+        }
+        // Preserve reasoning_details for continuation
+        if (Array.isArray(msg.reasoning_details)) {
+          assistantMsg.reasoning_details = msg.reasoning_details
+        }
+        result.push(assistantMsg)
       }
+    } else if (msg.role === 'tool') {
+      result.push({
+        role: 'tool',
+        tool_call_id: msg.tool_call_id,
+        content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+      })
     }
+  }
 
-    // Fallback for unknown content type
-    return {
-      role: msg.role,
-      content: msg.content
-    }
-  })
+  return result
 }
 
-/**
- * Normalize token usage from OpenRouter response
- * Handles provider-specific field naming
- */
-function normalizeUsage(usage: any): {
-  inputTokens: number
-  outputTokens: number
-  totalTokens: number
-  cachedTokens: number
-  reasoningTokens?: number
-} {
-  const u = usage || {}
-
-  return {
-    inputTokens: Number(u.inputTokens ?? u.promptTokens ?? 0),
-    outputTokens: Number(u.outputTokens ?? u.completionTokens ?? 0),
-    totalTokens: Number(u.totalTokens ?? (Number(u.inputTokens ?? 0) + Number(u.outputTokens ?? 0))),
-    cachedTokens: Number(u.cachedInputTokens ?? u.cachedTokens ?? 0),
-    reasoningTokens: Number(u.reasoningTokens ?? 0)
-  }
-}
-
-/**
- * Detect if model supports extended thinking (reasoning)
- */
-function supportsReasoning(model: string): boolean {
-  // Claude 4.x, 3.7 Sonnet, 3.5 Sonnet
-  if (/claude-4/i.test(model) || /claude-3-7-sonnet/i.test(model) || /claude-3\.5/i.test(model)) {
-    return true
-  }
-  
-  // OpenAI o1/o3 series
-  if (/^o1-|^o3-/.test(model)) {
-    return true
-  }
-
-  // DeepSeek reasoning models via OpenRouter
-  if (/deepseek.*r1|reasoning/i.test(model)) {
-    return true
-  }
-
-  // Other models that explicitly advertise reasoning
-  if (/reasoning|thinking|extended/i.test(model)) {
-    return true
-  }
-
-  return false
-}
-
-/**
- * OpenRouter Provider using @openrouter/sdk
- * Implements ProviderAdapter with native OpenRouter SDK integration
- */
 export const OpenRouterProvider: ProviderAdapter = {
   id: 'openrouter',
 
-  async agentStream({ 
-    apiKey, 
-    model, 
-    system, 
-    messages, 
-    temperature, 
-    reasoningEffort,
-    includeThoughts,
-    thinkingBudget,
-    tools, 
-    responseSchema: _responseSchema,
+  async agentStream({
+    apiKey,
+    model,
+    system,
+    messages,
+    temperature,
+    tools,
     emit,
     onChunk: onTextChunk,
     onDone: onStreamDone,
@@ -263,257 +143,302 @@ export const OpenRouterProvider: ProviderAdapter = {
     onToolError,
     onStep
   }): Promise<StreamHandle> {
-    const { tools: sdkTools, nameMap } = buildOpenRouterTools(tools, toolMeta)
     const ac = new AbortController()
-    const DEBUG = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
+    const debugThis = DEBUG
 
-    try {
-      if (DEBUG) {
-        console.log('[openrouter:sdk] agentStream start', { 
-          model, 
-          msgs: messages?.length || 0, 
-          tools: sdkTools.length,
-          includeThoughts,
-          thinkingBudget,
-          reasoningEffort
-        })
+    // Create OpenAI client pointing to OpenRouter
+    const client = new OpenAI({
+      apiKey,
+      baseURL: 'https://openrouter.ai/api/v1',
+      defaultHeaders: {
+        'HTTP-Referer': 'https://hifide.app',
+        'X-Title': 'HiFide'
       }
+    })
 
-      // Initialize OpenRouter SDK
-      const { OpenRouter } = await import('@openrouter/sdk')
-      const openrouter = new OpenRouter({ apiKey })
+    const { openaiTools, nameMap, toolMap } = buildOpenAITools(tools)
+    const hasTools = openaiTools.length > 0
 
-      // Use SDK's fromChatMessages helper for proper conversation format
-      // This ensures proper message alternation and format compatibility
-      const input = messages && messages.length > 0 ? fromChatMessages(messages) : messages?.[0]?.content || ''
+    // Build initial messages
+    let conversationMessages = toOpenAIMessages(system, messages || [])
 
-      // Determine if tools should be enabled
-      const hasTools = sdkTools.length > 0
-      const toolChoice = hasTools ? 'auto' : 'none'
+    // Agentic loop - continue until no more tool calls
+    let stepCount = 0
+    let cancelled = false
 
-      // Enable reasoning for supported models
-      const shouldEnableReasoning = includeThoughts === true && supportsReasoning(model)
-      const inputConfig: any = {
-        model,
-        input,
-        instructions: system, // Pass system instructions via SDK's instructions parameter
-        tools: hasTools ? sdkTools : undefined,
-        toolChoice
-      }
+    // Accumulate across ALL steps for consolidated reporting
+    // This gives us user/assistant pairs instead of multiple assistant messages
+    let turnText = ''
+    let turnReasoning = ''
+    const turnToolCalls: Array<{ toolCallId: string; toolName: string; args: any }> = []
+    const turnToolResults: Array<{ toolCallId: string; toolName: string; result: any }> = []
 
-      // Add reasoning configuration for supported models
-      if (shouldEnableReasoning) {
-        // OpenAI o1/o3 models use reasoningEffort
-        if (/^o1-|^o3-/.test(model)) {
-          if (reasoningEffort && reasoningEffort !== 'medium') {
-            inputConfig.providerOptions = {
-              openai: {
-                reasoning_effort: reasoningEffort as 'low' | 'medium' | 'high'
-              }
-            }
-          } else if (reasoningEffort === 'medium') {
-            // Default for o1/o3 if not specified
-            inputConfig.providerOptions = {
-              openai: {
-                reasoning_effort: 'medium'
-              }
-            }
-          }
-        } 
-        // Anthropic Claude models use thinking budget
-        else if (/claude/i.test(model)) {
-          if (typeof thinkingBudget === 'number' && thinkingBudget > 0) {
-            inputConfig.providerOptions = {
-              anthropic: {
-                thinking: {
-                  type: 'enabled',
-                  budgetTokens: thinkingBudget
-                }
-              }
-            }
-          }
-        }
-        // DeepSeek/Fireworks reasoning via <think> tags
-        else if (/deepseek/i.test(model) || /reasoning/i.test(model)) {
-          // Reasoning is embedded in response via <think> tags
-          // No special config needed, SDK will extract automatically
-        }
-      }
-
-      if (DEBUG) {
-        console.log('[openrouter:sdk] callModel config', inputConfig)
-      }
-
-      // Call the model
-      const result = openrouter.callModel(inputConfig)
-
-      // === STREAM TEXT ===
-      for await (const delta of result.getTextStream()) {
-        if (delta) {
-          onTextChunk?.(delta)
-        }
-      }
-
-      // === STREAM REASONING ===
-      for await (const delta of result.getReasoningStream()) {
-        if (delta) {
-          // Emit reasoning via separate event, not onChunk
-          emit?.({ 
-            type: 'reasoning', 
-            provider: 'openrouter', 
-            model, 
-            reasoning: delta 
+    const runLoop = async () => {
+      try {
+        if (debugThis) {
+          console.log('[openrouter] starting loop', {
+            model,
+            initialMessages: conversationMessages.length,
+            tools: openaiTools.length,
+            firstMessage: JSON.stringify(conversationMessages[0]).slice(0, 200),
+            lastMessage: JSON.stringify(conversationMessages[conversationMessages.length - 1]).slice(0, 200)
           })
         }
-      }
 
-      // === STREAM TOOL CALLS ===
-      // Track which tool calls we've seen to avoid duplicates
-      const seenToolCallIds = new Set<string>()
+        while (stepCount < AGENT_MAX_STEPS && !cancelled) {
+          stepCount++
 
-      // Stream tool events using getToolStream
-      for await (const event of result.getToolStream()) {
-        if (DEBUG) {
-          console.log('[openrouter:sdk] tool event', event)
-        }
-
-        switch (event.type) {
-          case 'delta': {
-            // Argument delta (streaming tool arguments)
-            // This is handled by tool call completion
-            break
-          }
-
-          case 'preliminary_result': {
-            // Progress update from generator tools
-            // We could emit progress events here if desired
-            break
-          }
-
-          case 'call': {
-            // Tool call completed (with full arguments)
-            const callId = event.toolCallId || event.id || ''
-            if (!callId || seenToolCallIds.has(callId)) break
-
-            seenToolCallIds.add(callId)
-            const safeName = String(event.toolName || '')
-            const originalName = nameMap.get(safeName) || safeName
-
-            onToolStart?.({ 
-              callId, 
-              name: originalName, 
-              arguments: event.arguments 
+          if (debugThis) {
+            console.log(`[openrouter] step ${stepCount}`, {
+              model,
+              messages: conversationMessages.length,
+              tools: openaiTools.length
             })
-            break
           }
 
-          case 'result': {
-            // Tool execution result
-            const callId = event.toolCallId || ''
-            if (!callId) break
+          // Make streaming request
+          // Include reasoning: { enabled: true } for models that support extended thinking
+          const requestBody: any = {
+            model,
+            messages: conversationMessages,
+            tools: hasTools ? openaiTools : undefined,
+            tool_choice: hasTools ? 'auto' : undefined,
+            temperature: typeof temperature === 'number' ? temperature : undefined,
+            stream: true,
+            // OpenRouter extension for reasoning models
+            reasoning: { enabled: true }
+          }
+          const stream = await client.chat.completions.create(requestBody, { signal: ac.signal })
 
-            const safeName = String(event.toolName || '')
-            const originalName = nameMap.get(safeName) || safeName
+          // Accumulate response data for this step
+          let stepText = ''
+          let stepReasoning = ''
+          let reasoningDetails: any[] = []
+          const toolCalls: Map<number, { id: string; name: string; arguments: string; thoughtSignature?: string }> = new Map()
+          let finishReason: string | null = null
+          let usage: any = null
 
-            // Parse output if it's stringified JSON
-            let output: any = event.output
-            if (typeof output === 'string') {
-              try {
-                const trimmed = output.trim()
-                if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || 
-                    (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-                  output = JSON.parse(trimmed)
+          // Process stream - cast to AsyncIterable since TS loses type info due to `any` requestBody
+          for await (const chunk of stream as unknown as AsyncIterable<ChatCompletionChunk>) {
+            if (cancelled) break
+
+            const choice = chunk.choices?.[0]
+            if (!choice) continue
+
+            const delta = choice.delta as any
+
+            // Stream text in real-time
+            if (delta?.content) {
+              stepText += delta.content
+              onTextChunk?.(delta.content)
+            }
+
+            // Stream reasoning in real-time and accumulate
+            if (delta?.reasoning) {
+              stepReasoning += delta.reasoning
+              emit?.({ type: 'reasoning', provider: 'openrouter', model, reasoning: delta.reasoning })
+            }
+
+            // Accumulate reasoning_details for continuation
+            if (Array.isArray(delta?.reasoning_details)) {
+              reasoningDetails.push(...delta.reasoning_details)
+            }
+
+            // Accumulate tool calls (including thought signatures for Gemini 3)
+            if (delta?.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                const idx = tc.index ?? 0
+                if (!toolCalls.has(idx)) {
+                  toolCalls.set(idx, { id: '', name: '', arguments: '', thoughtSignature: undefined as string | undefined })
                 }
-              } catch (err: any) {
-                // Keep as string if parsing fails
+                const pending = toolCalls.get(idx)!
+                if (tc.id) pending.id = tc.id
+                if (tc.function?.name) pending.name = tc.function.name
+                if (tc.function?.arguments) pending.arguments += tc.function.arguments
+                // Capture thought signature for Gemini 3 (OpenAI compat format)
+                const sig = (tc as any)?.extra_content?.google?.thought_signature
+                if (sig) pending.thoughtSignature = sig
               }
             }
 
-            onToolEnd?.({ 
-              callId, 
-              name: originalName, 
-              result: output 
+            if (choice.finish_reason) {
+              finishReason = choice.finish_reason
+            }
+
+            if (chunk.usage) {
+              usage = chunk.usage
+            }
+          }
+
+          // Report usage
+          if (usage && onTokenUsage) {
+            onTokenUsage({
+              inputTokens: usage.prompt_tokens || 0,
+              outputTokens: usage.completion_tokens || 0,
+              totalTokens: usage.total_tokens || 0,
+              cachedTokens: usage.prompt_tokens_details?.cached_tokens || 0
             })
+          }
+
+          const toolCallsArray = Array.from(toolCalls.values()).filter(tc => tc.id && tc.name)
+
+          // Accumulate into turn-level data (for consolidated reporting)
+          if (stepText) {
+            turnText += (turnText ? '\n' : '') + stepText
+          }
+          if (stepReasoning) {
+            turnReasoning += (turnReasoning ? '\n' : '') + stepReasoning
+          }
+
+          if (debugThis) {
+            console.log(`[openrouter] step ${stepCount} complete`, {
+              finishReason,
+              textLength: stepText.length,
+              toolCalls: toolCallsArray.length,
+              hasReasoningDetails: reasoningDetails.length > 0
+            })
+          }
+
+          // If no tool calls, we're done
+          if (toolCallsArray.length === 0 || finishReason !== 'tool_calls') {
             break
           }
 
-          case 'error': {
-            // Tool execution error
-            const callId = event.toolCallId || ''
-            if (!callId) break
-
-            const safeName = String(event.toolName || '')
-            const originalName = nameMap.get(safeName) || safeName
-
-            const errorMessage = String(event.error?.message || event.error || 'tool error')
-            onToolError?.({ 
-              callId, 
-              name: originalName, 
-              error: errorMessage 
+          // Build assistant message for API conversation history
+          // Include thought signatures for Gemini 3 (required for tool calls)
+          const assistantMessage: any = {
+            role: 'assistant',
+            content: stepText || null,
+            tool_calls: toolCallsArray.map(tc => {
+              const toolCall: any = {
+                id: tc.id,
+                type: 'function',
+                function: { name: tc.name, arguments: tc.arguments }
+              }
+              // Gemini 3 thought signatures (only on first tool call for parallel, on each for sequential)
+              if (tc.thoughtSignature) {
+                toolCall.extra_content = {
+                  google: { thought_signature: tc.thoughtSignature }
+                }
+              }
+              return toolCall
             })
-            break
           }
-        }
-      }
+          // Preserve reasoning_details for continuation (per OpenRouter docs)
+          if (reasoningDetails.length > 0) {
+            assistantMessage.reasoning_details = reasoningDetails
+          }
+          conversationMessages.push(assistantMessage)
 
-      // === STEP COMPLETION (when using streaming) ===
-      // Use getResponse to get final usage and full response
-      const response = await result.getResponse()
+          // Execute each tool and add results
+          for (const tc of toolCallsArray) {
+            const originalName = nameMap.get(tc.name) || tc.name
+            const tool = toolMap.get(tc.name)
 
-      if (DEBUG) {
-        console.log('[openrouter:sdk] onStepFinish/finish', { 
-          usage: response.usage,
-          finishReason: response.finishReason
-        })
-      }
+            let args: any = {}
+            try {
+              args = tc.arguments ? JSON.parse(tc.arguments) : {}
+            } catch {}
 
-      // Emit step completion with all data
-      if (onStep) {
-        onStep({
-          text: response.text || '',
-          reasoning: response.reasoning || undefined,
-          toolCalls: response.toolCalls || [],
-          toolResults: response.toolResults || []
-        })
-      }
+            // Add to turn-level tool calls
+            turnToolCalls.push({
+              toolCallId: tc.id,
+              toolName: originalName,
+              args
+            })
 
-      // Report token usage
-      if (response.usage && onTokenUsage) {
-        const usage = normalizeUsage(response.usage)
-        onTokenUsage(usage)
-      }
+            // Notify tool start
+            onToolStart?.({ callId: tc.id, name: originalName, arguments: args })
 
-      // Emit completion
-      onStreamDone?.()
-
-      return {
-        cancel: () => {
-          try {
-            ac.abort()
-            if (DEBUG) {
-              console.log('[openrouter:sdk] cancelled')
+            if (!tool) {
+              const errorResult = { error: `Tool not found: ${originalName}` }
+              onToolError?.({ callId: tc.id, name: originalName, error: 'Tool not found' })
+              turnToolResults.push({ toolCallId: tc.id, toolName: originalName, result: errorResult })
+              conversationMessages.push({
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: JSON.stringify(errorResult)
+              })
+              continue
             }
-          } catch (err: any) {
-            if (DEBUG) {
-              console.error('[openrouter:sdk] cancel error', err)
+
+            try {
+              // Execute tool
+              const raw = await tool.run(args, toolMeta)
+
+              // Handle toModelResult pattern
+              let toolResult = raw
+              try {
+                const toModel = (tool as any).toModelResult
+                if (typeof toModel === 'function') {
+                  const res = await toModel(raw)
+                  if (res?.ui && res?.previewKey) {
+                    UiPayloadCache.put(res.previewKey, res.ui)
+                  }
+                  toolResult = res?.minimal ?? raw
+                }
+              } catch {}
+
+              // Notify tool end
+              onToolEnd?.({ callId: tc.id, name: originalName, result: toolResult })
+
+              // Add to turn-level tool results
+              turnToolResults.push({ toolCallId: tc.id, toolName: originalName, result: toolResult })
+
+              // Add tool result to API conversation
+              const resultStr = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult)
+              conversationMessages.push({
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: resultStr
+              })
+
+            } catch (err: any) {
+              const errorMessage = String(err?.message || err || 'Tool execution error')
+              const errorResult = { error: errorMessage }
+              onToolError?.({ callId: tc.id, name: originalName, error: errorMessage })
+              turnToolResults.push({ toolCallId: tc.id, toolName: originalName, result: errorResult })
+              conversationMessages.push({
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: JSON.stringify(errorResult)
+              })
             }
           }
+
+          // Continue loop for next step
         }
-      }
 
-    } catch (err: any) {
-      const errorMessage = String(err?.message || err || 'OpenRouter provider error')
-      
-      if (DEBUG) {
-        console.error('[openrouter:sdk] adapter exception', err)
-      }
-
-      onStreamError?.(errorMessage)
-
-      return {
-        cancel: () => {
-          // Nothing to cancel if setup failed
+        // Report ONE consolidated step for the entire turn (user/assistant pair)
+        if (onStep) {
+          onStep({
+            text: turnText,
+            reasoning: turnReasoning || undefined,
+            toolCalls: turnToolCalls,
+            toolResults: turnToolResults
+          })
         }
+
+        // Done
+        onStreamDone?.()
+
+      } catch (err: any) {
+        if (err.name === 'AbortError' || cancelled) {
+          onStreamDone?.()
+          return
+        }
+        console.error('[openrouter] error:', err)
+        onStreamError?.(String(err?.message || err))
+      }
+    }
+
+    // Start the loop
+    runLoop()
+
+    return {
+      cancel: () => {
+        cancelled = true
+        try { ac.abort() } catch {}
       }
     }
   }

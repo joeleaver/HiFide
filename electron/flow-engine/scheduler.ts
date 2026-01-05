@@ -34,6 +34,7 @@ import { FlowNodeRunner } from './flow-node-runner'
 import { isCancellationError } from './cancellation'
 import { getFlowContextsService, getFlowGraphService, getSessionService } from '../services/index.js'
 
+const DEBUG = process.env.HF_SCHEDULER_DEBUG === '1'
 
 export class FlowScheduler {
   // Graph structure
@@ -116,7 +117,7 @@ export class FlowScheduler {
         systemInstructions: args.initialContext.systemInstructions,
         messageHistory: safeHistory
       }
-      console.log('[Scheduler] Initialized from session context:', {
+      if (DEBUG) console.log('[Scheduler] Initialized from session context:', {
         contextId: initialContext.contextId,
         provider: initialContext.provider,
         model: initialContext.model,
@@ -132,7 +133,7 @@ export class FlowScheduler {
         messageHistory: [],
         systemInstructions: undefined
       }
-      console.warn('[Scheduler] No session context provided, using defaults')
+      if (DEBUG) console.warn('[Scheduler] No session context provided, using defaults')
     }
 
     this.contextLifecycle = new ContextLifecycleManager({
@@ -221,13 +222,6 @@ export class FlowScheduler {
         })
         return
       }
-
-      console.log('[Scheduler.flushToSession] Flushing context to session', {
-        sessionId: this.sessionId,
-        messageCount: mainContext.messageHistory.length,
-        provider: mainContext.provider,
-        model: mainContext.model
-      })
 
       if (workspaceId && this.sessionId) {
         sessionService.updateContextFor({
@@ -347,7 +341,7 @@ export class FlowScheduler {
     callerId: string | null,
     isPull: boolean = false
   ): Promise<NodeOutput> {
-    console.log(`[Scheduler] ${nodeId} - Executing node`, {
+    if (DEBUG) console.log(`[Scheduler] ${nodeId} - Executing node`, {
       pushedInputs: Object.keys(pushedInputs),
       callerId,
       isPull
@@ -371,14 +365,16 @@ export class FlowScheduler {
     const pushEdges = outgoingEdges.filter(edge => edge.sourceOutput !== 'tools')
 
     if (pushEdges.length === 0) {
-      console.log(`[Scheduler] ${nodeId} - No push edges, nothing to propagate`)
+      if (DEBUG) console.log(`[Scheduler] ${nodeId} - No push edges, nothing to propagate`)
       return
     }
 
-    try {
-      const dbgEdges = pushEdges.map(e => ({ target: e.target, sourceOutput: e.sourceOutput, targetInput: e.targetInput }))
-      console.log(`[Scheduler] ${nodeId} - pushEdges:`, dbgEdges)
-    } catch {}
+    if (DEBUG) {
+      try {
+        const dbgEdges = pushEdges.map(e => ({ target: e.target, sourceOutput: e.sourceOutput, targetInput: e.targetInput }))
+        console.log(`[Scheduler] ${nodeId} - pushEdges:`, dbgEdges)
+      } catch {}
+    }
 
     const successorIds = Array.from(new Set(pushEdges.map(e => e.target)))
     successorIds.sort((a, b) => {
@@ -415,14 +411,16 @@ export class FlowScheduler {
         pushedData.context = (result as any).context || this.mainBinding.ref.current
       }
 
-      try {
-        console.log(`[Scheduler] ${nodeId} - collect for ${successorId}:`, considered)
-      } catch {}
+      if (DEBUG) {
+        try {
+          console.log(`[Scheduler] ${nodeId} - collect for ${successorId}:`, considered)
+        } catch {}
+      }
 
       if (pushedData.context && (pushedData.context.contextType === 'main' || !pushedData.context.contextType)) {
         const mainContext = this.mainContext
         if (mainContext.provider !== pushedData.context.provider || mainContext.model !== pushedData.context.model) {
-          console.log(`[Scheduler] ${nodeId} - Updating pushed context provider/model from mainContext:`, {
+          if (DEBUG) console.log(`[Scheduler] ${nodeId} - Updating pushed context provider/model from mainContext:`, {
             old: { provider: pushedData.context.provider, model: pushedData.context.model },
             new: { provider: mainContext.provider, model: mainContext.model }
           })
@@ -435,26 +433,30 @@ export class FlowScheduler {
       }
 
       if (Object.keys(pushedData).length === 0) {
-        console.log(`[Scheduler] ${nodeId} - NOT pushing to ${successorId} (no data)`)
+        if (DEBUG) console.log(`[Scheduler] ${nodeId} - NOT pushing to ${successorId} (no data)`)
         continue
       }
 
       const inFlight = this.ioCoordinator.getInFlightExecution(successorId)
       if (inFlight) {
         const merged = this.ioCoordinator.mergeIntoLiveInputs(successorId, pushedData)
-        const ctxDbg = merged.context ? { provider: merged.context.provider, model: merged.context.model, contextType: merged.context.contextType } : undefined
-        console.log(`[Scheduler] ${nodeId} - Fed in-flight ${successorId} with:`, Object.keys(pushedData), ctxDbg)
+        if (DEBUG) {
+          const ctxDbg = merged.context ? { provider: merged.context.provider, model: merged.context.model, contextType: merged.context.contextType } : undefined
+          console.log(`[Scheduler] ${nodeId} - Fed in-flight ${successorId} with:`, Object.keys(pushedData), ctxDbg)
+        }
         continue
       }
 
       const queueResult = this.ioCoordinator.queuePendingInputs(successorId, pushedData)
       if (queueResult.type === 'ready') {
         const initial = { ...queueResult.initialInputs }
-        const ctxDbg = initial.context ? { provider: initial.context.provider, model: initial.context.model, contextType: initial.context.contextType } : undefined
-        console.log(`[Scheduler] ${nodeId} - Starting ${successorId} with initial pushed:`, Object.keys(initial), ctxDbg)
+        if (DEBUG) {
+          const ctxDbg = initial.context ? { provider: initial.context.provider, model: initial.context.model, contextType: initial.context.contextType } : undefined
+          console.log(`[Scheduler] ${nodeId} - Starting ${successorId} with initial pushed:`, Object.keys(initial), ctxDbg)
+        }
         runnables.push({ id: successorId, promise: this.executeNode(successorId, initial, nodeId) })
       } else {
-        console.log(`[Scheduler] ${nodeId} - Deferring start of ${successorId}; waiting for:`, queueResult.waitingFor)
+        if (DEBUG) console.log(`[Scheduler] ${nodeId} - Deferring start of ${successorId}; waiting for:`, queueResult.waitingFor)
       }
     }
 
@@ -462,7 +464,7 @@ export class FlowScheduler {
       const succId = runnable.id
       runnable.promise = runnable.promise.catch((err) => {
         if (isCancellationError(err)) {
-          console.log(`[Scheduler] ${nodeId} - Successor ${succId} cancelled`)
+          if (DEBUG) console.log(`[Scheduler] ${nodeId} - Successor ${succId} cancelled`)
           return undefined
         }
         console.error(`[Scheduler] ${nodeId} - Successor ${succId} error:`, err)
@@ -492,7 +494,7 @@ export class FlowScheduler {
     if (model) {
       this.mainContext.model = model
     }
-    console.log('[Scheduler] Updated main context provider/model:', {
+    if (DEBUG) console.log('[Scheduler] Updated main context provider/model:', {
       provider: this.mainContext.provider,
       model: this.mainContext.model
     })
@@ -586,7 +588,7 @@ export class FlowScheduler {
    * Called by Portal Input nodes after storing data
    */
   async triggerPortalOutputs(portalId: string): Promise<void> {
-    console.log(`[Scheduler] Triggering portal outputs for ID: ${portalId}`)
+    if (DEBUG) console.log(`[Scheduler] Triggering portal outputs for ID: ${portalId}`)
 
     // Find all Portal Output nodes with matching ID (support nodeType in multiple locations)
     const portalOutputNodes = this.flowDef.nodes.filter((node: any) => {
@@ -595,13 +597,11 @@ export class FlowScheduler {
       return t === 'portalOutput' && configId === portalId
     })
 
-    console.log(`[Scheduler] Found ${portalOutputNodes.length} portal output nodes with ID: ${portalId}`)
-
-
+    if (DEBUG) console.log(`[Scheduler] Found ${portalOutputNodes.length} portal output nodes with ID: ${portalId}`)
 
     // Execute each Portal Output node (push-trigger)
     for (const node of portalOutputNodes) {
-      console.log(`[Scheduler] Triggering portal output node: ${node.id}`)
+      if (DEBUG) console.log(`[Scheduler] Triggering portal output node: ${node.id}`)
       await this.executeNode(node.id, {}, null, false)
     }
   }

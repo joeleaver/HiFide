@@ -55,7 +55,9 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
     return () => {}
   }
 
-  console.log('[TimelineEventHandler] Starting listener:', { requestId, sessionId })
+  if (process.env.HF_FLOW_DEBUG === '1') {
+    console.log('[TimelineEventHandler] Starting listener:', { requestId, sessionId })
+  }
 
   // Build node metadata lookup
   const nodeMeta = new Map<string, NodeMetadata>()
@@ -188,12 +190,6 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
           const toolName = ev.toolName || 'unknown'
           const label = formatToolName(toolName)
 
-          console.log('[TimelineEventHandler] toolStart:', {
-            callId: ev.callId,
-            toolName,
-            label
-          })
-
           toolCalls.push({
             id: `tool-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
             type: 'tool' as const,
@@ -207,7 +203,6 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
             contentType: 'json' as const,
           })
           buffers.toolCalls.set(key, toolCalls)
-          console.log('[TimelineEventHandler] Added to buffer, total tools:', toolCalls.length)
           flush(key) // Immediate flush for tool start
         }
         break
@@ -217,16 +212,9 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
         {
           const usageKeyForBuffer = `${ev.nodeId || 'global'}::${ev.executionId || 'global'}`
           const toolCalls = buffers.toolCalls.get(usageKeyForBuffer) || []
-          console.log('[TimelineEventHandler] toolEnd:', {
-            callId: ev.callId,
-            toolName: ev.toolName,
-            bufferedToolsCount: toolCalls.length,
-            bufferedCallIds: toolCalls.map(t => t.callId)
-          })
 
           const tool = toolCalls.find((t) => t.callId === ev.callId)
           if (tool) {
-            console.log('[TimelineEventHandler] Found tool in buffer, updating status to success')
             tool.status = 'success'
             tool.result = ev.result
             tool.endTimestamp = Date.now()
@@ -234,18 +222,12 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
             // Enrich badge with interactive data and content type based on tool
             // Use centralized badge processor instead of ad-hoc mutation
             const processedTool = badgeProcessor.processBadge(tool)
-            
+
             // Update the tool in the buffer with the processed version
             const toolIndex = toolCalls.findIndex(t => t.callId === ev.callId)
             if (toolIndex >= 0) {
               toolCalls[toolIndex] = processedTool
             }
-
-            console.log('[TimelineEventHandler] After enrichment:', {
-              contentType: processedTool.contentType,
-              hasInteractive: !!processedTool.interactive,
-              label: processedTool.label
-            })
 
             flush(key) // Immediate flush for tool end
 
@@ -336,11 +318,6 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
           // Also update session totals from the breakdown (since we suppress intermediate usage events)
           if (usageData.totals) {
             try {
-              console.log('[TimelineEventHandler] Updating usage totals from breakdown:', {
-                totals: usageData.totals,
-                nodeId: ev.nodeId,
-                executionId: ev.executionId
-              })
               writer.updateUsage({
                 usage: usageData.totals,
                 provider: ev.provider,

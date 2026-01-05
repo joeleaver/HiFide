@@ -30,13 +30,16 @@ export function createExecutionEventRouter(options: ExecutionEventRouterOptions)
       }
     }
 
-    if (event.type === 'tool_start' || event.type === 'tool_end' || event.type === 'tool_error' || event.type === 'badge_add' || event.type === 'badge_update') {
-      const tool = event.tool
-      const name = tool?.toolName
-      const callId = tool?.toolCallId
-      const badgeId = event.badge?.badgeId
-      console.log(`[FlowAPI] Event ${event.type} node=${event.nodeId} exec=${event.executionId} name=${name} callId=${callId} badgeId=${badgeId} provider=${event.provider} model=${event.model}`)
-      console.log(util.inspect(event, { depth: null, colors: false, maxArrayLength: 200 }))
+    // Debug logging for tool/badge events - only when HF_FLOW_DEBUG is enabled
+    if (process.env.HF_FLOW_DEBUG === '1') {
+      if (event.type === 'tool_start' || event.type === 'tool_end' || event.type === 'tool_error' || event.type === 'badge_add' || event.type === 'badge_update') {
+        const tool = event.tool
+        const name = tool?.toolName
+        const callId = tool?.toolCallId
+        const badgeId = event.badge?.badgeId
+        console.log(`[FlowAPI] Event ${event.type} node=${event.nodeId} exec=${event.executionId} name=${name} callId=${callId} badgeId=${badgeId} provider=${event.provider} model=${event.model}`)
+        console.log(util.inspect(event, { depth: null, colors: false, maxArrayLength: 200 }))
+      }
     }
 
     switch (event.type) {

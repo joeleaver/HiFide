@@ -2,11 +2,11 @@ import type { AgentTool } from '../../providers/provider'
 import path from 'node:path'
 import type { Dirent } from 'node:fs'
 import fs from 'node:fs/promises'
-import fg from 'fast-glob'
 import { randomUUID } from 'node:crypto'
 
 import { resolveWorkspaceRootAsync } from '../../utils/workspace.js'
 import { grepAllPages } from '../text/grep'
+import { discoverWorkspaceFiles, DEFAULT_EXCLUDE_PATTERNS } from '../../utils/fileDiscovery.js'
 
 
 type FileMeta = {
@@ -30,17 +30,12 @@ type Section = {
   items: SectionItem[];
 }
 
-const IGNORE_GLOBS = [
-  'node_modules/**','vendor/**','target/**','dist/**','build/**','out/**','coverage/**','release/**','tmp/**','temp/**',
-  '.git/**','.hg/**','.svn/**','.hifide-private/**','.hifide-public/**','.hifide_public/**','.next/**','.nuxt/**','.svelte-kit/**','.expo/**','.turbo/**',
-  '.cache/**','.parcel-cache/**','.rollup.cache/**','.yarn/**','.pnpm-store/**','**/*.log','**/*.lock'
-]
-
-const IGNORE_SEGMENTS = new Set([
-  'node_modules','vendor','target','dist','build','out','coverage','release','tmp','temp',
-  '.git','.hg','.svn','.hifide-private','.hifide-public','.hifide_public','.next','.nuxt','.svelte-kit','.expo','.turbo',
-  '.cache','.parcel-cache','.rollup.cache','.yarn','.pnpm-store'
-])
+// Convert glob patterns to segment set for quick path checks
+const IGNORE_SEGMENTS = new Set(
+  DEFAULT_EXCLUDE_PATTERNS
+    .filter(p => p.endsWith('/**'))
+    .map(p => p.replace('/**', '').replace(/\*\*\//g, ''))
+)
 
 const BINARY_EXTS = new Set([
   '.png','.jpg','.jpeg','.gif','.bmp','.webp','.ico','.pdf','.zip','.rar','.7z','.tar','.gz','.bz2','.xz',
@@ -128,16 +123,24 @@ function looksBinary(ext: string): boolean {
 }
 
 async function gatherWorkspaceFiles(root: string): Promise<FileMeta[]> {
-  const relPaths = await fg(['**/*'], { cwd: root, dot: true, onlyFiles: true, followSymbolicLinks: false, ignore: IGNORE_GLOBS })
+  // Use shared discoverWorkspaceFiles which respects .gitignore and excludes binary files
+  const absPaths = await discoverWorkspaceFiles({
+    cwd: root,
+    includeGlobs: ['**/*'],
+    respectGitignore: true,
+    includeDotfiles: true,
+    absolute: true,
+    excludeBinaryFiles: true,
+  })
+
   const metas: FileMeta[] = []
-  const limit = Math.max(4, Math.min(32, relPaths.length))
+  const limit = Math.max(4, Math.min(32, absPaths.length))
   let index = 0
 
   await Promise.all(Array.from({ length: limit }, async () => {
-    while (index < relPaths.length) {
-      const current = relPaths[index++]
-      const rel = toPosix(current)
-      const abs = path.join(root, rel)
+    while (index < absPaths.length) {
+      const abs = absPaths[index++]
+      const rel = toPosix(path.relative(root, abs))
       try {
         const stat = await fs.stat(abs)
         metas.push({ path: rel, absPath: abs, ext: path.extname(rel).toLowerCase(), bytes: stat.size || 0, mtimeMs: stat.mtimeMs || 0 })

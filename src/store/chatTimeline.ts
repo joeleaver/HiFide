@@ -279,21 +279,8 @@ function createChatTimelineStore() {
         const revIdx = box.content.length - 1 - idx
         const oldBadge = (box.content[revIdx] as any).badge
         const updatedBadge = { ...oldBadge, ...updates }
-        console.log('[chatTimeline] updateBadge: updating badge', {
-          callId: badgeId,
-          oldLabel: oldBadge?.label,
-          newLabel: updates.label,
-          oldStatus: oldBadge?.status,
-          newStatus: updates.status,
-          oldInteractive: oldBadge?.interactive,
-          newInteractive: updates.interactive,
-          finalInteractive: updatedBadge.interactive,
-          allUpdates: updates
-        })
         box.content[revIdx] = { type: 'badge', badge: updatedBadge }
         set({ items, sig: computeSig(items) })
-      } else {
-        console.warn('[chatTimeline] updateBadge: badge not found', { callId: badgeId, boxContentCount: box.content.length })
       }
     },
 
@@ -329,20 +316,16 @@ let _chatTimelineEventsInitialized = false
 
 export function initChatTimelineEvents(): void {
   if (_chatTimelineEventsInitialized) {
-    console.log('[chatTimeline] Events already initialized, skipping')
     return
   }
   _chatTimelineEventsInitialized = true
-  console.log('[chatTimeline] Initializing events')
 
   const client = getBackendClient()
   if (!client) return
 
   const processDelta = (msg: any) => {
     const op = msg?.op
-    //console.log('[chatTimeline] processDelta received:', { op, hasItem: !!msg?.item, item: msg?.item })
     if (op === 'message' && msg.item) {
-      // console.log('[chatTimeline] Adding message to timeline:', msg.item)
       useChatTimeline.getState().appendRawItem(msg.item as TimelineItem)
       return
     }
@@ -373,14 +356,6 @@ export function initChatTimelineEvents(): void {
     }
 
     if (op === 'updateBadge' && msg.nodeId && msg.callId) {
-      console.log('[chatTimeline] Delta handler received updateBadge:', {
-        callId: msg.callId,
-        hasUpdates: !!msg.updates,
-        updatesInteractive: msg.updates?.interactive,
-        updatesInteractiveJSON: JSON.stringify(msg.updates?.interactive),
-        fullUpdatesJSON: JSON.stringify(msg.updates),
-        fullMsg: msg
-      })
       useChatTimeline.getState().updateBadge(msg.nodeId, msg.callId, msg.updates || {}, msg.executionId)
       return
     }
@@ -396,14 +371,12 @@ export function initChatTimelineEvents(): void {
 
   // Timeline snapshots (full hydration)
   client.subscribe('session.timeline.snapshot', (msg: any) => {
-    console.log('[chatTimeline] session.timeline.snapshot received:', { msg, isArray: Array.isArray(msg?.items), itemCount: msg?.items?.length })
     const items = Array.isArray(msg?.items) ? msg.items as TimelineItem[] : []
     useChatTimeline.getState().hydrateFromSession(items)
   })
 
   // Session selection changes - clear and wait for snapshot
   client.subscribe('session.selected', () => {
-    console.log('[chatTimeline] session.selected received, clearing timeline')
     useChatTimeline.setState({ isHydrating: true })
     useChatTimeline.getState().clear()
   })

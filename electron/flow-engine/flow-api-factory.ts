@@ -103,25 +103,29 @@ export function createFlowApiFactory(deps: FlowApiFactoryDeps): FlowApiFactory {
         },
       },
       log: {
-        debug: (message: string, data?: any) => console.log(`[Flow Debug] ${nodeId}:`, message, data),
-        info: (message: string, data?: any) => console.log(`[Flow Info] ${nodeId}:`, message, data),
+        debug: (message: string, data?: any) => {
+          if (process.env.HF_FLOW_DEBUG === '1') console.log(`[Flow Debug] ${nodeId}:`, message, data)
+        },
+        info: (message: string, data?: any) => {
+          if (process.env.HF_FLOW_DEBUG === '1') console.log(`[Flow Info] ${nodeId}:`, message, data)
+        },
         warn: (message: string, data?: any) => console.warn(`[Flow Warn] ${nodeId}:`, message, data),
         error: (message: string, data?: any) => console.error(`[Flow Error] ${nodeId}:`, message, data),
       },
       tools: {
         execute: async (toolName: string, args: any) => {
-          console.log(`[Tool] ${nodeId}: ${toolName}`, args)
+          if (process.env.HF_FLOW_DEBUG === '1') console.log(`[Tool] ${nodeId}: ${toolName}`, args)
           return {}
         },
         list: (): Tool[] => mapAgentToolsToFlowTools(getAgentToolSnapshot(workspaceId)),
       },
       usage: {
         report: (usage: UsageReport) => {
-          console.log(`[Usage] ${nodeId}:`, usage)
+          if (process.env.HF_FLOW_DEBUG === '1') console.log(`[Usage] ${nodeId}:`, usage)
         },
       },
       waitForUserInput: async () => {
-        console.log('[FlowAPI.waitForUserInput] Waiting for input, nodeId:', nodeId)
+        if (process.env.HF_FLOW_DEBUG === '1') console.log('[FlowAPI.waitForUserInput] Waiting for input, nodeId:', nodeId)
         try {
           emitFlowEvent(requestId, { type: 'waitingforinput', nodeId, sessionId })
         } catch {}

@@ -9,6 +9,8 @@ import { ContextLifecycleManager } from './context-lifecycle-manager'
 import { emitFlowEvent } from './events'
 import { isCancellationError } from './cancellation'
 
+const DEBUG = process.env.HF_SCHEDULER_DEBUG === '1'
+
 interface FlowNodeRunnerOptions {
   flowDefinition: FlowDefinition
   flowApiFactory: FlowApiFactory
@@ -66,7 +68,7 @@ export class FlowNodeRunner {
     }
 
     const executionId = crypto.randomUUID()
-    console.log(`[Scheduler] ${nodeId} - Starting execution ${executionId}, isPull: ${isPull}, callerId: ${callerId}, pushedInputs:`, Object.keys(pushedInputs))
+    if (DEBUG) console.log(`[Scheduler] ${nodeId} - Starting execution ${executionId}, isPull: ${isPull}, callerId: ${callerId}, pushedInputs:`, Object.keys(pushedInputs))
 
     try { emitFlowEvent(this.requestId, { type: 'nodeStart', nodeId, executionId, sessionId: this.sessionId }) } catch {}
     try { this.onNodeStart?.(nodeId) } catch {}
@@ -81,7 +83,7 @@ export class FlowNodeRunner {
       const contextIn = activeBinding.ref.current
       const dataIn = pushedInputs.data
 
-      console.log(`[Scheduler] ${nodeId} - Using context snapshot:`, {
+      if (DEBUG) console.log(`[Scheduler] ${nodeId} - Using context snapshot:`, {
         contextId: contextIn.contextId,
         contextType: contextIn.contextType,
         provider: contextIn.provider,
