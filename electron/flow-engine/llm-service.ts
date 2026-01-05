@@ -337,11 +337,32 @@ class LLMService {
     const onStepWrapped = (step: { text: string; reasoning?: string; toolCalls?: any[]; toolResults?: any[] }) => {
       if (skipHistory) return
 
-      //1. Add assistant message for this step (if it has text, reasoning, or tool_calls)
-      // Use standard OpenAI format: assistant message includes content + optional tool_calls
+      // =========================================================================
+      // IMPORTANT: We intentionally do NOT persist tool_calls or tool results
+      // to the session's messageHistory.
+      //
+      // Why: During agentic loops, a single turn can generate many tool calls
+      // (e.g., 10+ steps with 3+ tool calls each). If we persisted all of this
+      // to messageHistory, the next user message would re-send ALL of that data
+      // back to the API, causing:
+      //   1. Context window explosion (tokens grow exponentially)
+      //   2. Model confusion from massive redundant context
+      //   3. Formatting issues as models lose track of conversation flow
+      //
+      // The providers handle their own internal tool loop context:
+      //   - AI SDK providers: streamText() with maxSteps manages tool context internally
+      //   - OpenRouter: maintains local conversationMessages array for the turn
+      //
+      // We only persist the assistant's text responses (and reasoning) which
+      // represent the actual conversational content the user should see continued.
+      // =========================================================================
+
+      // Only persist if there's actual text content (not just tool calls)
+      if (!step.text) return
+
       const assistantMessage: any = {
         role: 'assistant',
-        content: step.text || '',
+        content: step.text,
       }
 
       // Add reasoning if present
@@ -357,43 +378,7 @@ class LLMService {
         }
       }
 
-      // Add tool_calls if present (standard OpenAI format)
-      if (step.toolCalls && step.toolCalls.length > 0) {
-        assistantMessage.tool_calls = step.toolCalls.map((tc: any) => ({
-          id: tc.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          type: 'function',
-          function: {
-            name: tc.name,
-            arguments: typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments)
-          }
-        }))
-      }
-
-      // Only add assistant message if it has content
-      if (step.text || step.reasoning || (step.toolCalls && step.toolCalls.length > 0)) {
-        contextManager.addMessage(assistantMessage)
-      }
-
-      //2. Add tool results using standard OpenAI 'tool' role format
-      // This ensures proper user/assistant/tool alternation in the conversation history
-      if (step.toolResults && step.toolResults.length > 0) {
-        for (const result of step.toolResults) {
-          const content = typeof result.result === 'string' ? result.result : JSON.stringify(result.result)
-          if (!content) continue
-
-          // Find matching tool_call_id for this result
-          const matchingToolCall = (step.toolCalls || []).find(
-            (tc: any) => tc.name === result.toolName
-          )
-          const toolCallId = matchingToolCall?.id || result.callId || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-
-          contextManager.addMessage({
-            role: 'tool',
-            tool_call_id: toolCallId,
-            content: content
-          })
-        }
-      }
+      contextManager.addMessage(assistantMessage)
     }
 
     const onTokenUsageWrapped = (usage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number; reasoningTokens?: number }) => {

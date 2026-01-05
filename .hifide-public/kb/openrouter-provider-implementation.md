@@ -65,16 +65,22 @@ Tool names are sanitized to remove non-alphanumeric characters (except `-` and `
 
 ### Tool Call Persistence Policy
 
-**Tool calls are NOT persisted to message history from previous turns.** This is a deliberate design decision to:
+**Tool calls and tool results are NOT persisted to session message history.** This is a deliberate architectural decision across ALL providers to prevent context explosion:
 
-- Reduce token usage by not sending redundant tool call information
-- Prevent potential conflicts with the model's internal state
-- Keep the conversation history clean and focused on user/assistant dialogue
+**The Problem:**
+During agentic loops, a single turn can generate many tool calls (e.g., 10+ steps with 3+ tool calls each). If all tool calls and results were persisted to `messageHistory`, the next user message would re-send ALL of that data back to the API, causing:
+1. **Context window explosion** - tokens grow exponentially across turns
+2. **Model confusion** - massive redundant context causes formatting issues
+3. **Lost conversation flow** - models lose track of the actual dialogue
 
-Tool calls for the **current turn** are still added to `conversationMessages` within the agent loop, as these are necessary for multi-step agentic workflows. The model receives:
-1. User message (or previous assistant message)
-2. Assistant response with current turn's tool_calls
-3. Tool results for current turn's tool_calls
+**The Solution:**
+- **Within a single turn**: Each provider handles its own internal tool loop context
+  - OpenRouter: maintains local `conversationMessages` array for the turn
+  - AI SDK providers: `streamText()` with `maxSteps` manages tool context internally
+- **Across turns**: Only assistant text responses (and reasoning) are persisted to `messageHistory`
+- The `onStep` callback in `llm-service.ts` intentionally ignores `toolCalls` and `toolResults`
+
+Tool calls for the **current turn** are added to the provider's local conversation array within the agent loop, as these are necessary for multi-step agentic workflows. But they are NOT persisted to the session's `messageHistory`.
 
 ## Reasoning Model Support
 

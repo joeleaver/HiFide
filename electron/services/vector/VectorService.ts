@@ -67,6 +67,9 @@ export class VectorService {
   // Defer index creation until after indexing is complete
   private deferIndexing = new Set<TableType>();
 
+  // Track which tables already have an index created to avoid redundant createIndex calls
+  private tablesWithIndex = new Set<TableType>();
+
   private async ensureInitialized(): Promise<void> {
     if (this.db) return;
     
@@ -327,23 +330,62 @@ export class VectorService {
     this.deferIndexing.delete(type);
 
     const table = await this.getOrCreateTable(type);
-    const rowCount = await (table as any).countRows();
+    await this.createIndexIfNeeded(table, type);
+  }
 
-    if (rowCount >= 256) {
-      if (DEBUG_VECTOR) console.log(`[VectorService] Creating ANN index for ${type} (rows: ${rowCount})...`);
-      try {
-        await (table as any).createIndex('vector', {
-          config: lancedb.Index.ivfPq({
-            numPartitions: 2,
-            numSubVectors: 2,
-          }),
-        });
-        if (DEBUG_VECTOR) console.log(`[VectorService] Successfully created ANN index for ${type}`);
-      } catch (err: any) {
+  /**
+   * Creates an ANN index on the vector column if one doesn't already exist.
+   * This prevents redundant index creation on every upsert.
+   */
+  private async createIndexIfNeeded(table: lancedb.Table, type: TableType): Promise<void> {
+    // Skip if we've already created an index for this table in this session
+    if (this.tablesWithIndex.has(type)) {
+      if (DEBUG_VECTOR) console.log(`[VectorService] Index already exists for ${type} (cached), skipping creation`);
+      return;
+    }
+
+    // Check if the table already has a vector index
+    try {
+      const indices = await table.listIndices();
+      const hasVectorIndex = indices.some((idx: { columns?: string[]; name?: string }) =>
+        idx.columns?.includes('vector') || idx.name === 'vector_idx'
+      );
+
+      if (hasVectorIndex) {
+        if (DEBUG_VECTOR) console.log(`[VectorService] Index already exists for ${type} (from listIndices), skipping creation`);
+        this.tablesWithIndex.add(type);
+        return;
+      }
+    } catch (err: any) {
+      // listIndices may not be available in older versions, continue to check row count
+      if (DEBUG_VECTOR) console.log(`[VectorService] Could not list indices for ${type}:`, err.message);
+    }
+
+    // Check if we have enough rows for index creation
+    const rowCount = await table.countRows();
+    if (rowCount < 256) {
+      if (DEBUG_VECTOR) console.log(`[VectorService] Skipping index for ${type}: only ${rowCount} rows (requires 256).`);
+      return;
+    }
+
+    if (DEBUG_VECTOR) console.log(`[VectorService] Creating ANN index for ${type} (rows: ${rowCount})...`);
+    try {
+      await table.createIndex('vector', {
+        config: lancedb.Index.ivfPq({
+          numPartitions: 2,
+          numSubVectors: 2,
+        }),
+      });
+      this.tablesWithIndex.add(type);
+      if (DEBUG_VECTOR) console.log(`[VectorService] Successfully created ANN index for ${type}`);
+    } catch (err: any) {
+      // If the error indicates the index already exists, mark it as created
+      if (err.message?.includes('already exists') || err.message?.includes('already indexed')) {
+        if (DEBUG_VECTOR) console.log(`[VectorService] Index already exists for ${type} (from error), marking as created`);
+        this.tablesWithIndex.add(type);
+      } else {
         console.warn(`[VectorService] Failed to create index for ${type}:`, err.message);
       }
-    } else {
-      if (DEBUG_VECTOR) console.log(`[VectorService] Skipping index for ${type}: only ${rowCount} rows (requires 256).`);
     }
   }
 
@@ -404,21 +446,7 @@ export class VectorService {
     // Only create index if we're not in deferred indexing mode
     // During bulk indexing, we defer index creation until the end to save memory and CPU
     if (!this.deferIndexing.has(type)) {
-      // Check row count before creating index (LanceDB PQ requires >= 256 rows)
-      const rowCount = await (table as any).countRows();
-      if (rowCount >= 256) {
-        if (DEBUG_VECTOR) console.log(`[VectorService] Creating ANN index for ${type} (rows: ${rowCount})...`);
-        try {
-          await (table as any).createIndex('vector', {
-            config: lancedb.Index.ivfPq({
-              numPartitions: 2,
-              numSubVectors: 2,
-            }),
-          });
-        } catch (err: any) {
-          console.warn(`[VectorService] Failed to create index for ${type}:`, err.message);
-        }
-      }
+      await this.createIndexIfNeeded(table, type);
     }
 
     await this.refreshTableStats();
@@ -444,6 +472,8 @@ export class VectorService {
         try {
           await this.db.dropTable(config.tableName);
           this.tablePromises.delete(config.tableName);
+          // Clear the index cache for this table since it was dropped
+          this.tablesWithIndex.delete(t);
         } catch (e) {
           // Table might not exist
         }

@@ -1,5 +1,6 @@
 import type { AgentTool } from '../../providers/provider'
 import { deleteItem } from '../../store/utils/knowledgeBase'
+import { getVectorService, getKBIndexerService } from '../../services/index.js'
 
 export const knowledgeBaseDeleteTool: AgentTool = {
   name: 'knowledgeBaseDelete',
@@ -24,7 +25,23 @@ export const knowledgeBaseDeleteTool: AgentTool = {
     const ok = await deleteItem(baseDir, id)
     if (!ok) return { ok: false, error: 'Not found' }
 
-    // File system watcher will update the service state automatically
+    // Remove from vector index and update indexer state
+    try {
+      const vs = getVectorService()
+      const escapedId = id.replace(/'/g, "''")
+      // Delete all chunks for this KB article (id starts with kb:${kbId}:)
+      await vs.deleteItems('kb', `id LIKE 'kb:${escapedId}:%'`)
+
+      // Also remove from the indexer's tracked state
+      const kbIndexer = getKBIndexerService()
+      if (kbIndexer.state.indexedArticles[id]) {
+        const { [id]: _, ...rest } = kbIndexer.state.indexedArticles
+        kbIndexer.setState({ indexedArticles: rest })
+      }
+    } catch (indexErr) {
+      console.warn('[knowledgeBaseDelete] Failed to remove from vector index:', indexErr)
+      // Don't fail the delete operation if index cleanup fails
+    }
 
     return { ok: true, data: { id } }
   },

@@ -19,16 +19,19 @@ interface OrchestratorState {
         total: number;
         indexed: number;
         missing: number;
+        stale: number;  // Index entries for files that no longer exist
     };
     kb: {
         total: number;
         indexed: number;
         missing: number;
+        stale: number;  // Index entries for articles that no longer exist
     };
     memories: {
         total: number;
         indexed: number;
         missing: number;
+        stale: number;  // Index entries for memories that no longer exist
     };
     // Overall indexing enabled state
     indexingEnabled: boolean;
@@ -52,9 +55,9 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
             processedCount: 0,
             totalCount: 0,
             totalFilesDiscovered: 0,
-            code: { total: 0, indexed: 0, missing: 0 },
-            kb: { total: 0, indexed: 0, missing: 0 },
-            memories: { total: 0, indexed: 0, missing: 0 },
+            code: { total: 0, indexed: 0, missing: 0, stale: 0 },
+            kb: { total: 0, indexed: 0, missing: 0, stale: 0 },
+            memories: { total: 0, indexed: 0, missing: 0, stale: 0 },
             indexingEnabled: true
         }, 'index_orchestrator');
 
@@ -143,6 +146,43 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
                 if (events.length > 5) {
                     console.log(`  ... and ${events.length - 5} more`);
                 }
+
+                // Update counts based on event types BEFORE queueing
+                // 'change': file was indexed, now stale - decrement indexed only (not missing, it's still in DB)
+                // 'unlink': file deleted - decrement indexed and total
+                // 'add': new file - increment total and missing
+                let indexedDelta = 0;
+                let missingDelta = 0;
+                let totalDelta = 0;
+
+                for (const event of events) {
+                    if (event.type === 'change') {
+                        // File changed: was indexed, now stale and needs re-indexing
+                        // Don't increment missing - the file IS in the DB, just outdated
+                        indexedDelta--;
+                    } else if (event.type === 'unlink') {
+                        // File deleted: remove from indexed count and total
+                        indexedDelta--;
+                        totalDelta--;
+                    } else if (event.type === 'add') {
+                        // New file: add to total and missing
+                        totalDelta++;
+                        missingDelta++;
+                    }
+                }
+
+                // Apply deltas to state
+                if (indexedDelta !== 0 || missingDelta !== 0 || totalDelta !== 0) {
+                    this.setState({
+                        code: {
+                            total: Math.max(0, this.state.code.total + totalDelta),
+                            indexed: Math.max(0, this.state.code.indexed + indexedDelta),
+                            missing: Math.max(0, this.state.code.missing + missingDelta),
+                            stale: this.state.code.stale  // Preserve stale count
+                        }
+                    });
+                }
+
                 this.queue.push(events);
                 this.processQueue();
                 this.emitStatus();
@@ -204,12 +244,13 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
 
     /**
      * Check for missing files, KB articles, and memories
+     * Also detects and cleans up stale index entries (items that no longer exist)
      * Updates state with counts of total vs indexed items
      */
     async checkMissingItems(rootPath: string): Promise<void> {
         if (!rootPath) return;
 
-        console.log('[IndexOrchestrator] Checking for missing items...');
+        console.log('[IndexOrchestrator] Checking for missing and stale items...');
         const vectorService = getVectorService();
 
         // Check code files
@@ -220,51 +261,78 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
         const codeDiscovered = await this.discoverWorkspaceFiles(rootPath);
 
         // Convert absolute discovered paths to relative paths with forward slashes for comparison
+        // Also normalize to lowercase for case-insensitive comparison on Windows
         const toRelativePath = (absolutePath: string) => {
             return path.relative(rootPath, absolutePath).replace(/\\/g, '/');
         };
 
+        // Create lowercase Sets for case-insensitive comparison (Windows paths are case-insensitive)
+        const codeIndexedLower = new Set([...codeIndexed].map(p => p.toLowerCase()));
+        const codeDiscoveredLower = new Set(codeDiscovered.map(p => toRelativePath(p).toLowerCase()));
+
         const codeMissing = codeDiscovered.filter(absolutePath => {
             const relativePath = toRelativePath(absolutePath);
-            return !codeIndexed.has(relativePath);
+            return !codeIndexedLower.has(relativePath.toLowerCase());
         });
-        
+
+        // Find stale entries: indexed files that no longer exist on disk
+        const codeStale = [...codeIndexed].filter(indexedPath => {
+            return !codeDiscoveredLower.has(indexedPath.toLowerCase());
+        });
+
+        // Count how many discovered files are already indexed (not the DB size, which may have stale entries)
+        const codeIndexedCount = codeDiscovered.length - codeMissing.length;
+
         this.setState({
             code: {
                 total: codeDiscovered.length,
-                indexed: codeIndexed.size,
-                missing: codeMissing.length
+                indexed: codeIndexedCount,
+                missing: codeMissing.length,
+                stale: codeStale.length
             },
             // Also set totalFilesDiscovered for progress tracking
             totalFilesDiscovered: codeDiscovered.length
         });
-        
+
         // Check KB articles
         const kbIndexed = await vectorService.getIndexedFilePaths('kb');
         const kbDiscovered = await this.discoverKbArticles(rootPath);
+        const kbDiscoveredSet = new Set(kbDiscovered);
         const kbMissing = kbDiscovered.filter(id => !kbIndexed.has(id));
-        
+        // Find stale KB entries: indexed articles that no longer exist
+        const kbStale = [...kbIndexed].filter(id => !kbDiscoveredSet.has(id));
+        const kbIndexedCount = kbDiscovered.length - kbMissing.length;
+
         this.setState({
             kb: {
                 total: kbDiscovered.length,
-                indexed: kbIndexed.size,
-                missing: kbMissing.length
+                indexed: kbIndexedCount,
+                missing: kbMissing.length,
+                stale: kbStale.length
             }
         });
-        
+
         // Check memories
         const memoriesIndexed = await vectorService.getIndexedFilePaths('memories');
         const memoriesDiscovered = await this.discoverMemories(rootPath);
+        const memoriesDiscoveredSet = new Set(memoriesDiscovered);
         const memoriesMissing = memoriesDiscovered.filter(id => !memoriesIndexed.has(id));
-        
+        // Find stale memory entries: indexed memories that no longer exist
+        const memoriesStale = [...memoriesIndexed].filter(id => !memoriesDiscoveredSet.has(id));
+        const memoriesIndexedCount = memoriesDiscovered.length - memoriesMissing.length;
+
         this.setState({
             memories: {
                 total: memoriesDiscovered.length,
-                indexed: memoriesIndexed.size,
-                missing: memoriesMissing.length
+                indexed: memoriesIndexedCount,
+                missing: memoriesMissing.length,
+                stale: memoriesStale.length
             }
         });
-        
+
+        // Clean up stale entries from the vector database
+        await this.cleanupStaleEntries(vectorService, codeStale, kbStale, memoriesStale);
+
         // Debug: log sample paths to verify path formats match
         if (codeDiscovered.length > 0 && codeIndexed.size > 0) {
             const sampleDiscovered = toRelativePath(codeDiscovered[0]);
@@ -273,12 +341,76 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
         }
 
         console.log(`[IndexOrchestrator] Status check:`, {
-            code: { total: codeDiscovered.length, indexed: codeIndexed.size, missing: codeMissing.length },
-            kb: { total: kbDiscovered.length, indexed: kbIndexed.size, missing: kbMissing.length },
-            memories: { total: memoriesDiscovered.length, indexed: memoriesIndexed.size, missing: memoriesMissing.length }
+            code: { total: codeDiscovered.length, indexed: codeIndexedCount, missing: codeMissing.length, stale: codeStale.length },
+            kb: { total: kbDiscovered.length, indexed: kbIndexedCount, missing: kbMissing.length, stale: kbStale.length },
+            memories: { total: memoriesDiscovered.length, indexed: memoriesIndexedCount, missing: memoriesMissing.length, stale: memoriesStale.length }
         });
-        
+
         this.emitStatus();
+    }
+
+    /**
+     * Remove stale entries from the vector database
+     */
+    private async cleanupStaleEntries(
+        vectorService: ReturnType<typeof getVectorService>,
+        codeStale: string[],
+        kbStale: string[],
+        memoriesStale: string[]
+    ): Promise<void> {
+        // Clean up stale code entries
+        if (codeStale.length > 0) {
+            console.log(`[IndexOrchestrator] Removing ${codeStale.length} stale code entries...`);
+            for (const filePath of codeStale) {
+                try {
+                    const escapedPath = filePath.replace(/'/g, "''");
+                    await vectorService.deleteItems('code', `"filePath" = '${escapedPath}'`);
+                } catch (err) {
+                    console.error(`[IndexOrchestrator] Failed to delete stale code entry ${filePath}:`, err);
+                }
+            }
+        }
+
+        // Clean up stale KB entries
+        if (kbStale.length > 0) {
+            console.log(`[IndexOrchestrator] Removing ${kbStale.length} stale KB entries...`);
+            const { getKBIndexerService } = await import('../index.js');
+            const kbIndexer = getKBIndexerService();
+            for (const kbId of kbStale) {
+                try {
+                    const escapedId = kbId.replace(/'/g, "''");
+                    // KB articles are stored with IDs like kb:${kbId}:${chunkIndex}
+                    await vectorService.deleteItems('kb', `id LIKE 'kb:${escapedId}:%'`);
+                    // Also remove from indexer state
+                    if (kbIndexer.state.indexedArticles[kbId]) {
+                        const { [kbId]: _, ...rest } = kbIndexer.state.indexedArticles;
+                        kbIndexer.setState({ indexedArticles: rest });
+                    }
+                } catch (err) {
+                    console.error(`[IndexOrchestrator] Failed to delete stale KB entry ${kbId}:`, err);
+                }
+            }
+        }
+
+        // Clean up stale memory entries
+        if (memoriesStale.length > 0) {
+            console.log(`[IndexOrchestrator] Removing ${memoriesStale.length} stale memory entries...`);
+            const { getMemoriesIndexerService } = await import('../index.js');
+            const memoriesIndexer = getMemoriesIndexerService();
+            for (const memoryId of memoriesStale) {
+                try {
+                    const escapedId = memoryId.replace(/'/g, "''");
+                    await vectorService.deleteItems('memories', `id = '${escapedId}'`);
+                    // Also remove from indexer state
+                    if (memoriesIndexer.state.indexedItems[memoryId]) {
+                        const { [memoryId]: _, ...rest } = memoriesIndexer.state.indexedItems;
+                        memoriesIndexer.setState({ indexedItems: rest });
+                    }
+                } catch (err) {
+                    console.error(`[IndexOrchestrator] Failed to delete stale memory entry ${memoryId}:`, err);
+                }
+            }
+        }
     }
 
     /**
@@ -321,21 +453,23 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
      */
     private async discoverMemories(rootPath: string): Promise<string[]> {
         try {
-            const memoriesPath = path.join(rootPath, '.hifide-private', 'memories');
-            
-            // Check if memories directory exists
-            const fs = await import('fs');
-            if (!fs.existsSync(memoriesPath)) {
-                return [];
+            // Memories are stored in .hifide-public/memories.json as a JSON file with items array
+            const memoriesPath = path.join(rootPath, '.hifide-public', 'memories.json');
+
+            const fsPromises = await import('fs/promises');
+            try {
+                const raw = await fsPromises.readFile(memoriesPath, 'utf8');
+                const json = JSON.parse(raw);
+                // Extract memory IDs from the items array
+                const items = json.items || [];
+                return items.map((item: { id: string }) => item.id);
+            } catch (e: any) {
+                if (e?.code === 'ENOENT') {
+                    // File doesn't exist yet - no memories to discover
+                    return [];
+                }
+                throw e;
             }
-            
-            // Get all JSON files in memories directory
-            const files = await fs.promises.readdir(memoriesPath);
-            const memoryIds = files
-                .filter(f => f.endsWith('.json'))
-                .map(f => f.replace('.json', ''));
-            
-            return memoryIds;
         } catch (error) {
             console.error('[IndexOrchestrator] Failed to discover memories:', error);
             return [];
@@ -558,9 +692,12 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
             return path.relative(rootPath, absolutePath).replace(/\\/g, '/');
         };
 
+        // Create lowercase Set for case-insensitive comparison (Windows paths are case-insensitive)
+        const indexedFilesLower = new Set([...indexedFiles].map(p => p.toLowerCase()));
+
         const missingFiles = discoveredFiles.filter(absolutePath => {
             const relativePath = toRelativePath(absolutePath);
-            return !indexedFiles.has(relativePath);
+            return !indexedFilesLower.has(relativePath.toLowerCase());
         });
 
         const events = missingFiles.map(filePath => ({
@@ -571,29 +708,24 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
         this.queue.push(events);
       }
       
-      // Queue missing KB articles
+      // Trigger KB indexer for missing articles
       if (this.state.kb.missing > 0) {
-        const discoveredArticles = await this.discoverKbArticles(rootPath);
-        const { getVectorService } = await import('../index.js');
-        const vectorService = getVectorService();
-        const indexedArticles = await vectorService.getIndexedFilePaths('kb');
-        const missingArticles = discoveredArticles.filter(id => !indexedArticles.has(id));
-        
-        // KB articles are indexed differently - we'll need to trigger KB indexer
-        // For now, just log that they need indexing
-        console.log(`[IndexOrchestrator] ${missingArticles.length} KB articles need indexing`);
+        console.log(`[IndexOrchestrator] Triggering KB indexer for ${this.state.kb.missing} missing articles`);
+        const { getKBIndexerService } = await import('../index.js');
+        // Don't await - let it run in parallel with code indexing
+        getKBIndexerService().indexWorkspace(rootPath, false).catch(err => {
+          console.error('[IndexOrchestrator] KB indexer error:', err);
+        });
       }
-      
-      // Queue missing memories
+
+      // Trigger memories indexer for missing memories
       if (this.state.memories.missing > 0) {
-        const discoveredMemories = await this.discoverMemories(rootPath);
-        const { getVectorService } = await import('../index.js');
-        const vectorService = getVectorService();
-        const indexedMemories = await vectorService.getIndexedFilePaths('memories');
-        const missingMemories = discoveredMemories.filter(id => !indexedMemories.has(id));
-        
-        // Memories are indexed differently - we'll need to trigger memories indexer
-        console.log(`[IndexOrchestrator] ${missingMemories.length} memories need indexing`);
+        console.log(`[IndexOrchestrator] Triggering memories indexer for ${this.state.memories.missing} missing memories`);
+        const { getMemoriesIndexerService } = await import('../index.js');
+        // Don't await - let it run in parallel with code indexing
+        getMemoriesIndexerService().indexWorkspace(rootPath, false).catch(err => {
+          console.error('[IndexOrchestrator] Memories indexer error:', err);
+        });
       }
       
       // Set status to indexing and process queue
@@ -693,10 +825,15 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
 
         if (item.type === 'unlink') {
             try {
-                // Escape single quotes for SQL-like query
-                const escapedPath = item.path.replace(/'/g, "''");
+                // Convert absolute path to relative path (matching what's stored in the vector DB)
+                // The watcher sends absolute paths, but the DB stores relative paths with forward slashes
+                const relativePath = this.rootPath
+                    ? path.relative(this.rootPath, item.path).replace(/\\/g, '/')
+                    : item.path;
+                const escapedPath = relativePath.replace(/'/g, "''");
                 // Use quoted identifiers to match the schema ("filePath")
                 await vectorService.deleteItems('code', `"filePath" = '${escapedPath}'`);
+                console.log(`[IndexOrchestrator] Deleted index entry for: ${relativePath}`);
             } catch (err) {
                 console.error(`[IndexOrchestrator] Failed to delete ${item.path}:`, err);
             }
@@ -769,8 +906,13 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
                      this.indexedCount++;
 
                      // Update the state counts to reflect progress
+                     // For 'add' events: we incremented total+missing on receive, now increment indexed and decrement missing
+                     // For 'change' events: we only decremented indexed on receive, now just increment indexed back
                      const newCodeIndexed = this.state.code.indexed + 1;
-                     const newCodeMissing = Math.max(0, this.state.code.missing - 1);
+                     // Only decrement missing for 'add' events (new files), not for 'change' events (re-indexing)
+                     const newCodeMissing = item.type === 'add'
+                         ? Math.max(0, this.state.code.missing - 1)
+                         : this.state.code.missing;
                      this.setState({
                          code: {
                              ...this.state.code,

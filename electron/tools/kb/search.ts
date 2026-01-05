@@ -3,7 +3,26 @@ import { search as kbSearch } from '../../store/utils/knowledgeBase'
 import { randomUUID } from 'node:crypto'
 import { getVectorService } from '../../services/index.js'
 import { resolveWorkspaceRoot } from '../../utils/workspace.js'
+import { SCORE_SEMANTIC_MIN_THRESHOLD } from '../search'
 
+/**
+ * KB search result with score for unified ranking
+ */
+export interface KBSearchResult {
+  id: string
+  title: string
+  tags: string[]
+  files: string[]
+  path: string
+  excerpt: string
+  score: number
+  source?: 'keyword' | 'semantic'
+}
+
+/**
+ * Run semantic search against KB collection
+ * Uses shared semantic threshold filtering
+ */
 async function runSemanticKBSearch({
   query,
   limit,
@@ -12,26 +31,30 @@ async function runSemanticKBSearch({
   query: string
   limit: number
   meta?: any
-}) {
+}): Promise<KBSearchResult[]> {
   try {
     const vectorService = getVectorService()
     const workspaceRoot = resolveWorkspaceRoot(meta?.workspaceId)
 
     await vectorService.init(workspaceRoot)
-    const matches = await vectorService.search(query, limit, 'kb')
+    const matches = await vectorService.search(query, limit * 2, 'kb') // Get extra for filtering
 
     if (!matches || matches.length === 0) return []
 
-    return matches.map((m: any) => ({
-      id: m.kbId || m.id,
-      title: m.articleTitle || m.metadata?.title || 'Untitled',
-      tags: m.metadata?.tags || [],
-      files: m.metadata?.files || [],
-      path: (m.filePath || '').replace(/^\\?/, ''),
-      excerpt: `[semantic match] (${((m.score || 0) * 100).toFixed(0)}%) ${m.text.substring(0, 150)}...`,
-      score: m.score || 0.5
-    }))
-  } catch (error) {
+    return matches
+      .filter((m: any) => (m.score || 0) >= SCORE_SEMANTIC_MIN_THRESHOLD)
+      .slice(0, limit)
+      .map((m: any) => ({
+        id: m.kbId || m.id,
+        title: m.articleTitle || m.metadata?.title || 'Untitled',
+        tags: m.metadata?.tags || [],
+        files: m.metadata?.files || [],
+        path: (m.filePath || '').replace(/^\\?/, ''),
+        excerpt: `[semantic] (${((m.score || 0) * 100).toFixed(0)}%) ${(m.text || '').substring(0, 150)}...`,
+        score: m.score || 0.5,
+        source: 'semantic' as const
+      }))
+  } catch {
     return []
   }
 }
@@ -59,17 +82,19 @@ export const knowledgeBaseSearchTool: AgentTool = {
     const tagSet = new Set(tags.map((t: string) => t.toLowerCase()))
     const results = await kbSearch(baseDir, { query: query.trim(), tags: Array.from(tagSet), limit })
 
-    // If we have a query and few results, or results have low scores, try semantic fallback
-    let finalResults = results.map((r) => ({
+    // Map keyword results with source tag
+    let finalResults: KBSearchResult[] = results.map((r) => ({
       id: r.id,
       title: r.title,
       tags: r.tags,
       files: (r as any).files || [],
       path: r.relPath.replace(/^\\?/, ''),
-      excerpt: r.excerpt,
+      excerpt: r.excerpt || '',
       score: typeof r.score === 'number' ? r.score : 1,
+      source: 'keyword' as const
     }))
 
+    // If we have a query and few results, try semantic fallback
     if (query.trim() && finalResults.length < limit) {
       const semanticResults = await runSemanticKBSearch({
         query: query.trim(),
@@ -77,7 +102,7 @@ export const knowledgeBaseSearchTool: AgentTool = {
         meta
       })
 
-      // Merge and avoid duplicates by ID
+      // Merge and avoid duplicates by ID, sort by score
       const seenIds = new Set(finalResults.map(r => r.id))
       for (const sem of semanticResults) {
         if (!seenIds.has(sem.id)) {
@@ -85,13 +110,20 @@ export const knowledgeBaseSearchTool: AgentTool = {
           seenIds.add(sem.id)
         }
       }
+
+      // Re-sort merged results by score descending
+      finalResults.sort((a, b) => b.score - a.score)
     }
+
+    // Collect sources for metadata
+    const sources = new Set(finalResults.map(r => r.source))
 
     return {
       ok: true,
       data: {
         count: finalResults.length,
-        results: finalResults
+        results: finalResults,
+        sources: Array.from(sources)
       }
     }
   },

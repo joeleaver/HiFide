@@ -9,6 +9,7 @@ import { getConnectionWorkspaceId } from '../broadcast.js'
 import type { RpcConnection } from '../types'
 import { cleanupDeprecatedMemoriesSettings, readWorkspaceMemories, writeWorkspaceMemories } from '../../../store/utils/memories'
 import type { WorkspaceMemoryItem } from '../../../store/utils/memories'
+import { getVectorService, getMemoriesIndexerService } from '../../../services/index.js'
 
 
 export function createMemoriesHandlers(
@@ -57,6 +58,24 @@ export function createMemoriesHandlers(
       const file = await readWorkspaceMemories(baseDir)
       const next = { ...file, items: file.items.filter((m) => m.id !== id) }
       await writeWorkspaceMemories(next, baseDir)
+
+      // Remove from vector index and update indexer state
+      try {
+        const vs = getVectorService()
+        const escapedId = id.replace(/'/g, "''")
+        await vs.deleteItems('memories', `id = '${escapedId}'`)
+
+        // Also remove from the indexer's tracked state so it doesn't think it's still indexed
+        const memoriesIndexer = getMemoriesIndexerService()
+        if (memoriesIndexer.state.indexedItems[id]) {
+          const { [id]: _, ...rest } = memoriesIndexer.state.indexedItems
+          memoriesIndexer.setState({ indexedItems: rest })
+        }
+      } catch (indexErr) {
+        console.warn('[memories.delete] Failed to remove from vector index:', indexErr)
+        // Don't fail the delete operation if index cleanup fails
+      }
+
       return { ok: true }
     } catch (e: any) {
       return { ok: false, error: e?.message || String(e) }
