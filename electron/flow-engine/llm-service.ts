@@ -33,7 +33,6 @@ import { parseRateLimitError, sleep, withRetries } from '../providers/retry'
 import {
   estimateInputTokens,
   formatMessagesForAnthropic,
-  formatMessagesForGemini,
   formatMessagesForOpenAI,
   logLLMRequestPayload,
 } from './llm/payloads'
@@ -235,29 +234,6 @@ class LLMService {
           system,
           messages: [{ role: 'user' as const, content: message }]
         }
-      } else if (effectiveProvider === 'gemini') {
-        // Include systemInstruction even in stateless mode (skipHistory)
-        const parts: any[] = []
-        if (typeof message === 'string') {
-          parts.push({ text: message })
-        } else if (Array.isArray(message)) {
-          for (const part of message) {
-            if (part.type === 'text') {
-              parts.push({ text: part.text })
-            } else if (part.type === 'image') {
-              parts.push({
-                inline_data: {
-                  mime_type: part.mimeType,
-                  data: part.image,
-                },
-              })
-            }
-          }
-        }
-        formattedMessages = {
-          systemInstruction: request.systemInstructions ?? context.systemInstructions ?? '',
-          contents: [{ role: 'user', parts }]
-        }
       } else {
         // OpenAI and others — include a system message first if present
         const systemText = request.systemInstructions ?? context.systemInstructions
@@ -277,8 +253,6 @@ class LLMService {
 	    : workingContext
 	  if (effectiveProvider === 'anthropic') {
 	    formattedMessages = formatMessagesForAnthropic(latestContext)
-	  } else if (effectiveProvider === 'gemini') {
-	    formattedMessages = formatMessagesForGemini(latestContext)
 	  } else {
         formattedMessages = formatMessagesForOpenAI(latestContext, { provider: effectiveProvider })
 	  }
@@ -515,12 +489,6 @@ class LLMService {
               ...baseStreamOpts,
               system: formattedMessages.system,
               messages: formattedMessages.messages
-            }
-          } else if (effectiveProvider === 'gemini') {
-            streamOpts = {
-              ...baseStreamOpts,
-              systemInstruction: formattedMessages.systemInstruction,
-              contents: formattedMessages.contents
             }
           } else {
             // OpenAI and others: split system out for top-level and avoid duplication

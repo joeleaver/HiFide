@@ -379,6 +379,10 @@ export function createSessionHandlers(
       if (!workspaceId) return { ok: false, error: 'No workspace bound' }
 
       const sessionService = getSessionService()
+      
+      // Get current session before update to preserve history if needed
+      // (Currently history is preserved by default in session service)
+      
       await sessionService.setSessionProviderModelFor({ workspaceId, sessionId, provider: providerId, model: modelId })
 
       // Update any active flow scheduler for this session so next LLM request uses new provider/model

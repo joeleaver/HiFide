@@ -10,12 +10,12 @@ import Store from 'electron-store'
 import path from 'node:path'
 import fs from 'node:fs'
 import fsPromises from 'node:fs/promises'
-import { AnthropicAiSdkProvider } from '../providers-ai-sdk/anthropic'
-import { GeminiAiSdkProvider } from '../providers-ai-sdk/gemini'
-import { FireworksAiSdkProvider } from '../providers-ai-sdk/fireworks'
-import { OpenAiSdkProvider } from '../providers-ai-sdk/openai'
-import { XaiAiSdkProvider } from '../providers-ai-sdk/xai'
-import { OpenRouterProvider } from '../providers-ai-sdk/openrouter'
+import { AnthropicOpenAIProvider as AnthropicAiSdkProvider } from '../providers-ai-sdk/anthropic-openai'
+import { GeminiOpenAIProvider as GeminiAiSdkProvider } from '../providers-ai-sdk/gemini-openai'
+import { FireworksOpenAIProvider } from '../providers-ai-sdk/fireworks-openai'
+import { OpenAIOpenAIProvider as OpenAiSdkProvider } from '../providers-ai-sdk/openai-openai'
+import { XAIOpenAIProvider as XaiAiSdkProvider } from '../providers-ai-sdk/xai-openai'
+import { OpenRouterOpenAIProvider as OpenRouterProvider } from '../providers-ai-sdk/openrouter-openai'
 import { activeConnections, broadcastWorkspaceNotification } from '../backend/ws/broadcast'
 import { getSettingsService, getWorkspaceService } from '../services/index.js'
 import { readKanbanBoard } from '../store/utils/kanban.js'
@@ -252,7 +252,7 @@ export const providers: Record<string, ProviderAdapter> = {
   openai: OpenAiSdkProvider,
   anthropic: AnthropicAiSdkProvider,
   gemini: GeminiAiSdkProvider,
-  fireworks: FireworksAiSdkProvider,
+  fireworks: FireworksOpenAIProvider,
   xai: XaiAiSdkProvider,
   openrouter: OpenRouterProvider,
 }

@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "package:electron": "node scripts/package-electron.cjs",
     "prepackage:kill": "node scripts/prepackage-kill.cjs",
-    "rebuild:native": "cross-env CL=\"/std:c++20\" npm_config_msvs_version=2022 npx electron-rebuild -f -w node-pty,sharp,tree-sitter",
+    "rebuild:native": "cross-env CL=\"/std:c++20\" npm_config_msvs_version=2022 npx electron-rebuild -f -w node-pty,sharp,tree-sitter,onnxruntime-node",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",

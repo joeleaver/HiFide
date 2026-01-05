@@ -56,10 +56,9 @@ export const kanbanGetBoardTool: AgentTool = {
   parameters: {
     type: 'object',
     properties: {
-      status: { type: 'string', enum: ['backlog', 'todo', 'inProgress', 'done'] },
-      epicId: { type: 'string', minLength: 1 },
+      status: { type: 'string', enum: ['backlog', 'todo', 'inProgress', 'done'], description: 'Filter by task status' },
+      epicId: { type: 'string', description: 'Filter by epic ID' },
     },
-    additionalProperties: false,
   },
   run: async (input: { status?: KanbanStatus; epicId?: string }, meta?: any) => {
     const rawBoard = await ensureBoardLoadedFor(meta?.workspaceId)

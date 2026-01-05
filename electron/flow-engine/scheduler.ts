@@ -488,12 +488,17 @@ export class FlowScheduler {
    * This updates the main context to use new provider/model from the UI
    */
   updateProviderModel(provider?: string, model?: string): void {
+    // 1. Update internal state
     if (provider) {
       this.mainContext.provider = provider
     }
     if (model) {
       this.mainContext.model = model
     }
+    
+    // 2. Propagate to lifecycle manager (which updates the context registry)
+    this.contextLifecycle.updateProviderModel(provider, model)
+
     if (DEBUG) console.log('[Scheduler] Updated main context provider/model:', {
       provider: this.mainContext.provider,
       model: this.mainContext.model

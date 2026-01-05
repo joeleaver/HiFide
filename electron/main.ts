@@ -27,7 +27,7 @@ import { buildMenu } from './ipc/menu'
 // Provider setup
 
 import { AnthropicAiSdkProvider } from './providers-ai-sdk/anthropic'
-import { GeminiAiSdkProvider } from './providers-ai-sdk/gemini'
+import { GeminiOpenAIProvider as GeminiAiSdkProvider } from './providers-ai-sdk/gemini-openai'
 
 // State management
 import { providers, providerCapabilities } from './core/state'
