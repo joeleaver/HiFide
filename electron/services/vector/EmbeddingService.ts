@@ -92,10 +92,46 @@ export class EmbeddingService {
   private worker: Worker | null = null;
   private pendingRequests = new Map<string, { resolve: Function, reject: Function }>();
   private requestIdCounter = 0;
-  
+  private warmupPromise: Promise<void> | null = null;
+  private warmedUpModel: string | null = null;
+
   // Bounded LRU cache to prevent OOM during indexing
   // Max 10,000 entries or 100MB total
   private cache = new LRUCache<string, number[]>(10000, 100 * 1024 * 1024);
+
+  /**
+   * Warmup the embedding model by loading it before processing requests.
+   * This prevents race conditions when multiple concurrent requests try to load the model.
+   */
+  async warmup(modelId: string): Promise<void> {
+    if (this.warmedUpModel === modelId && this.warmupPromise === null) {
+      console.log(`[EmbeddingService] Model ${modelId} already warmed up`);
+      return;
+    }
+
+    if (this.warmupPromise) {
+      console.log(`[EmbeddingService] Waiting for existing warmup to complete...`);
+      await this.warmupPromise;
+      if (this.warmedUpModel === modelId) return;
+    }
+
+    console.log(`[EmbeddingService] Warming up model: ${modelId}`);
+    this.warmupPromise = (async () => {
+      try {
+        // Send a test embedding to trigger model loading
+        await this.embedLocal('warmup test', modelId);
+        this.warmedUpModel = modelId;
+        console.log(`[EmbeddingService] Model ${modelId} warmed up successfully`);
+      } catch (err) {
+        console.error(`[EmbeddingService] Warmup failed for ${modelId}:`, err);
+        throw err;
+      } finally {
+        this.warmupPromise = null;
+      }
+    })();
+
+    await this.warmupPromise;
+  }
 
   private async getWorker(): Promise<Worker> {
     if (this.worker) return this.worker;
@@ -165,7 +201,7 @@ export class EmbeddingService {
       return modelName.includes('large') ? 3072 : 1536;
     }
 
-    if (modelId.includes('nomic')) {
+    if (modelId.includes('nomic') || modelId.includes('code-rank-embed')) {
       return 768;
     }
     return 384;

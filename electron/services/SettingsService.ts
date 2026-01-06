@@ -573,12 +573,10 @@ export class SettingsService extends Service<SettingsState> {
     const mapModel = (uiModel: string) => {
       if (uiModel.includes('all-MiniLM-L6-v2')) {
         return { provider: 'local', localModel: 'Xenova/all-MiniLM-L6-v2' };
-      } else if (uiModel.includes('nomic-embed-text')) {
-        return { provider: 'local', localModel: 'nomic-ai/nomic-embed-text-v1.5' };
-      } else if (uiModel.includes('nomic-embed-code')) {
-        // Note: The code model is nomic-ai/nomic-embed-code (no version suffix)
-        return { provider: 'local', localModel: 'nomic-ai/nomic-embed-code' };
-      } else if (uiModel.includes('nomic')) {
+      } else if (uiModel.includes('code-rank-embed')) {
+        // Code-specific embeddings based on CodeRankEmbed
+        return { provider: 'local', localModel: 'sirasagi62/code-rank-embed-onnx' };
+      } else if (uiModel.includes('nomic-embed-text') || uiModel.includes('nomic-embed-code') || uiModel.includes('nomic')) {
         return { provider: 'local', localModel: 'nomic-ai/nomic-embed-text-v1.5' };
       } else if (uiModel.startsWith('text-embedding-3')) {
         return { provider: 'openai', localModel: this.state.vector.localModel };

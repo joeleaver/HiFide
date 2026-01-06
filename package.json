@@ -41,7 +41,7 @@
     "@openrouter/sdk": "^0.3.11",
     "@tanstack/react-query": "^5.90.6",
     "@uiw/react-json-view": "2.0.0-alpha.39",
-    "@xenova/transformers": "^2.17.2",
+    "@huggingface/transformers": "^3.1.2",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "ai": "^5.0.87",
@@ -164,9 +164,6 @@
     "patchedDependencies": {
       "node-pty@1.1.0": "patches/node-pty@1.1.0.patch",
       "tree-sitter@0.25.0": "patches/tree-sitter@0.25.0.patch"
-    },
-    "overrides": {
-      "@xenova/transformers>sharp": "^0.34.5"
     }
   }
 }

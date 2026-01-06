@@ -10,14 +10,15 @@ updatedAt: 2026-01-04T17:57:51.859Z
 # Local Embedding Model Support (Nomic)
 
 ## Feature Overview
-The system now supports multiple local embedding models via `@xenova/transformers`, including the Nomic Embed series which provides higher dimensionality (768) and better retrieval performance compared to the default MiniLM.
+The system now supports multiple local embedding models via `@huggingface/transformers` v3, including the Nomic Embed text model which provides higher dimensionality (768) and better retrieval performance compared to the default MiniLM.
 
 ## Configuration
 The `EmbeddingService` dynamically loads models based on the `settings.vector.localModel` path.
 
-- **Option 1 (Default):** `Xenova/all-MiniLM-L6-v2` (384 Dimensions)
-- **Option 2 (Nomic Text):** `nomic-ai/nomic-embed-text-v1.5` (768 Dimensions)
-- **Option 3 (Nomic Code):** `nomic-ai/nomic-embed-code` (768 Dimensions) - Optimized for code retrieval.
+- **Option 1 (Default):** `Xenova/all-MiniLM-L6-v2` (384 Dimensions) - Fast and lightweight
+- **Option 2 (Nomic Text):** `nomic-ai/nomic-embed-text-v1.5` (768 Dimensions) - Higher quality embeddings
+
+> **Note:** `nomic-ai/nomic-embed-code` is not available for local inference as it is a 7B parameter model without ONNX support. Use the text model for code as well - it works well for code retrieval.
 
 ## Automatic Integration
 When a model is selected in the UI:

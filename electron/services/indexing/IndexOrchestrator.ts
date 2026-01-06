@@ -690,7 +690,21 @@ export class IndexOrchestrator extends Service<OrchestratorState> {
     
     if (totalMissing > 0) {
       console.log(`[IndexOrchestrator] Indexing ${totalMissing} missing items on startup...`);
-      
+
+      // Warmup embedding model BEFORE starting to process items
+      // This prevents race conditions where multiple items try to download the model simultaneously
+      try {
+        const { getEmbeddingService, getSettingsService } = await import('../index.js');
+        const embeddingService = getEmbeddingService();
+        const settings = (getSettingsService() as any).state;
+        const modelId = settings?.vector?.codeLocalModel || settings?.vector?.localModel || 'Xenova/all-MiniLM-L6-v2';
+        console.log(`[IndexOrchestrator] Warming up embedding model: ${modelId}`);
+        await embeddingService.warmup(modelId);
+      } catch (err) {
+        console.error('[IndexOrchestrator] Failed to warmup embedding model:', err);
+        // Continue anyway - individual embed calls will retry
+      }
+
       // Queue missing code files
       if (this.state.code.missing > 0) {
         const { getVectorService } = await import('../index.js');

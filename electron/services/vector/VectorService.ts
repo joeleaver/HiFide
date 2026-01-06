@@ -427,7 +427,8 @@ export class VectorService {
     } else {
       const vectors = await Promise.all(items.map(async (item, idx) => {
         try {
-          return await embeddingService.embed(item.text);
+          // Pass the type so EmbeddingService uses the correct model (e.g., codeLocalModel for 'code')
+          return await embeddingService.embed(item.text, type);
         } catch (err) {
           console.error(`[VectorService] Failed to embed item ${idx}:`, err);
           throw err;
