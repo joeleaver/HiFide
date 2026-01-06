@@ -82,4 +82,17 @@ describe('BadgeProcessor - New Tools', () => {
       toolName: 'mcp_playwright_openPage',
     })
   })
+
+  it('should correctly label terminalExec with command in title', () => {
+    const badge = {
+      toolName: 'terminalExec',
+      args: { command: 'npm run test -- --grep "terminal"' },
+      result: { exitCode: 0, output: 'Pass' }
+    }
+
+    const processed = processor.processBadge(badge)
+    expect(processed.title).toBe('$ npm run test -- --grep "terminal"')
+    expect(processed.label).toBe('')
+    expect(processed.status).toBe('success')
+  })
 })

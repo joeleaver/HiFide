@@ -26,9 +26,8 @@ import {
   Draggable,
   type DropResult,
 } from '@hello-pangea/dnd'
-import { IconPlus, IconEdit, IconTrash, IconColumns3, IconFolderPlus, IconRefresh, IconAlertTriangle, IconArchive, IconBook } from '@tabler/icons-react'
+import { IconPlus, IconEdit, IconTrash, IconColumns3, IconFolderPlus, IconRefresh, IconAlertTriangle, IconArchive, IconBook, IconHistory, IconSend } from '@tabler/icons-react'
 
-import { getBackendClient } from '../../lib/backend/bootstrap'
 import type { KanbanEpic, KanbanStatus, KanbanTask, KanbanBoard } from '../../../electron/store/types'
 import { useKanban } from '@/store/kanban'
 import { useKanbanHydration } from '@/store/screenHydration'
@@ -87,11 +86,17 @@ export default function KanbanView() {
   const startLoading = useKanbanHydration((s) => s.startLoading)
 
 
-  // Get state from store (not local state!)
+  // Get state and actions from store
   const board = useKanban((s) => s.board)
   const saving = useKanban((s) => s.saving)
-
-  const setBoard = useKanban((s) => s.setBoard)
+  const moveTask = useKanban((s) => s.moveTask)
+  const createTask = useKanban((s) => s.createTask)
+  const updateTask = useKanban((s) => s.updateTask)
+  const deleteTask = useKanban((s) => s.deleteTask)
+  const createEpic = useKanban((s) => s.createEpic)
+  const updateEpic = useKanban((s) => s.updateEpic)
+  const deleteEpic = useKanban((s) => s.deleteEpic)
+  const archiveTasks = useKanban((s) => s.archiveTasks)
 
   const epics = board?.epics ?? []
 
@@ -113,82 +118,13 @@ export default function KanbanView() {
 
   // Board is pre-fetched during loading overlay phase, no need to load on mount
 
-  // Track an optimistic move to avoid overwriting with stale server snapshots
-  const pendingMoveRef = useRef<{ taskId: string; toStatus: KanbanStatus; startedAt: number } | null>(null)
-
-  // Produce an optimistic board for a drag result
-  function buildOptimisticMove(prev: KanbanBoard, result: DropResult): KanbanBoard {
-    const { draggableId: taskId, source, destination } = result
-    if (!destination) return prev
-    const fromStatus = source.droppableId as KanbanStatus
-    const toStatus = destination.droppableId as KanbanStatus
-    const fromIndex = source.index
-    const toIndexRaw = destination.index
-
-    const byStatus: Record<KanbanStatus, KanbanTask[]> = {
-      backlog: [], todo: [], inProgress: [], done: []
-    }
-    for (const t of prev.tasks) byStatus[t.status].push(t)
-    for (const k of Object.keys(byStatus) as KanbanStatus[]) byStatus[k].sort((a, b) => a.order - b.order)
-
-    if (fromStatus === toStatus) {
-      const list = [...byStatus[fromStatus]]
-      if (fromIndex < 0 || fromIndex >= list.length) return prev
-      const [removed] = list.splice(fromIndex, 1)
-      const toIndex = Math.max(0, Math.min(toIndexRaw, list.length))
-      list.splice(toIndex, 0, removed)
-      const reindexed = list.map((t, i) => ({ ...t, order: i, updatedAt: t.id === taskId ? Date.now() : t.updatedAt }))
-      const others = prev.tasks.filter((t) => t.status !== fromStatus)
-      return { ...prev, tasks: [...others, ...reindexed] }
-    } else {
-      const src = [...byStatus[fromStatus]]
-      if (fromIndex < 0 || fromIndex >= src.length) return prev
-      const [removed] = src.splice(fromIndex, 1)
-      const dst = [...byStatus[toStatus]]
-      const toIndex = Math.max(0, Math.min(toIndexRaw, dst.length))
-      dst.splice(toIndex, 0, { ...removed, status: toStatus })
-      const reSrc = src.map((t, i) => ({ ...t, order: i }))
-      const reDst = dst.map((t, i) => ({ ...t, status: toStatus, order: i, updatedAt: t.id === taskId ? Date.now() : t.updatedAt }))
-      const others = prev.tasks.filter((t) => t.status !== fromStatus && t.status !== toStatus)
-      return { ...prev, tasks: [...others, ...reSrc, ...reDst] }
-    }
-  }
-
-
   const handleDragEnd = async (result: DropResult) => {
     const destination = result.destination
     const source = result.source
     if (!destination || !board) return
     if (source.droppableId === destination.droppableId && source.index === destination.index) return
 
-    // Optimistically update UI
-    const prev = board
-    const optimistic = buildOptimisticMove(prev, result)
-    if (optimistic !== prev) {
-      pendingMoveRef.current = {
-        taskId: result.draggableId,
-        toStatus: destination.droppableId as KanbanStatus,
-        startedAt: Date.now(),
-      }
-      setBoard(optimistic)
-    }
-
-    try {
-      const client = getBackendClient()
-      const res: any = await client?.rpc('kanban.moveTask', {
-        workspaceId,
-        taskId: result.draggableId,
-        toStatus: destination.droppableId as KanbanStatus,
-        toIndex: destination.index,
-      })
-      if (!res?.ok) throw new Error('Move rejected')
-    } catch (err) {
-      // Roll back on failure
-      try { setBoard(prev) } catch { }
-      pendingMoveRef.current = null
-      console.error('[kanban] move failed:', err)
-      notifications.show({ color: 'red', title: 'Move failed', message: 'Unable to move task. Please try again.' })
-    }
+    await moveTask(result.draggableId, destination.droppableId as KanbanStatus, destination.index)
    }
  
    const handleOpenKnowledgeBase = useCallback((kbArticleId?: string | null) => {
@@ -199,17 +135,7 @@ export default function KanbanView() {
    }, [setCurrentViewLocal, setKnowledgeBaseActiveItem])
  
    const handleDeleteTask = async (task: KanbanTask) => {
-    const confirmed = window.confirm(`Delete task "${task.title}"?`)
-    if (!confirmed) return
-
-    try {
-      const res: any = await getBackendClient()?.rpc('kanban.deleteTask', { workspaceId, taskId: task.id })
-      if (!res?.ok) throw new Error('Delete rejected')
-      notifications.show({ color: 'green', title: 'Task deleted', message: 'The task was removed.' })
-    } catch (err) {
-      console.error('[kanban] delete failed:', err)
-      notifications.show({ color: 'red', title: 'Delete failed', message: String(err) })
-    }
+    await deleteTask(task.id)
   }
 
   const handleSubmitTask = async (values: TaskFormValues, existingId?: string) => {
@@ -218,105 +144,58 @@ export default function KanbanView() {
         ? values.kbArticleId.trim() || null
         : null
 
+    const payload = {
+      title: values.title,
+      status: values.status,
+      epicId: values.epicId,
+      description: values.description,
+      kbArticleId: sanitizedKbArticleId,
+      worklog: values.worklog,
+    }
+
     try {
       if (existingId) {
-        const res: any = await getBackendClient()?.rpc('kanban.updateTask', {
-          workspaceId,
-          taskId: existingId,
-          patch: {
-            title: values.title,
-            status: values.status,
-            epicId: values.epicId,
-            description: values.description,
-            kbArticleId: sanitizedKbArticleId,
-          }
-        })
-        if (!res?.ok || !res.task) throw new Error('Update rejected')
-        notifications.show({ color: 'green', title: 'Task updated', message: `Saved "${values.title}".` })
+        await updateTask(existingId, payload)
       } else {
-        const res: any = await getBackendClient()?.rpc('kanban.createTask', {
-          workspaceId,
-          input: {
-            title: values.title,
-            status: values.status,
-            epicId: values.epicId,
-            description: values.description,
-            kbArticleId: sanitizedKbArticleId,
-          }
-        })
-        if (!res?.ok || !res.task) throw new Error('Create rejected')
-        notifications.show({ color: 'green', title: 'Task created', message: `Added "${values.title}" to the board.` })
+        await createTask(payload)
       }
       closeTaskModal()
     } catch (err) {
-      console.error('[kanban] save failed:', err)
-      notifications.show({ color: 'red', title: 'Save failed', message: String(err) })
+      // Error handled in store
     }
   }
 
 
   const handleSubmitEpic = async (values: EpicFormValues, existingId?: string) => {
+    const payload = {
+      name: values.name,
+      color: values.color?.trim() || undefined,
+      description: values.description?.trim() || undefined,
+    }
+
     try {
       if (existingId) {
-        const res: any = await getBackendClient()?.rpc('kanban.updateEpic', {
-          workspaceId,
-          epicId: existingId,
-          patch: {
-            name: values.name,
-            color: values.color?.trim() || undefined,
-            description: values.description?.trim() || undefined,
-          }
-        })
-        if (!res?.ok || !res.epic) throw new Error('Update rejected')
-        notifications.show({ color: 'green', title: 'Epic updated', message: `Updated "${values.name}".` })
+        await updateEpic(existingId, payload)
       } else {
-        const res: any = await getBackendClient()?.rpc('kanban.createEpic', {
-          workspaceId,
-          input: {
-            name: values.name,
-            color: values.color?.trim() || undefined,
-            description: values.description?.trim() || undefined,
-          }
-        })
-        if (!res?.ok || !res.epic) throw new Error('Create rejected')
-        notifications.show({ color: 'green', title: 'Epic created', message: `Created epic "${values.name}".` })
+        await createEpic(payload)
       }
       closeEpicModal()
     } catch (err) {
-      console.error('[kanban] epic save failed:', err)
-      notifications.show({ color: 'red', title: 'Save failed', message: String(err) })
+      // Error handled in store
     }
   }
 
 
   const handleDeleteEpic = async (epic: KanbanEpic) => {
-    const confirmed = window.confirm(`Delete epic "${epic.name}"? Tasks will be unassigned.`)
-    if (!confirmed) return
-
-    try {
-      const res: any = await getBackendClient()?.rpc('kanban.deleteEpic', { workspaceId, epicId: epic.id })
-      if (!res?.ok) throw new Error('Delete rejected')
-      notifications.show({ color: 'green', title: 'Epic deleted', message: 'Tasks were unassigned.' })
-    } catch (err) {
-      console.error('[kanban] delete epic failed:', err)
-      notifications.show({ color: 'red', title: 'Delete failed', message: String(err) })
-    }
+    await deleteEpic(epic.id)
   }
 
   const handleArchiveTasks = async (olderThan: number) => {
     try {
-      const res: any = await getBackendClient()?.rpc('kanban.archiveTasks', { workspaceId, olderThan })
-      if (!res?.ok) throw new Error(res?.error || 'Archive failed')
-      const count = res.archivedCount ?? 0
-      notifications.show({
-        color: 'green',
-        title: 'Tasks archived',
-        message: `Archived ${count} task${count !== 1 ? 's' : ''}.`
-      })
+      await archiveTasks(olderThan)
       setArchiveModalOpen(false)
     } catch (err) {
-      console.error('[kanban] archive failed:', err)
-      notifications.show({ color: 'red', title: 'Archive failed', message: String(err) })
+      // Error handled in store
     }
   }
 
@@ -548,6 +427,23 @@ function KanbanTaskCard({ task, epic, provided, dragging, kbArticleTitle, onEdit
               <StreamingMarkdown content={task.description} showCursor={false} />
             </Box>
           )}
+          {task.worklog && task.worklog.length > 0 && (
+            <Box mt="sm" p="xs" style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 4 }}>
+              <Text size="xs" fw={700} c="dimmed" mb={4} style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>Worklog</Text>
+              <Stack gap={4}>
+                {task.worklog.slice(-3).map((log, i) => (
+                  <Text key={i} size="xs" c="dimmed" style={{ borderLeft: '2px solid rgba(255,255,255,0.1)', paddingLeft: 8 }}>
+                    {log}
+                  </Text>
+                ))}
+                {task.worklog.length > 3 && (
+                  <Text size="xs" c="dimmed" fs="italic">
+                    + {task.worklog.length - 3} more entries
+                  </Text>
+                )}
+              </Stack>
+            </Box>
+          )}
           {task.kbArticleId && (
             <Anchor
               component="button"
@@ -615,7 +511,7 @@ function TaskModal({ epics, onSubmit, saving }: TaskModalProps) {
 
   const handleSubmit = () => {
     if (!isTaskFormValid) {
-      notifications.show({ color: 'red', title: 'Validation', message: 'Title is required.' })
+      // notifications.show({ color: 'red', title: 'Validation', message: 'Title is required.' })
       return
     }
     void onSubmit(
@@ -625,6 +521,7 @@ function TaskModal({ epics, onSubmit, saving }: TaskModalProps) {
         epicId: taskForm.epicId,
         kbArticleId: taskForm.kbArticleId,
         description: taskForm.description.trim(),
+        worklog: taskForm.worklog,
       },
       modalState.mode === 'edit' ? modalState.task.id : undefined,
     )
@@ -682,6 +579,65 @@ function TaskModal({ epics, onSubmit, saving }: TaskModalProps) {
           value={taskForm.description}
           onChange={(event) => updateTaskForm({ description: event.currentTarget.value })}
         />
+
+        <Box>
+          <Text size="sm" fw={500} mb={4}>Worklog</Text>
+          <Paper withBorder p="xs" style={{ backgroundColor: 'rgba(0,0,0,0.2)' }}>
+            <Stack gap="xs">
+              {taskForm.worklog.length === 0 && (
+                <Text size="xs" c="dimmed" fs="italic">No worklog entries yet.</Text>
+              )}
+              {taskForm.worklog.map((log, i) => (
+                <Group key={i} align="flex-start" wrap="nowrap" gap="xs">
+                  <IconHistory size={14} style={{ marginTop: 2, flexShrink: 0 }} />
+                  <Text size="xs" style={{ flex: 1 }}>{log}</Text>
+                  <ActionIcon 
+                    size="xs" 
+                    variant="subtle" 
+                    color="red" 
+                    onClick={() => {
+                      const next = [...taskForm.worklog]
+                      next.splice(i, 1)
+                      updateTaskForm({ worklog: next })
+                    }}
+                  >
+                    <IconTrash size={12} />
+                  </ActionIcon>
+                </Group>
+              ))}
+            </Stack>
+          </Paper>
+          <Group mt="xs" gap="xs">
+            <TextInput
+              placeholder="Add worklog entry..."
+              style={{ flex: 1 }}
+              size="xs"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  const target = e.currentTarget
+                  const val = target.value.trim()
+                  if (val) {
+                    updateTaskForm({ worklog: [...taskForm.worklog, val] })
+                    target.value = ''
+                  }
+                }
+              }}
+              rightSection={
+                <ActionIcon size="xs" variant="light" onClick={(e) => {
+                  const input = (e.currentTarget.parentElement?.previousSibling as HTMLInputElement)
+                  const val = input.value.trim()
+                  if (val) {
+                    updateTaskForm({ worklog: [...taskForm.worklog, val] })
+                    input.value = ''
+                  }
+                }}>
+                  <IconSend size={14} />
+                </ActionIcon>
+              }
+            />
+          </Group>
+        </Box>
         <Group justify="flex-end" gap="sm">
           <Button variant="default" onClick={closeTaskModal} disabled={saving}>
             Cancel

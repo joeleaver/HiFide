@@ -126,6 +126,26 @@ export function createKanbanHandlers(addMethod: (method: string, handler: (param
     }
   })
 
+  // Log work on task
+  addMethod('kanban.logWorkOnTask', async (params: any) => {
+    const { taskId, message, workspaceId } = params
+    if (!taskId || !message || !workspaceId) {
+      throw new Error('Missing required parameters: taskId, message, workspaceId')
+    }
+    const task = await kanbanService.kanbanLogWorkOnTask(taskId, message, workspaceId)
+    return { ok: true, task }
+  })
+
+  // Get specific task
+  addMethod('kanban.getTask', async (params: any) => {
+    const { taskId, workspaceId } = params
+    if (!taskId || !workspaceId) {
+      throw new Error('Missing required parameters: taskId, workspaceId')
+    }
+    const task = await kanbanService.kanbanGetTask(taskId, workspaceId)
+    return { ok: true, task }
+  })
+
   // Refresh board from disk
   addMethod('kanban.refreshBoard', async (params: any) => {
     const { workspaceId } = params

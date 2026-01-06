@@ -13,7 +13,7 @@ import type { ProviderAdapter, StreamHandle, AgentTool } from '../../providers/p
 // Re-export types for convenience
 export type { ProviderAdapter, StreamHandle, AgentTool }
 
-const DEBUG = true // process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
+const DEBUG = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
 
 // Rate limiting constants
 const MAX_RETRIES = 5

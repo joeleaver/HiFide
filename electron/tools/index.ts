@@ -36,6 +36,8 @@ import { applyEditsTool } from './edits/apply'
 import { kanbanGetBoardTool } from './kanban/getBoard'
 import { kanbanCreateTaskTool } from './kanban/createTask'
 import { kanbanUpdateTaskTool } from './kanban/updateTask'
+import { kanbanLogWorkOnTaskTool } from './kanban/logWorkOnTask'
+import { kanbanGetTaskTool } from './kanban/getTask'
 import { kanbanDeleteTaskTool } from './kanban/deleteTask'
 import { kanbanMoveTaskTool } from './kanban/moveTask'
 import { kanbanCreateEpicTool } from './kanban/createEpic'
@@ -84,6 +86,8 @@ export const agentTools: AgentTool[] = [
   kanbanGetBoardTool,
   kanbanCreateTaskTool,
   kanbanUpdateTaskTool,
+  kanbanLogWorkOnTaskTool,
+  kanbanGetTaskTool,
   kanbanDeleteTaskTool,
   kanbanMoveTaskTool,
   kanbanCreateEpicTool,

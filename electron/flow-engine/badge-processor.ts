@@ -186,13 +186,12 @@ class BadgeConfigRegistry {
       defaultType: 'tool',
       contentType: 'terminal-exec',
       requiresExpansion: true,
-      generateTitle: (_badge: any) => 'Terminal',
-      generateLabel: (badge: any) => {
+      generateTitle: (badge: any) => {
         const command = badge.args?.command || badge.metadata?.command
-        if (!command) return ''
-        const cmdPreview = command.length > 40 ? `${command.substring(0, 40)}...` : command
-        return `$ ${cmdPreview}`
+        if (!command) return 'Terminal'
+        return `$ ${shortenMiddle(command, 80)}`
       },
+      generateLabel: (_badge: any) => '',
       enrichMetadata: (badge: any) => {
         const command = badge.args?.command
         const metadata: Record<string, any> = command ? { command } : {}
@@ -219,11 +218,11 @@ class BadgeConfigRegistry {
       defaultType: 'tool',
       contentType: 'workspace-search',
       requiresExpansion: true,
-      generateTitle: (_badge: any) => 'Workspace Search',
-      generateLabel: (badge: any) => {
+      generateTitle: (badge: any) => {
         const query = badge.args?.query || badge.metadata?.query
-        return query ? `"${query}"` : ''
+        return query ? `"${shortenMiddle(query, 100)}"` : 'Workspace Search'
       },
+      generateLabel: (_badge: any) => '',
       enrichMetadata: (badge: any) => {
         const metadata: Record<string, any> = {}
         const query = badge.args?.query
@@ -467,14 +466,13 @@ class BadgeConfigRegistry {
       defaultType: 'tool',
       contentType: 'operation-result',
       requiresExpansion: true,
-      generateTitle: (_badge: any) => 'Kanban Board',
-      generateLabel: (badge: any) => {
+      generateTitle: (badge: any) => {
         const status = badge.args?.status
+        return status ? `Kanban: ${status}` : 'Kanban Board'
+      },
+      generateLabel: (badge: any) => {
         const epicId = badge.args?.epicId
-        const parts: string[] = []
-        if (status) parts.push(`(${status})`)
-        if (epicId) parts.push(`[Epic: ${epicId}]`)
-        return parts.join(' ')
+        return epicId ? `[Epic: ${epicId}]` : ''
       },
       enrichMetadata: (badge: any) => {
         const md: Record<string, any> = {

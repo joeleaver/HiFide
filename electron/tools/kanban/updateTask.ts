@@ -15,12 +15,13 @@ export const kanbanUpdateTaskTool: AgentTool = {
       epicId: { type: 'string' },
       assignees: { type: 'array', items: { type: 'string' } },
       tags: { type: 'array', items: { type: 'string' } },
+      worklog: { type: 'array', items: { type: 'string' } },
       kbArticleId: { type: 'string', description: 'Knowledge Base article ID to associate with the task' },
     },
     required: ['taskId'],
     additionalProperties: false,
   },
-  run: async (input: { taskId: string; title?: string; description?: string; status?: KanbanStatus; epicId?: string | null; assignees?: string[]; tags?: string[]; kbArticleId?: string | null }, meta?: any) => {
+  run: async (input: { taskId: string; title?: string; description?: string; status?: KanbanStatus; epicId?: string | null; assignees?: string[]; tags?: string[]; worklog?: string[]; kbArticleId?: string | null }, meta?: any) => {
     const kanbanService = getKanbanService()
 
     const patch: Partial<KanbanTask> & { status?: KanbanStatus } = {}
@@ -30,6 +31,7 @@ export const kanbanUpdateTaskTool: AgentTool = {
     if (input.epicId !== undefined) patch.epicId = input.epicId ?? null
     if (input.assignees !== undefined) patch.assignees = input.assignees
     if (input.tags !== undefined) patch.tags = input.tags
+    if (input.worklog !== undefined) patch.worklog = input.worklog
     if (input.kbArticleId !== undefined) patch.kbArticleId = input.kbArticleId ?? null
 
     const updated: KanbanTask = await kanbanService.kanbanUpdateTask(input.taskId, patch, meta?.workspaceId)

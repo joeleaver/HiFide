@@ -257,6 +257,7 @@ export class KanbanService extends Service<KanbanState> {
     description?: string
     assignees?: string[]
     tags?: string[]
+    worklog?: string[]
   }): Promise<KanbanTask> {
     const workspaceRoot = await this.resolveWorkspaceRoot(input.workspaceId)
     let board = this.getWorkspaceState(workspaceRoot).board
@@ -276,6 +277,7 @@ export class KanbanService extends Service<KanbanState> {
       kbArticleId: this.sanitizeKbArticleId(input.kbArticleId),
       assignees: input.assignees ? [...input.assignees] : [],
       tags: input.tags ? [...input.tags] : [],
+      worklog: input.worklog ? [...input.worklog] : [],
       createdAt: timestamp,
       updatedAt: timestamp,
     }
@@ -304,6 +306,7 @@ export class KanbanService extends Service<KanbanState> {
       epicId?: string | null
       assignees?: string[]
       tags?: string[]
+      worklog?: string[]
     },
     workspaceId: string
   ): Promise<KanbanTask> {
@@ -326,6 +329,7 @@ export class KanbanService extends Service<KanbanState> {
           : this.sanitizeKbArticleId(patch.kbArticleId),
       assignees: patch.assignees ? [...patch.assignees] : task.assignees,
       tags: patch.tags ? [...patch.tags] : task.tags,
+      worklog: patch.worklog ? [...patch.worklog] : task.worklog,
       updatedAt: Date.now(),
     }
 
@@ -507,6 +511,52 @@ export class KanbanService extends Service<KanbanState> {
     } catch (error) {
       return { ok: false, error: String(error) }
     }
+  }
+
+  async kanbanLogWorkOnTask(
+    taskId: string,
+    message: string,
+    workspaceId: string
+  ): Promise<KanbanTask> {
+    const workspaceRoot = await this.resolveWorkspaceRoot(workspaceId)
+    const board = this.getWorkspaceState(workspaceRoot).board
+    if (!board) throw new Error('Board not loaded')
+
+    const task = this.findTask(board, taskId)
+    if (!task) throw new Error(`Task not found: ${taskId}`)
+
+    const updatedTask: KanbanTask = {
+      ...task,
+      worklog: [...(task.worklog || []), message],
+      updatedAt: Date.now(),
+    }
+
+    const updatedBoard = {
+      ...board,
+      tasks: board.tasks.map((existing) => (existing.id === taskId ? updatedTask : existing)),
+    }
+
+    try {
+      await this.persistBoard({ board: updatedBoard, workspaceId: workspaceRoot })
+      return updatedTask
+    } catch (error) {
+      console.error('[kanban] kanbanLogWorkOnTask failed:', error)
+      throw error
+    }
+  }
+
+  async kanbanGetTask(
+    taskId: string,
+    workspaceId: string
+  ): Promise<KanbanTask | null> {
+    const workspaceRoot = await this.resolveWorkspaceRoot(workspaceId)
+    const board = this.getWorkspaceState(workspaceRoot).board
+    if (!board) {
+      const res = await this.kanbanLoadFor(workspaceId)
+      if (!res.ok || !res.board) return null
+      return this.findTask(res.board, taskId) || null
+    }
+    return this.findTask(board, taskId) || null
   }
 
   async kanbanArchiveTasks(params: {

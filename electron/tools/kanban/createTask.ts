@@ -14,12 +14,13 @@ export const kanbanCreateTaskTool: AgentTool = {
       epicId: { type: 'string' },
       assignees: { type: 'array', items: { type: 'string' } },
       tags: { type: 'array', items: { type: 'string' } },
+      worklog: { type: 'array', items: { type: 'string' }, description: 'Initial worklog entries' },
       kbArticleId: { type: 'string', description: 'Knowledge Base article ID to link to the task' },
     },
     required: ['title'],
     additionalProperties: false,
   },
-  run: async (input: { title: string; description?: string; status?: KanbanStatus; epicId?: string | null; assignees?: string[]; tags?: string[]; kbArticleId?: string | null }, meta?: any) => {
+  run: async (input: { title: string; description?: string; status?: KanbanStatus; epicId?: string | null; assignees?: string[]; tags?: string[]; worklog?: string[]; kbArticleId?: string | null }, meta?: any) => {
     const kanbanService = getKanbanService()
 
     const task: KanbanTask = await kanbanService.kanbanCreateTask({
@@ -30,6 +31,7 @@ export const kanbanCreateTaskTool: AgentTool = {
       description: input.description,
       assignees: input.assignees,
       tags: input.tags,
+      worklog: input.worklog,
       kbArticleId: input.kbArticleId ?? null,
     })
 

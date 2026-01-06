@@ -121,123 +121,124 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
 
   return (
     <Stack gap={12}>
-      {(query || maxResults !== undefined || pathsInclude.length || pathsExclude.length) && (
-        <div>
-          <Text size="xs" fw={600} c="dimmed" mb={6}>
-            Search Parameters
-          </Text>
-          <Stack gap={4}>
-            {query && (
-              <Group gap={6}>
-                <Text size="xs" c="dimmed" fw={500}>Query:</Text>
-                <Text size="xs" c="gray.3">{query}</Text>
-              </Group>
-            )}
-            {maxResults !== undefined && (
-              <Group gap={6}>
-                <Text size="xs" c="dimmed" fw={500}>Max results:</Text>
-                <Text size="xs" c="gray.3">{maxResults}</Text>
-              </Group>
-            )}
-            {pathsInclude.length > 0 && (
-              <Group gap={6}>
-                <Text size="xs" c="dimmed" fw={500}>Include:</Text>
-                <Text size="xs" c="gray.3">{pathsInclude.join(', ')}</Text>
-              </Group>
-            )}
-            {pathsExclude.length > 0 && (
-              <Group gap={6}>
-                <Text size="xs" c="dimmed" fw={500}>Exclude:</Text>
-                <Text size="xs" c="gray.3">{pathsExclude.join(', ')}</Text>
-              </Group>
-            )}
-          </Stack>
-        </div>
-      )}
-
-      <Divider color="#3d3d3d" />
-
-      {/* LLM Payload Section */}
-      <div>
-        <Group gap={8} mb={6}>
-          <Text size="xs" fw={600} c="dimmed">
-            LLM Payload
-          </Text>
-          {llmResult && (
-            <>
-              <Badge size="xs" variant="light" color="green">
-                {llmMatchCount} {llmMatchCount === 1 ? 'match' : 'matches'}
-              </Badge>
-              <Badge size="xs" variant="light" color="blue">
-                {llmFileCount} {llmFileCount === 1 ? 'file' : 'files'}
-              </Badge>
-              {llmResult.error && (
-                <Badge size="xs" variant="light" color="red">
-                  error
-                </Badge>
-              )}
-            </>
+      {/* Parameter Summary */}
+      {(maxResults !== undefined || pathsInclude.length || pathsExclude.length) && (
+        <Group gap={12} wrap="wrap" p="8px 12px" style={{ background: '#1a1a1a', borderRadius: 6, border: '1px solid #2d2d2d' }}>
+          {maxResults !== undefined && (
+            <Group gap={4}>
+              <Text size="xs" c="dimmed" fw={600} tt="uppercase" lts="0.02em">Limit:</Text>
+              <Text size="xs" c="gray.4" fw={500}>{maxResults}</Text>
+            </Group>
+          )}
+          {pathsInclude.length > 0 && (
+            <Group gap={4}>
+              <Text size="xs" c="dimmed" fw={600} tt="uppercase" lts="0.02em">Include:</Text>
+              <Code size="xs" style={{ background: 'transparent', color: '#888', padding: 0 }}>
+                {pathsInclude.join(', ')}
+              </Code>
+            </Group>
+          )}
+          {pathsExclude.length > 0 && (
+            <Group gap={4}>
+              <Text size="xs" c="dimmed" fw={600} tt="uppercase" lts="0.02em">Exclude:</Text>
+              <Code size="xs" style={{ background: 'transparent', color: '#888', padding: 0 }}>
+                {pathsExclude.join(', ')}
+              </Code>
+            </Group>
           )}
         </Group>
+      )}
 
+      {/* Results Header */}
+      <Group justify="space-between" align="center" mt={4} px={4}>
+        <Group gap={8}>
+          <Text size="xs" fw={700} c="dimmed" tt="uppercase" lts="0.05em">
+            Results
+          </Text>
+          {llmResult && (
+            <Group gap={6}>
+              <Badge size="xs" variant="filled" color="gray.8" c="gray.4" fw={600} radius="sm">
+                {llmMatchCount} {llmMatchCount === 1 ? 'match' : 'matches'}
+              </Badge>
+              <Badge size="xs" variant="filled" color="gray.8" c="gray.4" fw={600} radius="sm">
+                {llmFileCount} {llmFileCount === 1 ? 'file' : 'files'}
+              </Badge>
+            </Group>
+          )}
+        </Group>
+        
         {llmResult?.summary && (
-          <Text size="xs" c="gray.4" mb={6}>
+          <Text size="xs" c="dimmed" fs="italic">
             {llmResult.summary}
           </Text>
         )}
+      </Group>
 
+      {/* Main Results Section */}
+      <Stack gap={12}>
         {!llmResult ? (
-          <Text size="sm" c="dimmed">
-            No tool payload was recorded for this call.
+          <Text size="xs" c="dimmed" px={4}>
+            No tool payload recorded.
           </Text>
         ) : llmResult.error ? (
-          <Text size="sm" c="red.4">
+          <Text size="xs" color="red.7" px={4}>
             {llmResult.error}
           </Text>
         ) : llmFiles.length === 0 ? (
-          <Text size="sm" c="dimmed">
-            No matches were returned to the model.
+          <Text size="xs" c="dimmed" px={4}>
+            No matches found.
           </Text>
         ) : (
           <Accordion
             variant="separated"
             styles={{
               item: {
-                background: '#1a1a1a',
+                background: '#141414',
                 border: '1px solid #2d2d2d',
+                borderRadius: 6,
+                overflow: 'hidden',
               },
               control: {
                 padding: '8px 12px',
+                '&:hover': {
+                  background: '#1a1a1a',
+                }
               },
               content: {
-                padding: '8px 12px',
+                padding: '0 12px 12px 12px',
+                background: '#0d0d0d',
               },
+              chevron: {
+                color: '#555',
+              }
             }}
           >
             {llmFiles.map((entry, idx) => (
               <Accordion.Item key={`${entry.file}-${idx}`} value={`llm-${idx}`}>
                 <Accordion.Control>
                   <Group gap={8}>
-                    <Text size="xs" fw={500} c="gray.3" style={{ flex: 1 }}>
+                    <Text size="xs" fw={600} c="gray.3" style={{ flex: 1, fontFamily: 'var(--mantine-font-family-monospace)' }}>
                       {entry.file}
                     </Text>
-                    <Badge size="xs" variant="light" color="gray">
-                      {entry.matches?.length || 0} {entry.matches?.length === 1 ? 'match' : 'matches'}
+                    <Badge size="xs" variant="light" color="gray" radius="sm">
+                      {entry.matches?.length || 0}
                     </Badge>
                   </Group>
                 </Accordion.Control>
                 <Accordion.Panel>
-                  <Stack gap={6}>
+                  <Stack gap={4} mt={8}>
                     {(entry.matches || []).map((match, matchIdx) => (
                       <Code
                         key={matchIdx}
                         block
                         style={{
                           fontSize: 11,
-                          lineHeight: 1.4,
-                          background: '#0d0d0d',
-                          border: '1px solid #2d2d2d',
-                          padding: '6px 8px',
+                          lineHeight: 1.5,
+                          background: '#111',
+                          border: '1px solid #222',
+                          color: '#ccc',
+                          padding: '8px 10px',
+                          borderRadius: 4,
                         }}
                       >
                         {match}
@@ -251,92 +252,78 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
         )}
 
         {llmRawPayload && (
-          <Stack gap={4} mt={10}>
-            <Text size="xs" fw={600} c="dimmed">
-              Raw payload sent to model
-            </Text>
-            <Code
-              block
-              style={{
-                fontSize: 11,
-                lineHeight: 1.4,
-                maxHeight: 200,
-                overflow: 'auto',
-                background: '#0d0d0d',
-                border: '1px solid #2d2d2d',
-                padding: '8px 10px',
-              }}
-            >
-              {llmRawPayload}
-            </Code>
-          </Stack>
+          <Accordion variant="subtle" mt={4}>
+            <Accordion.Item value="raw" style={{ border: 'none' }}>
+              <Accordion.Control p="4px 8px">
+                <Text size="xs" fw={600} c="dimmed" ta="center">
+                  Show Raw JSON Output
+                </Text>
+              </Accordion.Control>
+              <Accordion.Panel>
+                <Code
+                  block
+                  style={{
+                    fontSize: 10,
+                    lineHeight: 1.4,
+                    maxHeight: 200,
+                    overflow: 'auto',
+                    background: '#0d0d0d',
+                    border: '1px solid #2d2d2d',
+                    padding: '8px 10px',
+                  }}
+                >
+                  {llmRawPayload}
+                </Code>
+              </Accordion.Panel>
+            </Accordion.Item>
+          </Accordion>
         )}
-      </div>
+      </Stack>
 
       {searchKey && (
-        <>
-          <Divider color="#3d3d3d" />
-          <div>
-            <Group gap={8} mb={6}>
-              <Text size="xs" fw={600} c="dimmed">
-                Cached UI Preview
-              </Text>
-              {uiResults && (
-                <>
-                  <Badge size="xs" variant="light" color="green">
-                    {uiResults.count} {uiResults.count === 1 ? 'match' : 'matches'}
-                  </Badge>
-                  <Badge size="xs" variant="light" color="blue">
-                    {uiFileGroups.length} {uiFileGroups.length === 1 ? 'file' : 'files'}
-                  </Badge>
-                  {uiResults.meta?.truncated && (
-                    <Badge size="xs" variant="light" color="orange">
-                      truncated
-                    </Badge>
-                  )}
-                  {uiResults.meta?.mode && (
-                    <Badge size="xs" variant="light" color="gray">
-                      {uiResults.meta.mode}
-                    </Badge>
-                  )}
-                </>
+        <Stack gap={0}>
+          <Divider color="#313131" my={10} label="Cached UI Preview" labelPosition="center" />
+          
+          {uiResults && (
+            <Group gap={8} mb={8}>
+              <Badge size="xs" variant="outline" color="gray">
+                {uiResults.count} matches
+              </Badge>
+              <Badge size="xs" variant="outline" color="gray">
+                {uiFileGroups.length} files
+              </Badge>
+              {uiResults.meta?.truncated && (
+                <Badge size="xs" variant="dot" color="orange">
+                  truncated
+                </Badge>
               )}
             </Group>
+          )}
 
-            {uiLoading && (
-              <Text size="sm" c="dimmed">
-                Loading cached preview...
-              </Text>
-            )}
+          {uiLoading && (
+            <Text size="xs" c="dimmed">Loading preview...</Text>
+          )}
 
-            {uiError && !uiLoading && (
-              <Text size="sm" c="red.4">
-                {uiError}
-              </Text>
-            )}
+          {uiError && !uiLoading && (
+            <Text size="xs" color="red.7">{uiError}</Text>
+          )}
 
-            {!uiLoading && !uiError && !uiResults && (
-              <Text size="sm" c="dimmed">
-                No cached preview available.
-              </Text>
-            )}
-
-            {uiResults && !uiLoading && !uiError && (
-              <Accordion
-                variant="separated"
-                styles={{
-                  item: {
-                    background: '#1a1a1a',
-                    border: '1px solid #2d2d2d',
-                  },
-                  control: {
-                    padding: '8px 12px',
-                  },
-                  content: {
-                    padding: '8px 12px',
-                  },
-                }}
-              >
+          {uiResults && !uiLoading && !uiError && (
+            <Accordion
+              variant="separated"
+              styles={{
+                item: {
+                  background: '#141414',
+                  border: '1px solid #282828',
+                },
+                control: {
+                  padding: '6px 10px',
+                },
+                content: {
+                  padding: '6px 10px',
+                },
+              }}
+            >
                 {uiFileGroups.map(([filePath, matches], idx) => (
                   <Accordion.Item key={`${filePath}-${idx}`} value={`ui-${idx}`}>
                     <Accordion.Control>
@@ -378,8 +365,7 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
                 ))}
               </Accordion>
             )}
-          </div>
-        </>
+          </Stack>
       )}
     </Stack>
   )

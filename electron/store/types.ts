@@ -48,6 +48,7 @@ export interface KanbanTask {
   kbArticleId?: string | null
   assignees?: string[]
   tags?: string[]
+  worklog?: string[]
   createdAt: number
   updatedAt: number
   archived?: boolean
