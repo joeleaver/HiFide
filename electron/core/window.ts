@@ -19,7 +19,11 @@ const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 const DIRNAME = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url))
 
 // Robust path to dist-electron root, even when this file is bundled into a chunk
-const DIST_ELECTRON = process.env.DIST_ELECTRON || (DIRNAME.endsWith('chunks') ? path.join(DIRNAME, '..') : DIRNAME)
+const DIST_ELECTRON = (process.env.DIST_ELECTRON && !process.env.DIST_ELECTRON.endsWith('chunks'))
+  ? process.env.DIST_ELECTRON
+  : (DIRNAME.endsWith('chunks') || DIRNAME.includes(path.join('dist-electron', 'chunks'))
+    ? path.join(DIRNAME, '..')
+    : DIRNAME)
 
 /**
  * Window state interface

@@ -90,7 +90,6 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
   }, [searchKey])
 
   // Extract query/filter parameters for display
-  const query = fullParams?.query || ''
   const filters = fullParams?.filters || {}
   const pathsInclude = filters.pathsInclude || []
   const pathsExclude = filters.pathsExclude || []
@@ -133,7 +132,7 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
           {pathsInclude.length > 0 && (
             <Group gap={4}>
               <Text size="xs" c="dimmed" fw={600} tt="uppercase" lts="0.02em">Include:</Text>
-              <Code size="xs" style={{ background: 'transparent', color: '#888', padding: 0 }}>
+              <Code style={{ background: 'transparent', color: '#888', padding: 0, fontSize: '0.75rem' }}>
                 {pathsInclude.join(', ')}
               </Code>
             </Group>
@@ -141,7 +140,7 @@ export const BadgeWorkspaceSearchContent = memo(function BadgeWorkspaceSearchCon
           {pathsExclude.length > 0 && (
             <Group gap={4}>
               <Text size="xs" c="dimmed" fw={600} tt="uppercase" lts="0.02em">Exclude:</Text>
-              <Code size="xs" style={{ background: 'transparent', color: '#888', padding: 0 }}>
+              <Code style={{ background: 'transparent', color: '#888', padding: 0, fontSize: '0.75rem' }}>
                 {pathsExclude.join(', ')}
               </Code>
             </Group>

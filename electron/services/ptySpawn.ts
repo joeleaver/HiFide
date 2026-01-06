@@ -43,7 +43,11 @@ export async function spawnPty(command: string, cwd = process.cwd(), timeoutMs =
 
   const timeoutP = new Promise<{ timedOut: true; exitCode: null }>((resolve) =>
     setTimeout(() => {
-      pty.kill()
+      try {
+        pty.kill()
+      } catch (e) {
+        console.warn('[ptySpawn] Failed to kill timed-out PTY:', e)
+      }
       resolve({ timedOut: true, exitCode: null })
     }, timeoutMs)
   )

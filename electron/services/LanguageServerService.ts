@@ -2,7 +2,6 @@ import { Service } from './base/Service.js'
 import { LspManager } from './lsp/LspManager.js'
 import { 
   type SupportedLspLanguage,
-  type LspDiagnosticsEvent,
   type LspLanguageListResponse,
   type LspLanguageStatusPayload,
 } from '../../shared/lsp.js'
@@ -39,7 +38,7 @@ export class LanguageServerService extends Service<LanguageServerState> {
     this.applyDefaultLanguagePreferences()
   }
 
-  protected onStateChange(updates: Partial<LanguageServerState>, prevState: LanguageServerState): void {
+  protected onStateChange(updates: Partial<LanguageServerState>, _prevState: LanguageServerState): void {
     if (updates.preferences) {
       this.persistFields(['preferences'])
     }
@@ -125,7 +124,7 @@ export class LanguageServerService extends Service<LanguageServerState> {
         else if (server.status === 'starting') status = 'installing'
         else if (server.status === 'error') {
           status = 'error'
-          lastError = server.lastError
+          lastError = server.lastError ?? null
         }
       }
     }
@@ -159,28 +158,46 @@ export class LanguageServerService extends Service<LanguageServerState> {
   }
 
   // Facade methods
-  async didOpen(workspaceRoot: string, params: any) {
+  async openDocument(workspaceRoot: string, params: any) {
     return this.getManager(workspaceRoot).didOpen(params)
   }
 
-  async didChange(workspaceRoot: string, params: any) {
+  async changeDocument(workspaceRoot: string, params: any) {
     return this.getManager(workspaceRoot).didChange(params)
   }
 
-  async didClose(workspaceRoot: string, params: any) {
-    return this.getManager(workspaceRoot).didClose(params)
+  async closeDocument(workspaceRoot: string, path: string) {
+    return this.getManager(workspaceRoot).didClose({ path })
   }
 
-  async getCompletions(workspaceRoot: string, params: any) {
+  async requestCompletion(workspaceRoot: string, params: any) {
     return this.getManager(workspaceRoot).getCompletions(params)
   }
 
-  async getHover(workspaceRoot: string, params: any) {
+  async requestHover(workspaceRoot: string, params: any) {
     return this.getManager(workspaceRoot).getHover(params)
+  }
+
+  async requestDefinition(workspaceRoot: string, params: any) {
+    return this.getManager(workspaceRoot).getDefinition(params)
   }
 
   async getDefinition(workspaceRoot: string, params: any) {
     return this.getManager(workspaceRoot).getDefinition(params)
+  }
+
+  async prepareWorkspace(workspaceRoot: string) {
+    // Currently, managers are lazily created. 
+    // We could pre-warm servers here if needed.
+    this.getManager(workspaceRoot)
+  }
+
+  async resetWorkspace(workspaceRoot: string) {
+    const manager = this.managers.get(workspaceRoot)
+    if (manager) {
+      await manager.dispose()
+      this.managers.delete(workspaceRoot)
+    }
   }
 
   async getReferences(workspaceRoot: string, params: any) {

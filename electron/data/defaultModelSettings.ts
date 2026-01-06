@@ -82,10 +82,19 @@ export function getDefaultModelSettingsPath(): string {
   }
 
   // 2. Fallback to process.resourcesPath (standard Electron packaged resources)
+  // In a built app, files in 'public' are moved to the root of the renderer 'dist' folder.
+  // If we are in ASAR, process.resourcesPath points to the directory containing app.asar.
+  // The 'dist' folder (VITE_PUBLIC) inside app.asar is usually:
+  // resources/app.asar/dist/defaultModelSettings.json
   const packagedPath = process.resourcesPath
-    ? path.resolve(process.resourcesPath, SETTINGS_FILENAME)
+    ? path.resolve(process.resourcesPath, 'app.asar', 'dist', SETTINGS_FILENAME)
     : null
   if (packagedPath && fs.existsSync(packagedPath)) return packagedPath
+
+  const packagedPathAlt = process.resourcesPath
+    ? path.resolve(process.resourcesPath, SETTINGS_FILENAME)
+    : null
+  if (packagedPathAlt && fs.existsSync(packagedPathAlt)) return packagedPathAlt
 
   // 3. Fallback to common dev locations relative to CWD
   const publicPath = path.resolve(process.cwd(), 'public', SETTINGS_FILENAME)

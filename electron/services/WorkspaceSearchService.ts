@@ -297,7 +297,7 @@ export class WorkspaceSearchService extends Service<WorkspaceSearchServiceState>
     callbacks: WorkspaceSearchCallbacks
   ) {
     const vectorService = getVectorService();
-    const results = await vectorService.search(params.query, 10);
+    const results = await vectorService.search(workspaceRoot, params.query, 10);
     
     if (results.length === 0) return;
 

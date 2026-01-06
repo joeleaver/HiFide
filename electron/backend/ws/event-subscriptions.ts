@@ -106,6 +106,7 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
   // Kanban board
   const kanbanService = getKanbanService()
   addWorkspaceSubscription(kanbanService, 'kanban:board:changed', 'kanban.board.changed', (data) => ({
+    workspaceId: data.workspaceId,
     board: data.board || null,
     loading: !!data.loading,
     saving: !!data.saving,
@@ -116,6 +117,7 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
   // Indexing orchestrator status
   const indexingOrchestratorService = getIndexOrchestratorService()
   addWorkspaceSubscription(indexingOrchestratorService, 'index-orchestrator-status', 'indexing.status.changed', (data) => ({
+    workspaceId: data.workspaceId,
     isProcessing: !!data.isProcessing,
     currentTask: data.currentTask || null,
     queueLength: typeof data.queueLength === 'number' ? data.queueLength : 0,
@@ -130,12 +132,14 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
   // Knowledge Base items
   const kbService = getKnowledgeBaseService()
   addWorkspaceSubscription(kbService, 'kb:items:changed', 'kb.items.changed', (data) => ({
+    workspaceId: data.workspaceId,
     items: data.items || {},
     error: data.error || null,
   }))
 
   // Knowledge Base workspace files
   addWorkspaceSubscription(kbService, 'kb:workspaceFiles:changed', 'kb.files.changed', (data) => ({
+    workspaceId: data.workspaceId,
     files: Array.isArray(data.files) ? data.files : [],
   }))
 

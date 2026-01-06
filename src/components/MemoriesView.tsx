@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import {
   ActionIcon,
   Badge,
@@ -91,7 +91,17 @@ export default function MemoriesView() {
 
   useEffect(() => {
     load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    
+    const client = getBackendClient()
+    if (!client) return
+
+    const unsub = client.subscribe('workspace.attached', () => {
+      load()
+    })
+
+    return () => {
+      unsub()
+    }
   }, [])
 
   useEffect(() => {

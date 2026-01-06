@@ -8,18 +8,16 @@
 import { BrowserWindow } from 'electron'
 import Store from 'electron-store'
 import path from 'node:path'
-import fs from 'node:fs'
 import fsPromises from 'node:fs/promises'
+import chokidar, { type FSWatcher } from 'chokidar'
 import { AnthropicOpenAIProvider as AnthropicAiSdkProvider } from '../providers-ai-sdk/anthropic-openai'
 import { GeminiOpenAIProvider as GeminiAiSdkProvider } from '../providers-ai-sdk/gemini-openai'
 import { FireworksOpenAIProvider } from '../providers-ai-sdk/fireworks-openai'
 import { OpenAIOpenAIProvider as OpenAiSdkProvider } from '../providers-ai-sdk/openai-openai'
 import { XAIOpenAIProvider as XaiAiSdkProvider } from '../providers-ai-sdk/xai-openai'
 import { OpenRouterOpenAIProvider as OpenRouterProvider } from '../providers-ai-sdk/openrouter-openai'
-import { activeConnections, broadcastWorkspaceNotification } from '../backend/ws/broadcast'
+import { activeConnections } from '../backend/ws/broadcast'
 import { getSettingsService, getWorkspaceService } from '../services/index.js'
-import { readKanbanBoard } from '../store/utils/kanban.js'
-import { listItems } from '../store/utils/knowledgeBase.js'
 
 import type { ProviderAdapter } from '../providers/provider'
 
@@ -118,75 +116,9 @@ export const providerCapabilities: Record<string, Record<string, boolean>> = {
 }
 
 /**
- * Kanban board filesystem watchers per workspace
- */
-const kanbanWatchers = new Map<string, fs.FSWatcher>()
-const kanbanDebounces = new Map<string, NodeJS.Timeout>()
-
-function scheduleKanbanReload(workspaceRoot: string): void {
-  const existing = kanbanDebounces.get(workspaceRoot)
-  if (existing) clearTimeout(existing)
-  const t = setTimeout(() => { void triggerKanbanReload(workspaceRoot) }, 200)
-  kanbanDebounces.set(workspaceRoot, t)
-}
-
-async function triggerKanbanReload(workspaceRoot: string): Promise<void> {
-  try {    const board = await readKanbanBoard(workspaceRoot)
-    const ts = Date.now()
-    try { broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', { board, loading: false, saving: false, error: null, lastLoadedAt: ts }) } catch {}
-  } catch (error) {
-    console.error('[kanban] Failed to refresh board after filesystem update:', error)
-  }
-}
-
-export async function startKanbanWatcher(workspaceRoot: string): Promise<void> {
-  const dir = path.join(workspaceRoot, '.hifide-public', 'kanban')
-  if (kanbanWatchers.has(workspaceRoot)) return
-  try {
-    await fsPromises.mkdir(dir, { recursive: true })
-    const watcher = fs.watch(dir, (eventType, filename) => {
-      if (!filename || filename.toString() !== 'board.json') return
-      if (eventType === 'rename' || eventType === 'change') scheduleKanbanReload(workspaceRoot)
-    })
-    kanbanWatchers.set(workspaceRoot, watcher)
-  } catch (error) {
-    console.error('[kanban] Failed to start filesystem watcher:', error)
-  }
-}
-
-export function stopKanbanWatcher(workspaceRoot?: string): void {
-  // If a specific workspace is provided, stop only when no active connections remain
-  if (workspaceRoot) {
-    try {
-      // Count connections bound to this workspace via window→workspace mapping
-      let hasConsumer = false
-      const workspaceService = getWorkspaceService()
-      for (const [, meta] of Array.from(activeConnections.entries())) {
-        const wsId = workspaceService.getWorkspaceForWindow(meta.windowId)
-        if (wsId === workspaceRoot) { hasConsumer = true; break }
-      }
-      if (hasConsumer) return
-    } catch {}
-    const watcher = kanbanWatchers.get(workspaceRoot)
-    if (watcher) {
-      try { watcher.close() } catch (error) { console.error('[kanban] Failed to stop filesystem watcher:', error) }
-    }
-    kanbanWatchers.delete(workspaceRoot)
-    const t = kanbanDebounces.get(workspaceRoot); if (t) { clearTimeout(t); kanbanDebounces.delete(workspaceRoot) }
-    return
-  }
-  // No workspace specified: stop all (used during app shutdown)
-  for (const [root, watcher] of Array.from(kanbanWatchers.entries())) {
-    try { watcher.close() } catch {}
-    kanbanWatchers.delete(root)
-    const t = kanbanDebounces.get(root); if (t) { clearTimeout(t); kanbanDebounces.delete(root) }
-  }
-}
-
-/**
  * Knowledge Base filesystem watchers per workspace
  */
-const kbWatchers = new Map<string, fs.FSWatcher>()
+const kbWatchers = new Map<string, FSWatcher>()
 const kbDebounces = new Map<string, NodeJS.Timeout>()
 
 function scheduleKbReload(workspaceRoot: string): void {
@@ -196,23 +128,30 @@ function scheduleKbReload(workspaceRoot: string): void {
 }
 
 async function triggerKbReload(workspaceRoot: string): Promise<void> {
-  try {    const items = await listItems(workspaceRoot)
-    const map: Record<string, any> = {}
-    for (const it of items) map[it.id] = it
-    try { broadcastWorkspaceNotification(workspaceRoot, 'kb.items.changed', { items: map, error: null }) } catch {}
+  try {
+    const { getKnowledgeBaseService } = await import('../services/index.js')
+    const kbService = getKnowledgeBaseService()
+    await kbService.syncFromDisk(workspaceRoot)
   } catch (error) {
     console.error('[kb] Failed to reload index after filesystem update:', error)
   }
 }
 
 export async function startKbWatcher(workspaceRoot: string): Promise<void> {
-  const dir = path.join(workspaceRoot, '.hifide-public', 'kb')
+  const dir = path.resolve(workspaceRoot, '.hifide-public', 'kb')
   if (kbWatchers.has(workspaceRoot)) return
   try {
     await fsPromises.mkdir(dir, { recursive: true })
-    const watcher = fs.watch(dir, { recursive: process.platform !== 'linux' }, (eventType, filename) => {
-      if (!filename || !filename.toString().endsWith('.md')) return
-      if (eventType === 'rename' || eventType === 'change') scheduleKbReload(workspaceRoot)
+    const watcher = chokidar.watch(dir, {
+      ignored: /(^|[\/\\])\../, // ignore dotfiles
+      persistent: true,
+      ignoreInitial: true,
+      depth: 1,
+    })
+    watcher.on('all', (_event, filename) => {
+      if (typeof filename === 'string' && filename.endsWith('.md')) {
+        scheduleKbReload(workspaceRoot)
+      }
     })
     kbWatchers.set(workspaceRoot, watcher)
   } catch (error) {

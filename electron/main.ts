@@ -16,8 +16,13 @@ import path from 'node:path'
 
 // Environment setup - must happen before other local imports
 const DIRNAME = path.dirname(fileURLToPath(import.meta.url))
-process.env.DIST_ELECTRON = DIRNAME
-process.env.APP_ROOT = path.join(DIRNAME, '..')
+
+// When bundled, this file might be in dist-electron/main.mjs or dist-electron/chunks/...
+// We need to find the app root (where dist/ and dist-electron/ live).
+const isChunk = DIRNAME.includes(path.join('dist-electron', 'chunks')) || DIRNAME.endsWith('chunks')
+process.env.DIST_ELECTRON = isChunk ? path.join(DIRNAME, '..') : DIRNAME
+process.env.APP_ROOT = isChunk ? path.join(DIRNAME, '..', '..') : path.join(DIRNAME, '..')
+
 const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST

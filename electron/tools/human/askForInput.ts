@@ -1,5 +1,4 @@
 import type { AgentTool } from '../../providers/provider.js'
-import { randomUUID } from 'node:crypto'
 import type { FlowAPI } from '../../flow-engine/flow-api.js'
 
 export interface AskForInputParams {
@@ -31,7 +30,8 @@ export const askForInputTool: AgentTool = {
 
     // Wait for user input via FlowAPI
     // We pass the prompt so the UI can display it
-    const userInput = await flow.waitForUserInput(args.prompt)
+    // We pass isTool: true so the UI knows not to add the input to the session history
+    const userInput = await flow.waitForUserInput(args.prompt, true)
 
     return {
       ok: true,

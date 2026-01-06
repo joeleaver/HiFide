@@ -9,11 +9,11 @@ export function createVectorHandlers(
   connection: any
 ) {
   addMethod('vector.getState', async () => {
-    return vectorHandlers.getState()
+    return vectorHandlers.getState(connection)
   })
 
   addMethod('vector.search', async (params: { query: string; options?: any }) => {
-    return vectorHandlers.search(params.query, params.options)
+    return vectorHandlers.search(connection, params.query, params.options)
   })
 
   addMethod('codeIndexer.indexWorkspace', async (params: { force?: boolean }) => {

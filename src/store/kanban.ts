@@ -118,7 +118,7 @@ export const useKanban = create<KanbanStore>((set, get) => ({
   },
 
   moveTask: async (taskId, toStatus, toIndex) => {
-    const { board, updateDerivedState, setBoard, setError } = get()
+    const { board, setBoard, setError } = get()
     if (!board) return
     const workspaceId = useBackendBinding.getState().workspaceId
     if (!workspaceId) return
@@ -362,8 +362,22 @@ export function initKanbanEvents(): void {
   const client = getBackendClient()
   if (!client) return
 
+  client.subscribe('workspace.attached', (p: any) => {
+    // Force hydration with the ID from the event to avoid race conditions with binding store
+    const workspaceId = p?.workspaceId || p?.id || p?.root
+    if (workspaceId) {
+       useKanban.getState().hydrateBoard().catch(() => {})
+    }
+  })
+
   // Board changed - always update loading/saving/error, but board update is conditional
   client.subscribe('kanban.board.changed', (p: any) => {
+    // Check if this update is for our current workspace
+    const currentWorkspaceId = useBackendBinding.getState().workspaceId
+    if (p?.workspaceId && currentWorkspaceId && p.workspaceId !== currentWorkspaceId) {
+      return
+    }
+
     const state = useKanban.getState()
 
     // Always update status flags

@@ -141,8 +141,8 @@ export async function buildWorkspaceSnapshot(workspaceId: string): Promise<Works
     }
 
     // Get knowledge base items (full data, not just count)
-    const kbItems = kbService.getItems()
-    const kbFiles = kbService.getWorkspaceFiles()
+    const kbItems = kbService.getItems(workspaceId)
+    const kbFiles = kbService.getWorkspaceFiles(workspaceId)
     const knowledgeBase = {
       items: kbItems,
       files: kbFiles,

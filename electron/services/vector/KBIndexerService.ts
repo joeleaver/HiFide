@@ -2,8 +2,12 @@ import { Service } from '../base/Service.js';
 import { getKnowledgeBaseService, getVectorService } from '../index.js';
 import crypto from 'node:crypto';
 
-interface KBIndexerState {
+interface KBIndexerWorkspaceState {
   indexedArticles: Record<string, string>; // kbId -> hash
+}
+
+interface KBIndexerState {
+  workspaces: Record<string, KBIndexerWorkspaceState>;
 }
 
 export class KBIndexerService extends Service<KBIndexerState> {
@@ -11,12 +15,26 @@ export class KBIndexerService extends Service<KBIndexerState> {
 
   constructor() {
     super({
-      indexedArticles: {}
+      workspaces: {}
     }, 'kb_indexer');
   }
 
   onStateChange(): void {
     this.persistState();
+  }
+
+  private getWorkspaceState(workspaceRoot: string): KBIndexerWorkspaceState {
+    return this.state.workspaces[workspaceRoot] || { indexedArticles: {} };
+  }
+
+  private updateWorkspaceState(workspaceRoot: string, updates: Partial<KBIndexerWorkspaceState>) {
+    const prev = this.getWorkspaceState(workspaceRoot);
+    this.setState({
+      workspaces: {
+        ...this.state.workspaces,
+        [workspaceRoot]: { ...prev, ...updates }
+      }
+    });
   }
 
   async indexWorkspace(workspaceRoot: string, force = false) {
@@ -40,25 +58,25 @@ export class KBIndexerService extends Service<KBIndexerState> {
     // Explicitly sync from disk to ensure we have the latest items before indexing
     await kbService.syncFromDisk(workspaceRoot);
     
-    const allItems = kbService.getItems();
+    const allItems = kbService.getItems(workspaceRoot);
     const items = Object.values(allItems);
     console.log(`[KBIndexerService] Discovered ${items.length} articles to index.`);
 
     // Note: KB indexing is usually much faster than code, but we still report it
     if (force) {
         console.log('[KBIndexerService] Forced re-index: clearing article hashes...');
-        this.setState({ indexedArticles: {} });
+        this.updateWorkspaceState(workspaceRoot, { indexedArticles: {} });
         await this.persistState();
         // Clear status for clean start
-        await vs.updateIndexingStatus('kb', 0, 0);
+        await vs.updateIndexingStatus(workspaceRoot, 'kb', 0, 0);
         // Wait a moment for persistence to settle
         await new Promise(resolve => setTimeout(resolve, 100));
     }
 
     // Signal table-specific start
-    await vs.startTableIndexing('kb');
+    await vs.startTableIndexing(workspaceRoot, 'kb');
 
-    vs.updateIndexingStatus('kb', 0, items.length);
+    vs.updateIndexingStatus(workspaceRoot, 'kb', 0, items.length);
 
     const batchSize = 5;
     for (let i = 0; i < items.length; i += batchSize) {
@@ -66,33 +84,35 @@ export class KBIndexerService extends Service<KBIndexerState> {
         await Promise.all(batch.map((item: any) => this.indexArticle(workspaceRoot, item.id, force)));
         
         const indexedCount = Math.min(i + batchSize, items.length);
-        vs.updateIndexingStatus('kb', indexedCount, items.length);
+        vs.updateIndexingStatus(workspaceRoot, 'kb', indexedCount, items.length);
 
         // Yield to maintain responsiveness
         await new Promise(resolve => setTimeout(resolve, 50));
     }
 
-    vs.updateIndexingStatus('kb', items.length, items.length);
+    vs.updateIndexingStatus(workspaceRoot, 'kb', items.length, items.length);
   }
 
-    async indexArticle(_workspaceRoot: string, kbId: string, force = false) {
+    async indexArticle(workspaceRoot: string, kbId: string, force = false) {
         const kbService = getKnowledgeBaseService();
         const vs = getVectorService();
         try {
-            const allItems = kbService.getItems();
+            const allItems = kbService.getItems(workspaceRoot);
             const result = allItems[kbId];
+            if (!result) return;
             const meta = result as any;
             const body = (result as any).body || '';
             const content = `${meta.title}\nTags: ${(meta.tags || []).join(', ')}\n\n${body}`;
             const hash = crypto.createHash('md5').update(content).digest('hex');
 
-            if (!force && this.state.indexedArticles[kbId] === hash) {
+            const wsState = this.getWorkspaceState(workspaceRoot);
+            if (!force && wsState.indexedArticles[kbId] === hash) {
                 return; // Unchanged
             }
 
             const chunks = this.chunkMarkdown(body, meta);
             
-                await vs.upsertItems(chunks.map((c, i) => ({
+                await vs.upsertItems(workspaceRoot, chunks.map((c, i) => ({
                 id: `kb:${kbId}:${i}`,
                 text: c.text,
                 type: 'kb',
@@ -106,9 +126,10 @@ export class KBIndexerService extends Service<KBIndexerState> {
                 })
             })), 'kb');
 
-            this.setState({
+            const currentWsState = this.getWorkspaceState(workspaceRoot);
+            this.updateWorkspaceState(workspaceRoot, {
                 indexedArticles: {
-                    ...this.state.indexedArticles,
+                    ...currentWsState.indexedArticles,
                     [kbId]: hash
                 }
             });
@@ -149,9 +170,17 @@ export class KBIndexerService extends Service<KBIndexerState> {
     this.abortController = new AbortController();
   }
 
-  async reset() {
-    console.log('[KBIndexerService] Resetting state.');
-    this.setState({ indexedArticles: {} });
+  async reset(workspaceRoot: string) {
+    console.log(`[KBIndexerService] Resetting state for ${workspaceRoot}.`);
+    this.updateWorkspaceState(workspaceRoot, { indexedArticles: {} });
     await this.persistState();
+  }
+
+  removeArticle(workspaceRoot: string, id: string) {
+    const wsState = this.getWorkspaceState(workspaceRoot);
+    if (wsState.indexedArticles[id]) {
+      const { [id]: _, ...rest } = wsState.indexedArticles;
+      this.updateWorkspaceState(workspaceRoot, { indexedArticles: rest });
+    }
   }
 }

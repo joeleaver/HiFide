@@ -137,28 +137,10 @@ export class KanbanService extends Service<KanbanState> {
     this.updateWorkspaceState(workspaceRoot, { saving: true, board, error: null })
     try {
       await kanbanSaver.save(workspaceRoot, board, immediate)
-      const state = this.updateWorkspaceState(workspaceRoot, { saving: false, board, error: null })
-      try {
-        broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', {
-          board,
-          loading: state.loading,
-          saving: state.saving,
-          error: state.error,
-          lastLoadedAt: state.lastLoadedAt,
-        })
-      } catch {}
+      this.updateWorkspaceState(workspaceRoot, { saving: false, board, error: null })
     } catch (error) {
       const message = String(error)
-      const state = this.updateWorkspaceState(workspaceRoot, { saving: false, error: message })
-      try {
-        broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', {
-          board: state.board,
-          loading: state.loading,
-          saving: state.saving,
-          error: message,
-          lastLoadedAt: state.lastLoadedAt,
-        })
-      } catch {}
+      this.updateWorkspaceState(workspaceRoot, { saving: false, error: message })
       throw error
     }
   }
@@ -178,75 +160,22 @@ export class KanbanService extends Service<KanbanState> {
     try {
       const board = await readKanbanBoard(workspaceRoot)
       const ts = Date.now()
-      const state = this.updateWorkspaceState(workspaceRoot, {
+      this.updateWorkspaceState(workspaceRoot, {
         board,
         loading: false,
         lastLoadedAt: ts,
         error: null,
       })
-      try {
-        broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', {
-          board,
-          loading: state.loading,
-          saving: state.saving,
-          error: state.error,
-          lastLoadedAt: ts,
-        })
-      } catch {}
       return { ok: true, board }
     } catch (error) {
       const message = String(error)
-      const state = this.updateWorkspaceState(workspaceRoot, { loading: false, error: message })
+      this.updateWorkspaceState(workspaceRoot, { loading: false, error: message })
       console.error('[kanban] Load failed:', error)
-      try {
-        broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', {
-          board: state.board,
-          loading: state.loading,
-          saving: state.saving,
-          error: message,
-          lastLoadedAt: state.lastLoadedAt,
-        })
-      } catch {}
       return { ok: false }
     }
   }
 
-  async kanbanRefreshFromDiskFor(workspaceId: string): Promise<{ ok: boolean; board?: KanbanBoard }> {
-    const workspaceRoot = await this.resolveWorkspaceRoot(workspaceId)
-    try {
-      const board = await readKanbanBoard(workspaceRoot)
-      const ts = Date.now()
-      const state = this.updateWorkspaceState(workspaceRoot, {
-        board,
-        error: null,
-        lastLoadedAt: ts,
-      })
-      try {
-        broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', {
-          board,
-          loading: state.loading,
-          saving: state.saving,
-          error: state.error,
-          lastLoadedAt: ts,
-        })
-      } catch {}
-      return { ok: true, board }
-    } catch (error) {
-      const message = String(error)
-      const state = this.updateWorkspaceState(workspaceRoot, { error: message })
-      console.error('[kanban] Refresh failed:', error)
-      try {
-        broadcastWorkspaceNotification(workspaceRoot, 'kanban.board.changed', {
-          board: state.board,
-          loading: state.loading,
-          saving: state.saving,
-          error: message,
-          lastLoadedAt: state.lastLoadedAt,
-        })
-      } catch {}
-      return { ok: false }
-    }
-  }
+
 
   async kanbanCreateTask(input: {
     workspaceId: string

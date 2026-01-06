@@ -18,6 +18,7 @@ interface FlowRuntimeState {
   lastEventAt?: number
   pausedNode?: string | null
   inputPrompt?: string | null
+  isToolInput?: boolean
   nodeState: Record<string, NodeExecState>
   selectedSessionId?: string | null
   isHydrating: boolean
@@ -38,6 +39,7 @@ function createFlowRuntimeStore() {
     lastEventAt: undefined,
     pausedNode: null,
     inputPrompt: null,
+    isToolInput: false,
     nodeState: {},
     selectedSessionId: null,
     isHydrating: false,
@@ -46,7 +48,7 @@ function createFlowRuntimeStore() {
     setRequestId: (id) => set({ requestId: id }),
     setSessionScope: (id) => set({ selectedSessionId: id ?? null }),
     setIsHydrating: (b) => set({ isHydrating: !!b }),
-    reset: () => set({ status: 'stopped', requestId: undefined, lastEventAt: undefined, pausedNode: null, inputPrompt: null, nodeState: {} }),
+    reset: () => set({ status: 'stopped', requestId: undefined, lastEventAt: undefined, pausedNode: null, inputPrompt: null, isToolInput: false, nodeState: {} }),
 
     handleEvent: (ev) => {
       // Minimal state machine driven by backend flow events
@@ -71,10 +73,11 @@ function createFlowRuntimeStore() {
               status: 'waitingForInput',
               lastEventAt: now,
               pausedNode: (ev.nodeId as string) || null,
-              inputPrompt: (ev as any).prompt || null
+              inputPrompt: (ev as any).prompt || null,
+              isToolInput: !!(ev as any).isTool
             })
           } else {
-            set({ requestId: ev.requestId, status: 'running', lastEventAt: now, pausedNode: null, inputPrompt: null })
+            set({ requestId: ev.requestId, status: 'running', lastEventAt: now, pausedNode: null, inputPrompt: null, isToolInput: false })
           }
         } else {
           return
@@ -116,6 +119,7 @@ function createFlowRuntimeStore() {
           newState.status = 'running'
           newState.inputPrompt = null
           newState.pausedNode = null
+          newState.isToolInput = false
         }
         set(newState)
         return
@@ -127,6 +131,7 @@ function createFlowRuntimeStore() {
           newState.status = 'running'
           newState.inputPrompt = null
           newState.pausedNode = null
+          newState.isToolInput = false
         }
         set(newState)
         return
@@ -155,7 +160,8 @@ function createFlowRuntimeStore() {
           requestId: ev.requestId,
           lastEventAt: now,
           pausedNode: nodeId,
-          inputPrompt: (ev as any).prompt || null
+          inputPrompt: (ev as any).prompt || null,
+          isToolInput: !!(ev as any).isTool
         })
         return
       }
@@ -187,7 +193,7 @@ function createFlowRuntimeStore() {
       }
 
       if (t === 'done') {
-        set({ status: 'stopped', requestId: undefined, lastEventAt: now, pausedNode: null, inputPrompt: null })
+        set({ status: 'stopped', requestId: undefined, lastEventAt: now, pausedNode: null, inputPrompt: null, isToolInput: false })
         return
       }
 
@@ -247,7 +253,7 @@ export function initFlowRuntimeEvents(): void {
               }
             }
             if (snap.pausedNodeId) {
-              try { rt.handleEvent({ type: 'waitingforinput', nodeId: snap.pausedNodeId, requestId: rid } as any) } catch { }
+              try { rt.handleEvent({ type: 'waitingforinput', nodeId: snap.pausedNodeId, requestId: rid, isTool: snap.isToolInput } as any) } catch { }
             }
           }
         } catch { }
@@ -273,7 +279,7 @@ export async function refreshFlowRuntimeStatus(): Promise<void> {
       if (snap.status === 'waitingForInput') {
         try { rt.setStatus('waitingForInput') } catch { }
         if (snap.pausedNodeId) {
-          try { rt.handleEvent({ type: 'waitingforinput', nodeId: snap.pausedNodeId, requestId: rid } as any) } catch { }
+          try { rt.handleEvent({ type: 'waitingforinput', nodeId: snap.pausedNodeId, requestId: rid, isTool: snap.isToolInput } as any) } catch { }
         }
       } else if (snap.status === 'running') {
         try { rt.setStatus('running') } catch { }

@@ -95,6 +95,7 @@ export type BadgeContentType =
   | 'search-results'
 
   | 'operation-result'
+  | 'human-input'
 
 export type Badge = {
   id: string                    // Unique ID for this badge

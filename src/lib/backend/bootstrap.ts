@@ -64,6 +64,27 @@ export function bootstrapBackendFromPreload(): void {
     }
   })
 
+  // Workspace binding MUST be initialized before other event listeners
+  // so that stores can read the correct workspaceId from useBackendBinding
+  client.subscribe('workspace.attached', (p: any) => {
+    console.log('[bootstrap] workspace.attached received:', p)
+    const workspaceId = (p?.workspaceId || p?.id || p?.root || null) as string | null
+    const root = (p?.root || (typeof workspaceId === 'string' ? workspaceId : null)) as string | null
+    console.log('[bootstrap] Setting attached:', { windowId, workspaceId, root, attached: !!workspaceId })
+
+    useBackendBinding.setState({ windowId, workspaceId, root, attached: !!workspaceId })
+
+    // Reload UI state for the new workspace (workspace-scoped localStorage)
+    reloadUiStateForWorkspace()
+
+    // Force loading overlay to recompute
+    setTimeout(() => {
+      useLoadingOverlay.getState()._recompute()
+    }, 100)
+
+    requestMenuStatePublish()
+  })
+
   // Initialize all event subscriptions once at app startup
   // BackendClient automatically re-attaches on reconnect
 
@@ -94,29 +115,6 @@ export function bootstrapBackendFromPreload(): void {
 
   // Initialize flow editor local events (async - waits for client ready)
   void initFlowEditorLocalEvents()
-
-  // Workspace binding
-  client.subscribe('workspace.attached', (p: any) => {
-    console.log('[bootstrap] workspace.attached received:', p)
-    const workspaceId = (p?.workspaceId || p?.id || p?.root || null) as string | null
-    const root = (p?.root || (typeof workspaceId === 'string' ? workspaceId : null)) as string | null
-    console.log('[bootstrap] Setting attached:', { windowId, workspaceId, root, attached: !!workspaceId })
-
-    console.log('[bootstrap] Before setState, current state:', useBackendBinding.getState())
-    useBackendBinding.setState({ windowId, workspaceId, root, attached: !!workspaceId })
-    console.log('[bootstrap] After setState, new state:', useBackendBinding.getState())
-
-    // Reload UI state for the new workspace (workspace-scoped localStorage)
-    reloadUiStateForWorkspace()
-
-    // Force loading overlay to recompute
-    setTimeout(() => {
-      console.log('[bootstrap] Forcing loadingOverlay recompute')
-      useLoadingOverlay.getState()._recompute()
-    }, 100)
-
-    requestMenuStatePublish()
-  })
 
   client.connect()
 

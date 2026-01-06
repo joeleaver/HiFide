@@ -57,9 +57,9 @@
     "fast-glob": "^3.3.3",
     "fflate": "^0.8.2",
     "highlight.js": "^11.11.1",
+    "apache-arrow": "^18.1.0",
     "ignore": "^5.3.2",
     "json-rpc-2.0": "^1.7.1",
-    "lancedb": "^0.0.1",
     "markdown-it": "^14.1.0",
     "monaco-editor": "^0.54.0",
     "node-pty": "1.1.0",
@@ -136,7 +136,8 @@
     "asarUnpack": [
       "**/node-pty/**/*.{node,dll,exe}",
       "node-modules/node-pty/build/Release/*.{node,dll,exe}",
-      "**/vscode-ripgrep/**"
+      "**/vscode-ripgrep/**",
+      "**/@lancedb/lancedb*/**/*.node"
     ],
     "npmRebuild": true,
     "win": {

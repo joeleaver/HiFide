@@ -19,8 +19,8 @@ export function createIndexingHandlers(
       return { ok: false, error: 'no-active-workspace' }
     }
 
-    const stats = await orchestrator.getStats()
-    const orchestratorState = orchestrator.getState()
+    const stats = await orchestrator.getStats(workspaceId)
+    const orchestratorState = orchestrator.getState(workspaceId)
     
     return {
       ok: true,
@@ -54,9 +54,13 @@ export function createIndexingHandlers(
   addMethod('indexing.stop', async () => {
     const orchestrator = getIndexOrchestratorService()
     const { getKBIndexerService, getMemoriesIndexerService } = await import('../../../services/index.js')
+    const workspaceId = await getConnectionWorkspaceId(connection)
+    if (!workspaceId) {
+      return { ok: false, error: 'no-active-workspace' }
+    }
 
     // Stop all three indexers
-    await orchestrator.stop()
+    await orchestrator.stop(workspaceId)
     await getKBIndexerService().stop()
     await getMemoriesIndexerService().stop()
     return { ok: true }
@@ -86,7 +90,7 @@ export function createIndexingHandlers(
     const enabled = params?.enabled ?? true
 
     // Update orchestrator state
-    orchestrator.setIndexingEnabled(enabled)
+    orchestrator.setIndexingEnabled(workspaceId, enabled)
 
     // Persist to settings
     const settingsService = getSettingsService()

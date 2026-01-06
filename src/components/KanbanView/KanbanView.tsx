@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useMemo } from 'react'
 import {
   Anchor,
   ActionIcon,
@@ -28,10 +28,9 @@ import {
 } from '@hello-pangea/dnd'
 import { IconPlus, IconEdit, IconTrash, IconColumns3, IconFolderPlus, IconRefresh, IconAlertTriangle, IconArchive, IconBook, IconHistory, IconSend } from '@tabler/icons-react'
 
-import type { KanbanEpic, KanbanStatus, KanbanTask, KanbanBoard } from '../../../electron/store/types'
+import type { KanbanEpic, KanbanStatus, KanbanTask } from '../../../electron/store/types'
 import { useKanban } from '@/store/kanban'
 import { useKanbanHydration } from '@/store/screenHydration'
-import { useBackendBinding } from '@/store/binding'
 import { useKanbanUI } from '@/store/kanbanUI'
 import type { TaskFormValues, EpicFormValues } from '@/store/kanbanUI'
 import { useKnowledgeBase } from '@/store/knowledgeBase'
@@ -76,9 +75,6 @@ function KanbanSkeleton() {
 
 export default function KanbanView() {
   const theme = useMantineTheme()
-
-  // Get workspaceId from backend binding
-  const workspaceId = useBackendBinding((s: any) => s.workspaceId)
 
   // Screen hydration state
   const screenPhase = useKanbanHydration((s) => s.phase)

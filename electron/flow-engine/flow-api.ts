@@ -199,8 +199,9 @@ export interface FlowAPI {
    * Sets flow status to 'waitingForInput' and waits for user submission
    * 
    * @param prompt - Optional message to display to the user
+   * @param isTool - Whether this is a tool-initiated input request (affects session history)
    */
-  waitForUserInput: (prompt?: string) => Promise<string | MessagePart[]>
+  waitForUserInput: (prompt?: string, isTool?: boolean) => Promise<string | MessagePart[]>
 
   // ===== Portal Nodes =====
 

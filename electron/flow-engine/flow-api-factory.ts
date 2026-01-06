@@ -3,6 +3,7 @@ import { emitFlowEvent } from './events'
 import type { FlowAPI, Badge, UsageReport, Tool } from './flow-api'
 import { getAgentToolSnapshot } from '../tools/agentToolRegistry.js'
 import type { AgentTool } from '../providers/provider'
+import type { MessagePart } from '../store/types'
 import type { ContextBinding, ContextRegistry } from './contextRegistry'
 import type { CreateIsolatedContextOptions } from './context-options'
 import type { ExecutionEventRouter } from './execution-event-router'
@@ -18,7 +19,7 @@ export interface FlowApiFactoryDeps {
   userInputResolvers: Map<string, (value: string | MessagePart[]) => void>
   executionEventRouter: ExecutionEventRouter
   triggerPortalOutputs: (portalId: string) => Promise<void>
-  setPausedNodeId: (nodeId: string | null) => void
+  setPausedNodeId: (nodeId: string | null, isTool?: boolean) => void
   createIsolatedContext: (options: CreateIsolatedContextOptions, activeBinding: ContextBinding) => MainFlowContext
   releaseContext: (contextId: string) => boolean
 }
@@ -129,13 +130,13 @@ export function createFlowApiFactory(deps: FlowApiFactoryDeps): FlowApiFactory {
           if (process.env.HF_FLOW_DEBUG === '1') console.log(`[Usage] ${nodeId}:`, usage)
         },
       },
-      waitForUserInput: async (prompt?: string) => {
-        if (process.env.HF_FLOW_DEBUG === '1') console.log('[FlowAPI.waitForUserInput] Waiting for input, nodeId:', nodeId, 'prompt:', prompt)
+      waitForUserInput: async (prompt?: string, isTool?: boolean) => {
+        if (process.env.HF_FLOW_DEBUG === '1') console.log('[FlowAPI.waitForUserInput] Waiting for input, nodeId:', nodeId, 'prompt:', prompt, 'isTool:', isTool)
         try {
-          emitFlowEvent(requestId, { type: 'waitingforinput', nodeId, sessionId, prompt })
+          emitFlowEvent(requestId, { type: 'waitingforinput', nodeId, sessionId, prompt, isTool })
         } catch {}
         try {
-          setPausedNodeId(nodeId)
+          setPausedNodeId(nodeId, isTool)
         } catch {}
 
         const userInput = await new Promise<string | MessagePart[]>((resolve, reject) => {

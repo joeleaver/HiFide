@@ -1,10 +1,7 @@
 import { 
-  type PublishDiagnosticsParams,
   CompletionTriggerKind,
 } from 'vscode-languageserver-protocol'
 import { URI } from 'vscode-uri'
-import { pathToFileURL } from 'url'
-import fs from 'node:fs'
 import path from 'node:path'
 
 export type ServerStatus = 'idle' | 'starting' | 'ready' | 'stopped' | 'error'

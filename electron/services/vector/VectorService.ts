@@ -35,104 +35,129 @@ export interface TableConfig {
   enabled: boolean;
 }
 
+interface VectorWorkspaceState {
+  db: lancedb.Connection | null;
+  tablePromises: Map<string, Promise<lancedb.Table>>;
+  initPromise: Promise<void> | null;
+  deferIndexing: Set<TableType>;
+  tablesWithIndex: Set<TableType>;
+  initialized: boolean;
+  indexing: boolean;
+  lastIndexedAt: number | null;
+  status: {
+    indexing: boolean;
+    progress: number;
+    totalFiles: number;
+    indexedFiles: number;
+    activeTable: TableType | 'all' | null;
+    sources: Record<string, { total: number; indexed: number }>;
+    tables: {
+      code: TableStatus;
+      kb: TableStatus;
+      memories: TableStatus;
+    };
+  };
+}
+
 export class VectorService {
-  private db: lancedb.Connection | null = null;
-  private tablePromises: Map<string, Promise<lancedb.Table>> = new Map();
-  private initPromise: Promise<void> | null = null;
+  private workspaces = new Map<string, VectorWorkspaceState>();
 
   private tableConfigs: Record<TableType, TableConfig> = {
     code: { tableName: 'code_vectors', modelName: 'default', dimensions: 0, enabled: true },
     kb: { tableName: 'kb_vectors', modelName: 'default', dimensions: 0, enabled: true },
     memories: { tableName: 'memory_vectors', modelName: 'default', dimensions: 0, enabled: true }
   };
-  private state = {
-    initialized: false,
-    indexing: false,
-    lastIndexedAt: null as number | null,
-    status: {
-      indexing: false,
-      progress: 0,
-      totalFiles: 0,
-      indexedFiles: 0,
-      activeTable: null as TableType | 'all' | null,
-      sources: {} as Record<string, { total: number; indexed: number }>,
-      tables: {
-        code: { count: 0, indexedAt: null, exists: false } as TableStatus,
-        kb: { count: 0, indexedAt: null, exists: false } as TableStatus,
-        memories: { count: 0, indexedAt: null, exists: false } as TableStatus,
-      }
+
+  private getWorkspaceState(workspaceRoot: string): VectorWorkspaceState {
+    const normalized = path.resolve(workspaceRoot);
+    let state = this.workspaces.get(normalized);
+    if (!state) {
+      state = {
+        db: null,
+        tablePromises: new Map(),
+        initPromise: null,
+        deferIndexing: new Set(),
+        tablesWithIndex: new Set(),
+        initialized: false,
+        indexing: false,
+        lastIndexedAt: null,
+        status: {
+          indexing: false,
+          progress: 0,
+          totalFiles: 0,
+          indexedFiles: 0,
+          activeTable: null,
+          sources: {},
+          tables: {
+            code: { count: 0, indexedAt: null, exists: false },
+            kb: { count: 0, indexedAt: null, exists: false },
+            memories: { count: 0, indexedAt: null, exists: false },
+          }
+        }
+      };
+      this.workspaces.set(normalized, state);
     }
-  };
-  
-  // Defer index creation until after indexing is complete
-  private deferIndexing = new Set<TableType>();
+    return state;
+  }
 
-  // Track which tables already have an index created to avoid redundant createIndex calls
-  private tablesWithIndex = new Set<TableType>();
-
-  private async ensureInitialized(): Promise<void> {
-    if (this.db) return;
+  private async ensureInitialized(workspaceRoot: string): Promise<VectorWorkspaceState> {
+    const state = this.getWorkspaceState(workspaceRoot);
+    if (state.db) return state;
     
-    if (this.initPromise) {
-      await this.initPromise;
-      if (this.db) return;
+    if (state.initPromise) {
+      await state.initPromise;
+      if (state.db) return state;
     }
 
-    const ws = getWorkspaceService();
-    const workspaces = ws.getAllWindowWorkspaces();
-    const activePath = Object.values(workspaces)[0];
-
-    if (!activePath) {
-      throw new Error('No active workspace found for VectorService initialization.');
-    }
-
-    if (DEBUG_VECTOR) console.log(`[VectorService] DB missing, attempting late init with: ${activePath}`);
-    await this.init(activePath);
+    if (DEBUG_VECTOR) console.log(`[VectorService] DB missing, attempting late init with: ${workspaceRoot}`);
+    await this.init(workspaceRoot);
+    return state;
   }
 
   async init(workspaceRoot: string): Promise<void> {
-    if (this.initPromise) return this.initPromise;
+    const state = this.getWorkspaceState(workspaceRoot);
+    if (state.initPromise) return state.initPromise;
 
-    this.initPromise = (async () => {
+    state.initPromise = (async () => {
       try {
         const dbPath = path.join(workspaceRoot, '.hifide-private', 'vectors');
         await fs.mkdir(dbPath, { recursive: true });
 
         if (DEBUG_VECTOR) console.log(`[VectorService] Connecting to LanceDB at: ${dbPath}`);
-        this.db = await lancedb.connect(dbPath);
+        state.db = await lancedb.connect(dbPath);
 
-        this.state.initialized = true;
-        await this.refreshTableStats();
-        if (DEBUG_VECTOR) console.log('[VectorService] Database initialized successfully.');
+        state.initialized = true;
+        await this.refreshTableStats(workspaceRoot);
+        if (DEBUG_VECTOR) console.log(`[VectorService] Database initialized successfully for: ${workspaceRoot}`);
       } catch (error) {
-        console.error('[VectorService] Initialization failed:', error);
-        this.db = null;
-        this.initPromise = null;
+        console.error(`[VectorService] Initialization failed for ${workspaceRoot}:`, error);
+        state.db = null;
+        state.initPromise = null;
         throw error;
       }
     })();
 
-    return this.initPromise;
+    return state.initPromise;
   }
 
-  async getOrCreateTable(type: TableType): Promise<lancedb.Table> {
-    await this.ensureInitialized();
+  async getOrCreateTable(workspaceRoot: string, type: TableType): Promise<lancedb.Table> {
+    const state = await this.ensureInitialized(workspaceRoot);
     const config = this.tableConfigs[type];
     
-    if (this.tablePromises.has(config.tableName)) {
-      return await this.tablePromises.get(config.tableName)!;
+    if (state.tablePromises.has(config.tableName)) {
+      return await state.tablePromises.get(config.tableName)!;
     }
 
     const promise = (async () => {
-      if (!this.db) throw new Error('Database not connected');
+      if (!state.db) throw new Error(`Database not connected for workspace: ${workspaceRoot}`);
       const expectedDim = await getEmbeddingService().getDimension(type);
       config.dimensions = expectedDim; // Track dimension in config
       
       try {
-        const tableNames = await this.db.tableNames();
+        const tableNames = await state.db.tableNames();
         if (tableNames.includes(config.tableName)) {
           if (DEBUG_VECTOR) console.log(`[VectorService] Opening existing table ${config.tableName} (expected dim: ${expectedDim})`);
-          const table = await this.db.openTable(config.tableName);
+          const table = await state.db.openTable(config.tableName);
           const schema = await table.schema();
 
           const fields = (schema as any).fields || [];
@@ -140,15 +165,15 @@ export class VectorService {
 
           if (vectorField && vectorField.type && vectorField.type.listSize !== expectedDim) {
             console.warn(`[VectorService] Dimension mismatch in ${config.tableName}. Recreating.`);
-            await this.db.dropTable(config.tableName);
-            return await this.createInitialTable(type, expectedDim);
+            await state.db.dropTable(config.tableName);
+            return await this.createInitialTable(workspaceRoot, type, expectedDim);
           }
 
           return table;
         }
-        return await this.createInitialTable(type, expectedDim);
+        return await this.createInitialTable(workspaceRoot, type, expectedDim);
       } catch (e) {
-        return await this.createInitialTable(type, expectedDim);
+        return await this.createInitialTable(workspaceRoot, type, expectedDim);
       }
     })();
 
@@ -156,9 +181,10 @@ export class VectorService {
     return await promise;
   }
 
-  private async createInitialTable(type: TableType, dim: number): Promise<lancedb.Table> {
+  private async createInitialTable(workspaceRoot: string, type: TableType, dim: number): Promise<lancedb.Table> {
+    const state = this.getWorkspaceState(workspaceRoot);
     const config = this.tableConfigs[type];
-    if (DEBUG_VECTOR) console.log(`[VectorService] Creating new table: ${config.tableName}`);
+    if (DEBUG_VECTOR) console.log(`[VectorService] Creating new table: ${config.tableName} in ${workspaceRoot}`);
     const seedVector = new Array(dim).fill(0);
     const seed = {
       id: `seed-${type}`,
@@ -176,16 +202,16 @@ export class VectorService {
     };
     
     try {
-      return await this.db!.createTable(config.tableName, [seed as any]);
+      return await state.db!.createTable(config.tableName, [seed as any]);
     } catch (err: any) {
       if (err.message?.includes('already exists')) {
-        return await this.db!.openTable(config.tableName);
+        return await state.db!.openTable(config.tableName);
       }
       throw err;
     }
   }
 
-  async search(query: string, limit: number = 10, type?: TableType | 'all', filter?: string) {
+  async search(workspaceRoot: string, query: string, limit: number = 10, type?: TableType | 'all', filter?: string) {
     try {
       const typesToSearch: TableType[] = (type === 'all' || !type) 
         ? (Object.keys(this.tableConfigs) as TableType[]) 
@@ -195,11 +221,11 @@ export class VectorService {
       const queryVector = await embeddingService.embed(query);
       const safeLimit = Math.max(1, Math.floor(Number(limit) || 10));
 
-      if (DEBUG_VECTOR) console.log(`[VectorService] Executing search for: "${query}" (limit: ${safeLimit}, tables: ${typesToSearch.join(', ')})`);
+      if (DEBUG_VECTOR) console.log(`[VectorService] Executing search in ${workspaceRoot} for: "${query}" (limit: ${safeLimit}, tables: ${typesToSearch.join(', ')})`);
 
       const searchPromises = typesToSearch.map(async (t) => {
         try {
-          const table = await this.getOrCreateTable(t);
+          const table = await this.getOrCreateTable(workspaceRoot, t);
           // Re-embed specifically for this table's model if queryVector dimension doesn't match
           const tableDim = await getEmbeddingService().getDimension(t);
           let tableQueryVector = queryVector;
@@ -279,68 +305,71 @@ export class VectorService {
     }
   }
 
-  async deleteItems(type: TableType, filter: string): Promise<void> {
+  async deleteItems(workspaceRoot: string, type: TableType, filter: string): Promise<void> {
     try {
-      const table = await this.getOrCreateTable(type);
+      const table = await this.getOrCreateTable(workspaceRoot, type);
       await table.delete(filter);
-      await this.refreshTableStats();
+      await this.refreshTableStats(workspaceRoot);
     } catch (error) {
-      console.warn(`[VectorService] Failed to delete items from ${type} table. This can happen if the table is outdated or corrupt. Consider re-indexing.`, error);
-      // We don't re-throw because a failed deletion shouldn't necessarily halt the orchestrator's queue
+      console.warn(`[VectorService] Failed to delete items from ${type} table in ${workspaceRoot}.`, error);
     }
   }
 
-  async refreshTableStats(): Promise<void> {
-    if (!this.db) return;
+  async refreshTableStats(workspaceRoot: string): Promise<void> {
+    const state = this.getWorkspaceState(workspaceRoot);
+    if (!state.db) return;
     try {
-      const tableNames = await this.db.tableNames();
+      const tableNames = await state.db.tableNames();
       for (const type of Object.keys(this.tableConfigs) as TableType[]) {
         const config = this.tableConfigs[type];
         if (tableNames.includes(config.tableName)) {
-          const table = await this.db.openTable(config.tableName);
+          const table = await state.db.openTable(config.tableName);
           const count = await table.countRows();
           // Subtract 1 if the table has a seed row
           const actualCount = count > 0 ? (count - 1) : 0; 
-          this.state.status.tables[type] = {
+          state.status.tables[type] = {
             count: actualCount,
             indexedAt: Date.now(),
             exists: true
           };
         } else {
-           this.state.status.tables[type] = {
+           state.status.tables[type] = {
             count: 0,
             indexedAt: null,
             exists: false
           };
         }
       }
-      this.emitChange();
+      this.emitChange(workspaceRoot);
     } catch (e) {
-      console.error('[VectorService] Table stats refresh failed:', e);
+      console.error(`[VectorService] Table stats refresh failed for ${workspaceRoot}:`, e);
     }
   }
 
-  async deferIndexCreation(type: TableType): Promise<void> {
-    if (DEBUG_VECTOR) console.log(`[VectorService] Deferring index creation for table ${type}`);
-    this.deferIndexing.add(type);
+  async deferIndexCreation(workspaceRoot: string, type: TableType): Promise<void> {
+    const state = this.getWorkspaceState(workspaceRoot);
+    if (DEBUG_VECTOR) console.log(`[VectorService] Deferring index creation for table ${type} in ${workspaceRoot}`);
+    state.deferIndexing.add(type);
   }
 
-  async finishDeferredIndexing(type: TableType): Promise<void> {
-    if (DEBUG_VECTOR) console.log(`[VectorService] Finishing deferred indexing for table ${type}. Creating ANN index...`);
-    this.deferIndexing.delete(type);
+  async finishDeferredIndexing(workspaceRoot: string, type: TableType): Promise<void> {
+    const state = this.getWorkspaceState(workspaceRoot);
+    if (DEBUG_VECTOR) console.log(`[VectorService] Finishing deferred indexing for table ${type} in ${workspaceRoot}. Creating ANN index...`);
+    state.deferIndexing.delete(type);
 
-    const table = await this.getOrCreateTable(type);
-    await this.createIndexIfNeeded(table, type);
+    const table = await this.getOrCreateTable(workspaceRoot, type);
+    await this.createIndexIfNeeded(workspaceRoot, table, type);
   }
 
   /**
    * Creates an ANN index on the vector column if one doesn't already exist.
    * This prevents redundant index creation on every upsert.
    */
-  private async createIndexIfNeeded(table: lancedb.Table, type: TableType): Promise<void> {
+  private async createIndexIfNeeded(workspaceRoot: string, table: lancedb.Table, type: TableType): Promise<void> {
+    const state = this.getWorkspaceState(workspaceRoot);
     // Skip if we've already created an index for this table in this session
-    if (this.tablesWithIndex.has(type)) {
-      if (DEBUG_VECTOR) console.log(`[VectorService] Index already exists for ${type} (cached), skipping creation`);
+    if (state.tablesWithIndex.has(type)) {
+      if (DEBUG_VECTOR) console.log(`[VectorService] Index already exists for ${type} in ${workspaceRoot} (cached), skipping creation`);
       return;
     }
 
@@ -352,23 +381,23 @@ export class VectorService {
       );
 
       if (hasVectorIndex) {
-        if (DEBUG_VECTOR) console.log(`[VectorService] Index already exists for ${type} (from listIndices), skipping creation`);
-        this.tablesWithIndex.add(type);
+        if (DEBUG_VECTOR) console.log(`[VectorService] Index already exists for ${type} in ${workspaceRoot} (from listIndices), skipping creation`);
+        state.tablesWithIndex.add(type);
         return;
       }
     } catch (err: any) {
       // listIndices may not be available in older versions, continue to check row count
-      if (DEBUG_VECTOR) console.log(`[VectorService] Could not list indices for ${type}:`, err.message);
+      if (DEBUG_VECTOR) console.log(`[VectorService] Could not list indices for ${type} in ${workspaceRoot}:`, err.message);
     }
 
     // Check if we have enough rows for index creation
     const rowCount = await table.countRows();
     if (rowCount < 256) {
-      if (DEBUG_VECTOR) console.log(`[VectorService] Skipping index for ${type}: only ${rowCount} rows (requires 256).`);
+      if (DEBUG_VECTOR) console.log(`[VectorService] Skipping index for ${type} in ${workspaceRoot}: only ${rowCount} rows (requires 256).`);
       return;
     }
 
-    if (DEBUG_VECTOR) console.log(`[VectorService] Creating ANN index for ${type} (rows: ${rowCount})...`);
+    if (DEBUG_VECTOR) console.log(`[VectorService] Creating ANN index for ${type} in ${workspaceRoot} (rows: ${rowCount})...`);
     try {
       await table.createIndex('vector', {
         config: lancedb.Index.ivfPq({
@@ -376,39 +405,45 @@ export class VectorService {
           numSubVectors: 2,
         }),
       });
-      this.tablesWithIndex.add(type);
-      if (DEBUG_VECTOR) console.log(`[VectorService] Successfully created ANN index for ${type}`);
+      state.tablesWithIndex.add(type);
+      if (DEBUG_VECTOR) console.log(`[VectorService] Successfully created ANN index for ${type} in ${workspaceRoot}`);
     } catch (err: any) {
       // If the error indicates the index already exists, mark it as created
       if (err.message?.includes('already exists') || err.message?.includes('already indexed')) {
-        if (DEBUG_VECTOR) console.log(`[VectorService] Index already exists for ${type} (from error), marking as created`);
-        this.tablesWithIndex.add(type);
+        if (DEBUG_VECTOR) console.log(`[VectorService] Index already exists for ${type} in ${workspaceRoot} (from error), marking as created`);
+        state.tablesWithIndex.add(type);
       } else {
-        console.warn(`[VectorService] Failed to create index for ${type}:`, err.message);
+        console.warn(`[VectorService] Failed to create index for ${type} in ${workspaceRoot}:`, err.message);
       }
     }
   }
 
-  private emitChange() {
-    // This is a placeholder for the actual event emission logic 
-    // Usually handled by the service registry or bridge
-    const ws = getWorkspaceService();
-    const workspaces = ws.getAllWindowWorkspaces();
-    const activePath = Object.values(workspaces)[0];
-    if (activePath) {
-      import('../../backend/ws/broadcast.js').then(({ broadcastWorkspaceNotification }) => {
-        broadcastWorkspaceNotification(activePath, 'vector_service.changed', this.state);
+  private emitChange(workspaceRoot: string) {
+    const state = this.getWorkspaceState(workspaceRoot);
+    import('../../backend/ws/broadcast.js').then(({ broadcastWorkspaceNotification }) => {
+      broadcastWorkspaceNotification(workspaceRoot, 'vector_service.changed', {
+        workspaceId: workspaceRoot,
+        initialized: state.initialized,
+        indexing: state.indexing,
+        lastIndexedAt: state.lastIndexedAt,
+        status: state.status
       });
-    }
+    });
   }
 
-  getState() {
-    return this.state;
+  getState(workspaceRoot: string) {
+    const state = this.getWorkspaceState(workspaceRoot);
+    return {
+      initialized: state.initialized,
+      indexing: state.indexing,
+      lastIndexedAt: state.lastIndexedAt,
+      status: state.status
+    };
   }
 
-  async upsertItems(items: Array<Omit<VectorItem, 'vector' >>, type: TableType = 'code') {
-    await this.ensureInitialized();
-    const table = await this.getOrCreateTable(type);
+  async upsertItems(workspaceRoot: string, items: Array<Omit<VectorItem, 'vector' >>, type: TableType = 'code') {
+    const state = await this.ensureInitialized(workspaceRoot);
+    const table = await this.getOrCreateTable(workspaceRoot, type);
     const embeddingService = getEmbeddingService();
 
     // DEBUG: To isolate if embedding is the cause of the crash, we can flip this to true
@@ -446,92 +481,87 @@ export class VectorService {
 
     // Only create index if we're not in deferred indexing mode
     // During bulk indexing, we defer index creation until the end to save memory and CPU
-    if (!this.deferIndexing.has(type)) {
-      await this.createIndexIfNeeded(table, type);
+    if (!state.deferIndexing.has(type)) {
+      await this.createIndexIfNeeded(workspaceRoot, table, type);
     }
 
-    await this.refreshTableStats();
+    await this.refreshTableStats(workspaceRoot);
   }
 
-  async startTableIndexing(type: TableType | 'all') {
-    this.state.status.activeTable = type;
-    this.state.indexing = true;
-    this.state.status.indexing = true;
-    this.state.status.progress = 0;
-    this.state.status.indexedFiles = 0;
-    this.state.status.totalFiles = 0;
-    this.state.status.sources = {};
-    this.emitChange();
+  async startTableIndexing(workspaceRoot: string, type: TableType | 'all') {
+    const state = this.getWorkspaceState(workspaceRoot);
+    state.status.activeTable = type;
+    state.indexing = true;
+    state.status.indexing = true;
+    state.status.progress = 0;
+    state.status.indexedFiles = 0;
+    state.status.totalFiles = 0;
+    state.status.sources = {};
+    this.emitChange(workspaceRoot);
   }
 
-  async purge(type?: TableType) {
-    await this.ensureInitialized();
-    if (this.db) {
+  async purge(workspaceRoot: string, type?: TableType) {
+    const state = await this.ensureInitialized(workspaceRoot);
+    if (state.db) {
       const typesToPurge = type ? [type] : (Object.keys(this.tableConfigs) as TableType[]);
       for (const t of typesToPurge) {
         const config = this.tableConfigs[t];
         try {
-          await this.db.dropTable(config.tableName);
-          this.tablePromises.delete(config.tableName);
+          await state.db.dropTable(config.tableName);
+          state.tablePromises.delete(config.tableName);
           // Clear the index cache for this table since it was dropped
-          this.tablesWithIndex.delete(t);
+          state.tablesWithIndex.delete(t);
         } catch (e) {
           // Table might not exist
         }
       }
     }
-    this.state.status.sources = {};
-    this.state.status.totalFiles = 0;
-    this.state.status.indexedFiles = 0;
-    this.state.status.progress = 0;
+    state.status.sources = {};
+    state.status.totalFiles = 0;
+    state.status.indexedFiles = 0;
+    state.status.progress = 0;
   }
 
-  async updateIndexingStatus(source: string, indexed: number, total: number) {
-    this.state.status.sources[source] = { indexed, total };
+  async updateIndexingStatus(workspaceRoot: string, source: string, indexed: number, total: number) {
+    const state = this.getWorkspaceState(workspaceRoot);
+    state.status.sources[source] = { indexed, total };
     
     let globalTotal = 0;
     let globalIndexed = 0;
     
-    Object.values(this.state.status.sources).forEach(s => {
+    Object.values(state.status.sources).forEach(s => {
       globalTotal += s.total;
       globalIndexed += s.indexed;
     });
 
-    this.state.status.totalFiles = globalTotal;
-    this.state.status.indexedFiles = globalIndexed;
-    this.state.status.progress = globalTotal > 0 ? Math.floor((globalIndexed / globalTotal) * 100) : 0;
+    state.status.totalFiles = globalTotal;
+    state.status.indexedFiles = globalIndexed;
+    state.status.progress = globalTotal > 0 ? Math.floor((globalIndexed / globalTotal) * 100) : 0;
     
     // We only set indexing to false if ALL tables currently being tracked are finished.
     // However, if we're doing a multi-table index, we don't want to flip to false
     // just because one table finishes (e.g. KB finishes before Code).
     
-    const isActuallyIndexing = Object.values(this.state.status.sources).some(s => s.indexed < s.total);
-    this.state.indexing = isActuallyIndexing;
-    this.state.status.indexing = isActuallyIndexing;
+    const isActuallyIndexing = Object.values(state.status.sources).some(s => s.indexed < s.total);
+    state.indexing = isActuallyIndexing;
+    state.status.indexing = isActuallyIndexing;
 
     if (!isActuallyIndexing) {
-      this.state.status.activeTable = null;
-      await this.refreshTableStats();
+      state.status.activeTable = null;
+      await this.refreshTableStats(workspaceRoot);
     }
 
-    const ws = getWorkspaceService();
-    const workspaces = ws.getAllWindowWorkspaces();
-    const activePath = Object.values(workspaces)[0];
-    if (activePath) {
-      import('../../backend/ws/broadcast.js').then(({ broadcastWorkspaceNotification }) => {
-        broadcastWorkspaceNotification(activePath, 'vector_service.changed', this.state);
-      });
-    }
+    this.emitChange(workspaceRoot);
   }
 
   /**
    * Get all unique file paths indexed in a specific table
    * Used for startup indexing check to identify missing files
    */
-  async getIndexedFilePaths(type: TableType = 'code'): Promise<Set<string>> {
+  async getIndexedFilePaths(workspaceRoot: string, type: TableType = 'code'): Promise<Set<string>> {
     try {
-      await this.ensureInitialized();
-      const table = await this.getOrCreateTable(type);
+      await this.ensureInitialized(workspaceRoot);
+      const table = await this.getOrCreateTable(workspaceRoot, type);
       
       // Query all rows and extract unique filePath values
       // Using SQL-like query with SELECT to avoid loading all vector data

@@ -111,7 +111,16 @@ export const useVectorStore = create<VectorStore>((set, get) => ({
     const client = getBackendClient()
     if (!client) return () => {}
 
+    const unsubAttached = client.subscribe('workspace.attached', () => {
+      get().fetchState().catch(() => {})
+    })
+
     const unsub = client.subscribe('vector_service.changed', (s: any) => {
+      // Check if this update is for our current workspace
+      const currentWorkspaceId = useBackendBinding.getState().workspaceId
+      if (s?.workspaceId && currentWorkspaceId && s.workspaceId !== currentWorkspaceId) {
+        return
+      }
       set({ state: s })
     })
 
@@ -121,6 +130,7 @@ export const useVectorStore = create<VectorStore>((set, get) => ({
 
     return () => {
       unsub()
+      unsubAttached()
       anyClient.off?.('connect', handleConnect)
     }
   },

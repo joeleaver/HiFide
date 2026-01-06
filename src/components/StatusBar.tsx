@@ -38,6 +38,11 @@ export default function StatusBar() {
         if (res?.ok) setVectorStatus(res.state?.status)
 
         unsubscribe = client.subscribe('vector_service.changed', (state: any) => {
+          // Check if this update is for our current workspace
+          const currentWorkspaceId = useBackendBinding.getState().workspaceId
+          if (state?.workspaceId && currentWorkspaceId && state.workspaceId !== currentWorkspaceId) {
+            return
+          }
           setVectorStatus(state?.status)
         })
       } catch (e) {}

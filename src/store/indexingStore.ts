@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { getBackendClient } from '../lib/backend/bootstrap'
+import { useBackendBinding } from './binding'
 
 export interface IndexingStatus {
   isProcessing: boolean
@@ -37,6 +38,7 @@ interface IndexingStore {
   // Actions
   fetchStatus: () => Promise<void>
   subscribe: () => () => void
+  hydrate: () => Promise<void>
   startIndexing: () => Promise<void>
   stopIndexing: () => Promise<void>
   reindex: (force?: boolean) => Promise<void>
@@ -81,7 +83,19 @@ export const useIndexingStore = create<IndexingStore>((set, get) => ({
     const client = getBackendClient()
     if (!client) return () => {}
 
+    const unsubAttached = client.subscribe('workspace.attached', (p: any) => {
+      const workspaceId = p?.workspaceId || p?.id || p?.root
+      if (workspaceId) {
+        get().fetchStatus().catch(() => {})
+      }
+    })
+
     const unsub = client.subscribe('indexing.status.changed', (s: any) => {
+      // Check if this update is for our current workspace
+      const currentWorkspaceId = useBackendBinding.getState().workspaceId
+      if (s?.workspaceId && currentWorkspaceId && s.workspaceId !== currentWorkspaceId) {
+        return
+      }
       set({ status: s, error: null })
     })
 
@@ -91,6 +105,7 @@ export const useIndexingStore = create<IndexingStore>((set, get) => ({
 
     return () => {
       unsub()
+      unsubAttached()
       anyClient.off?.('connect', handleConnect)
     }
   },
@@ -167,4 +182,8 @@ export const useIndexingStore = create<IndexingStore>((set, get) => ({
       set({ loading: false })
     }
   },
+
+  hydrate: async () => {
+    await get().fetchStatus()
+  }
 }))

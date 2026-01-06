@@ -34,10 +34,7 @@ export const knowledgeBaseDeleteTool: AgentTool = {
 
       // Also remove from the indexer's tracked state
       const kbIndexer = getKBIndexerService()
-      if (kbIndexer.state.indexedArticles[id]) {
-        const { [id]: _, ...rest } = kbIndexer.state.indexedArticles
-        kbIndexer.setState({ indexedArticles: rest })
-      }
+      kbIndexer.removeArticle(meta.workspaceId, id)
     } catch (indexErr) {
       console.warn('[knowledgeBaseDelete] Failed to remove from vector index:', indexErr)
       // Don't fail the delete operation if index cleanup fails

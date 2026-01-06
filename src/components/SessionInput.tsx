@@ -22,6 +22,7 @@ export default memo(function SessionInput() {
   const clearInputContext = useUiStore((s) => s.clearSessionInputContext)
   const requestId = useFlowRuntime((s) => s.requestId)
   const feStatus = useFlowRuntime((s) => s.status)
+  const isToolInput = useFlowRuntime((s) => s.isToolInput)
   const addUserMessage = useChatTimeline((s) => s.addUserMessage)
   
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
@@ -186,13 +187,15 @@ export default memo(function SessionInput() {
     }
 
     // Capture status strictly before async calls
-    const isToolResponse = feStatus === 'waitingForInput'
+    const isWaitingForInput = feStatus === 'waitingForInput'
+    // If we are waiting for input, and it's a tool input, we don't add it to the chat history.
+    // If it's NOT a tool input (e.g. userInput node), we DO add it to the chat history.
+    const isToolResponse = isWaitingForInput && isToolInput
 
-    // Only add to chat if we are NOT in waitingForInput mode
-    // In waitingForInput mode, the input is a response to a tool call
-    if (!isToolResponse) {
-      addUserMessage(finalInput)
-    }
+    // NOTE: We do NOT call addUserMessage here. 
+    // The backend resumeFlow handler is responsible for adding the message to the 
+    // persistent session timeline and broadcasting it back to all renderers.
+    // This ensures a single source of truth and prevents duplicate entries.
 
     await FlowService.resume(requestId, finalInput as any, { 
       userInputContext: inputContext,

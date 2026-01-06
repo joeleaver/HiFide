@@ -32,7 +32,7 @@ export const OpenRouterOpenAIProvider = createOpenAICompatibleProvider({
   },
 
   // Configure OpenRouter-specific request parameters
-  requestModifier: (body, context) => {
+  requestModifier: (body) => {
     const modified: any = { ...body }
     
     // Enable reasoning for models that support it
@@ -43,7 +43,7 @@ export const OpenRouterOpenAIProvider = createOpenAICompatibleProvider({
   },
 
   // Process streaming chunks for OpenRouter-specific fields
-  chunkProcessor: (chunk, delta, context) => {
+  chunkProcessor: (chunk) => {
     const result: any = {}
     
     // Capture Gemini 3 thought signature from extra_content

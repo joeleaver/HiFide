@@ -95,7 +95,7 @@ export async function loadWorkspace(options: WorkspaceLoadOptions): Promise<{ ok
               acc[item.id] = item
               return acc
             }, {} as Record<string, any>)
-            kbService.setKbItems(itemsMap)
+            kbService.setKbItems(workspaceId, itemsMap)
           } catch (err) {
             console.error('[workspace-loader] Failed to load KB items:', err)
           }

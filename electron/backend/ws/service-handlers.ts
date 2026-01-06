@@ -455,11 +455,13 @@ export const settingsHandlers = {
 
 // Vector & Indexing Handlers
 export const vectorHandlers = {
-  async getState() {
+  async getState(connection: RpcConnection) {
     try {
+      const workspaceId = await getConnectionWorkspaceId(connection)
+      if (!workspaceId) return { ok: false, error: 'no-workspace' }
+
       const vectorService = getVectorService()
-      const state = vectorService.getState()
-      console.log('[vectorHandlers] getState returning:', JSON.stringify(state))
+      const state = vectorService.getState(workspaceId)
       return {
         ok: true,
         state,
@@ -470,10 +472,13 @@ export const vectorHandlers = {
     }
   },
 
-  async search(query: string, options: { limit?: number; type?: 'all' | 'code' | 'kb' | 'memories' } = {}) {
+  async search(connection: RpcConnection, query: string, options: { limit?: number; type?: 'all' | 'code' | 'kb' | 'memories' } = {}) {
     try {
+      const workspaceId = await getConnectionWorkspaceId(connection)
+      if (!workspaceId) return { ok: false, error: 'no-workspace' }
+
       const vectorService = getVectorService()
-      const results = await vectorService.search(query, options.limit || 10, options.type);
+      const results = await vectorService.search(workspaceId, query, options.limit || 10, options.type);
       
       // Ensure results are strictly plain objects for RPC serialization
       const sanitizedResults = results.map((r: any) => ({
@@ -529,18 +534,18 @@ export const indexerHandlers = {
     console.log(`[indexerHandlers] re-index requested (table: ${targetTable}, force: ${force})`)
 
     const vs = getVectorService()
-    vs.startTableIndexing(targetTable as any);
+    vs.startTableIndexing(workspaceRoot, targetTable as any);
 
     // If forcing, purge ONLY the target vector table(s)
     if (force) {
       try {
         if (targetTable === 'all') {
-          await vs.purge() // Purges everything
+          await vs.purge(workspaceRoot) // Purges everything
         } else {
-          await vs.purge(targetTable as any)
+          await vs.purge(workspaceRoot, targetTable as any)
         }
       } catch (err) {
-        console.error(`[indexerHandlers] Error purging vector table ${targetTable}:`, err)
+        console.error(`[indexerHandlers] Error purging vector table ${targetTable} in ${workspaceRoot}:`, err)
       }
     }
 

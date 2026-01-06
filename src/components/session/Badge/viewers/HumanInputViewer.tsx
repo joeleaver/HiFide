@@ -1,4 +1,4 @@
-import { Stack, Text, Group, Divider } from '@mantine/core'
+import { Stack, Text, Group } from '@mantine/core'
 import type { Badge as BadgeType } from '../../../../../electron/store/types'
 import Markdown from '../../../Markdown'
 

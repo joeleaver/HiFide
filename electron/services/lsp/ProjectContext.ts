@@ -78,7 +78,7 @@ export class ProjectContext {
   }
 
   getLaunchEnv(): NodeJS.ProcessEnv {
-    const env: Record<string, string> = { ...process.env } as any
+    const env: NodeJS.ProcessEnv = { ...process.env }
     
     if (process.versions?.electron) {
       env.ELECTRON_RUN_AS_NODE = '1'

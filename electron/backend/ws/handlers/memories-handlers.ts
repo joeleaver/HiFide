@@ -63,14 +63,11 @@ export function createMemoriesHandlers(
       try {
         const vs = getVectorService()
         const escapedId = id.replace(/'/g, "''")
-        await vs.deleteItems('memories', `id = '${escapedId}'`)
+        await vs.deleteItems(baseDir, 'memories', `id = '${escapedId}'`)
 
         // Also remove from the indexer's tracked state so it doesn't think it's still indexed
         const memoriesIndexer = getMemoriesIndexerService()
-        if (memoriesIndexer.state.indexedItems[id]) {
-          const { [id]: _, ...rest } = memoriesIndexer.state.indexedItems
-          memoriesIndexer.setState({ indexedItems: rest })
-        }
+        memoriesIndexer.removeItem(baseDir, id)
       } catch (indexErr) {
         console.warn('[memories.delete] Failed to remove from vector index:', indexErr)
         // Don't fail the delete operation if index cleanup fails

@@ -74,6 +74,7 @@ export class FlowScheduler {
   // Track active/executing nodes and paused state for status snapshots
   private activeNodeIds = new Set<string>()
   private pausedNodeId: string | null = null
+  private isPausedForTool: boolean = false
 
   // Portal data registry (for portal nodes)
   private portalRegistry = new Map<string, { context?: MainFlowContext; data?: any }>()
@@ -164,7 +165,10 @@ export class FlowScheduler {
       userInputResolvers: this.userInputResolvers,
       executionEventRouter: this.executionEventRouter,
       triggerPortalOutputs: (portalId) => this.triggerPortalOutputs(portalId),
-      setPausedNodeId: (nodeId) => { this.pausedNodeId = nodeId },
+      setPausedNodeId: (nodeId, isTool) => { 
+        this.pausedNodeId = nodeId
+        this.isPausedForTool = !!isTool
+      },
       createIsolatedContext: (options, activeBinding) =>
         this.contextLifecycle.createIsolatedContext(options, activeBinding),
       releaseContext: (contextId) => this.contextLifecycle.releaseContext(contextId)
@@ -614,7 +618,7 @@ export class FlowScheduler {
   /**
    * Snapshot current scheduler state for UI seeding on reconnect
    */
-  public getSnapshot(): { requestId: string; status: 'running' | 'waitingForInput' | 'stopped'; activeNodeIds: string[]; pausedNodeId: string | null } {
+  public getSnapshot(): { requestId: string; status: 'running' | 'waitingForInput' | 'stopped'; activeNodeIds: string[]; pausedNodeId: string | null; isToolInput: boolean } {
     const aborted = this.abortController?.signal?.aborted === true
     const hasWaiting = this.userInputResolvers.size > 0 || !!this.pausedNodeId
     const status: 'running' | 'waitingForInput' | 'stopped' = aborted ? 'stopped' : (hasWaiting ? 'waitingForInput' : 'running')
@@ -623,6 +627,7 @@ export class FlowScheduler {
       status,
       activeNodeIds: Array.from(this.activeNodeIds),
       pausedNodeId: this.pausedNodeId || null,
+      isToolInput: this.isPausedForTool
     }
   }
 

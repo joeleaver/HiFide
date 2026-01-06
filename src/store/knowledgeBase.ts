@@ -70,11 +70,19 @@ export function initKnowledgeBaseEvents(): void {
   
   // Items changed
   client.subscribe('kb.items.changed', (p: any) => {
+    const currentWorkspaceId = useBackendBinding.getState().workspaceId
+    if (p?.workspaceId && currentWorkspaceId && p.workspaceId !== currentWorkspaceId) {
+      return
+    }
     useKnowledgeBase.getState().setItemsMap(p?.items || {})
   })
   
   // Files changed
   client.subscribe('kb.files.changed', (p: any) => {
+    const currentWorkspaceId = useBackendBinding.getState().workspaceId
+    if (p?.workspaceId && currentWorkspaceId && p.workspaceId !== currentWorkspaceId) {
+      return
+    }
     useKnowledgeBase.getState().setWorkspaceFiles(Array.isArray(p?.files) ? p.files : [])
   })
 }

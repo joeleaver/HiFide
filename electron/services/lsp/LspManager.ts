@@ -1,14 +1,6 @@
 import path from 'node:path'
 import { 
   type PublishDiagnosticsParams,
-  type CompletionParams,
-  type HoverParams,
-  type DefinitionParams,
-  type ReferenceParams,
-  type RenameParams,
-  type CodeActionParams,
-  type DocumentFormattingParams,
-  type DocumentSymbolParams,
   type CompletionList,
   type CompletionItem,
   type Hover,
@@ -36,7 +28,6 @@ import { ProjectContext } from './ProjectContext.js'
 import { 
   type ServerStatus, 
   toLspUri, 
-  normalizePath, 
   normalizeTriggerKind 
 } from './Protocol.js'
 import { LANGUAGE_SERVER_DEFINITIONS, type LanguageServerDefinition } from '../../config/languageServers.js'

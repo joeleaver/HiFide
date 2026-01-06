@@ -24,7 +24,7 @@ export const XAIOpenAIProvider = createOpenAICompatibleProvider({
   baseURL: 'https://api.x.ai/v1',
 
   // xAI is fully OpenAI-compatible, no special modifications needed
-  requestModifier: (body, context) => {
+  requestModifier: (body) => {
     // Just pass through - xAI handles standard OpenAI format
     return body
   }

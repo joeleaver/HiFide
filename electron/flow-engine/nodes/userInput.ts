@@ -30,7 +30,8 @@ export const userInputNode: NodeFunction = async (flow, _context, _dataIn, _inpu
 
   // Wait for user input via FlowAPI
   // This creates a promise that will be resolved when the user submits
-  const userInput = await flow.waitForUserInput()
+  // We explicitly pass isTool: false so the UI knows to add the input to the session history
+  const userInput = await flow.waitForUserInput(undefined, false)
   
   if (typeof userInput === 'string') {
     const trimmed = userInput.trim()
