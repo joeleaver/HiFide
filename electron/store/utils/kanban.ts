@@ -30,6 +30,7 @@ const KanbanTaskSchema = z.object({
   kbArticleId: z.string().nullable().optional(),
   assignees: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
+  worklog: z.array(z.string()).optional(),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
   archived: z.boolean().optional(),
@@ -77,6 +78,7 @@ function normalizeTask(task: KanbanTask): KanbanTask {
         : task.kbArticleId ?? null,
     assignees: task.assignees ?? [],
     tags: task.tags ?? [],
+    worklog: task.worklog ?? [],
     archived: task.archived ?? false,
     archivedAt: task.archivedAt,
   }

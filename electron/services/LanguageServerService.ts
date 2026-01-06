@@ -76,6 +76,7 @@ interface LaunchConfig {
   command: string
   args: string[]
   env?: NodeJS.ProcessEnv
+  initializationOptions?: any
 }
 
 interface MasonPackageEntry {
@@ -100,27 +101,99 @@ for (const definition of LANGUAGE_SERVER_DEFINITIONS) {
   }
 }
 
-function resolveTsServerEntrypoint(): string {
+function resolveWorkspaceRequire(workspaceRoot: string) {
+  return createRequire(path.join(workspaceRoot, 'package.json'))
+}
+
+function resolvePackageBin(workspaceRoot: string, packageName: string): string | null {
+  console.log(`[LanguageServerService] Resolving bin for ${packageName} in ${workspaceRoot}`)
+  const workspaceRequire = resolveWorkspaceRequire(workspaceRoot)
+  const resolve = (id: string) => {
+    try {
+      const res = workspaceRequire.resolve(id)
+      console.log(`[LanguageServerService] Resolved ${id} via workspace: ${res}`)
+      return res
+    } catch {
+      try {
+        const res = require.resolve(id)
+        console.log(`[LanguageServerService] Resolved ${id} via fallback: ${res}`)
+        return res
+      } catch {
+        console.log(`[LanguageServerService] Failed to resolve ${id}`)
+        return null
+      }
+    }
+  }
+
+  const pkgJsonPath = resolve(`${packageName}/package.json`)
+  if (!pkgJsonPath) return null
+
   try {
-    const pkgJsonPath = require.resolve('typescript-language-server/package.json')
-    const pkg = require(pkgJsonPath) as { bin?: string | Record<string, string> }
+    const pkg = (path.isAbsolute(pkgJsonPath) ? require(pkgJsonPath) : workspaceRequire(pkgJsonPath)) as {
+      bin?: string | Record<string, string>
+    }
     const binEntry =
       typeof pkg.bin === 'string'
         ? pkg.bin
-        : pkg.bin?.['typescript-language-server'] ?? pkg.bin?.default ?? null
-    if (!binEntry) throw new Error('Missing bin entry')
-    return path.resolve(path.dirname(pkgJsonPath), binEntry)
-  } catch (error) {
-    throw new Error(`[LanguageServerService] Unable to resolve typescript-language-server: ${String(error)}`)
+        : pkg.bin?.[packageName] ?? pkg.bin?.default ?? (typeof pkg.bin === 'object' ? Object.values(pkg.bin)[0] : null)
+    
+    if (!binEntry) {
+      console.log(`[LanguageServerService] No bin entry found for ${packageName} in ${pkgJsonPath}`)
+      return null
+    }
+    const resolvedBin = path.resolve(path.dirname(pkgJsonPath), binEntry)
+    console.log(`[LanguageServerService] Resolved bin for ${packageName}: ${resolvedBin}`)
+    return resolvedBin
+  } catch (err) {
+    console.error(`[LanguageServerService] Error reading package.json for ${packageName}:`, err)
+    return null
   }
 }
 
-function resolveNodeCommandEnv(): { command: string; env?: NodeJS.ProcessEnv } {
-  const extraEnv: Record<string, string> = {}
-  if (process.versions?.electron) {
-    extraEnv.ELECTRON_RUN_AS_NODE = '1'
+function resolveTsserverPath(workspaceRoot: string): string | null {
+  console.log(`[LanguageServerService] Resolving tsserver path in ${workspaceRoot}`)
+  const workspaceRequire = resolveWorkspaceRequire(workspaceRoot)
+  const resolve = (id: string) => {
+    try {
+      return workspaceRequire.resolve(id)
+    } catch {
+      try {
+        return require.resolve(id)
+      } catch {
+        return null
+      }
+    }
   }
-  return { command: process.execPath, env: Object.keys(extraEnv).length ? extraEnv as NodeJS.ProcessEnv : undefined }
+
+  const tsPkgJsonPath = resolve('typescript/package.json')
+  if (!tsPkgJsonPath) {
+    console.log(`[LanguageServerService] Could not find typescript/package.json`)
+    return null
+  }
+  const resolvedPath = path.resolve(path.dirname(tsPkgJsonPath), 'lib', 'tsserver.js')
+  console.log(`[LanguageServerService] Resolved tsserver.js: ${resolvedPath}`)
+  return resolvedPath
+}
+
+function resolveNodeCommandEnv(workspaceRoot: string): { command: string; env?: NodeJS.ProcessEnv } {
+  const env: Record<string, string> = { ...process.env } as any
+  
+  // Ensure Electron-specific Node.js mode
+  if (process.versions?.electron) {
+    env.ELECTRON_RUN_AS_NODE = '1'
+  }
+
+  // Clean up NODE_OPTIONS which might interfere with child processes in some environments
+  delete env.NODE_OPTIONS
+
+  // Inject NODE_PATH to help the server find local modules and plugins
+  const workspaceNodeModules = path.join(workspaceRoot, 'node_modules')
+  const existingNodePath = env.NODE_PATH
+  env.NODE_PATH = existingNodePath 
+    ? `${workspaceNodeModules}${path.delimiter}${existingNodePath}`
+    : workspaceNodeModules
+
+  return { command: process.execPath, env }
 }
 
 function normalizeWorkspaceRoot(root: string): string {
@@ -180,6 +253,13 @@ class LanguageServerInstance {
     this.onStatusChange('starting')
 
     const launch = await this.resolveLaunchConfig()
+    console.log(`[LanguageServerService] Starting ${this.serverKey} server:`, {
+      command: launch.command,
+      args: launch.args,
+      cwd: this.workspaceRoot,
+      env_NODE_PATH: launch.env?.NODE_PATH,
+    })
+
     const child = spawn(launch.command, launch.args, {
       cwd: this.workspaceRoot,
       env: { ...process.env, ...(launch.env ?? {}) },
@@ -217,6 +297,8 @@ class LanguageServerInstance {
     connection.listen()
 
     const rootUri = pathToFileURL(this.workspaceRoot).toString()
+    const definition = SERVER_DEFINITION_BY_KEY.get(this.serverKey)
+    
     const initializeParams = {
       processId: process.pid,
       rootUri,
@@ -239,18 +321,24 @@ class LanguageServerInstance {
         },
       ],
       initializationOptions: {
+        ...(definition?.initializationOptions ?? {}),
+        ...(launch.initializationOptions ?? {}),
         preferences: {
           includePackageJsonAutoImports: 'auto',
           includeCompletionsForModuleExports: true,
           includeCompletionsWithSnippetText: true,
+          ...(definition?.initializationOptions?.preferences ?? {}),
+          ...(launch.initializationOptions?.preferences ?? {}),
         },
       },
     }
 
+    console.log(`[LanguageServerService] Sending InitializeRequest for ${this.serverKey}:`, JSON.stringify(initializeParams, null, 2))
     const result = await connection.sendRequest<InitializeResult>(InitializeRequest.method, initializeParams)
     if (!result) {
       throw new Error('[LanguageServerService] Failed to initialize language server')
     }
+    console.log(`[LanguageServerService] Server ${this.serverKey} initialized with capabilities:`, JSON.stringify(result.capabilities, null, 2))
     connection.sendNotification(InitializedNotification.method, {})
     this.status = 'ready'
     this.onStatusChange('ready')
@@ -302,7 +390,7 @@ class WorkspaceLanguageHost {
     private readonly workspaceRoot: string,
     private readonly emitDiagnostics: (payload: LspDiagnosticsEvent) => void,
     private readonly updateSnapshot: (serverKey: ServerKey, status: ServerStatus, meta?: { error?: string | null }) => void,
-    private readonly resolveLaunchConfig: (serverKey: ServerKey) => Promise<LaunchConfig>,
+    private readonly resolveLaunchConfig: (serverKey: ServerKey, workspaceRoot: string) => Promise<LaunchConfig>,
   ) {}
 
   private toAbsolutePath(input: string): string {
@@ -330,7 +418,7 @@ class WorkspaceLanguageHost {
     const instance = new LanguageServerInstance(
       this.workspaceRoot,
       serverKey,
-      () => this.resolveLaunchConfig(serverKey),
+      () => this.resolveLaunchConfig(serverKey, this.workspaceRoot),
       (params) => this.handleDiagnostics(params),
       (status, meta) => this.updateSnapshot(serverKey, status, meta)
     )
@@ -349,6 +437,11 @@ class WorkspaceLanguageHost {
     const uri = params.uri
     const doc = this.findDocument(uri)
     const pathFromUri = doc?.path ?? URI.parse(uri).fsPath
+    
+    if (params.diagnostics?.length > 0) {
+      console.log(`[LanguageServerService] Received ${params.diagnostics.length} diagnostics for ${pathFromUri}`)
+    }
+
     const payload: LspDiagnosticsEvent = {
       workspaceRoot: this.workspaceRoot,
       uri,
@@ -650,7 +743,7 @@ export class LanguageServerService extends Service<LanguageServerState> {
       normalized,
       emitDiagnostics,
       updateSnapshot,
-      (serverKey) => this.resolveLaunchConfig(serverKey)
+      (serverKey, workspaceRoot) => this.resolveLaunchConfig(serverKey, workspaceRoot)
     )
     this.hosts.set(normalized, host)
     this.setState({ workspaces: { ...this.state.workspaces, [normalized]: snapshot } })
@@ -773,17 +866,44 @@ export class LanguageServerService extends Service<LanguageServerState> {
     this.broadcastServerLanguages(serverKey)
   }
 
-  private async resolveLaunchConfig(serverKey: ServerKey): Promise<LaunchConfig> {
+  private async resolveLaunchConfig(serverKey: ServerKey, workspaceRoot: string): Promise<LaunchConfig> {
+    console.log(`[LanguageServerService] Resolving launch config for ${serverKey} in ${workspaceRoot}`)
     const definition = SERVER_DEFINITION_BY_KEY.get(serverKey)
     if (!definition) {
       throw new Error(`[LanguageServerService] Unknown server key ${serverKey}`)
     }
 
-    if (definition.provisioning.type === 'builtin') {
-      const { command, env } = resolveNodeCommandEnv()
-      return { command, env, args: [resolveTsServerEntrypoint(), '--stdio'] }
+    const { command, env } = resolveNodeCommandEnv(workspaceRoot)
+
+    // Strategy 1: Look for the package in the workspace or app node_modules
+    const localBin = resolvePackageBin(workspaceRoot, definition.masonPackage)
+    if (localBin) {
+      console.log(`[LanguageServerService] Found local bin for ${serverKey}: ${localBin}`)
+      const initializationOptions: any = {}
+      const args = [localBin, '--stdio']
+
+      if (serverKey === 'tsserver') {
+        const tsserverPath = resolveTsserverPath(workspaceRoot)
+        if (tsserverPath) {
+          const tsdk = path.dirname(tsserverPath)
+          initializationOptions.tsserver = { path: tsserverPath }
+          initializationOptions.typescript = { tsdk }
+          
+          // Add command line flags for redundancy/reliability
+          args.push('--tsserver-path', tsserverPath)
+          args.push('--tsdk', tsdk)
+          
+          console.log(`[LanguageServerService] Injected tsserver initialization options and args`, {
+            initializationOptions,
+            extraArgs: ['--tsserver-path', tsserverPath, '--tsdk', tsdk]
+          })
+        }
+      }
+      return { command, env, args, initializationOptions }
     }
 
+    // Strategy 2: Fallback to npm-npx for non-builtin servers
+    console.log(`[LanguageServerService] No local bin found for ${serverKey}, falling back to npx`)
     if (definition.provisioning.type === 'npm-npx') {
       const version = await this.resolveMasonVersion(definition.masonPackage)
       if (version) {
@@ -791,7 +911,8 @@ export class LanguageServerService extends Service<LanguageServerState> {
       }
       const packageSpecifier = version ? `${definition.masonPackage}@${version}` : definition.masonPackage
       const args = ['--yes', packageSpecifier, definition.provisioning.bin, ...(definition.provisioning.args ?? [])]
-      return { command: getNpxCommand(), args }
+      console.log(`[LanguageServerService] npx launch args for ${serverKey}:`, args)
+      return { command: getNpxCommand(), args, env }
     }
 
     throw new Error(`[LanguageServerService] Unsupported provisioning for ${serverKey}`)

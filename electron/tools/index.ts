@@ -58,6 +58,7 @@ import { grepTool } from './text/grep'
 import { knowledgeBaseSearchTool } from './kb/search'
 import { knowledgeBaseStoreTool } from './kb/store'
 import { knowledgeBaseDeleteTool } from './kb/delete'
+import { knowledgeBaseGetTool } from './kb/get'
 
 
 export const agentTools: AgentTool[] = [
@@ -104,4 +105,5 @@ export const agentTools: AgentTool[] = [
   knowledgeBaseSearchTool,
   knowledgeBaseStoreTool,
   knowledgeBaseDeleteTool,
+  knowledgeBaseGetTool,
 ]

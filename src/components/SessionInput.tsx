@@ -5,7 +5,7 @@ import { FlowService } from '../services/flow'
 import { Image, Group, Stack, Text, Paper, ActionIcon } from '@mantine/core'
 import { IconPhoto, IconPlus, IconX } from '@tabler/icons-react'
 import '../styles/mdx-dark.css'
-import { MDXEditor, BoldItalicUnderlineToggles, CreateLink, InsertTable, ListsToggle, markdownShortcutPlugin, listsPlugin, toolbarPlugin, MDXEditorMethods, linkPlugin, linkDialogPlugin, tablePlugin } from '@mdxeditor/editor'
+import { MDXEditor, markdownShortcutPlugin, listsPlugin, MDXEditorMethods, linkPlugin, linkDialogPlugin, tablePlugin } from '@mdxeditor/editor'
 
 interface PendingImage {
   id: string
@@ -266,10 +266,7 @@ export default memo(function SessionInput() {
             send()
           }
         }}
-        onMouseDownCapture={() => {
-          try { editorRef.current?.focus(undefined, { defaultSelection: 'rootEnd' }) } catch {}
-          placeCaret()
-        }}
+
         style={{ ['--kb-placeholder' as any]: '"Ask your agent... (Ctrl+Enter to send)"' }}
       >
         <MDXEditor
@@ -292,17 +289,6 @@ export default memo(function SessionInput() {
             setInputValue(v)
           }}
           plugins={[
-            toolbarPlugin({
-              toolbarClassName: 'kb-mde-toolbar kb-mde-toolbar-compact',
-              toolbarContents: () => (
-                <>
-                  <BoldItalicUnderlineToggles options={['Bold', 'Italic']} />
-                  <ListsToggle options={['bullet', 'number']} />
-                  <CreateLink />
-                  <InsertTable />
-                </>
-              )
-            }),
             listsPlugin(),
             tablePlugin(),
             markdownShortcutPlugin(),

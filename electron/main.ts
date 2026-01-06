@@ -11,13 +11,22 @@
  * - Application initialization
  */
 
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
+
+// Environment setup - must happen before other local imports
+const DIRNAME = path.dirname(fileURLToPath(import.meta.url))
+process.env.DIST_ELECTRON = DIRNAME
+process.env.APP_ROOT = path.join(DIRNAME, '..')
+const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
+const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
+process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
+
 import './logger'
 import { app, ipcMain } from 'electron'
-import path from 'node:path'
 
 // Disable GPU acceleration to prevent SharedImageManager/Skia mailbox errors and hardware-related crashes
 app.disableHardwareAcceleration()
-import { fileURLToPath } from 'node:url'
 
 // Core modules
 import { initializeApp } from './core/app'
@@ -36,13 +45,6 @@ import { initializeServices, getAppService } from './services'
 // Agent dependencies
 import { initAgentSessionsCleanup } from './session/agentSessions'
 import { initializeAgentToolRegistry } from './tools/agentToolRegistry'
-
-// Environment setup
-const DIRNAME = path.dirname(fileURLToPath(import.meta.url))
-process.env.APP_ROOT = path.join(DIRNAME, '..')
-const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
-const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
-process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
 
 
 // ----------------------------------------------------------------------------

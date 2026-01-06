@@ -10,6 +10,7 @@ export interface LanguageServerDefinition {
   languages: SupportedLspLanguage[]
   masonPackage: string
   provisioning: LanguageProvisioning
+  initializationOptions?: any
 }
 
 export const LANGUAGE_SERVER_DEFINITIONS: LanguageServerDefinition[] = [

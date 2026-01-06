@@ -134,7 +134,7 @@ export class KanbanService extends Service<KanbanState> {
     const { board, workspaceId, immediate = false } = params
     const workspaceRoot = await this.resolveWorkspaceRoot(workspaceId)
 
-    this.updateWorkspaceState(workspaceRoot, { saving: true, error: null })
+    this.updateWorkspaceState(workspaceRoot, { saving: true, board, error: null })
     try {
       await kanbanSaver.save(workspaceRoot, board, immediate)
       const state = this.updateWorkspaceState(workspaceRoot, { saving: false, board, error: null })

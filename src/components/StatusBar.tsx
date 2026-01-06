@@ -145,31 +145,7 @@ export default function StatusBar() {
           </Tooltip>
         )}
 
-        {/* Vector counts (from VectorService) - show if indexing is NOT active */}
-        {!(indexingStatus?.isProcessing || indexingLoading) && vectorStatus?.tables && (
-          <Group gap={4} px={4}>
-            <Tooltip label="Code Vectors">
-              <Group gap={2} style={{ cursor: 'default' }}>
-                <IconDatabase size={12} color="#60a5fa" />
-                <Text size="xs" fw={500}>{vectorStatus?.tables?.code?.count || 0}</Text>
-              </Group>
-            </Tooltip>
-            <Tooltip label="Knowledge Base Vectors">
-              <Group gap={2} style={{ cursor: 'default' }}>
-                <IconDatabase size={12} color="#4ade80" />
-                <Text size="xs" fw={500}>{vectorStatus?.tables?.kb?.count || 0}</Text>
-              </Group>
-            </Tooltip>
-            <Tooltip label="Memory Vectors">
-              <Group gap={2} style={{ cursor: 'default' }}>
-                <IconDatabase size={12} color="#fb923c" />
-                <Text size="xs" fw={500}>{vectorStatus?.tables?.memories?.count || 0}</Text>
-              </Group>
-            </Tooltip>
-          </Group>
-        )}
-
-        {/* Vector counts (from VectorService) - keeping this for backward compatibility */}
+        {/* Vector counts (from VectorService) */}
         {vectorStatus?.tables && (
           <Group gap={4} px={4}>
             <Tooltip label="Code Vectors">

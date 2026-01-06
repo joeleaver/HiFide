@@ -117,6 +117,33 @@ export function mountTerminalInstance(
     console.log('[terminalInstances] Opening terminal for first time:', tabId)
     instance.terminal.open(container)
     instance.isOpen = true
+
+    // Add right-click behavior: copy if selection exists, otherwise paste
+    const term = instance.terminal
+    const el = term.element
+    if (el) {
+      el.addEventListener('contextmenu', async (e) => {
+        e.preventDefault()
+        if (term.hasSelection()) {
+          const selection = term.getSelection()
+          try {
+            await navigator.clipboard.writeText(selection)
+            term.clearSelection()
+          } catch (err) {
+            console.error('[terminalInstances] Failed to copy to clipboard:', err)
+          }
+        } else if (!term.options.disableStdin) {
+          try {
+            const text = await navigator.clipboard.readText()
+            if (text) {
+              term.paste(text)
+            }
+          } catch (err) {
+            console.error('[terminalInstances] Failed to read from clipboard:', err)
+          }
+        }
+      })
+    }
   }
 
   instance.container = container

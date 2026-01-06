@@ -4,7 +4,7 @@
  * Handles BrowserWindow creation, state persistence, and lifecycle
  */
 
-import { app, BrowserWindow, screen } from 'electron'
+import { app, BrowserWindow, screen, Menu, MenuItem } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setWindow, windowStateStore } from './state'
@@ -17,6 +17,9 @@ const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 // const VITE_PUBLIC = process.env['VITE_PUBLIC']
 // Works in both CJS and ESM builds
 const DIRNAME = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url))
+
+// Robust path to dist-electron root, even when this file is bundled into a chunk
+const DIST_ELECTRON = process.env.DIST_ELECTRON || (DIRNAME.endsWith('chunks') ? path.join(DIRNAME, '..') : DIRNAME)
 
 /**
  * Window state interface
@@ -213,7 +216,7 @@ export function createWindow(opts?: { offsetFromCurrent?: boolean; workspaceId?:
     x: windowState.x,
     y: windowState.y,
     webPreferences: {
-      preload: path.join(DIRNAME, 'preload.mjs'),
+      preload: path.join(DIST_ELECTRON, 'preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -293,7 +296,11 @@ export function createWindow(opts?: { offsetFromCurrent?: boolean; workspaceId?:
       } else {
         console.time('[window] loadFile(prod)')
         const query: any = { wsUrl, wsToken, windowId: String(win.id) }
-        await win.loadFile(path.join(DIRNAME, '../dist/index.html'), { query } as any)
+        // APP_ROOT/dist/index.html
+        const indexPath = process.env.APP_ROOT 
+          ? path.join(process.env.APP_ROOT, 'dist/index.html')
+          : path.join(DIST_ELECTRON, '../dist/index.html')
+        await win.loadFile(indexPath, { query } as any)
         console.timeEnd('[window] loadFile(prod)')
         // DevTools disabled in production
       }
@@ -320,7 +327,65 @@ export function createWindow(opts?: { offsetFromCurrent?: boolean; workspaceId?:
   // Update global state
   setWindow(win)
 
+  // Context menu with spelling suggestions
+  win.webContents.on('context-menu', (_event, params) => {
+    const menu = new Menu()
 
+    // Only show the menu if there are spelling suggestions, if it's an editable field, or if there's a selection
+    const hasSuggestions = params.dictionarySuggestions.length > 0
+    const isEditable = params.isEditable
+    const hasSelection = params.selectionText.trim().length > 0
+
+    if (!hasSuggestions && !isEditable && !hasSelection) {
+      return
+    }
+
+    // Add spelling suggestions
+    for (const suggestion of params.dictionarySuggestions) {
+      menu.append(
+        new MenuItem({
+          label: suggestion,
+          click: () => win.webContents.replaceMisspelling(suggestion),
+        })
+      )
+    }
+
+    // Add separator if there were suggestions
+    if (hasSuggestions) {
+      menu.append(new MenuItem({ type: 'separator' }))
+    }
+
+    // Add to dictionary
+    if (params.misspelledWord) {
+      menu.append(
+        new MenuItem({
+          label: `Add to Dictionary`,
+          click: () => win.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord),
+        })
+      )
+      menu.append(new MenuItem({ type: 'separator' }))
+    }
+
+    // Standard edit actions
+    menu.append(new MenuItem({ label: 'Cut', role: 'cut', enabled: params.editFlags.canCut }))
+    menu.append(new MenuItem({ label: 'Copy', role: 'copy', enabled: params.editFlags.canCopy }))
+    menu.append(new MenuItem({ label: 'Paste', role: 'paste', enabled: params.editFlags.canPaste }))
+    menu.append(new MenuItem({ type: 'separator' }))
+    menu.append(new MenuItem({ label: 'Select All', role: 'selectAll', enabled: params.editFlags.canSelectAll }))
+
+    // DevTools
+    if (!app.isPackaged) {
+      menu.append(new MenuItem({ type: 'separator' }))
+      menu.append(
+        new MenuItem({
+          label: 'Inspect Element',
+          click: () => win.webContents.inspectElement(params.x, params.y),
+        })
+      )
+    }
+
+    menu.popup()
+  })
 
   // Re-assert global error capture at end of setup.
   // Some libraries set their own uncaughtException capture callbacks; we want
