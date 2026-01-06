@@ -19,6 +19,7 @@ import { JsonViewer } from './viewers/JsonViewer'
 import { TerminalExecViewer } from './viewers/TerminalExecViewer'
 import { ErrorViewer } from './viewers/ErrorViewer'
 import { OperationResultViewer } from './viewers/OperationResultViewer'
+import { HumanInputViewer } from './viewers/HumanInputViewer'
 import { inferContentType } from './inferContentType'
 
 interface BadgeContentProps {
@@ -77,6 +78,9 @@ export function BadgeContent({ badge }: BadgeContentProps) {
     case 'operation-result':
       return <OperationResultViewer badge={badge} />
     
+    case 'human-input':
+      return <HumanInputViewer badge={badge} />
+
     case 'json':
     case 'text':
     default:

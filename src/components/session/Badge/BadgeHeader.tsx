@@ -95,20 +95,21 @@ export function BadgeHeader({ badge, simple }: BadgeHeaderProps) {
               tt="uppercase" 
               style={{ flexShrink: 0, opacity: 0.9, letterSpacing: 0.5 }}
             >
-              {badge.toolName.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ')}
+              {badge.metadata?.displayToolName || badge.toolName.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ')}
             </MantineBadge>
           )}
 
           {/* Title (tool action summary; should NOT repeat the tool name) */}
           <Text
             size="xs"
-            fw={600}
+            fw={badge.contentType === 'human-input' ? 500 : 600}
             c="gray.3"
             style={{
-              fontFamily: 'monospace',
+              fontFamily: badge.contentType === 'human-input' ? 'inherit' : 'monospace',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
+              flex: 1,
             }}
           >
             {badge.title ?? badge.label}

@@ -72,9 +72,10 @@ export async function resumeFlow(
   _wc: WebContents | undefined,
   requestId: string,
   userInput: string | MessagePart[],
-  userInputContext?: unknown
+  userInputContext?: unknown,
+  options: { isToolResponse?: boolean } = {}
 ): Promise<{ ok: boolean; error?: string }> {
-  console.log('[resumeFlow] Called with:', { requestId, hasUserInput: !!userInput })
+  console.log('[resumeFlow] Called with:', { requestId, hasUserInput: !!userInput, isToolResponse: options.isToolResponse })
 
   const scheduler = activeFlows.get(requestId)
 
@@ -104,67 +105,70 @@ export async function resumeFlow(
       }
     }
 
-    // Add user message to session timeline
-    const sessionId = scheduler.getSessionId()
-    const workspaceId = scheduler.getWorkspaceId()
+    // Add user message to session timeline ONLY if it's NOT a tool response.
+    // Tool responses are handled by the tool's own badge/result mechanism.
+    if (!options.isToolResponse) {
+      const sessionId = scheduler.getSessionId()
+      const workspaceId = scheduler.getWorkspaceId()
 
-    console.log('[resumeFlow] Adding user message to timeline:', { sessionId, workspaceId })
+      console.log('[resumeFlow] Adding user message to timeline:', { sessionId, workspaceId })
 
-    if (sessionId && workspaceId) {
-      const { getSessionService } = await import('../services/index.js')
-      const { broadcastWorkspaceNotification } = await import('../backend/ws/broadcast.js')
+      if (sessionId && workspaceId) {
+        const { getSessionService } = await import('../services/index.js')
+        const { broadcastWorkspaceNotification } = await import('../backend/ws/broadcast.js')
 
-      const sessionService = getSessionService()
+        const sessionService = getSessionService()
 
-      console.log('[resumeFlow] Got sessionService:', !!sessionService)
+        console.log('[resumeFlow] Got sessionService:', !!sessionService)
 
-      const sessions = sessionService.getSessionsFor({ workspaceId })
-      const sessionIndex = sessions.findIndex((s: Session) => s.id === sessionId)
-      const session: Session | undefined = sessionIndex >= 0 ? sessions[sessionIndex] : undefined
+        const sessions = sessionService.getSessionsFor({ workspaceId })
+        const sessionIndex = sessions.findIndex((s: Session) => s.id === sessionId)
+        const session: Session | undefined = sessionIndex >= 0 ? sessions[sessionIndex] : undefined
 
-      console.log('[resumeFlow] Found session:', !!session, 'sessions count:', sessions.length)
+        console.log('[resumeFlow] Found session:', !!session, 'sessions count:', sessions.length)
 
-      if (session) {
-        // Create user message item
-        const userMessageItem: SessionMessage = {
-          type: 'message',
-          id: `msg-${Date.now()}`,
-          role: 'user',
-          content: finalInput as any,
-          timestamp: Date.now()
+        if (session) {
+          // Create user message item
+          const userMessageItem: SessionMessage = {
+            type: 'message',
+            id: `msg-${Date.now()}`,
+            role: 'user',
+            content: finalInput as any,
+            timestamp: Date.now()
+          }
+
+          console.log('[resumeFlow] Created user message item:', userMessageItem.id)
+
+          // Add to session timeline
+          const updatedItems = [...(session.items || []), userMessageItem]
+          const updatedSession: Session = {
+            ...session,
+            items: updatedItems,
+            updatedAt: Date.now(),
+            lastActivityAt: Date.now(),
+          }
+
+          const updatedSessions = [...sessions]
+          updatedSessions[sessionIndex] = updatedSession
+
+          sessionService.setSessionsFor({ workspaceId, sessions: updatedSessions })
+          sessionService.saveSessionFor({ workspaceId, sessionId }, false)
+
+          console.log('[resumeFlow] Broadcasting user message to renderer')
+
+          // Broadcast to renderer
+          broadcastWorkspaceNotification(workspaceId, 'session.timeline.delta', {
+            op: 'message',
+            item: userMessageItem
+          })
+
+          console.log('[resumeFlow] User message added to timeline successfully')
+        } else {
+          console.warn('[resumeFlow] Session not found for sessionId:', sessionId)
         }
-
-        console.log('[resumeFlow] Created user message item:', userMessageItem.id)
-
-        // Add to session timeline
-        const updatedItems = [...(session.items || []), userMessageItem]
-        const updatedSession: Session = {
-          ...session,
-          items: updatedItems,
-          updatedAt: Date.now(),
-          lastActivityAt: Date.now(),
-        }
-
-        const updatedSessions = [...sessions]
-        updatedSessions[sessionIndex] = updatedSession
-
-        sessionService.setSessionsFor({ workspaceId, sessions: updatedSessions })
-        sessionService.saveSessionFor({ workspaceId, sessionId }, false)
-
-        console.log('[resumeFlow] Broadcasting user message to renderer')
-
-        // Broadcast to renderer
-        broadcastWorkspaceNotification(workspaceId, 'session.timeline.delta', {
-          op: 'message',
-          item: userMessageItem
-        })
-
-        console.log('[resumeFlow] User message added to timeline successfully')
       } else {
-        console.warn('[resumeFlow] Session not found for sessionId:', sessionId)
+        console.warn('[resumeFlow] Missing sessionId or workspaceId:', { sessionId, workspaceId })
       }
-    } else {
-      console.warn('[resumeFlow] Missing sessionId or workspaceId:', { sessionId, workspaceId })
     }
 
     console.log('[resumeFlow] Calling scheduler.resolveAnyWaitingUserInput')

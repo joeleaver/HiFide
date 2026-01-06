@@ -26,6 +26,7 @@ const GROUP_LABELS: Record<string, string> = {
   code: '🔧 Code Analysis',
   workspace: '🗂️ Workspace',
   project: '📋 Project Management',
+  human: '👤 Human Interaction',
   mcp: '🔌 MCP Tools',
   other: '📦 Other',
 }
@@ -51,6 +52,7 @@ export function ToolsConfig({ config, onConfigChange }: ToolsConfigProps) {
       const lc = n.toLowerCase()
       const cat = tool.category
         || (n === 'knowledgeBaseStore' || n === 'knowledgeBaseSearch' ? 'workspace'
+        : n === 'askForInput' ? 'human'
         : n.startsWith('fs') ? 'fs'
         : n.startsWith('agent') ? 'agent'
         : n.startsWith('workspace') || n.startsWith('knowledgeBase') ? 'workspace'

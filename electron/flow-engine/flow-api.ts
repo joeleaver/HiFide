@@ -197,8 +197,10 @@ export interface FlowAPI {
    * Wait for user to provide input
    * Used by userInput node to break loops naturally
    * Sets flow status to 'waitingForInput' and waits for user submission
+   * 
+   * @param prompt - Optional message to display to the user
    */
-  waitForUserInput: () => Promise<string | MessagePart[]>
+  waitForUserInput: (prompt?: string) => Promise<string | MessagePart[]>
 
   // ===== Portal Nodes =====
 

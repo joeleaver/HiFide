@@ -48,7 +48,7 @@ export const FlowService = {
   async resume(
     requestId: string | undefined,
     userInput: string | MessagePart[],
-    options?: { userInputContext?: unknown }
+    options?: { userInputContext?: unknown; isToolResponse?: boolean }
   ): Promise<{ ok: boolean; error?: string }> {
     const client = getBackendClient()
     if (!client) return { ok: false, error: 'backend-not-ready' }
@@ -56,6 +56,7 @@ export const FlowService = {
     return client.rpc('flow.resume', {
       requestId,
       userInput,
+      isToolResponse: options?.isToolResponse,
       ...(options?.userInputContext !== undefined ? { userInputContext: options.userInputContext } : {})
     })
   },

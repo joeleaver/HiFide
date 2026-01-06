@@ -543,7 +543,11 @@ class LLMService {
                 ...streamOpts,
                 tools: policyTools,
                 responseSchema,
-                toolMeta: { requestId: context.contextId, workspaceId: (flowAPI as any)?.workspaceId }, // Include workspace for tool scoping
+                toolMeta: {
+                  requestId: context.contextId,
+                  workspaceId: (flowAPI as any)?.workspaceId,
+                  flowAPI, // Pass FlowAPI so tools like askForInput can use it
+                },
                 onToolStart: onToolStartWrapped,
                 onToolEnd: onToolEndWrapped,
                 onToolError: eventHandlers.onToolError,

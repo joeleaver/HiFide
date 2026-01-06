@@ -18,7 +18,7 @@ export const LANGUAGE_SERVER_DEFINITIONS: LanguageServerDefinition[] = [
     key: 'tsserver',
     displayName: 'TypeScript / JavaScript',
     languages: ['typescript', 'javascript', 'typescriptreact', 'javascriptreact', 'json'],
-    masonPackage: 'typescript-language-server',
+    masonPackage: '@vtsls/language-server',
     provisioning: { type: 'builtin' },
   },
   {

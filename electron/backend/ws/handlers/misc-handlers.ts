@@ -290,7 +290,7 @@ export function createMiscHandlers(
 
   addMethod(
     'flow.resume',
-    async ({ requestId, userInput, userInputContext }: { requestId?: string; userInput: string; userInputContext?: unknown }) => {
+    async ({ requestId, userInput, userInputContext, isToolResponse }: { requestId?: string; userInput: string; userInputContext?: unknown; isToolResponse?: boolean }) => {
     try {
       if (!requestId) {
         return { ok: false, error: 'requestId is required' }
@@ -301,7 +301,7 @@ export function createMiscHandlers(
       const wc = meta?.windowId ? BrowserWindow.fromId(meta.windowId)?.webContents : undefined
 
       const { resumeFlow } = await import('../../../flow-engine/index.js')
-      const result = await resumeFlow(wc, requestId, userInput, userInputContext)
+      const result = await resumeFlow(wc, requestId, userInput, userInputContext, { isToolResponse })
       return result
     } catch (e: any) {
       console.error('[flow.resume] Error:', e)

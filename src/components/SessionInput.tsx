@@ -1,6 +1,7 @@
 import { memo, useRef, useEffect, useState, useCallback } from 'react'
 import { useUiStore } from '../store/ui'
 import { useFlowRuntime } from '../store/flowRuntime'
+import { useChatTimeline } from '../store/chatTimeline'
 import { FlowService } from '../services/flow'
 import { Image, Group, Stack, Text, Paper, ActionIcon } from '@mantine/core'
 import { IconPhoto, IconPlus, IconX } from '@tabler/icons-react'
@@ -20,6 +21,8 @@ export default memo(function SessionInput() {
   const inputContext = useUiStore((s) => s.sessionInputContext)
   const clearInputContext = useUiStore((s) => s.clearSessionInputContext)
   const requestId = useFlowRuntime((s) => s.requestId)
+  const feStatus = useFlowRuntime((s) => s.status)
+  const addUserMessage = useChatTimeline((s) => s.addUserMessage)
   
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
   const [isDragging, setIsDragging] = useState(false)
@@ -182,7 +185,19 @@ export default memo(function SessionInput() {
       finalInput = parts
     }
 
-    await FlowService.resume(requestId, finalInput as any, { userInputContext: inputContext }).catch((e) => {
+    // Capture status strictly before async calls
+    const isToolResponse = feStatus === 'waitingForInput'
+
+    // Only add to chat if we are NOT in waitingForInput mode
+    // In waitingForInput mode, the input is a response to a tool call
+    if (!isToolResponse) {
+      addUserMessage(finalInput)
+    }
+
+    await FlowService.resume(requestId, finalInput as any, { 
+      userInputContext: inputContext,
+      isToolResponse
+    }).catch((e) => {
       console.error('[SessionInput] Failed to resume flow:', e)
     })
   }

@@ -179,6 +179,25 @@ class BadgeConfigRegistry {
 
     // Register early: specific first-party tool configs still override this.
     this.register(mcpGenericConfig)
+
+    // Human Interaction: askForInput
+    const askForInputConfig: BadgeConfig = {
+      toolName: 'askForInput',
+      defaultType: 'tool',
+      contentType: 'human-input',
+      requiresExpansion: true,
+      generateTitle: (badge: any) => shortenMiddle(badge.args?.prompt || 'Human Input', 120),
+      generateLabel: (_badge: any) => '',
+      enrichMetadata: (badge: any) => ({
+        displayToolName: 'HUMAN',
+        prompt: badge.args?.prompt,
+        response: badge.result?.data || badge.result?.response,
+      }),
+      determineStatus: (badge: any) => badge.result?.ok ? 'success' : 'running',
+      isExpandable: (_badge: any) => true,
+      shouldShowPreview: (_badge: any) => false
+    }
+    this.register(askForInputConfig)
     
     // Terminal Exec
     const terminalExecConfig: BadgeConfig = {

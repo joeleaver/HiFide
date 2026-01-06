@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback } from 'react'
 
-import { Group, Text, Menu, Button, TextInput, Card, ActionIcon } from '@mantine/core'
+import { Group, Text, Menu, Button, TextInput, Card, ActionIcon, Stack } from '@mantine/core'
 import { IconChevronDown, IconChevronRight, IconAlertTriangle, IconX } from '@tabler/icons-react'
 import { useFlowRuntime } from '../store/flowRuntime'
 import { useSessionUi } from '../store/sessionUi'
@@ -23,6 +23,7 @@ export default function SessionControlsBar() {
   const [flowError, setFlowError] = useState<string | null>(null)
 
   const feStatus = useFlowRuntime((s: any) => s.status)
+  const inputPrompt = useFlowRuntime((s: any) => s.inputPrompt)
 
   const allFlows = Array.isArray(flows) ? (flows as any[]) : []
   const { system: systemFlows, user: userFlows, workspace: workspaceFlows } = splitFlowsByLibrary(allFlows)
@@ -111,14 +112,24 @@ export default function SessionControlsBar() {
       <FlowStatusIndicator />
 
       {feStatus === 'waitingForInput' && (
-        <Group gap="sm" wrap="nowrap" justify="flex-start" style={{ width: '100%' }}>
-          <div style={{ flex: 1, minWidth: 220 }}>
-            <SessionInput />
-          </div>
-          <Card padding="xs" radius="sm" withBorder style={{ minWidth: 140, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#181818', borderStyle: 'dashed', borderColor: '#3e3e42' }}>
-            <Text size="xs" c="#999">Focus</Text>
-          </Card>
-        </Group>
+        <Stack gap={4} style={{ width: '100%' }}>
+          {inputPrompt && (
+            <Card padding="xs" radius="sm" withBorder style={{ background: '#1a1a1a', borderColor: '#3b82f633', borderLeft: '3px solid #3b82f6' }}>
+              <Group gap="xs" wrap="nowrap" align="flex-start">
+                <Text size="xs" c="blue.4" fw={600} style={{ flexShrink: 0, marginTop: 1 }}>PROMPT:</Text>
+                <Text size="xs" c="#ccc" style={{ lineHeight: 1.4 }}>{inputPrompt}</Text>
+              </Group>
+            </Card>
+          )}
+          <Group gap="sm" wrap="nowrap" justify="flex-start" style={{ width: '100%' }}>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <SessionInput />
+            </div>
+            <Card padding="xs" radius="sm" withBorder style={{ minWidth: 140, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#181818', borderStyle: 'dashed', borderColor: '#3e3e42' }}>
+              <Text size="xs" c="#999">Focus</Text>
+            </Card>
+          </Group>
+        </Stack>
       )}
 
       <Group gap="xs" wrap="nowrap" justify="flex-start" style={{ width: '100%', alignItems: 'center' }}>

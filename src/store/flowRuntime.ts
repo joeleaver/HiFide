@@ -17,6 +17,7 @@ interface FlowRuntimeState {
   requestId?: string
   lastEventAt?: number
   pausedNode?: string | null
+  inputPrompt?: string | null
   nodeState: Record<string, NodeExecState>
   selectedSessionId?: string | null
   isHydrating: boolean
@@ -36,6 +37,7 @@ function createFlowRuntimeStore() {
     requestId: undefined,
     lastEventAt: undefined,
     pausedNode: null,
+    inputPrompt: null,
     nodeState: {},
     selectedSessionId: null,
     isHydrating: false,
@@ -44,7 +46,7 @@ function createFlowRuntimeStore() {
     setRequestId: (id) => set({ requestId: id }),
     setSessionScope: (id) => set({ selectedSessionId: id ?? null }),
     setIsHydrating: (b) => set({ isHydrating: !!b }),
-    reset: () => set({ status: 'stopped', requestId: undefined, lastEventAt: undefined, pausedNode: null, nodeState: {} }),
+    reset: () => set({ status: 'stopped', requestId: undefined, lastEventAt: undefined, pausedNode: null, inputPrompt: null, nodeState: {} }),
 
     handleEvent: (ev) => {
       // Minimal state machine driven by backend flow events
@@ -64,9 +66,15 @@ function createFlowRuntimeStore() {
         const isStartish = t === 'nodestart' || t === 'chunk' || t === 'waitingforinput'
         if (isStartish) {
           if (t === 'waitingforinput') {
-            set({ requestId: ev.requestId, status: 'waitingForInput', lastEventAt: now, pausedNode: (ev.nodeId as string) || null })
+            set({
+              requestId: ev.requestId,
+              status: 'waitingForInput',
+              lastEventAt: now,
+              pausedNode: (ev.nodeId as string) || null,
+              inputPrompt: (ev as any).prompt || null
+            })
           } else {
-            set({ requestId: ev.requestId, status: 'running', lastEventAt: now, pausedNode: null })
+            set({ requestId: ev.requestId, status: 'running', lastEventAt: now, pausedNode: null, inputPrompt: null })
           }
         } else {
           return
@@ -103,12 +111,24 @@ function createFlowRuntimeStore() {
       }
 
       if (t === 'toolend') {
-        set({ lastEventAt: now })
+        const newState: any = { lastEventAt: now }
+        if (get().status === 'waitingForInput') {
+          newState.status = 'running'
+          newState.inputPrompt = null
+          newState.pausedNode = null
+        }
+        set(newState)
         return
       }
 
       if (t === 'toolerror') {
-        set({ lastEventAt: now })
+        const newState: any = { lastEventAt: now }
+        if (get().status === 'waitingForInput') {
+          newState.status = 'running'
+          newState.inputPrompt = null
+          newState.pausedNode = null
+        }
+        set(newState)
         return
       }
 
@@ -130,7 +150,13 @@ function createFlowRuntimeStore() {
           status: 'executing',
           style: { border: '3px solid #f59e0b', boxShadow: '0 0 0 2px rgba(245, 158, 11, 0.2)' }
         })
-        set({ status: 'waitingForInput', requestId: ev.requestId, lastEventAt: now, pausedNode: nodeId })
+        set({
+          status: 'waitingForInput',
+          requestId: ev.requestId,
+          lastEventAt: now,
+          pausedNode: nodeId,
+          inputPrompt: (ev as any).prompt || null
+        })
         return
       }
 
@@ -161,7 +187,7 @@ function createFlowRuntimeStore() {
       }
 
       if (t === 'done') {
-        set({ status: 'stopped', requestId: undefined, lastEventAt: now, pausedNode: null })
+        set({ status: 'stopped', requestId: undefined, lastEventAt: now, pausedNode: null, inputPrompt: null })
         return
       }
 

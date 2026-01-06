@@ -35,6 +35,7 @@ export function inferContentType(toolName?: string): string {
   if (normalized.includes('index.search')) return 'search'
   if (normalized === 'terminalexec' || normalized === 'terminal.exec') return 'terminal-exec'
   if (normalized.includes('operation-result') || normalized.includes('operationresult')) return 'operation-result'
+  if (normalized === 'askforinput') return 'human-input'
 
   return 'json'
 }

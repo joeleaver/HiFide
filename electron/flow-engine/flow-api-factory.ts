@@ -15,7 +15,7 @@ export interface FlowApiFactoryDeps {
   abortController: AbortController
   contextRegistry: ContextRegistry
   portalRegistry: Map<string, { context?: MainFlowContext; data?: any }>
-  userInputResolvers: Map<string, (value: string) => void>
+  userInputResolvers: Map<string, (value: string | MessagePart[]) => void>
   executionEventRouter: ExecutionEventRouter
   triggerPortalOutputs: (portalId: string) => Promise<void>
   setPausedNodeId: (nodeId: string | null) => void
@@ -64,7 +64,7 @@ export function createFlowApiFactory(deps: FlowApiFactoryDeps): FlowApiFactory {
       nodeId,
     })
 
-    return {
+    const flowAPI: FlowAPI = {
       nodeId,
       requestId,
       executionId,
@@ -115,7 +115,12 @@ export function createFlowApiFactory(deps: FlowApiFactoryDeps): FlowApiFactory {
       tools: {
         execute: async (toolName: string, args: any) => {
           if (process.env.HF_FLOW_DEBUG === '1') console.log(`[Tool] ${nodeId}: ${toolName}`, args)
-          return {}
+          const snapshot = getAgentToolSnapshot(workspaceId)
+          const tool = snapshot.find((t) => t.name === toolName)
+          if (!tool) {
+            throw new Error(`Tool not found: ${toolName}`)
+          }
+          return tool.run(args, { requestId, workspaceId, flowAPI })
         },
         list: (): Tool[] => mapAgentToolsToFlowTools(getAgentToolSnapshot(workspaceId)),
       },
@@ -124,16 +129,16 @@ export function createFlowApiFactory(deps: FlowApiFactoryDeps): FlowApiFactory {
           if (process.env.HF_FLOW_DEBUG === '1') console.log(`[Usage] ${nodeId}:`, usage)
         },
       },
-      waitForUserInput: async () => {
-        if (process.env.HF_FLOW_DEBUG === '1') console.log('[FlowAPI.waitForUserInput] Waiting for input, nodeId:', nodeId)
+      waitForUserInput: async (prompt?: string) => {
+        if (process.env.HF_FLOW_DEBUG === '1') console.log('[FlowAPI.waitForUserInput] Waiting for input, nodeId:', nodeId, 'prompt:', prompt)
         try {
-          emitFlowEvent(requestId, { type: 'waitingforinput', nodeId, sessionId })
+          emitFlowEvent(requestId, { type: 'waitingforinput', nodeId, sessionId, prompt })
         } catch {}
         try {
           setPausedNodeId(nodeId)
         } catch {}
 
-        const userInput = await new Promise<string>((resolve, reject) => {
+        const userInput = await new Promise<string | MessagePart[]>((resolve, reject) => {
           userInputResolvers.set(nodeId, resolve)
           if (abortController.signal.aborted) {
             reject(new Error('Flow execution cancelled'))
@@ -158,6 +163,8 @@ export function createFlowApiFactory(deps: FlowApiFactoryDeps): FlowApiFactory {
         return portalRegistry.get(portalId)
       },
     }
+
+    return flowAPI
   }
 }
 
