@@ -590,7 +590,8 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
               inputTokens: stepUsage.prompt_tokens || 0,
               outputTokens: stepUsage.completion_tokens || 0,
               totalTokens: stepUsage.total_tokens || 0,
-              cachedTokens: stepUsage.prompt_tokens_details?.cached_tokens || 0
+              cachedTokens: stepUsage.prompt_tokens_details?.cached_tokens || 0,
+              stepCount: stepCount
             })
           }
 

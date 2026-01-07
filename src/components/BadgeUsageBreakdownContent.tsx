@@ -43,7 +43,7 @@ export const BadgeUsageBreakdownContent = memo(function BadgeUsageBreakdownConte
 
   const inputTotal = rows.filter(r => r.section === 'Input').reduce((acc, r) => acc + (r.value || 0), 0)
   const outputTotal = rows.filter(r => r.section === 'Output').reduce((acc, r) => acc + (r.value || 0), 0)
-  const cachedInput = Number(totals.cachedInputTokens || 0)
+  const cachedInput = Number(totals.cachedTokens || 0)
   const structuralOverhead = Math.max(0, Number(totals.inputTokens || 0) - inputTotal - cachedInput)
 
   return (
@@ -61,6 +61,9 @@ export const BadgeUsageBreakdownContent = memo(function BadgeUsageBreakdownConte
         )}
         {typeof totals.costEstimate === 'number' && (
           <Badge size="xs" variant="light" color="teal">Cost: ${totals.costEstimate.toFixed(4)}</Badge>
+        )}
+        {typeof totals.stepCount === 'number' && totals.stepCount > 0 && (
+          <Badge size="xs" variant="light" color="orange">Steps: {totals.stepCount}</Badge>
         )}
       </Group>
 
@@ -110,7 +113,7 @@ export const BadgeUsageBreakdownContent = memo(function BadgeUsageBreakdownConte
           </Table.Tr>
           <Table.Tr>
             <Table.Td>
-              <Text size="xs" c="dimmed">Cached input (subset)</Text>
+              <Text size="xs" c="dimmed">Cached input</Text>
             </Table.Td>
             <Table.Td>
               <Text size="xs">Input</Text>
@@ -119,17 +122,19 @@ export const BadgeUsageBreakdownContent = memo(function BadgeUsageBreakdownConte
               <Text size="xs">{cachedInput.toLocaleString()}</Text>
             </Table.Td>
           </Table.Tr>
-          <Table.Tr>
-            <Table.Td>
-              <Text size="xs" c="dimmed">Structural / overhead</Text>
-            </Table.Td>
-            <Table.Td>
-              <Text size="xs">Input</Text>
-            </Table.Td>
-            <Table.Td style={{ textAlign: 'right' }}>
-              <Text size="xs">{structuralOverhead.toLocaleString()}</Text>
-            </Table.Td>
-          </Table.Tr>
+          {structuralOverhead > 0 && (
+            <Table.Tr>
+              <Table.Td>
+                <Text size="xs" c="dimmed">Unaccounted input</Text>
+              </Table.Td>
+              <Table.Td>
+                <Text size="xs">Input</Text>
+              </Table.Td>
+              <Table.Td style={{ textAlign: 'right' }}>
+                <Text size="xs">{structuralOverhead.toLocaleString()}</Text>
+              </Table.Td>
+            </Table.Tr>
+          )}
           <Table.Tr>
             <Table.Td>
               <Text size="xs" fw={600}>Provider total</Text>
@@ -143,6 +148,28 @@ export const BadgeUsageBreakdownContent = memo(function BadgeUsageBreakdownConte
           </Table.Tr>
         </Table.Tbody>
       </Table>
+
+      {/* Agentic loop metadata */}
+      {typeof totals.stepCount === 'number' && totals.stepCount > 0 && (
+        <Table striped highlightOnHover withTableBorder withColumnBorders>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th style={{ width: 160 }}>Metadata</Table.Th>
+              <Table.Th align="right">Value</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            <Table.Tr>
+              <Table.Td>
+                <Text size="xs" c="dimmed">Agentic steps</Text>
+              </Table.Td>
+              <Table.Td style={{ textAlign: 'right' }}>
+                <Text size="xs" fw={600}>{totals.stepCount}</Text>
+              </Table.Td>
+            </Table.Tr>
+          </Table.Tbody>
+        </Table>
+      )}
 
       {/* Per-tool breakdown */}
       {breakdown.tools && Object.keys(breakdown.tools).length > 0 && (

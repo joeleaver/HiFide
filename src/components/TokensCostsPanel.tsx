@@ -1,5 +1,5 @@
-import { Badge, Card, Group, ScrollArea, SimpleGrid, Stack, Text } from '@mantine/core'
-import type { ReactNode } from 'react'
+import { ScrollArea, Stack, Text, Table } from '@mantine/core'
+import React, { useState } from 'react'
 import CollapsiblePanel from './CollapsiblePanel'
 import { useUiStore } from '../store/ui'
 import { useSessionUi } from '../store/sessionUi'
@@ -22,188 +22,263 @@ type CostBreakdown = {
 }
 
 const DEFAULT_USAGE: TokenUsage = { inputTokens: 0, cachedTokens: 0, outputTokens: 0, totalTokens: 0, reasoningTokens: 0 }
-
 const DEFAULT_COSTS: CostBreakdown = { inputCost: 0, cachedCost: 0, outputCost: 0, totalCost: 0, currency: 'USD' }
 
-const formatCurrency = (value: number, currency = 'USD') => {
+const formatTokens = (value?: number) => (Number.isFinite(value) ? Number(value).toLocaleString() : '0')
+const formatCost = (value: number, currency = 'USD') => {
   const amount = Number.isFinite(value) ? value : 0
   const prefix = currency === 'USD' ? '$' : ''
-  return `${prefix}${amount.toFixed(4)}`
+  return `${prefix}${amount.toFixed(5)}`
 }
 
-const formatTokens = (value?: number) => (Number.isFinite(value) ? Number(value).toLocaleString() : '0')
-
-const formatTimestamp = (ts?: number) => {
-  if (!ts) return null
-  const date = new Date(ts)
-  if (Number.isNaN(date.getTime())) return null
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+// Group requests by executionId
+type ExecutionGroup = {
+  executionId: string
+  nodeId: string
+  provider: string
+  model: string
+  requests: Array<{
+    timestamp: number
+    requestId: string
+    usage: TokenUsage
+    cost: CostBreakdown
+  }>
+  // Subtotals for this execution group
+  subtotals: {
+    usage: TokenUsage
+    cost: CostBreakdown
+  }
 }
 
-type SummaryCardProps = {
-  label: string
-  value: string
-  accent: string
-  children?: ReactNode
+interface TokensCostsPanelProps {
+  isFloating?: boolean
 }
 
-const SummaryCard = ({ label, value, accent, children }: SummaryCardProps) => (
-  <Card withBorder padding="sm" radius="md" style={{ backgroundColor: 'rgba(255,255,255,0.02)' }}>
-    <Text size="xs" c="dimmed" mb={4}>
-      {label}
-    </Text>
-    <Text size="lg" fw={600} c={accent}>
-      {value}
-    </Text>
-    {children && (
-      typeof children === 'string' || typeof children === 'number' ? (
-        <Text size="xs" c="dimmed" mt={4}>
-          {children}
-        </Text>
-      ) : (
-        <div style={{ marginTop: 6 }}>{children}</div>
-      )
-    )}
-  </Card>
-)
-
-const LabelValueRow = ({ label, value, color = '#fff' }: { label: string; value: ReactNode; color?: string }) => {
-  const isPrimitive = typeof value === 'string' || typeof value === 'number'
-  return (
-    <Group justify="space-between" align="flex-start" gap="xs">
-      <Text size="xs" c="dimmed">
-        {label}
-      </Text>
-      {isPrimitive ? (
-        <Text size="xs" style={{ color, textAlign: 'right' }}>
-          {value}
-        </Text>
-      ) : (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', textAlign: 'right', fontSize: 12 }}>
-          {value}
-        </div>
-      )}
-    </Group>
-  )
-}
-
-const summaryGridResponsive = {
-  breakpoints: [
-    { maxWidth: '70em', cols: 2 },
-    { maxWidth: '48em', cols: 1 },
-  ],
-}
-
-const inputGridResponsive = {
-  breakpoints: [{ maxWidth: '48em', cols: 1 }],
-}
-
-const requestMetricsGrid = {
-  breakpoints: [
-    { maxWidth: '62em', cols: 2 },
-    { maxWidth: '40em', cols: 1 },
-  ],
-}
-
-type MetricValueProps = {
-  tokens: number
-  cost: number
-  currency: string
-  tokensColor: string
-  costColor: string
-  tokenLabel?: string
-  subtitle?: ReactNode
-  align?: 'flex-start' | 'flex-end' | 'center' | 'stretch'
-  showCost?: boolean
-}
-
-const MetricValue = ({
-  tokens,
-  cost,
-  currency,
-  tokensColor,
-  costColor,
-  tokenLabel = 'tokens',
-  subtitle,
-  align = 'flex-end',
-  showCost = true,
-}: MetricValueProps) => (
-  <Stack gap={2} align={align} style={{ minWidth: 90 }}>
-    <Text size="xs" style={{ color: tokensColor }}>
-      {formatTokens(tokens)} {tokenLabel}
-    </Text>
-    {subtitle}
-    {showCost && (
-      <Text size="xs" style={{ color: costColor }}>
-        {formatCurrency(cost, currency)}
-      </Text>
-    )}
-  </Stack>
-)
-
-const RequestMetric = ({ label, align = 'flex-start', ...metricProps }: { label: string } & MetricValueProps) => (
-  <Stack gap={2} style={{ minWidth: 110 }}>
-    <Text size="xs" fw={600} c="dimmed">
-      {label}
-    </Text>
-    <MetricValue align={align} {...metricProps} />
-  </Stack>
-)
-
-export default function TokensCostsPanel() {
-  // Panel chrome
+export default function TokensCostsPanel({ isFloating = false }: TokensCostsPanelProps) {
   const collapsed = useUiStore((s) => s.tokensCostsCollapsed)
   const height = useUiStore((s) => s.tokensCostsHeight)
   const setCollapsed = useUiStore((s) => s.setTokensCostsCollapsed)
   const setHeight = useUiStore((s) => s.setTokensCostsHeight)
 
-  // Session state (shared renderer store)
   const tokenUsage = useSessionUi((s: any) => s.tokenUsage) as {
     total: TokenUsage
     byProvider: Record<string, TokenUsage>
     byProviderAndModel: Record<string, Record<string, TokenUsage>>
   } | null
   const costs = (useSessionUi((s: any) => s.costs) as any) || DEFAULT_COSTS
-  const totalUsage: TokenUsage = tokenUsage?.total ?? DEFAULT_USAGE
-  const totalInputTokens = Number(totalUsage.inputTokens ?? 0)
-  const totalCachedTokens = Number(totalUsage.cachedTokens ?? 0)
-  const totalOutputTokens = Number(totalUsage.outputTokens ?? 0)
-  const currency = typeof costs?.currency === 'string' ? costs.currency : 'USD';
-  const inputCostTotal = Number(costs?.inputCost ?? 0);
-  const cachedCostTotal = Number(costs?.cachedCost ?? 0);
-  const outputCostTotal = Number(costs?.outputCost ?? 0);
-  const totalCost = Number.isFinite(Number(costs?.totalCost))
-    ? Number(costs?.totalCost)
-    : inputCostTotal + cachedCostTotal + outputCostTotal
-  const totalSavings = 0
-  const cachedInputPercent = totalInputTokens + totalCachedTokens > 0
-    ? (totalCachedTokens / (totalInputTokens + totalCachedTokens)) * 100
-    : 0
-  const cachedSavingsLabel = '—';
-  const byProviderAndModelTokens = (tokenUsage?.byProviderAndModel ?? {}) as Record<string, Record<string, TokenUsage>>;
-  const byProviderTokens = (tokenUsage?.byProvider ?? {}) as Record<string, TokenUsage>;
-  const byProviderAndModelCosts = (costs?.byProviderAndModel ?? {}) as Record<string, Record<string, any>>;
-  const hasUsage =
-    totalInputTokens > 0 ||
-    totalOutputTokens > 0 ||
-    totalCachedTokens > 0 ||
-    Object.keys(byProviderAndModelTokens).length > 0
+  const requestsLog = (useSessionUi((s: any) => s.requestsLog) as any) || []
 
-  const requestsLog = (useSessionUi((s: any) => s.requestsLog) as any[]) || []
+  const totalUsage = tokenUsage?.total ?? DEFAULT_USAGE
+  const totalInput = Number(totalUsage.inputTokens ?? 0)
+  const totalCached = Number(totalUsage.cachedTokens ?? 0)
+  const totalOutput = Number(totalUsage.outputTokens ?? 0)
 
-  const requestRows = (() => {
-    if (!Array.isArray(requestsLog) || !requestsLog.length) return []
-    const asc = [...requestsLog].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
-    const seen = new Set<string>()
-    return asc.filter((entry) => {
-      const key = `${entry.requestId}:${entry.nodeId}:${entry.executionId}`
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
+  const currency = typeof costs?.currency === 'string' ? costs.currency : 'USD'
+  const inputCost = Number(costs?.inputCost ?? 0)
+  const cachedCost = Number(costs?.cachedCost ?? 0)
+  const outputCost = Number(costs?.outputCost ?? 0)
+
+  const hasUsage = totalInput > 0 || totalOutput > 0 || totalCached > 0 || Array.isArray(requestsLog) && requestsLog.length > 0
+
+  // Group requests by executionId and calculate subtotals
+  const executionGroups = (() => {
+    const groups: Record<string, ExecutionGroup> = {}
+
+    if (Array.isArray(requestsLog)) {
+      requestsLog.forEach((req: any) => {
+        const execId = req.executionId || 'unknown'
+        if (!groups[execId]) {
+          groups[execId] = {
+            executionId: execId,
+            nodeId: req.nodeId || 'unknown',
+            provider: req.provider || 'unknown',
+            model: req.model || 'unknown',
+            requests: [],
+            subtotals: {
+              usage: { ...DEFAULT_USAGE },
+              cost: { ...DEFAULT_COSTS }
+            }
+          }
+        }
+
+        const reqUsage = req.usage || DEFAULT_USAGE
+        const reqCost = req.cost || DEFAULT_COSTS
+
+        groups[execId].requests.push({
+          timestamp: req.timestamp || Date.now(),
+          requestId: req.requestId || 'unknown',
+          usage: reqUsage,
+          cost: reqCost
+        })
+
+        // Update subtotals
+        const sub = groups[execId].subtotals
+        sub.usage.inputTokens += reqUsage.inputTokens || 0
+        sub.usage.cachedTokens += reqUsage.cachedTokens || 0
+        sub.usage.outputTokens += reqUsage.outputTokens || 0
+        sub.usage.totalTokens += reqUsage.totalTokens || 0
+        sub.usage.reasoningTokens = (sub.usage.reasoningTokens || 0) + (reqUsage.reasoningTokens || 0)
+
+        sub.cost.inputCost += reqCost.inputCost || 0
+        sub.cost.cachedCost += reqCost.cachedCost || 0
+        sub.cost.outputCost += reqCost.outputCost || 0
+        sub.cost.totalCost += reqCost.totalCost || 0
+      })
+    }
+
+    return Object.values(groups)
   })()
 
-  const totalTokens = totalUsage.totalTokens || totalInputTokens + totalOutputTokens
+  // Initialize expandedExecutions with all execution IDs (all expanded by default)
+  const [expandedExecutions, setExpandedExecutions] = useState<Set<string>>(() => {
+    return new Set(executionGroups.map(g => g.executionId))
+  })
+
+  const toggleExecution = (executionId: string) => {
+    const newExpanded = new Set(expandedExecutions)
+    if (newExpanded.has(executionId)) {
+      newExpanded.delete(executionId)
+    } else {
+      newExpanded.add(executionId)
+    }
+    setExpandedExecutions(newExpanded)
+  }
+
+  const content = (
+    <ScrollArea style={{ height: '100%' }} type="auto">
+      <Stack gap={0} style={{ padding: '8px' }}>
+        {hasUsage ? (
+            <Table striped>
+              <Table.Tbody>
+                {/* Header row */}
+                <Table.Tr style={{ backgroundColor: '#1a1a1a', fontWeight: 600 }}>
+                  <Table.Td style={{ padding: '6px 8px', fontSize: '11px', fontWeight: 600 }}>Provider / Model</Table.Td>
+                  <Table.Td style={{ padding: '6px 8px', fontSize: '11px', fontWeight: 600, textAlign: 'right' }}>Input Tokens</Table.Td>
+                  <Table.Td style={{ padding: '6px 8px', fontSize: '11px', fontWeight: 600, textAlign: 'right' }}>Cached Tokens</Table.Td>
+                  <Table.Td style={{ padding: '6px 8px', fontSize: '11px', fontWeight: 600, textAlign: 'right' }}>Output Tokens</Table.Td>
+                  <Table.Td style={{ padding: '6px 8px', fontSize: '11px', fontWeight: 600, textAlign: 'right' }}>Input Cost</Table.Td>
+                  <Table.Td style={{ padding: '6px 8px', fontSize: '11px', fontWeight: 600, textAlign: 'right' }}>Cached Cost</Table.Td>
+                  <Table.Td style={{ padding: '6px 8px', fontSize: '11px', fontWeight: 600, textAlign: 'right' }}>Output Cost</Table.Td>
+                  <Table.Td style={{ padding: '6px 8px', fontSize: '11px', fontWeight: 600, textAlign: 'right' }}>Total Cost</Table.Td>
+                </Table.Tr>
+
+                {/* TOTAL data row */}
+                <Table.Tr style={{ backgroundColor: 'rgba(79, 195, 247, 0.05)' }}>
+                  <Table.Td style={{ padding: '6px 8px' }}>
+                    <Text size="xs" fw={600}>TOTAL</Text>
+                  </Table.Td>
+                  <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                    <Text size="xs" c="#4fc3f7">{formatTokens(totalInput)}</Text>
+                  </Table.Td>
+                  <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                    <Text size="xs" c={totalCached > 0 ? '#ffa726' : 'dimmed'}>{formatTokens(totalCached)}</Text>
+                  </Table.Td>
+                  <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                    <Text size="xs" c="#81c784">{formatTokens(totalOutput)}</Text>
+                  </Table.Td>
+                  <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                    <Text size="xs" c="dimmed">{formatCost(inputCost, currency)}</Text>
+                  </Table.Td>
+                  <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                    <Text size="xs" c="dimmed">{formatCost(cachedCost, currency)}</Text>
+                  </Table.Td>
+                  <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                    <Text size="xs" c="dimmed">{formatCost(outputCost, currency)}</Text>
+                  </Table.Td>
+                  <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                    <Text size="xs" fw={600} c="#fff">{formatCost(inputCost + cachedCost + outputCost, currency)}</Text>
+                  </Table.Td>
+                </Table.Tr>
+
+                {/* EXECUTION GROUPS */}
+                {executionGroups.map((group) => (
+                  <React.Fragment key={group.executionId}>
+                    {/* Collapsable header with subtotals */}
+                    <Table.Tr
+                      onClick={() => toggleExecution(group.executionId)}
+                      style={{
+                        backgroundColor: 'rgba(100, 100, 100, 0.1)',
+                        cursor: 'pointer',
+                        userSelect: 'none',
+                        borderTop: '1px solid #333'
+                      }}
+                    >
+                      <Table.Td style={{ padding: '6px 8px', lineHeight: '1.2' }}>
+                        <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '11px', fontWeight: 500 }}>
+                          {expandedExecutions.has(group.executionId) ? '▼' : '▶'} {group.provider} / {group.model}
+                        </div>
+                        <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '11px', color: '#999' }}>
+                          {group.nodeId}
+                        </div>
+                      </Table.Td>
+                      <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                        <Text size="xs" c="#4fc3f7">{formatTokens(group.subtotals.usage.inputTokens)}</Text>
+                      </Table.Td>
+                      <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                        <Text size="xs" c={group.subtotals.usage.cachedTokens > 0 ? '#ffa726' : 'dimmed'}>{formatTokens(group.subtotals.usage.cachedTokens)}</Text>
+                      </Table.Td>
+                      <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                        <Text size="xs" c="#81c784">{formatTokens(group.subtotals.usage.outputTokens)}</Text>
+                      </Table.Td>
+                      <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                        <Text size="xs" c="dimmed">{formatCost(group.subtotals.cost.inputCost, currency)}</Text>
+                      </Table.Td>
+                      <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                        <Text size="xs" c="dimmed">{formatCost(group.subtotals.cost.cachedCost, currency)}</Text>
+                      </Table.Td>
+                      <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                        <Text size="xs" c="dimmed">{formatCost(group.subtotals.cost.outputCost, currency)}</Text>
+                      </Table.Td>
+                      <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                        <Text size="xs" fw={600} c="#fff">{formatCost(group.subtotals.cost.inputCost + group.subtotals.cost.cachedCost + group.subtotals.cost.outputCost, currency)}</Text>
+                      </Table.Td>
+                    </Table.Tr>
+
+                    {/* Expanded content - request rows */}
+                    {expandedExecutions.has(group.executionId) && group.requests.map((req, idx) => (
+                      <Table.Tr key={idx}>
+                        <Table.Td style={{ padding: '6px 8px' }}>
+                          <Text size="xs" c="dimmed">Turn {idx + 1}</Text>
+                        </Table.Td>
+                        <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                          <Text size="xs" c="#4fc3f7">{formatTokens(req.usage.inputTokens)}</Text>
+                        </Table.Td>
+                        <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                          <Text size="xs" c={req.usage.cachedTokens > 0 ? '#ffa726' : 'dimmed'}>{formatTokens(req.usage.cachedTokens)}</Text>
+                        </Table.Td>
+                        <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                          <Text size="xs" c="#81c784">{formatTokens(req.usage.outputTokens)}</Text>
+                        </Table.Td>
+                        <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                          <Text size="xs" c="dimmed">{formatCost(req.cost.inputCost, currency)}</Text>
+                        </Table.Td>
+                        <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                          <Text size="xs" c="dimmed">{formatCost(req.cost.cachedCost, currency)}</Text>
+                        </Table.Td>
+                        <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                          <Text size="xs" c="dimmed">{formatCost(req.cost.outputCost, currency)}</Text>
+                        </Table.Td>
+                        <Table.Td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                          <Text size="xs" fw={500} c="#fff">{formatCost(Number(req.cost.inputCost ?? 0) + Number(req.cost.cachedCost ?? 0) + Number(req.cost.outputCost ?? 0), currency)}</Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </Table.Tbody>
+            </Table>
+          ) : (
+            <Text size="xs" c="dimmed" style={{ textAlign: 'center', padding: '20px 0' }}>
+              No token usage yet
+            </Text>
+          )}
+        </Stack>
+      </ScrollArea>
+    )
+
+  if (isFloating) {
+    return content
+  }
 
   return (
     <CollapsiblePanel
@@ -212,295 +287,10 @@ export default function TokensCostsPanel() {
       onToggleCollapse={() => setCollapsed(!collapsed)}
       height={height}
       onHeightChange={setHeight}
-      minHeight={150}
-      maxHeight={400}
+      minHeight={100}
+      maxHeight={600}
     >
-      <ScrollArea style={{ height: '100%' }} type="auto">
-        <Stack gap="lg" style={{ padding: 12 }}>
-          <div>
-            <Text size="xs" fw={600} c="blue" mb={6}>SESSION SNAPSHOT</Text>
-            <SimpleGrid cols={3} spacing="sm" {...summaryGridResponsive}>
-              <SummaryCard
-                label="Total tokens"
-                value={formatTokens(totalTokens)}
-                accent="#4fc3f7"
-              >
-                <Stack gap={2}>
-                  <Text size="xs" c="dimmed">
-                    Input ·{' '}
-                    <Text span c="#4fc3f7" fw={500}>{formatTokens(totalInputTokens)}</Text>
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    Cached input ·{' '}
-                    <Text span c="#ffa726" fw={500}>{formatTokens(totalCachedTokens)}</Text>
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    Output ·{' '}
-                    <Text span c="#81c784" fw={500}>{formatTokens(totalOutputTokens)}</Text>
-                  </Text>
-                </Stack>
-              </SummaryCard>
-              <SummaryCard
-                label="Total cost"
-                value={formatCurrency(totalCost, currency)}
-                accent="#4ade80"
-              >
-                <Stack gap={2}>
-                  <Text size="xs" c="dimmed">
-                    Input ·{' '}
-                    <Text span c="#4ade80" fw={500}>{formatCurrency(inputCostTotal + cachedCostTotal, currency)}</Text>
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    Output ·{' '}
-                    <Text span c="#81c784" fw={500}>{formatCurrency(outputCostTotal, currency)}</Text>
-                  </Text>
-                </Stack>
-              </SummaryCard>
-              <SummaryCard
-                label="Cached input"
-                value={formatTokens(totalCachedTokens)}
-                accent="#ffa726"
-              >
-                <Stack gap={2}>
-                  <Text size="xs" c="dimmed">
-                    Cost ·{' '}
-                    <Text span c="#ffa726" fw={500}>{formatCurrency(cachedCostTotal, currency)}</Text>
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    Savings ·{' '}
-                    <Text span c="#66bb6a" fw={500}>{cachedSavingsLabel}</Text>
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    Share of input ·{' '}
-                    <Text span c="#ffa726" fw={500}>{Math.round(cachedInputPercent)}%</Text>
-                  </Text>
-                </Stack>
-              </SummaryCard>
-            </SimpleGrid>
-          </div>
-
-          {(totalInputTokens > 0 || totalCachedTokens > 0 || totalUsage.reasoningTokens || inputCostTotal > 0 || cachedCostTotal > 0 || totalSavings > 0) && (
-            <Card withBorder padding="sm" radius="md">
-              <Group justify="space-between" align="flex-start" mb="xs">
-                <div>
-                  <Text size="xs" fw={600} c="dimmed">INPUT LANES</Text>
-                  <Text size="xs" c="dimmed">Input vs cached traffic</Text>
-                </div>
-                {totalUsage.reasoningTokens && totalUsage.reasoningTokens > 0 && (
-                  <Badge size="xs" color="teal" variant="light">
-                    {formatTokens(totalUsage.reasoningTokens)} thinking tokens
-                  </Badge>
-                )}
-              </Group>
-              <SimpleGrid cols={2} spacing="md" {...inputGridResponsive}>
-                <Stack gap={4}>
-                  <Text size="xs" fw={600}>Input</Text>
-                  <LabelValueRow
-                    label="Tokens"
-                    value={`${formatTokens(totalInputTokens)} tokens`}
-                    color="#4fc3f7"
-                  />
-                  <LabelValueRow
-                    label="Cost"
-                    value={formatCurrency(inputCostTotal, currency)}
-                    color="#4ade80"
-                  />
-                </Stack>
-                <Stack gap={4}>
-                  <Text size="xs" fw={600}>Cached input</Text>
-                  <LabelValueRow
-                    label="Tokens"
-                    value={`${formatTokens(totalCachedTokens)} tokens`}
-                    color="#ffa726"
-                  />
-                  <LabelValueRow
-                    label="Cost"
-                    value={formatCurrency(cachedCostTotal, currency)}
-                    color="#ffa726"
-                  />
-                  <LabelValueRow
-                    label="Savings"
-                    value={cachedSavingsLabel}
-                    color="#66bb6a"
-                  />
-                </Stack>
-              </SimpleGrid>
-            </Card>
-          )}
-
-          {hasUsage && Object.keys(byProviderAndModelCosts).length > 0 && (
-            <Stack gap="xs">
-              <Text size="xs" fw={600} c="dimmed">BY PROVIDER & MODEL</Text>
-              <Stack gap="sm">
-                {Object.entries(byProviderAndModelCosts).map(([provider, models]) => (
-                  <Card key={provider} withBorder padding="sm" radius="md">
-                    <Group justify="space-between" align="center" mb="xs">
-                      <Text size="sm" fw={600}>{provider}</Text>
-                      <Badge size="xs" variant="light" color="gray">
-                        {Object.keys(models).length} model{Object.keys(models).length === 1 ? '' : 's'}
-                      </Badge>
-                    </Group>
-                    <Stack gap="xs">
-                      {Object.entries(models).map(([model, cost]) => {
-                        const usage = byProviderAndModelTokens?.[provider]?.[model] || byProviderTokens[provider]
-                        const inputTokens = Number(usage?.inputTokens ?? 0)
-                        const outputTokens = Number(usage?.outputTokens ?? 0)
-                        const reasoningTokens = Number(usage?.reasoningTokens ?? 0)
-                        const cachedTokens = Number(usage?.cachedTokens ?? 0)
-                        const cachedShare = inputTokens + cachedTokens > 0 ? (cachedTokens / (inputTokens + cachedTokens)) * 100 : 0
-                        const liveCost = Number(cost?.inputCost ?? 0)
-                        const cachedCost = Number((cost as any)?.cachedCost ?? (cost as any)?.cachedInputCost ?? 0)
-                        const outputCost = Number(cost?.outputCost ?? 0)
-                        const totalModelCost = Number(cost?.totalCost ?? liveCost + cachedCost + outputCost)
-                        return (
-                          <div key={`${provider}-${model}`} style={{ border: '1px solid #2a2a2a', borderRadius: 8, padding: 8 }}>
-                            <Text size="xs" fw={600} mb={4}>{model}</Text>
-                            <Stack gap={4}>
-                              <LabelValueRow
-                                label="Input"
-                                value={(
-                                  <MetricValue
-                                    tokens={inputTokens}
-                                    cost={liveCost}
-                                    currency={currency}
-                                    tokensColor="#4fc3f7"
-                                    costColor="#4ade80"
-                                  />
-                                )}
-                              />
-                              <LabelValueRow
-                                label="Cached input"
-                                value={(
-                                  <MetricValue
-                                    tokens={cachedTokens}
-                                    cost={cachedCost}
-                                    currency={currency}
-                                    tokensColor="#ffa726"
-                                    costColor="#ffa726"
-                                    subtitle={cachedTokens > 0 ? (
-                                      <Text size="xs" style={{ color: '#ffa726' }}>{Math.round(cachedShare)}% of input</Text>
-                                    ) : undefined}
-                                  />
-                                )}
-                              />
-                              <LabelValueRow
-                                label="Output"
-                                value={(
-                                  <MetricValue
-                                    tokens={outputTokens}
-                                    cost={outputCost}
-                                    currency={currency}
-                                    tokensColor="#81c784"
-                                    costColor="#81c784"
-                                    subtitle={reasoningTokens > 0 ? (
-                                      <Text size="xs" style={{ color: '#a5d6a7' }}>{formatTokens(reasoningTokens)} thinking</Text>
-                                    ) : undefined}
-                                  />
-                                )}
-                              />
-                              <LabelValueRow
-                                label="Total cost"
-                                value={formatCurrency(totalModelCost, currency)}
-                                color="#4ade80"
-                              />
-                            </Stack>
-                          </div>
-                        )
-                      })}
-                    </Stack>
-                  </Card>
-                ))}
-              </Stack>
-            </Stack>
-          )}
-
-          {requestRows.length > 0 && (
-            <Stack gap="xs">
-              <Group gap={6}>
-                <Text size="xs" fw={600} c="orange">REQUESTS THIS SESSION</Text>
-                <Badge size="xs" color="orange" variant="light">{requestRows.length}</Badge>
-              </Group>
-              <Stack gap="xs">
-                {requestRows.map((entry, idx) => {
-                  const input = Number(entry?.usage?.inputTokens ?? 0)
-                  const cachedTokens = Number(entry?.usage?.cachedTokens ?? 0)
-                  const output = Number(entry?.usage?.outputTokens ?? 0)
-                  const reasoning = Number(entry?.usage?.reasoningTokens ?? 0)
-
-                  const inputCost = Number(entry?.cost?.inputCost ?? 0)
-                  const cachedCost = Number((entry?.cost as any)?.cachedCost ?? (entry?.cost as any)?.cachedInputCost ?? 0)
-                  const outputCost = Number(entry?.cost?.outputCost ?? 0)
-
-                  const cachedPercent = cachedTokens + input > 0 ? Math.round((cachedTokens / (cachedTokens + input)) * 100) : 0
-                  const timestamp = formatTimestamp(entry.timestamp)
-
-                  return (
-                    <Card
-                      key={`${entry.requestId}:${entry.nodeId}:${entry.executionId}:${idx}`}
-                      withBorder
-                      padding="xs"
-                      radius="sm"
-                    >
-                      <Group justify="space-between" align="flex-start" gap="sm">
-                        <Stack gap={2}>
-                          <Text size="sm" fw={600}>{entry.provider} / {entry.model}</Text>
-                          {(entry.nodeId || entry.executionId) && (
-                            <Text size="xs" c="dimmed">
-                              node {entry.nodeId || '—'} · exec {entry.executionId || '—'}
-                            </Text>
-                          )}
-                        </Stack>
-                        {(timestamp || cachedPercent > 0) && (
-                          <Stack gap={4} align="flex-end">
-                            {timestamp && (
-                              <Text size="xs" c="dimmed">{timestamp}</Text>
-                            )}
-                            {cachedPercent > 0 && (
-                              <Badge size="xs" color="orange" variant="light">{cachedPercent}% cached</Badge>
-                            )}
-                          </Stack>
-                        )}
-                      </Group>
-                      <SimpleGrid cols={3} spacing="sm" mt="xs" {...requestMetricsGrid}>
-                        <RequestMetric
-                          label="Input"
-                          tokens={input}
-                          cost={inputCost}
-                          currency={currency}
-                          tokensColor="#4fc3f7"
-                          costColor="#4ade80"
-                        />
-                        <RequestMetric
-                          label="Cached input"
-                          tokens={cachedTokens}
-                          cost={cachedCost}
-                          currency={currency}
-                          tokensColor="#ffa726"
-                          costColor="#ffa726"
-                          subtitle={cachedPercent > 0 ? (
-                            <Text size="xs" style={{ color: '#ffa726' }}>{cachedPercent}% of input</Text>
-                          ) : undefined}
-                        />
-                        <RequestMetric
-                          label="Output"
-                          tokens={output}
-                          cost={outputCost}
-                          currency={currency}
-                          tokensColor="#81c784"
-                          costColor="#81c784"
-                          subtitle={reasoning > 0 ? (
-                            <Text size="xs" style={{ color: '#a5d6a7' }}>{formatTokens(reasoning)} thinking</Text>
-                          ) : undefined}
-                        />
-                      </SimpleGrid>
-                    </Card>
-                  )
-                })}
-              </Stack>
-            </Stack>
-          )}
-        </Stack>
-      </ScrollArea>
+      {content}
     </CollapsiblePanel>
   )
 }

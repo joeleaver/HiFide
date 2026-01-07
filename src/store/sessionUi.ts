@@ -422,6 +422,129 @@ export function initSessionUiEvents(): void {
       console.error('[sessionUi] Error in __setUsage:', e)
     }
   })
+
+  // Listen for real-time tokenUsage events during streaming
+  // These are intermediate events that update the panel in real-time
+  // Note: These come as part of flow.event with type: 'tokenUsage'
+  const flowEventHandler = (ev: any) => {
+    if (ev?.type !== 'tokenUsage') return
+    const p = ev
+    try {
+      // For real-time updates, use the current store state (not the sessions array)
+      // The sessions array is only updated when session.usage.changed is received
+      const st = useSessionUi.getState()
+      if (!st.currentId) return
+
+      // Get the current tokenUsage and costs from the store state
+      // These are the real-time values that we'll update
+      const tokenUsage = st.tokenUsage || {
+        total: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0, reasoningTokens: 0 },
+        byProvider: {},
+        byProviderAndModel: {},
+      }
+
+      const providerKey = p?.provider || 'unknown'
+      const modelKey = p?.model || 'unknown'
+      const usage = p?.usage || {}
+
+      // Create new objects to ensure reference changes for re-renders
+      const newTokenUsage = {
+        ...tokenUsage,
+        total: {
+          ...tokenUsage.total,
+          inputTokens: (tokenUsage.total.inputTokens || 0) + (usage.inputTokens || 0),
+          outputTokens: (tokenUsage.total.outputTokens || 0) + (usage.outputTokens || 0),
+          totalTokens: (tokenUsage.total.totalTokens || 0) + (usage.totalTokens || 0),
+          cachedTokens: (tokenUsage.total.cachedTokens || 0) + (usage.cachedTokens || 0),
+        },
+        byProvider: {
+          ...tokenUsage.byProvider,
+          [providerKey]: {
+            ...(tokenUsage.byProvider[providerKey] || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0, reasoningTokens: 0 }),
+            inputTokens: ((tokenUsage.byProvider[providerKey]?.inputTokens || 0) + (usage.inputTokens || 0)),
+            outputTokens: ((tokenUsage.byProvider[providerKey]?.outputTokens || 0) + (usage.outputTokens || 0)),
+            totalTokens: ((tokenUsage.byProvider[providerKey]?.totalTokens || 0) + (usage.totalTokens || 0)),
+            cachedTokens: ((tokenUsage.byProvider[providerKey]?.cachedTokens || 0) + (usage.cachedTokens || 0)),
+          }
+        },
+        byProviderAndModel: {
+          ...tokenUsage.byProviderAndModel,
+          [providerKey]: {
+            ...(tokenUsage.byProviderAndModel[providerKey] || {}),
+            [modelKey]: {
+              ...(tokenUsage.byProviderAndModel[providerKey]?.[modelKey] || { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0, reasoningTokens: 0 }),
+              inputTokens: ((tokenUsage.byProviderAndModel[providerKey]?.[modelKey]?.inputTokens || 0) + (usage.inputTokens || 0)),
+              outputTokens: ((tokenUsage.byProviderAndModel[providerKey]?.[modelKey]?.outputTokens || 0) + (usage.outputTokens || 0)),
+              totalTokens: ((tokenUsage.byProviderAndModel[providerKey]?.[modelKey]?.totalTokens || 0) + (usage.totalTokens || 0)),
+              cachedTokens: ((tokenUsage.byProviderAndModel[providerKey]?.[modelKey]?.cachedTokens || 0) + (usage.cachedTokens || 0)),
+            }
+          }
+        }
+      }
+
+      // Update costs if available from the backend
+      let newCosts = st.costs || { inputCost: 0, cachedCost: 0, outputCost: 0, totalCost: 0, currency: 'USD', byProviderAndModel: {} }
+      if (p?.cost) {
+        newCosts = {
+          ...newCosts,
+          inputCost: (newCosts.inputCost || 0) + (p.cost.inputCost || 0),
+          cachedCost: (newCosts.cachedCost || 0) + (p.cost.cachedCost || 0),
+          outputCost: (newCosts.outputCost || 0) + (p.cost.outputCost || 0),
+          totalCost: (newCosts.totalCost || 0) + (p.cost.totalCost || 0),
+          byProviderAndModel: {
+            ...newCosts.byProviderAndModel,
+            [providerKey]: {
+              ...(newCosts.byProviderAndModel[providerKey] || {}),
+              [modelKey]: {
+                ...(newCosts.byProviderAndModel[providerKey]?.[modelKey] || { inputCost: 0, cachedCost: 0, outputCost: 0, totalCost: 0 }),
+                inputCost: ((newCosts.byProviderAndModel[providerKey]?.[modelKey]?.inputCost || 0) + (p.cost.inputCost || 0)),
+                cachedCost: ((newCosts.byProviderAndModel[providerKey]?.[modelKey]?.cachedCost || 0) + (p.cost.cachedCost || 0)),
+                outputCost: ((newCosts.byProviderAndModel[providerKey]?.[modelKey]?.outputCost || 0) + (p.cost.outputCost || 0)),
+                totalCost: ((newCosts.byProviderAndModel[providerKey]?.[modelKey]?.totalCost || 0) + (p.cost.totalCost || 0)),
+              }
+            }
+          }
+        }
+      }
+
+      // Add a new entry to requestsLog for each tokenUsage event
+      // This creates a row for each intermediate update during streaming
+      const requestsLog = Array.isArray(st.requestsLog) ? [...st.requestsLog] : []
+
+      const newLogEntry = {
+        requestId: p?.requestId || 'unknown',
+        nodeId: p?.nodeId || 'unknown',
+        executionId: p?.executionId || 'unknown',
+        provider: providerKey,
+        model: modelKey,
+        timestamp: Date.now(),
+        usage: {
+          inputTokens: usage.inputTokens || 0,
+          outputTokens: usage.outputTokens || 0,
+          totalTokens: usage.totalTokens || 0,
+          cachedTokens: usage.cachedTokens || 0,
+          reasoningTokens: usage.reasoningTokens || 0,
+        },
+        cost: {
+          inputCost: Number(p?.cost?.inputCost ?? 0),
+          cachedCost: Number(p?.cost?.cachedCost ?? 0),
+          outputCost: Number(p?.cost?.outputCost ?? 0),
+          totalCost: Number(p?.cost?.totalCost ?? (Number(p?.cost?.inputCost ?? 0) + Number(p?.cost?.cachedCost ?? 0) + Number(p?.cost?.outputCost ?? 0))),
+          currency: 'USD',
+        },
+      }
+
+      // Always push a new entry for each tokenUsage event
+      requestsLog.push(newLogEntry)
+
+      st.__setUsage(newTokenUsage, newCosts, requestsLog)
+    } catch (e) {
+      if (process.env.HF_FLOW_DEBUG === '1') {
+        console.error('[sessionUi] Error processing tokenUsage event:', e)
+      }
+    }
+  }
+  client.subscribe('flow.event', flowEventHandler)
 }
 
 export async function hydrateSessionUiSettingsAndFlows(): Promise<void> {

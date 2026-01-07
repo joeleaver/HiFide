@@ -40,6 +40,8 @@ import {
 import { createTokenCounter, ToolUsageTracker, UsageAccumulator } from './llm/usage-tracker'
 import { resolveSamplingControls } from './llm/stream-options'
 import { wrapToolsWithPolicy } from './llm/tool-policy'
+import { getSettingsService } from '../services/index.js'
+import type { TokenUsage } from '../store/types.js'
 
 const DEBUG_USAGE = process.env.HF_DEBUG_USAGE === '1' || process.env.HF_DEBUG_TOKENS === '1'
 
@@ -376,6 +378,29 @@ class LLMService {
           })
         } catch {}
       }
+
+      // Calculate cost for this usage event
+      let cost: any = undefined
+      try {
+        const settingsService = getSettingsService()
+        const calculatedCost = settingsService.calculateCost(effectiveProvider, effectiveModel, usage as TokenUsage)
+        if (calculatedCost) {
+          cost = calculatedCost
+        }
+      } catch (err) {
+        if (DEBUG_USAGE) {
+          console.error('[LLMService] Failed to calculate cost:', err)
+        }
+      }
+
+      // Emit the usage event so the UI can update in real-time
+      try {
+        emitUsage({ ...usage, cost })
+      } catch (err) {
+        if (DEBUG_USAGE) {
+          console.error('[LLMService] Failed to emit usage event:', err)
+        }
+      }
     }
 
     const approxInputTokens = estimateInputTokens(effectiveProvider, formattedMessages)
@@ -647,16 +672,18 @@ class LLMService {
           inputTokens: accumulatedTotals.inputTokens ?? calcInput,
           outputTokens: accumulatedTotals.outputTokens ?? calcOutput,
           totalTokens: accumulatedTotals.totalTokens ?? ((accumulatedTotals.inputTokens ?? calcInput) + (accumulatedTotals.outputTokens ?? calcOutput)),
-          cachedTokens: Math.max(0, accumulatedTotals.cachedTokens || 0)
+          cachedTokens: Math.max(0, accumulatedTotals.cachedTokens || 0),
+          stepCount: accumulatedTotals.stepCount || 0
         }
         : (lastReported
           ? {
             inputTokens: lastReported.inputTokens ?? calcInput,
             outputTokens: lastReported.outputTokens ?? calcOutput,
             totalTokens: lastReported.totalTokens ?? ((lastReported.inputTokens ?? calcInput) + (lastReported.outputTokens ?? calcOutput)),
-            cachedTokens: Math.max(0, lastReported.cachedTokens || (lastReported as any).cachedInputTokens || 0)
+            cachedTokens: Math.max(0, lastReported.cachedTokens || (lastReported as any).cachedInputTokens || 0),
+            stepCount: lastReported.stepCount || 0
           }
-          : { inputTokens: calcInput, outputTokens: calcOutput, totalTokens: calcInput + calcOutput, cachedTokens: 0 })
+          : { inputTokens: calcInput, outputTokens: calcOutput, totalTokens: calcInput + calcOutput, cachedTokens: 0, stepCount: 0 })
 
       const thoughtsTokens = Math.max(0, Number(totals.outputTokens || 0) - (assistantTextTokens + toolCallsTokens))
 

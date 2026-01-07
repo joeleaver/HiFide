@@ -68,6 +68,7 @@ export interface UsageBreakdownEventData {
     outputTokens: number
     totalTokens: number
     costEstimate?: number
+    stepCount?: number  // Number of agentic turns/steps
   }
   estimated: boolean
 }
@@ -216,7 +217,7 @@ export function createCallbackEventEmitters(
       })
     },
 
-    onTokenUsage: (usage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number; cost?: number }) => {
+    onTokenUsage: (usage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number; reasoningTokens?: number; cost?: any }) => {
       emit({
         type: 'usage',
         provider,

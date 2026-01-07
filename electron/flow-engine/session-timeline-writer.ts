@@ -150,9 +150,10 @@ export class SessionTimelineWriter {
 
     const deltaInput = Number(ev.usage?.inputTokens ?? 0)
     const deltaOutput = Number(ev.usage?.outputTokens ?? 0)
-    const deltaTotal = Number(ev.usage?.totalTokens ?? (deltaInput + deltaOutput))
     const deltaCached = Number(ev.usage?.cachedTokens ?? 0)
     const deltaReasoning = Number(ev.usage?.reasoningTokens ?? 0)
+    // totalTokens should include all token types: input + cached + output
+    const deltaTotal = Number(ev.usage?.totalTokens ?? (deltaInput + deltaCached + deltaOutput))
 
     const applyUsageDelta = (bucket: any) => {
       bucket.inputTokens = Number(bucket.inputTokens || 0) + deltaInput
@@ -212,7 +213,8 @@ export class SessionTimelineWriter {
       costs.inputCost += normalizedCost.inputCost
       ;(costs as any).cachedCost = Number((costs as any).cachedCost ?? 0) + normalizedCost.cachedCost
       costs.outputCost += normalizedCost.outputCost
-      costs.totalCost += normalizedCost.totalCost
+      // Recalculate totalCost from the three components to ensure consistency
+      costs.totalCost = costs.inputCost + (costs as any).cachedCost + costs.outputCost
 
       const providerCosts = costs.byProviderAndModel[providerKey] || {}
       costs.byProviderAndModel[providerKey] = providerCosts

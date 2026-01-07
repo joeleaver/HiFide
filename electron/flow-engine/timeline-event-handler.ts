@@ -120,18 +120,23 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
   const unsubscribe = flowEvents.onFlowEvent(requestId, (ev: any) => {
     const { type, nodeId, executionId } = ev
 
-    // Handle tokenUsage events (which may fire multiple times per stream) without
-    // triggering session usage broadcasts. We'll rely on the final
-    // usageBreakdown event (which we emit once per completed LLM call) to update
-    // the session/renderer, so intermediate tokenUsage events are ignored to
-    // prevent rerender storms.
+    // Handle tokenUsage events - these are intermediate events during streaming
+    // We push each event to the requestsLog so the UI can show all intermediate updates
     if (type === 'tokenUsage') {
-      if (process.env.HF_FLOW_DEBUG === '1') {
-        console.log('[TimelineEventHandler] tokenUsage event (ignored for UI)', {
+      try {
+        writer.updateUsage({
+          usage: ev.usage,
+          cost: ev.cost,
           provider: ev.provider,
           model: ev.model,
-          usage: ev.usage,
+          requestId,
+          nodeId: ev.nodeId || 'unknown',
+          executionId: ev.executionId || 'unknown'
         })
+      } catch (err) {
+        if (process.env.HF_FLOW_DEBUG === '1') {
+          console.error('[TimelineEventHandler] Failed to update usage for tokenUsage event:', err)
+        }
       }
       return
     }
@@ -314,22 +319,10 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
 
           // Store breakdown data in cache for viewer
           UiPayloadCache.put(usageKey, usageData)
-          
-          // Also update session totals from the breakdown (since we suppress intermediate usage events)
-          if (usageData.totals) {
-            try {
-              writer.updateUsage({
-                usage: usageData.totals,
-                provider: ev.provider,
-                model: ev.model,
-                requestId,
-                nodeId: ev.nodeId || 'unknown',
-                executionId: ev.executionId || 'unknown'
-              })
-            } catch (err) {
-              console.error('[TimelineEventHandler] Failed to update usage totals:', err)
-            }
-          }
+
+          // Note: We do NOT call updateUsage here because we already called it for each
+          // individual tokenUsage event. The breakdown is just the sum of those events,
+          // so calling updateUsage again would double-count the usage.
 
           const usageKeyForBuffer = `${ev.nodeId || 'global'}::${ev.executionId || 'global'}`
           const toolCalls = buffers.toolCalls.get(usageKeyForBuffer) || []
@@ -351,8 +344,14 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
             },
             metadata: {
               inputTokens: usageData?.totals?.inputTokens,
+              cachedTokens: usageData?.totals?.cachedTokens,
               outputTokens: usageData?.totals?.outputTokens,
-              totalTokens: usageData?.totals?.totalTokens
+              totalTokens: usageData?.totals?.totalTokens,
+              inputCost: usageData?.cost?.inputCost,
+              cachedCost: usageData?.cost?.cachedInputCost,
+              outputCost: usageData?.cost?.outputCost,
+              totalCost: usageData?.cost?.totalCost,
+              currency: usageData?.cost?.currency
             }
           }
 

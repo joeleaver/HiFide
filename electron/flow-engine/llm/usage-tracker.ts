@@ -14,6 +14,7 @@ export interface UsageStats {
   totalTokens: number
   cachedTokens?: number
   reasoningTokens?: number
+  stepCount?: number  // Number of agentic turns/steps
 }
 
 export function createTokenCounter(provider: string, model: string): TokenCounter {
@@ -67,57 +68,54 @@ function estimateTokensFromFallback(value: string): number {
 
 export class UsageAccumulator {
   private lastReportedUsage: UsageStats | null = null
-  private accumulatedUsage: UsageStats = { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0, reasoningTokens: 0 }
+  private accumulatedUsage: UsageStats = { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0, reasoningTokens: 0, stepCount: 0 }
   private usageEmitted = false
+  private maxStepCount = 0
 
   recordProviderUsage(usage: UsageStats, debugLogger?: (details: any) => void): void {
-    const prev = this.lastReportedUsage
-    const currTotal = usage?.totalTokens ?? ((usage?.inputTokens || 0) + (usage?.outputTokens || 0))
-    const prevTotal = prev?.totalTokens ?? ((prev?.inputTokens || 0) + (prev?.outputTokens || 0))
-    const isCumulative = !!prev && currTotal >= prevTotal
+    // Each provider usage report represents tokens used in that iteration/step.
+    // We simply accumulate them directly - no delta calculation needed.
+    const inputTokens = Math.max(0, usage?.inputTokens || 0)
+    const outputTokens = Math.max(0, usage?.outputTokens || 0)
+    const cachedTokens = Math.max(0, usage?.cachedTokens || 0)
+    const reasoningTokens = Math.max(0, usage?.reasoningTokens || 0)
+    const stepCount = Math.max(0, usage?.stepCount || 0)
+    const totalTokens = Math.max(0, usage?.totalTokens ?? (inputTokens + outputTokens + cachedTokens))
 
-    let delta = usage
-    if (prev && isCumulative) {
-      const dTotal = Math.max(0, currTotal - prevTotal)
-      const dInput = Math.max(0, (usage.inputTokens || 0) - (prev.inputTokens || 0))
-      const dOutput = Math.max(0, dTotal - dInput)
-      delta = {
-        inputTokens: dInput,
-        outputTokens: dOutput,
-        totalTokens: Math.max(0, dInput + dOutput),
-        cachedTokens: Math.max(0, (usage.cachedTokens || 0) - (prev.cachedTokens || 0)),
-        reasoningTokens: Math.max(0, (usage.reasoningTokens || 0) - (prev.reasoningTokens || 0))
-      }
+    // Track the maximum step count (final step count of the agentic loop)
+    if (stepCount > this.maxStepCount) {
+      this.maxStepCount = stepCount
     }
 
     if (debugLogger) {
       try {
         debugLogger({
-          mode: isCumulative ? 'cumulative->delta' : 'per-step',
+          mode: 'per-step',
           raw: usage,
-          prev,
-          delta
+          normalized: {
+            inputTokens,
+            outputTokens,
+            cachedTokens,
+            reasoningTokens,
+            totalTokens
+          }
         })
       } catch {}
     }
 
+    // Accumulate tokens directly
     this.accumulatedUsage = {
-      inputTokens: (this.accumulatedUsage.inputTokens || 0) + (delta.inputTokens || 0),
-      outputTokens: (this.accumulatedUsage.outputTokens || 0) + (delta.outputTokens || 0),
-      totalTokens: (this.accumulatedUsage.totalTokens || 0) + (delta.totalTokens || 0),
-      cachedTokens: (this.accumulatedUsage.cachedTokens || 0) + (delta.cachedTokens || 0),
-      reasoningTokens: (this.accumulatedUsage.reasoningTokens || 0) + (delta.reasoningTokens || 0)
+      inputTokens: (this.accumulatedUsage.inputTokens || 0) + inputTokens,
+      outputTokens: (this.accumulatedUsage.outputTokens || 0) + outputTokens,
+      totalTokens: (this.accumulatedUsage.totalTokens || 0) + totalTokens,
+      cachedTokens: (this.accumulatedUsage.cachedTokens || 0) + cachedTokens,
+      reasoningTokens: (this.accumulatedUsage.reasoningTokens || 0) + reasoningTokens,
+      stepCount: this.maxStepCount
     }
 
     this.lastReportedUsage = usage
 
-    if (
-      (delta.inputTokens || 0) > 0 ||
-      (delta.outputTokens || 0) > 0 ||
-      (delta.totalTokens || 0) > 0 ||
-      (delta.cachedTokens || 0) > 0 ||
-      (delta.reasoningTokens || 0) > 0
-    ) {
+    if (inputTokens > 0 || outputTokens > 0 || totalTokens > 0 || cachedTokens > 0 || reasoningTokens > 0) {
       this.usageEmitted = true
     }
   }

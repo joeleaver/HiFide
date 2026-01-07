@@ -30,10 +30,12 @@ export function mergeCostBucket(existing: TokenCost | undefined, delta: Normaliz
 
   target.inputCost = Number(target.inputCost || 0) + delta.inputCost
   target.outputCost = Number(target.outputCost || 0) + delta.outputCost
-  target.totalCost = Number(target.totalCost || 0) + delta.totalCost
 
   const prevCached = Number((target as any).cachedCost ?? (target as any).cachedInputCost ?? 0)
   ;(target as any).cachedCost = prevCached + delta.cachedCost
+
+  // Recalculate totalCost from the three components to ensure consistency
+  target.totalCost = target.inputCost + (target as any).cachedCost + target.outputCost
 
   return target
 }
@@ -42,7 +44,8 @@ export function serializeNormalizedCost(delta: NormalizedTokenCost): TokenCost {
   const snapshot: TokenCost = {
     inputCost: delta.inputCost,
     outputCost: delta.outputCost,
-    totalCost: delta.totalCost,
+    // Recalculate totalCost from the three components to ensure consistency
+    totalCost: delta.inputCost + delta.cachedCost + delta.outputCost,
     currency: delta.currency,
   }
 

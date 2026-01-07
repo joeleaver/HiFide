@@ -21,6 +21,8 @@ export type TokenUsage = {
   outputTokens: number
   totalTokens: number
   cachedTokens?: number  // Tokens served from cache (Gemini context caching)
+  reasoningTokens?: number  // Tokens used for reasoning/thinking (Gemini 2.0, Claude 3.7)
+  stepCount?: number  // Number of agentic turns/steps (for multi-turn LLM calls)
 }
 
 // Generic tool spec used by provider-native agent runtimes

@@ -5,6 +5,7 @@ import { useUiStore } from '../store/ui'
 import { useSessionUi } from '../store/sessionUi'
 import { useChatTimeline } from '../store/chatTimeline'
 import SessionPane from '../SessionPane'
+import TotalCostDisplay from './TotalCostDisplay'
 import { getBackendClient } from '../lib/backend/bootstrap'
 import { MIN_SESSION_PANEL_WIDTH, ACTIVITY_BAR_WIDTH } from '../constants/layout'
 
@@ -123,6 +124,7 @@ export default function GlobalSessionPanel() {
         >
           New
         </Button>
+        <TotalCostDisplay />
       </div>
 
       {/* Session content */}

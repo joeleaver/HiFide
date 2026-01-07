@@ -9,7 +9,6 @@ import AgentDebugPanel from './AgentDebugPanel'
 import FlowCanvasPanel from './FlowCanvasPanel'
 import NodePalettePanel from './NodePalettePanel'
 import ContextInspectorPanel from './ContextInspectorPanel'
-import TokensCostsPanel from './TokensCostsPanel'
 import { ReactFlowProvider } from 'reactflow'
 
 import { useRerenderTrace } from '../utils/perf'
@@ -210,9 +209,6 @@ export default function FlowView() {
 
           {/* Context Inspector Panel */}
           <ContextInspectorPanel />
-
-          {/* Tokens & Costs Panel */}
-          <TokensCostsPanel />
 
           {/* Flow Debug Panel - Hidden by default */}
           {SHOW_FLOW_DEBUG_PANEL && <AgentDebugPanel />}
