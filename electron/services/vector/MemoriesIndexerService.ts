@@ -20,7 +20,8 @@ export class MemoriesIndexerService extends Service<MemoriesIndexerState> {
 
   constructor() {
     super({
-      workspaces: {}
+      workspaces: {},
+      indexedItems: {} // Legacy field for schema compatibility
     }, 'memories_indexer');
   }
 
@@ -29,12 +30,12 @@ export class MemoriesIndexerService extends Service<MemoriesIndexerState> {
   }
 
   private getWorkspaceState(workspaceRoot: string): MemoriesIndexerWorkspaceState {
-    const normalized = path.resolve(workspaceRoot);
+    const normalized = workspaceRoot;
     return this.state.workspaces[normalized] || { indexedItems: {} };
   }
 
   private updateWorkspaceState(workspaceRoot: string, updates: Partial<MemoriesIndexerWorkspaceState>) {
-    const normalized = path.resolve(workspaceRoot);
+    const normalized = workspaceRoot;
     const prev = this.getWorkspaceState(normalized);
     this.setState({
       workspaces: {

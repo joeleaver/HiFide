@@ -37,7 +37,7 @@ async function runSemanticKBSearch({
     const workspaceRoot = resolveWorkspaceRoot(meta?.workspaceId)
 
     await vectorService.init(workspaceRoot)
-    const matches = await vectorService.search(query, limit * 2, 'kb') // Get extra for filtering
+    const matches = await vectorService.search(workspaceRoot, query, limit * 2, 'kb') // Get extra for filtering
 
     if (!matches || matches.length === 0) return []
 

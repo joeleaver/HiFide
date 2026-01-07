@@ -252,9 +252,9 @@ class LLMService {
 	    ? { ...workingContext, systemInstructions: request.systemInstructions }
 	    : workingContext
 	  if (effectiveProvider === 'anthropic') {
-	    formattedMessages = formatMessagesForAnthropic(latestContext)
+	    formattedMessages = formatMessagesForAnthropic(latestContext, { model: effectiveModel })
 	  } else {
-        formattedMessages = formatMessagesForOpenAI(latestContext, { provider: effectiveProvider })
+        formattedMessages = formatMessagesForOpenAI(latestContext, { provider: effectiveProvider, model: effectiveModel })
 	  }
 	}
 

@@ -11,6 +11,8 @@ export type ChatMessage = {
 
 export interface StreamHandle {
   cancel: () => void
+  // Internal promise for testing/debugging - allows callers to await completion if needed
+  _loopPromise?: Promise<void>
 }
 
 // Token usage information from LLM providers

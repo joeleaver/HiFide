@@ -152,6 +152,6 @@ export function createKanbanHandlers(addMethod: (method: string, handler: (param
     if (!workspaceId) {
       throw new Error('Missing required parameter: workspaceId')
     }
-    return kanbanService.kanbanRefreshFromDiskFor(workspaceId)
+    return kanbanService.kanbanLoadFor(workspaceId)
   })
 }

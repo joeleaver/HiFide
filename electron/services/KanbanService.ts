@@ -17,7 +17,7 @@ import {
   reindexOrders,
   kanbanSaver,
 } from '../store/utils/kanban.js'
-import { broadcastWorkspaceNotification } from '../backend/ws/broadcast.js'
+// import { broadcastWorkspaceNotification } from '../backend/ws/broadcast.js'
 
 interface KanbanWorkspaceState {
   board: KanbanBoard | null

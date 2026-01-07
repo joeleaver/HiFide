@@ -30,7 +30,7 @@ export const knowledgeBaseDeleteTool: AgentTool = {
       const vs = getVectorService()
       const escapedId = id.replace(/'/g, "''")
       // Delete all chunks for this KB article (id starts with kb:${kbId}:)
-      await vs.deleteItems('kb', `id LIKE 'kb:${escapedId}:%'`)
+      await vs.deleteItems(baseDir, 'kb', `id LIKE 'kb:${escapedId}:%'`)
 
       // Also remove from the indexer's tracked state
       const kbIndexer = getKBIndexerService()

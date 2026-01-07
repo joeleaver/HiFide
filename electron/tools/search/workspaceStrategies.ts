@@ -589,7 +589,7 @@ export async function runScoredSemanticSearch({
     const workspaceRoot = resolveWorkspaceRoot(meta?.workspaceId)
 
     await vectorService.init(workspaceRoot)
-    const matches = await vectorService.search(query, maxResults * 2, collection)
+    const matches = await vectorService.search(workspaceRoot, query, maxResults * 2, collection)
 
     if (!matches || matches.length === 0) return []
 

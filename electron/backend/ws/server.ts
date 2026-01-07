@@ -40,13 +40,24 @@ let resolveBootstrap: ((value: WsBootstrap) => void) | null = null
 function broadcastFlowEvent(ev: any): void {
   try {
     const sid = (ev && typeof ev === 'object') ? (ev.sessionId || null) : null
-    //console.log('[broadcastFlowEvent] Event type:', ev.type, 'sessionId:', sid)
-    const wsFromSid = getWorkspaceIdForSessionId(sid)
-    //console.log('[broadcastFlowEvent] Workspace from sessionId:', wsFromSid)
+    const wsId = (ev && typeof ev === 'object') ? (ev.workspaceId || null) : null
+    console.log('[broadcastFlowEvent] Event type:', ev.type, 'sessionId:', sid, 'workspaceId:', wsId, 'requestId:', ev.requestId)
+
+    // Try to find workspace from sessionId first
+    let wsFromSid = getWorkspaceIdForSessionId(sid)
+
+    // If sessionId lookup fails, use workspaceId from event as fallback
+    if (!wsFromSid && wsId) {
+      wsFromSid = wsId
+      console.log('[broadcastFlowEvent] Using workspaceId from event as fallback:', wsId)
+    }
+
+    console.log('[broadcastFlowEvent] Resolved workspace:', wsFromSid)
     if (!wsFromSid) {
-      console.error('[broadcastFlowEvent] Failed to find workspace for sessionId:', sid, 'event type:', ev.type)
+      console.error('[broadcastFlowEvent] Failed to find workspace for sessionId:', sid, 'workspaceId:', wsId, 'event type:', ev.type)
       return
     }
+    console.log('[broadcastFlowEvent] Broadcasting event to workspace:', wsFromSid)
     broadcastWorkspaceNotification(wsFromSid, 'flow.event', ev)
   } catch (e) {
     console.error('[broadcastFlowEvent] Error:', e)

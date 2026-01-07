@@ -1,12 +1,13 @@
 import { jest } from '@jest/globals';
 import searchWorkspaceTool from '../searchWorkspace.js';
 import { grepTool } from '../../text/grep.js';
-import { getVectorService, getIndexOrchestratorService } from '../../../services/index.js';
+import { getVectorService, getGlobalIndexingOrchestratorService, getWorkspaceService } from '../../../services/index.js';
 
 jest.mock('../../text/grep.js');
 jest.mock('../../../services/index.js', () => ({
     getVectorService: jest.fn(),
-    getIndexOrchestratorService: jest.fn(),
+    getGlobalIndexingOrchestratorService: jest.fn(),
+    getWorkspaceService: jest.fn(),
     getSettingsService: jest.fn().mockReturnValue({
         getApiKeys: jest.fn().mockReturnValue({ openai: 'test-key' })
     })
@@ -29,7 +30,7 @@ describe('workspaceSearch semantic', () => {
             })
         };
         (getVectorService as jest.Mock).mockReturnValue(mockVectorService);
-        (getIndexOrchestratorService as jest.Mock).mockReturnValue(mockOrchestratorService);
+        (getGlobalIndexingOrchestratorService as jest.Mock).mockReturnValue(mockOrchestratorService);
         (grepTool.run as jest.Mock).mockResolvedValue({ ok: true, data: { matches: [] } });
     });
 

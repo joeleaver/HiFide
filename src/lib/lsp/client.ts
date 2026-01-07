@@ -14,7 +14,11 @@ async function callRpc<T = any>(method: string, params: unknown): Promise<T | nu
 }
 
 export async function openDocument(payload: LspDocumentParams): Promise<void> {
-  if (!isLspLanguage(payload.languageId)) return
+  if (!isLspLanguage(payload.languageId)) {
+    console.warn(`[lspClient] openDocument: unsupported language "${payload.languageId}" for ${payload.path}`)
+    return
+  }
+  console.log(`[lspClient] openDocument: ${payload.path} (${payload.languageId})`)
   const res: any = await callRpc('lsp.openDocument', payload)
   if (res && res.ok === false && res.error) {
     throw Object.assign(new Error(res.error), { code: res.error, languageId: payload.languageId })

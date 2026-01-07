@@ -21,7 +21,7 @@ import {
   getExplorerService,
   getLanguageServerService,
   getGitStatusService,
-  getIndexOrchestratorService,
+  getGlobalIndexingOrchestratorService,
 } from '../../services/index.js'
 import type { ExplorerFsEvent } from '../../store/types.js'
 import type { LspDiagnosticsEvent, LspLanguageStatusPayload } from '../../../shared/lsp.js'
@@ -115,7 +115,7 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
   }))
 
   // Indexing orchestrator status
-  const indexingOrchestratorService = getIndexOrchestratorService()
+  const indexingOrchestratorService = getGlobalIndexingOrchestratorService()
   addWorkspaceSubscription(indexingOrchestratorService, 'index-orchestrator-status', 'indexing.status.changed', (data) => ({
     workspaceId: data.workspaceId,
     isProcessing: !!data.isProcessing,

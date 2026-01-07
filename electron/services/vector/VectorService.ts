@@ -1,7 +1,8 @@
 import * as lancedb from '@lancedb/lancedb';
 import path from 'path';
 import fs from 'fs/promises';
-import { getEmbeddingService, getWorkspaceService } from '../index.js';
+import crypto from 'crypto';
+import { getEmbeddingService } from '../index.js';
 
 const DEBUG_VECTOR = process.env.HF_VECTOR_DEBUG === '1';
 
@@ -62,11 +63,34 @@ interface VectorWorkspaceState {
 export class VectorService {
   private workspaces = new Map<string, VectorWorkspaceState>();
 
-  private tableConfigs: Record<TableType, TableConfig> = {
-    code: { tableName: 'code_vectors', modelName: 'default', dimensions: 0, enabled: true },
-    kb: { tableName: 'kb_vectors', modelName: 'default', dimensions: 0, enabled: true },
-    memories: { tableName: 'memory_vectors', modelName: 'default', dimensions: 0, enabled: true }
-  };
+  /**
+   * Generate workspace-specific table name
+   * Includes workspace hash to ensure isolation
+   */
+  private getTableName(workspaceRoot: string, type: TableType): string {
+    const normalized = path.resolve(workspaceRoot);
+    const hash = crypto.createHash('md5').update(normalized).digest('hex').substring(0, 8);
+
+    const baseNames: Record<TableType, string> = {
+      code: 'code_vectors',
+      kb: 'kb_vectors',
+      memories: 'memory_vectors'
+    };
+
+    return `${baseNames[type]}_${hash}`;
+  }
+
+  /**
+   * Get table config for a workspace and type
+   */
+  private getTableConfig(workspaceRoot: string, type: TableType): TableConfig {
+    return {
+      tableName: this.getTableName(workspaceRoot, type),
+      modelName: 'default',
+      dimensions: 0,
+      enabled: true
+    };
+  }
 
   private getWorkspaceState(workspaceRoot: string): VectorWorkspaceState {
     const normalized = path.resolve(workspaceRoot);
@@ -142,8 +166,8 @@ export class VectorService {
 
   async getOrCreateTable(workspaceRoot: string, type: TableType): Promise<lancedb.Table> {
     const state = await this.ensureInitialized(workspaceRoot);
-    const config = this.tableConfigs[type];
-    
+    const config = this.getTableConfig(workspaceRoot, type);
+
     if (state.tablePromises.has(config.tableName)) {
       return await state.tablePromises.get(config.tableName)!;
     }
@@ -152,7 +176,7 @@ export class VectorService {
       if (!state.db) throw new Error(`Database not connected for workspace: ${workspaceRoot}`);
       const expectedDim = await getEmbeddingService().getDimension(type);
       config.dimensions = expectedDim; // Track dimension in config
-      
+
       try {
         const tableNames = await state.db.tableNames();
         if (tableNames.includes(config.tableName)) {
@@ -177,13 +201,13 @@ export class VectorService {
       }
     })();
 
-    this.tablePromises.set(config.tableName, promise);
+    state.tablePromises.set(config.tableName, promise);
     return await promise;
   }
 
   private async createInitialTable(workspaceRoot: string, type: TableType, dim: number): Promise<lancedb.Table> {
     const state = this.getWorkspaceState(workspaceRoot);
-    const config = this.tableConfigs[type];
+    const config = this.getTableConfig(workspaceRoot, type);
     if (DEBUG_VECTOR) console.log(`[VectorService] Creating new table: ${config.tableName} in ${workspaceRoot}`);
     const seedVector = new Array(dim).fill(0);
     const seed = {
@@ -200,7 +224,7 @@ export class VectorService {
       articleTitle: '',
       metadata: JSON.stringify({ isSeed: true })
     };
-    
+
     try {
       return await state.db!.createTable(config.tableName, [seed as any]);
     } catch (err: any) {
@@ -213,8 +237,9 @@ export class VectorService {
 
   async search(workspaceRoot: string, query: string, limit: number = 10, type?: TableType | 'all', filter?: string) {
     try {
-      const typesToSearch: TableType[] = (type === 'all' || !type) 
-        ? (Object.keys(this.tableConfigs) as TableType[]) 
+      const allTableTypes: TableType[] = ['code', 'kb', 'memories'];
+      const typesToSearch: TableType[] = (type === 'all' || !type)
+        ? allTableTypes
         : [type];
         
       const embeddingService = getEmbeddingService();
@@ -320,13 +345,14 @@ export class VectorService {
     if (!state.db) return;
     try {
       const tableNames = await state.db.tableNames();
-      for (const type of Object.keys(this.tableConfigs) as TableType[]) {
-        const config = this.tableConfigs[type];
+      const tableTypes: TableType[] = ['code', 'kb', 'memories'];
+      for (const type of tableTypes) {
+        const config = this.getTableConfig(workspaceRoot, type);
         if (tableNames.includes(config.tableName)) {
           const table = await state.db.openTable(config.tableName);
           const count = await table.countRows();
           // Subtract 1 if the table has a seed row
-          const actualCount = count > 0 ? (count - 1) : 0; 
+          const actualCount = count > 0 ? (count - 1) : 0;
           state.status.tables[type] = {
             count: actualCount,
             indexedAt: Date.now(),
@@ -503,9 +529,10 @@ export class VectorService {
   async purge(workspaceRoot: string, type?: TableType) {
     const state = await this.ensureInitialized(workspaceRoot);
     if (state.db) {
-      const typesToPurge = type ? [type] : (Object.keys(this.tableConfigs) as TableType[]);
+      const allTableTypes: TableType[] = ['code', 'kb', 'memories'];
+      const typesToPurge = type ? [type] : allTableTypes;
       for (const t of typesToPurge) {
-        const config = this.tableConfigs[t];
+        const config = this.getTableConfig(workspaceRoot, t);
         try {
           await state.db.dropTable(config.tableName);
           state.tablePromises.delete(config.tableName);

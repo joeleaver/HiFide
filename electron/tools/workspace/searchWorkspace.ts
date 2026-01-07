@@ -1,6 +1,6 @@
 import type { AgentTool } from '../../providers/provider'
 import { randomUUID } from 'node:crypto'
-import { getIndexOrchestratorService } from '../../services/index.js'
+import { getGlobalIndexingOrchestratorService, getWorkspaceService } from '../../services/index.js'
 import {
   type ScoredResult,
   type SearchWorkspaceResult,
@@ -27,14 +27,31 @@ interface IndexingStatus {
 /**
  * Get current indexing status from the orchestrator
  */
-function getIndexingStatus(): IndexingStatus {
+function getIndexingStatus(meta?: any): IndexingStatus {
   try {
-    const orchestrator = getIndexOrchestratorService()
+    const orchestrator = getGlobalIndexingOrchestratorService()
     if (!orchestrator) {
       return { enabled: false, percentComplete: 0, isProcessing: false }
     }
 
-    const state = orchestrator.getState()
+    // Get workspace ID from metadata or current workspace
+    let workspaceId = meta?.workspaceId || meta?.workspaceRoot
+    if (!workspaceId) {
+      const workspaceService = getWorkspaceService()
+      const workspaces = workspaceService.getAllWindowWorkspaces()
+      workspaceId = Object.values(workspaces)[0]
+    }
+
+    if (!workspaceId) {
+      return { enabled: false, percentComplete: 0, isProcessing: false }
+    }
+
+    const manager = orchestrator.getWorkspaceManager(workspaceId)
+    if (!manager) {
+      return { enabled: false, percentComplete: 0, isProcessing: false }
+    }
+
+    const state = manager.getState()
     const enabled = state.indexingEnabled ?? false
     const total = state.code?.total || 0
     const indexed = state.code?.indexed || 0
@@ -137,7 +154,7 @@ export const searchWorkspaceTool: AgentTool = {
     ]
 
     // Get indexing status to determine if semantic search should be included
-    const indexingStatus = getIndexingStatus()
+    const indexingStatus = getIndexingStatus(meta)
     const { enabled: indexingEnabled, percentComplete } = indexingStatus
     const tokens = tokenizeQuery(query)
 

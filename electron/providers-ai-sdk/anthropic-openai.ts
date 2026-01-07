@@ -14,17 +14,7 @@
 import {
   createOpenAICompatibleProvider,
 } from './core/openai-compatible'
-
-// Models that support extended thinking (Claude 3.5+ Sonnet, Claude 3.7+, Claude 4+)
-const supportsThinking = (id: string) => {
-  // Claude 4.x models
-  if (/claude-4/i.test(id) || /claude-opus-4/i.test(id) || /claude-sonnet-4/i.test(id) || /claude-haiku-4/i.test(id)) return true
-  // Claude 3.7 Sonnet
-  if (/claude-3-7-sonnet/i.test(id) || /claude-3\.7/i.test(id)) return true
-  // Claude 3.5 Sonnet (not Haiku - 3.5 Haiku doesn't support thinking)
-  if (/claude-3-5-sonnet/i.test(id) || /claude-3\.5-sonnet/i.test(id)) return true
-  return false
-}
+import { supportsExtendedThinking } from '../../shared/model-capabilities'
 
 /**
  * Anthropic provider adapter using the OpenAI-compatible core.
@@ -40,7 +30,7 @@ export const AnthropicOpenAIProvider = createOpenAICompatibleProvider({
     const modified: any = { ...body }
     
     // Enable extended thinking for supported models
-    if (context.includeThoughts && supportsThinking(context.model)) {
+    if (context.includeThoughts && supportsExtendedThinking(context.model)) {
       // Anthropic uses the thinking parameter in their OpenAI-compatible API
       const budgetTokens = typeof context.thinkingBudget === 'number' && context.thinkingBudget !== -1
         ? context.thinkingBudget

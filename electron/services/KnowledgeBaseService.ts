@@ -10,7 +10,7 @@ import { listItems } from '../store/utils/knowledgeBase.js'
 
 
 import path from 'node:path'
-import { broadcastWorkspaceNotification } from '../backend/ws/broadcast.js'
+// import { broadcastWorkspaceNotification } from '../backend/ws/broadcast.js'
 
 interface KnowledgeBaseWorkspaceState {
   kbLoading: boolean

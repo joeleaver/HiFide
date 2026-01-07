@@ -147,6 +147,7 @@ export class FlowScheduler {
     this.executionEventRouter = createExecutionEventRouter({
       requestId: this.requestId,
       sessionId: this.sessionId,
+      workspaceId: this.workspaceId,
       abortSignal: this.abortController.signal
     })
 
@@ -182,6 +183,7 @@ export class FlowScheduler {
       abortSignal: this.abortController.signal,
       requestId: this.requestId,
       sessionId: this.sessionId,
+      workspaceId: this.workspaceId,
       getNodeConfig: (nodeId) => this.getNodeConfig(nodeId),
       flushToSession: () => this.flushToSession(),
       onNodeStart: (nodeId) => {
@@ -324,7 +326,7 @@ export class FlowScheduler {
         return { ok: true }
       }
       console.error('[FlowScheduler] Error:', error)
-      try { emitFlowEvent(this.requestId, { type: 'error', error, sessionId: this.sessionId }) } catch {}
+      try { emitFlowEvent(this.requestId, { type: 'error', error, sessionId: this.sessionId, workspaceId: this.workspaceId } as any) } catch {}
       await this.flushToSession()
       this.contextLifecycle.clearContextState()
       return { ok: false, error }

@@ -11,7 +11,12 @@ function applyLanguageDefaults(monaco: typeof Monaco): void {
   const ts = monaco.languages?.typescript
   if (!ts) return
 
-  const diagnosticOptions = { noSemanticValidation: false, noSyntaxValidation: false }
+  // Disable Monaco's built-in TypeScript validation since we use LSP for diagnostics
+  // This prevents false positives and conflicts with the language server
+  const diagnosticOptions = {
+    noSemanticValidation: true,  // Disable semantic validation - LSP handles this
+    noSyntaxValidation: false     // Keep syntax validation for immediate feedback
+  }
   const sharedCompilerOptions = {
     allowJs: true,
     allowNonTsExtensions: true,

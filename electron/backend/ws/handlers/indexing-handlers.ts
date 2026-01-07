@@ -1,8 +1,10 @@
 /**
  * Indexing Orchestrator RPC handlers
+ *
+ * Uses the new GlobalIndexingOrchestrator for workspace-aware indexing
  */
 
-import { getIndexOrchestratorService } from '../../../services/index.js'
+import { getGlobalIndexingOrchestratorService } from '../../../services/index.js'
 import { getConnectionWorkspaceId } from '../broadcast.js'
 import type { RpcConnection } from '../types.js'
 
@@ -12,31 +14,37 @@ export function createIndexingHandlers(
 ) {
   // Get current indexing orchestrator status
   addMethod('indexing.getStatus', async () => {
-    const orchestrator = getIndexOrchestratorService()
+    const orchestrator = getGlobalIndexingOrchestratorService()
     const workspaceId = await getConnectionWorkspaceId(connection)
 
     if (!workspaceId) {
       return { ok: false, error: 'no-active-workspace' }
     }
 
-    const stats = await orchestrator.getStats(workspaceId)
-    const orchestratorState = orchestrator.getState(workspaceId)
-    
+    const manager = orchestrator.getWorkspaceManager(workspaceId)
+    if (!manager) {
+      return { ok: false, error: 'workspace-not-registered' }
+    }
+
+    const state = manager.getState()
+
     return {
       ok: true,
-      ...stats,
       workspaceId,
+      status: state.status,
+      indexingEnabled: state.indexingEnabled,
       // Detailed counts
-      code: orchestratorState.code,
-      kb: orchestratorState.kb,
-      memories: orchestratorState.memories,
-      indexingEnabled: orchestratorState.indexingEnabled,
+      code: state.code,
+      kb: state.kb,
+      memories: state.memories,
+      totalFilesDiscovered: state.totalFilesDiscovered,
+      indexedCount: state.indexedCount,
     }
   })
 
   // Start indexing for the workspace (all three indexers without forcing)
   addMethod('indexing.start', async () => {
-    const orchestrator = getIndexOrchestratorService()
+    const orchestrator = getGlobalIndexingOrchestratorService()
     const { getKBIndexerService, getMemoriesIndexerService } = await import('../../../services/index.js')
     const workspaceId = await getConnectionWorkspaceId(connection)
     if (!workspaceId) {
@@ -52,7 +60,7 @@ export function createIndexingHandlers(
 
   // Stop indexing (all three indexers)
   addMethod('indexing.stop', async () => {
-    const orchestrator = getIndexOrchestratorService()
+    const orchestrator = getGlobalIndexingOrchestratorService()
     const { getKBIndexerService, getMemoriesIndexerService } = await import('../../../services/index.js')
     const workspaceId = await getConnectionWorkspaceId(connection)
     if (!workspaceId) {
@@ -68,18 +76,18 @@ export function createIndexingHandlers(
 
   // Re-index workspace
   addMethod('indexing.reindex', async (params: { force?: boolean }) => {
-    const orchestrator = getIndexOrchestratorService()
+    const orchestrator = getGlobalIndexingOrchestratorService()
     const workspaceId = await getConnectionWorkspaceId(connection)
     if (!workspaceId) {
       return { ok: false, error: 'no-active-workspace' }
     }
-    await orchestrator.indexAll(params?.force || false, workspaceId)
+    await orchestrator.indexAll(workspaceId, params?.force || false)
     return { ok: true }
   })
 
   // Set indexing enabled state and persist to settings
   addMethod('indexing.setEnabled', async (params: { enabled: boolean }) => {
-    const orchestrator = getIndexOrchestratorService()
+    const orchestrator = getGlobalIndexingOrchestratorService()
     const { getSettingsService } = await import('../../../services/index.js')
     const workspaceId = await getConnectionWorkspaceId(connection)
 
@@ -90,7 +98,7 @@ export function createIndexingHandlers(
     const enabled = params?.enabled ?? true
 
     // Update orchestrator state
-    orchestrator.setIndexingEnabled(workspaceId, enabled)
+    orchestrator.setIndexingEnabled(enabled)
 
     // Persist to settings
     const settingsService = getSettingsService()
@@ -109,7 +117,7 @@ export function createIndexingHandlers(
     } else {
       // If disabling, stop any active indexing
       const { getKBIndexerService, getMemoriesIndexerService } = await import('../../../services/index.js')
-      await orchestrator.stop()
+      await orchestrator.stop(workspaceId)
       await getKBIndexerService().stop()
       await getMemoriesIndexerService().stop()
     }

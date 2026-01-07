@@ -298,6 +298,7 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
       messages,
       temperature,
       tools,
+      responseSchema,
       emit,
       onChunk: onTextChunk,
       onDone: onStreamDone,
@@ -328,16 +329,23 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
       // Convert messages - this array will be mutated during the agentic loop
       let conversationMessages = toOpenAIMessages(messages || [])
 
-      //Add system message if provided
-      if (system && typeof system === 'string') {
-        conversationMessages.unshift({ role: 'system', content: system })
+      // Add system message if provided
+      // Handle both Anthropic format (blocks array) and OpenAI format (string)
+      if (system) {
+        if (Array.isArray(system)) {
+          // Anthropic format - blocks array
+          conversationMessages.unshift({ role: 'system', content: system })
+        } else if (typeof system === 'string') {
+          // OpenAI/Fireworks format - string
+          conversationMessages.unshift({ role: 'system', content: system })
+        }
       }
 
-      // State for reasoning extraction
+      // State for reasoning extraction (will be reset each step)
       let reasoningState: ReasoningState = {
         buffer: '',
         insideTag: false,
-        tagName: 'think'
+        tagName: ''
       }
 
       // Agentic loop with rate limiting
@@ -353,6 +361,15 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
         while (stepCount < AGENT_MAX_STEPS && !cancelled) {
           stepCount++
 
+          // Reset reasoning state for this step to prevent state corruption
+          // NOTE: This is reset at the START of each step, but will be maintained
+          // across all chunks within a single streaming response
+          reasoningState = {
+            buffer: '',
+            insideTag: false,
+            tagName: ''
+          }
+
           // Build request body fresh each iteration (like OpenRouter)
           let requestBody: any = {
             model,
@@ -363,7 +380,15 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
             stream: true
           }
 
-          //Apply provider-specific modifications
+          // Add responseSchema if provided (for structured outputs)
+          if (responseSchema) {
+            requestBody.response_format = {
+              type: 'json_schema',
+              json_schema: responseSchema
+            }
+          }
+
+          // Apply provider-specific modifications
           if (requestModifier) {
             requestBody = requestModifier(requestBody, {
               model,
@@ -430,6 +455,7 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
           let stepText = ''
           let stepReasoning = ''
           const toolCalls: Map<number, { id: string; name: string; arguments: string }> = new Map()
+          const seenToolIds = new Set<string>() // Track seen tool IDs to detect new parallel calls
           let stepUsage: any = null
           let finishReason: string | null = null
 
@@ -455,18 +481,30 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
 
                 // Apply reasoning extraction if configured (e.g., <think> tags)
                 if (reasoningExtractor) {
+                  if (DEBUG) {
+                    console.log(`[${id}] Before extraction - reasoningState:`, reasoningState)
+                  }
                   const result = reasoningExtractor(delta.content, reasoningState)
                   textToEmit = result.text
                   reasoningToEmit = result.reasoning
                   reasoningState = result.state
+                  if (DEBUG) {
+                    console.log(`[${id}] After extraction - reasoningState:`, reasoningState)
+                  }
                 }
 
                 if (reasoningToEmit) {
                   stepReasoning += reasoningToEmit
+                  if (DEBUG) {
+                    console.log(`[${id}] Emitting reasoning:`, reasoningToEmit.slice(0, 100))
+                  }
                   emit?.({ type: 'reasoning', provider: id, model, reasoning: reasoningToEmit })
                 }
                 if (textToEmit) {
                   stepText += textToEmit
+                  if (DEBUG) {
+                    console.log(`[${id}] Emitting text chunk:`, textToEmit.slice(0, 100))
+                  }
                   onTextChunk?.(textToEmit)
                 }
               }
@@ -479,36 +517,32 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
                 emit?.({ type: 'reasoning', provider: id, model, reasoning: reasoningChunk })
               }
 
-              // Handle tool calls - use Map like OpenRouter for safety
+              // Handle tool calls - use ID-based tracking for safety
               // Gemini sends each parallel tool call as a complete chunk with index=0 but different IDs
               // OpenAI streams partial data for each tool call with incrementing indices
               if (delta?.tool_calls) {
                 for (const tc of delta.tool_calls) {
-                  const idx = tc.index ?? 0
+                  if (!tc.id) continue // Skip if no ID
 
-                  // Check if this is a new tool call (different ID) vs streaming delta for existing one
-                  // Gemini: each chunk has complete tool call with unique ID and index=0
-                  // OpenAI: chunks have partial data with same ID and incrementing indices
-                  const existing = toolCalls.get(idx)
-                  const isNewToolCall = tc.id && existing && existing.id && tc.id !== existing.id
-
-                  if (isNewToolCall) {
-                    // Gemini-style: this is a new parallel tool call, find next available index
-                    let newIdx = toolCalls.size
-                    toolCalls.set(newIdx, {
+                  // Check if this is a new tool call (not seen before)
+                  if (!seenToolIds.has(tc.id)) {
+                    // New tool call - add it
+                    seenToolIds.add(tc.id)
+                    toolCalls.set(toolCalls.size, {
                       id: tc.id,
                       name: tc.function?.name || '',
                       arguments: tc.function?.arguments || ''
                     })
                   } else {
-                    // OpenAI-style: streaming delta for same tool call
-                    if (!toolCalls.has(idx)) {
-                      toolCalls.set(idx, { id: '', name: '', arguments: '' })
+                    // Existing tool call - append arguments (streaming delta)
+                    // Find the entry with this ID and append arguments
+                    for (const [, call] of toolCalls.entries()) {
+                      if (call.id === tc.id) {
+                        if (tc.function?.name) call.name = tc.function.name
+                        if (tc.function?.arguments) call.arguments += tc.function.arguments
+                        break
+                      }
                     }
-                    const pending = toolCalls.get(idx)!
-                    if (tc.id) pending.id = tc.id
-                    if (tc.function?.name) pending.name = tc.function.name
-                    if (tc.function?.arguments) pending.arguments += tc.function.arguments
                   }
                 }
               }
@@ -686,8 +720,10 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
         onStreamDone?.()
       }
 
-      // Start the loop
-      runLoop().catch((err: any) => {
+      // Start the loop and await it to ensure streaming completes before returning
+      // This prevents race conditions where the caller thinks the request is done
+      // but streaming is still happening in the background
+      const loopPromise = runLoop().catch((err: any) => {
         if (err?.name !== 'AbortError' && !ac.signal.aborted) {
           console.error(`[${id}] Stream error:`, err)
           console.error(`[${id}] Error details:`, {
@@ -705,7 +741,9 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
         cancel: () => {
           cancelled = true
           try { ac.abort() } catch {}
-        }
+        },
+        // Internal promise for testing/debugging - allows callers to await completion if needed
+        _loopPromise: loopPromise
       }
     }
   }

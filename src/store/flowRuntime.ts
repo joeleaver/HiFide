@@ -22,6 +22,7 @@ interface FlowRuntimeState {
   nodeState: Record<string, NodeExecState>
   selectedSessionId?: string | null
   isHydrating: boolean
+  stoppedRequestId?: string  // Track the requestId of the stopped flow to ignore its cleanup events
 
   // Actions
   setStatus: (s: FlowStatus) => void
@@ -43,12 +44,13 @@ function createFlowRuntimeStore() {
     nodeState: {},
     selectedSessionId: null,
     isHydrating: false,
+    stoppedRequestId: undefined,
 
     setStatus: (s) => set({ status: s }),
     setRequestId: (id) => set({ requestId: id }),
     setSessionScope: (id) => set({ selectedSessionId: id ?? null }),
     setIsHydrating: (b) => set({ isHydrating: !!b }),
-    reset: () => set({ status: 'stopped', requestId: undefined, lastEventAt: undefined, pausedNode: null, inputPrompt: null, isToolInput: false, nodeState: {} }),
+    reset: () => set({ status: 'stopped', requestId: undefined, lastEventAt: undefined, pausedNode: null, inputPrompt: null, isToolInput: false, nodeState: {}, stoppedRequestId: undefined }),
 
     handleEvent: (ev) => {
       // Minimal state machine driven by backend flow events
@@ -56,17 +58,43 @@ function createFlowRuntimeStore() {
       const now = Date.now()
 
       // Session scoping: drop events that don't match the currently selected session (when provided)
+      // EXCEPT for 'done' and 'error' events which should always be processed to reset the UI
       const currentSid = get().selectedSessionId
       const evSid = (ev as any)?.sessionId as string | undefined
-      if (currentSid && evSid && evSid !== currentSid) {
+      if (currentSid && evSid && evSid !== currentSid && t !== 'done' && t !== 'error') {
+        console.log('[handleEvent] Dropping event due to session mismatch:', t, 'current:', currentSid, 'event:', evSid)
         return
       }
 
-      // Drop or adopt events when requestId mismatches; adopt on start-ish events
+      // Once flow is stopped, ignore cleanup events from the same flow
+      // This prevents cleanup events (nodeEnd, etc.) from resetting the UI back to 'running'
+      // But allow events from a NEW flow (different requestId) to start
+      const currentStatus = get().status
       const currentRid = get().requestId
+      const stoppedRid = get().stoppedRequestId
+      if (currentStatus === 'stopped' && t !== 'done' && t !== 'error' && ev?.requestId === stoppedRid) {
+        console.log('[handleEvent] Ignoring cleanup event from stopped flow:', t, 'requestId:', ev.requestId)
+        return
+      }
+
+      // Drop or adopt events when requestId mismatches
+      // Always process 'done' and 'error' events to reset UI
+      // Adopt 'start-ish' events to switch to a new flow
       if (currentRid && ev?.requestId && ev.requestId !== currentRid) {
         const isStartish = t === 'nodestart' || t === 'chunk' || t === 'waitingforinput'
-        if (isStartish) {
+        const isTerminal = t === 'done' || t === 'error'
+
+        console.log('[handleEvent] RequestId mismatch:', t, 'current:', currentRid, 'event:', ev.requestId, 'isTerminal:', isTerminal, 'isStartish:', isStartish)
+
+        if (isTerminal) {
+          // Always process terminal events for the current flow
+          // Don't switch to a different requestId
+          if (ev.requestId !== currentRid) {
+            console.log('[handleEvent] Dropping terminal event due to requestId mismatch')
+            return
+          }
+        } else if (isStartish) {
+          // Adopt start-ish events to switch to a new flow
           if (t === 'waitingforinput') {
             set({
               requestId: ev.requestId,
@@ -188,12 +216,15 @@ function createFlowRuntimeStore() {
         if (nodeId) {
           updateNode(nodeId, { status: 'error', style: { border: '3px solid #ef4444', boxShadow: '0 0 0 2px rgba(239,68,68,0.2)' } })
         }
-        set({ status: 'stopped', lastEventAt: now, pausedNode: null })
+        const rid = get().requestId
+        set({ status: 'stopped', lastEventAt: now, pausedNode: null, stoppedRequestId: rid })
         return
       }
 
       if (t === 'done') {
-        set({ status: 'stopped', requestId: undefined, lastEventAt: now, pausedNode: null, inputPrompt: null, isToolInput: false })
+        console.log('[handleEvent] Processing done event, resetting UI')
+        const rid = get().requestId
+        set({ status: 'stopped', requestId: undefined, lastEventAt: now, pausedNode: null, inputPrompt: null, isToolInput: false, stoppedRequestId: rid })
         return
       }
 
@@ -228,8 +259,10 @@ export function initFlowRuntimeEvents(): void {
     // 1) Subscribe FIRST to avoid missing in-flight events
     FlowService.onEvent((ev) => {
       try {
+        console.log('[flowRuntime] Received event:', ev.type, 'requestId:', ev.requestId)
         useFlowRuntime.getState().handleEvent(ev)
       } catch (e) {
+        console.error('[flowRuntime] Error handling event:', e)
         // Swallow runtime event errors; UI will reflect state on next successful event
       }
     })

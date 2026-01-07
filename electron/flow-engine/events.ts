@@ -21,7 +21,7 @@ export type FlowEvent = (
   | { type: 'usageBreakdown'; nodeId: string; provider: string; model: string; breakdown: any; executionId: string }
   | { type: 'badgeAdd'; nodeId: string; executionId: string; badgeId: string; badge: any }
   | { type: 'badgeUpdate'; nodeId: string; executionId: string; badgeId: string; updates: any }
-) & { sessionId?: string }
+) & { sessionId?: string; workspaceId?: string }
 
 /**
  * Flow event emitter - decouples flow execution from IPC layer

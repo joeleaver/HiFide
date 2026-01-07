@@ -8,7 +8,7 @@
  */
 
 import { BrowserWindow } from 'electron'
-import { getWorkspaceService, getSessionService, getFlowProfileService, getKanbanService, getKnowledgeBaseService } from '../../services/index.js'
+import { getWorkspaceService, getSessionService, getFlowProfileService, getKanbanService, getKnowledgeBaseService, getGlobalIndexingOrchestratorService } from '../../services/index.js'
 import { getWorkspaceManager } from '../../core/workspaceManager.js'
 import { sendWorkspaceSnapshot } from './snapshot.js'
 import { setConnectionSelectedSessionId, transitionConnectionPhase } from './broadcast.js'
@@ -69,6 +69,27 @@ export async function loadWorkspace(options: WorkspaceLoadOptions): Promise<{ ok
         }
       } catch (err) {
         console.error('[workspace-loader] Failed to bind workspace manager:', err)
+      }
+
+      // Start indexing for the workspace if enabled
+      try {
+        const orchestrator = getGlobalIndexingOrchestratorService()
+        const { getSettingsService, getKBIndexerService, getMemoriesIndexerService } = await import('../../services/index.js')
+        const settingsService = getSettingsService()
+        const indexingEnabled = settingsService.state.vector.indexingEnabled ?? true
+
+        if (indexingEnabled) {
+          console.log('[workspace-loader] Starting indexing for workspace:', workspaceId)
+          // Start all three indexers: code, KB, and memories
+          await orchestrator.start(workspaceId)
+          await getKBIndexerService().indexWorkspace(workspaceId, false)
+          await getMemoriesIndexerService().indexWorkspace(workspaceId, false)
+        } else {
+          console.log('[workspace-loader] Indexing disabled, skipping start for workspace:', workspaceId)
+        }
+      } catch (err) {
+        console.error('[workspace-loader] Failed to start indexing:', err)
+        // Don't fail workspace load if indexing fails
       }
 
       // Parallelize heavy service initialization

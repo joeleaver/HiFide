@@ -5,13 +5,14 @@ import type { ExecutionEvent } from './execution-events'
 export interface ExecutionEventRouterOptions {
   requestId: string
   sessionId?: string
+  workspaceId?: string
   abortSignal: AbortSignal
 }
 
 export type ExecutionEventRouter = (event: ExecutionEvent) => Promise<void>
 
 export function createExecutionEventRouter(options: ExecutionEventRouterOptions): ExecutionEventRouter {
-  const { requestId, sessionId, abortSignal } = options
+  const { requestId, sessionId, workspaceId, abortSignal } = options
 
   return async function handleExecutionEvent(event: ExecutionEvent): Promise<void> {
     if (abortSignal.aborted) {
@@ -106,12 +107,12 @@ export function createExecutionEventRouter(options: ExecutionEventRouterOptions)
         break
 
       case 'done':
-        try { emitFlowEvent(requestId, { type: 'done', sessionId }) } catch {}
+        try { emitFlowEvent(requestId, { type: 'done', sessionId, workspaceId } as any) } catch {}
         break
 
       case 'error':
         if (event.error) {
-          try { emitFlowEvent(requestId, { type: 'error', nodeId: event.nodeId, executionId: event.executionId, error: event.error, sessionId }) } catch {}
+          try { emitFlowEvent(requestId, { type: 'error', nodeId: event.nodeId, executionId: event.executionId, error: event.error, sessionId, workspaceId } as any) } catch {}
         }
         break
 

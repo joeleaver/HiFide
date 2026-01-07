@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { getBackendClient } from '../lib/backend/bootstrap'
+import { useWorkspaceUi } from './workspaceUi'
 
 export interface TableStatus {
   count: number;
@@ -117,7 +118,7 @@ export const useVectorStore = create<VectorStore>((set, get) => ({
 
     const unsub = client.subscribe('vector_service.changed', (s: any) => {
       // Check if this update is for our current workspace
-      const currentWorkspaceId = useBackendBinding.getState().workspaceId
+      const currentWorkspaceId = useWorkspaceUi.getState().root
       if (s?.workspaceId && currentWorkspaceId && s.workspaceId !== currentWorkspaceId) {
         return
       }

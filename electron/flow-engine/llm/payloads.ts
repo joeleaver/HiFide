@@ -1,7 +1,15 @@
 import type { AgentTool, ChatMessage, ChatMessagePart } from '../../providers/provider'
 import type { MainFlowContext, MessagePart } from '../types'
+import { supportsReasoningPersistence } from '../../../shared/model-capabilities'
 
-const OPENAI_REASONING_PROVIDERS = new Set(['fireworks', 'openrouter'])
+/**
+ * Providers that support reasoning/thinking and should have reasoning re-injected
+ * into the conversation history for the next agent loop.
+ *
+ * These providers are designed to see their own reasoning to maintain context
+ * and improve multi-turn accuracy.
+ */
+const REASONING_PROVIDERS = new Set(['openai', 'anthropic', 'gemini', 'fireworks', 'openrouter'])
 
 export function estimateTokensFromText(value: string | undefined | null): number {
   if (!value) return 0
@@ -83,7 +91,7 @@ export function estimateInputTokens(provider: string, formattedMessages: any): n
 
 export function formatMessagesForOpenAI(
   context: MainFlowContext,
-  options?: { provider?: string }
+  options?: { provider?: string; model?: string }
 ): ChatMessage[] {
   const history = Array.isArray(context.messageHistory) ? context.messageHistory : []
   const messages: ChatMessage[] = []
@@ -91,7 +99,10 @@ export function formatMessagesForOpenAI(
   if (systemText) {
     messages.push({ role: 'system', content: systemText })
   }
-  const shouldEmbedReasoning = options?.provider ? OPENAI_REASONING_PROVIDERS.has(options.provider) : false
+  // Re-inject reasoning for providers that support it and models that have reasoning capability
+  const shouldEmbedReasoning = options?.provider && options?.model
+    ? REASONING_PROVIDERS.has(options.provider) && supportsReasoningPersistence(options.provider, options.model)
+    : false
 
   // Find the last user message index to keep its images
   const lastUserMsgIndex = [...history].reverse().findIndex((m) => m.role === 'user')
@@ -153,7 +164,8 @@ export function formatMessagesForOpenAI(
 }
 
 export function formatMessagesForAnthropic(
-  context: MainFlowContext
+  context: MainFlowContext,
+  options?: { model?: string }
 ): {
   system?: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>
   messages: Array<{ role: 'user' | 'assistant'; content: any }>
@@ -165,7 +177,10 @@ export function formatMessagesForAnthropic(
       : undefined
 
   const history = Array.isArray(context.messageHistory) ? context.messageHistory : []
-  
+
+  // Determine if we should re-inject reasoning for this model
+  const shouldEmbedReasoning = options?.model ? supportsReasoningPersistence('anthropic', options.model) : false
+
   // Find the last user message index to keep its images
   const lastUserMsgIndex = [...history].reverse().findIndex((m) => m.role === 'user')
   const actualLastUserIndex = lastUserMsgIndex === -1 ? -1 : history.length - 1 - lastUserMsgIndex
@@ -180,6 +195,13 @@ export function formatMessagesForAnthropic(
       let content: any
       if (typeof entry.content === 'string') {
         content = entry.content
+        // Re-inject reasoning for Anthropic thinking models
+        if (entry.role === 'assistant' && shouldEmbedReasoning && entry.reasoning) {
+          const trimmedReasoning = String(entry.reasoning).trim()
+          if (trimmedReasoning) {
+            content = `<think>${trimmedReasoning}</think>\n${content}`
+          }
+        }
       } else {
         const parts = entry.content
           .map((part) => {
@@ -210,13 +232,17 @@ export function formatMessagesForAnthropic(
 }
 
 export function formatMessagesForGemini(
-  context: MainFlowContext
+  context: MainFlowContext,
+  options?: { model?: string }
 ): {
   systemInstruction: string
   contents: Array<{ role: string; parts: Array<any> }>
 } {
   const systemInstruction = context.systemInstructions || ''
   const history = Array.isArray(context.messageHistory) ? context.messageHistory : []
+
+  // Determine if we should re-inject reasoning for this model
+  const shouldEmbedReasoning = options?.model ? supportsReasoning('gemini', options.model) : false
 
   // Find the last user message index to keep its images
   const lastUserMsgIndex = [...history].reverse().findIndex((m) => m.role === 'user')
@@ -229,7 +255,7 @@ export function formatMessagesForGemini(
       const isLastUserMessage = originalIndex === actualLastUserIndex
       const parts: Array<any> = []
 
-      if (msg.role === 'assistant') {
+      if (msg.role === 'assistant' && shouldEmbedReasoning) {
         const trimmedReasoning = msg.reasoning ? String(msg.reasoning).trim() : ''
         if (trimmedReasoning) {
           parts.push({ text: `<think>${trimmedReasoning}</think>` })

@@ -8,6 +8,7 @@
  * - Model-specific overrides: unlimited rows with model chooser
  */
 import React from 'react'
+import { supportsReasoningEffort, supportsExtendedThinking, getProviderFromModel } from '../../../shared/model-capabilities'
 
 /** Model override entry */
 export interface ModelOverride {
@@ -66,51 +67,7 @@ function computeTempPreview(normalized: number | undefined): string {
   return `→ OpenAI/Gemini: ${openai} | Anthropic: ${anthropic}`
 }
 
-/** Get provider from model ID (heuristic) */
-function getProviderFromModel(model?: string): 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter' | 'unknown' {
-  if (!model) return 'unknown'
-  const lowerModel = model.toLowerCase().trim()
-  
-  // Check for explicit provider prefixes first (common in OpenRouter or unified model selectors)
-  if (lowerModel.includes(':')) {
-    const prefix = lowerModel.split(':')[0].trim()
-    if (prefix === 'openrouter') return 'openrouter'
-    if (prefix === 'openai') return 'openai'
-    if (prefix === 'anthropic') return 'anthropic'
-    if (prefix === 'gemini' || prefix === 'google') return 'gemini'
-    if (prefix === 'fireworks') return 'fireworks'
-    if (prefix === 'xai') return 'xai'
-  }
 
-  if (lowerModel.startsWith('openrouter/') || lowerModel.includes('openrouter')) return 'openrouter'
-  if (/^(gpt-|o1|o3|chatgpt|text-|dall-e|whisper|tts)/i.test(model)) return 'openai'
-  if (/^claude/i.test(model)) return 'anthropic'
-  if (/^gemini/i.test(model)) return 'gemini'
-  if (/^grok/i.test(model)) return 'xai'
-  if (/^accounts\/fireworks/i.test(model)) return 'fireworks'
-  return 'unknown'
-}
-
-/** Check if model supports reasoning effort */
-function supportsReasoningEffort(model: string): boolean {
-  return /^o[13](-|$)/i.test(model)
-}
-
-/** Check if model supports extended thinking */
-function supportsThinking(model: string, provider?: string): boolean {
-  // OpenRouter can support thinking if the underlying model does
-  const isOpenRouter = provider === 'openrouter' || model.startsWith('openrouter/')
-  const cleanModel = isOpenRouter ? model.replace('openrouter/', '') : model
-
-  // Gemini 2.5+ or 3+
-  if (/(2\.5|[^0-9]3[.-])/i.test(cleanModel) && (/gemini/i.test(cleanModel) || isOpenRouter)) return true
-  // Anthropic Claude 3.5+ Sonnet, 3.7+, 4+
-  if (/claude-4/i.test(cleanModel) || /claude-opus-4/i.test(cleanModel) ||
-      /claude-sonnet-4/i.test(cleanModel) || /claude-haiku-4/i.test(cleanModel) ||
-      /claude-3-7-sonnet/i.test(cleanModel) || /claude-3\.7/i.test(cleanModel) ||
-      /claude-3-5-sonnet/i.test(cleanModel) || /claude-3\.5-sonnet/i.test(cleanModel)) return true
-  return false
-}
 
 export const SamplingControls: React.FC<SamplingControlsProps> = ({
   config,
@@ -209,7 +166,7 @@ export const SamplingControls: React.FC<SamplingControlsProps> = ({
       </div>
 
       {/* Extended Thinking */}
-      {supportsThinking(effectiveModel || '', provider) && (
+      {supportsExtendedThinking(effectiveModel || '') && (
       <div style={sectionStyle}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
           <input
@@ -256,7 +213,7 @@ export const SamplingControls: React.FC<SamplingControlsProps> = ({
         {modelOverrides.map((override, idx) => {
           const provider = getProviderFromModel(override.model)
           const showReasoningEffort = supportsReasoningEffort(override.model)
-          const showThinking = supportsThinking(override.model, provider)
+          const showThinking = supportsExtendedThinking(override.model)
           // Always show temperature for anything that looks like a valid override, 
           // or if we identified a known provider.
           const showTemp = provider !== 'unknown' || override.model.includes(':') || override.model.length > 0

@@ -6,6 +6,7 @@ import { useFlowEditorLocal } from '../store/flowEditorLocal'
 import { useUiStore } from '../store/ui'
 import { useWorkspaceUi } from '../store/workspaceUi'
 import { useIndexingStore } from '../store/indexingStore'
+import { LspStatusIndicator } from './LspStatusIndicator'
 
 const STATUS_BAR_HEIGHT = 24
 
@@ -39,7 +40,7 @@ export default function StatusBar() {
 
         unsubscribe = client.subscribe('vector_service.changed', (state: any) => {
           // Check if this update is for our current workspace
-          const currentWorkspaceId = useBackendBinding.getState().workspaceId
+          const currentWorkspaceId = useWorkspaceUi.getState().root
           if (state?.workspaceId && currentWorkspaceId && state.workspaceId !== currentWorkspaceId) {
             return
           }
@@ -173,6 +174,9 @@ export default function StatusBar() {
             </Tooltip>
           </Group>
         )}
+
+        {/* Language Server Status - only in explorer view */}
+        {currentView === 'explorer' && <LspStatusIndicator />}
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 8px', height: STATUS_BAR_HEIGHT }}>
           {currentView === 'flow' ? (

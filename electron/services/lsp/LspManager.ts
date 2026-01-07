@@ -79,7 +79,7 @@ export class LspManager {
 
   private async resolveLaunchConfig(definition: LanguageServerDefinition) {
     const env = this.projectContext.getLaunchEnv()
-    
+
     if (definition.key === 'tsserver') {
       const vtslsPath = this.projectContext.resolvePackageBin('@vtsls/language-server', 'vtsls')
       const tsserverPath = this.projectContext.resolveTsserverPath()
@@ -92,26 +92,60 @@ export class LspManager {
         initializationOptions: {
           typescript: {
             tsdk: tsdk,
+            tsserver: {
+              useSyntaxServer: 'never',
+              log: 'off'
+            }
           },
           vtsls: {
             autoUseWorkspaceTsdk: true,
+            enableMoveToFileCodeAction: true,
+            autoFixOnSave: true
           }
         },
         settings: {
           typescript: {
             tsdk: tsdk,
             suggest: {
-              completeFunctionCalls: true
+              completeFunctionCalls: true,
+              autoImports: true,
+              paths: true
             },
             inlayHints: {
               parameterNames: { enabled: 'all' },
               variableTypes: { enabled: true }
-            }
+            },
+            preferences: {
+              importModuleSpecifierPreference: 'relative',
+              importModuleSpecifierEnding: 'auto',
+              quotePreference: 'single',
+              jsxAttributeDefaultValue: 'none'
+            },
+            tsserver: {
+              useSyntaxServer: 'never',
+              log: 'off'
+            },
+            enablePromptUseWorkspaceTsdk: true
           },
           javascript: {
+            suggest: {
+              completeFunctionCalls: true,
+              autoImports: true,
+              paths: true
+            },
             format: {
               semicolons: 'insert'
+            },
+            preferences: {
+              importModuleSpecifierPreference: 'relative',
+              importModuleSpecifierEnding: 'auto',
+              quotePreference: 'single',
+              jsxAttributeDefaultValue: 'none'
             }
+          },
+          vtsls: {
+            autoFixOnSave: true,
+            enableMoveToFileCodeAction: true
           }
         }
       }
@@ -135,33 +169,60 @@ export class LspManager {
     const client = await this.getClientForLanguage(lang)
     if (!client) return
 
-    client.sendNotification(DidOpenTextDocumentNotification.method, {
-      textDocument: {
-        uri: toLspUri(params.path),
-        languageId: lang,
-        version: params.version,
-        text: params.text
+    try {
+      await client.sendNotification(DidOpenTextDocumentNotification.method, {
+        textDocument: {
+          uri: toLspUri(params.path),
+          languageId: lang,
+          version: params.version,
+          text: params.text
+        }
+      })
+    } catch (error: any) {
+      // Silently ignore if client was disposed (e.g., workspace switched)
+      if (error?.message?.includes('disposed')) {
+        console.debug(`[LSP] Client disposed while opening ${params.path}`)
+        return
       }
-    })
+      console.error(`[LSP] Failed to open document ${params.path}:`, error)
+    }
   }
 
   async didChange(params: { path: string; text: string; version: number }) {
     const client = await this.getClientForPath(params.path)
     if (!client) return
 
-    client.sendNotification(DidChangeTextDocumentNotification.method, {
-      textDocument: { uri: toLspUri(params.path), version: params.version },
-      contentChanges: [{ text: params.text }]
-    })
+    try {
+      await client.sendNotification(DidChangeTextDocumentNotification.method, {
+        textDocument: { uri: toLspUri(params.path), version: params.version },
+        contentChanges: [{ text: params.text }]
+      })
+    } catch (error: any) {
+      // Silently ignore if client was disposed (e.g., workspace switched)
+      if (error?.message?.includes('disposed')) {
+        console.debug(`[LSP] Client disposed while changing ${params.path}`)
+        return
+      }
+      console.error(`[LSP] Failed to change document ${params.path}:`, error)
+    }
   }
 
   async didClose(params: { path: string }) {
     const client = await this.getClientForPath(params.path)
     if (!client) return
 
-    client.sendNotification(DidCloseTextDocumentNotification.method, {
-      textDocument: { uri: toLspUri(params.path) }
-    })
+    try {
+      await client.sendNotification(DidCloseTextDocumentNotification.method, {
+        textDocument: { uri: toLspUri(params.path) }
+      })
+    } catch (error: any) {
+      // Silently ignore if client was disposed (e.g., workspace switched)
+      if (error?.message?.includes('disposed')) {
+        console.debug(`[LSP] Client disposed while closing ${params.path}`)
+        return
+      }
+      console.error(`[LSP] Failed to close document ${params.path}:`, error)
+    }
   }
 
   async getCompletions(params: { path: string; line: number; character: number; triggerKind?: number; triggerCharacter?: string }) {

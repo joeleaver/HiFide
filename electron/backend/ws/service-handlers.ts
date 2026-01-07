@@ -15,7 +15,7 @@ import {
   getVectorService,
   getKBIndexerService,
   getMemoriesIndexerService,
-  getIndexOrchestratorService,
+  getGlobalIndexingOrchestratorService,
   getWorkspaceService,
 } from '../../services/index.js'
 import type { RpcConnection } from './types.js'
@@ -155,7 +155,7 @@ export const kanbanHandlers = {
       return { ok: false, error: 'No workspace bound to connection' }
     }
     const kanbanService = getKanbanService()
-    await kanbanService.kanbanRefreshFromDiskFor(workspaceId)
+    await kanbanService.kanbanLoadFor(workspaceId)
     return { ok: true }
   },
 
@@ -551,8 +551,8 @@ export const indexerHandlers = {
 
     // Route to the appropriate indexers
     if (targetTable === 'all' || targetTable === 'code') {
-      // V2: Delegate code indexing to the orchestrator
-      getIndexOrchestratorService().indexAll(force, workspaceRoot);
+      // Delegate code indexing to the new GlobalIndexingOrchestrator
+      getGlobalIndexingOrchestratorService().indexAll(workspaceRoot, force);
     }
     
     if (targetTable === 'all' || targetTable === 'kb') {

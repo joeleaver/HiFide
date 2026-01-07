@@ -19,6 +19,7 @@ interface FlowNodeRunnerOptions {
   abortSignal: AbortSignal
   requestId: string
   sessionId?: string
+  workspaceId?: string
   getNodeConfig: (nodeId: string) => Promise<Record<string, any>>
   flushToSession: () => Promise<void>
   onNodeStart?: (nodeId: string) => void
@@ -40,6 +41,7 @@ export class FlowNodeRunner {
   private readonly abortSignal: AbortSignal
   private readonly requestId: string
   private readonly sessionId?: string
+  private readonly workspaceId?: string
   private readonly getNodeConfig: (nodeId: string) => Promise<Record<string, any>>
   private readonly flushToSession: () => Promise<void>
   private readonly onNodeStart?: (nodeId: string) => void
@@ -53,6 +55,7 @@ export class FlowNodeRunner {
     this.abortSignal = options.abortSignal
     this.requestId = options.requestId
     this.sessionId = options.sessionId
+    this.workspaceId = options.workspaceId
     this.getNodeConfig = options.getNodeConfig
     this.flushToSession = options.flushToSession
     this.onNodeStart = options.onNodeStart
@@ -70,7 +73,7 @@ export class FlowNodeRunner {
     const executionId = crypto.randomUUID()
     if (DEBUG) console.log(`[Scheduler] ${nodeId} - Starting execution ${executionId}, isPull: ${isPull}, callerId: ${callerId}, pushedInputs:`, Object.keys(pushedInputs))
 
-    try { emitFlowEvent(this.requestId, { type: 'nodeStart', nodeId, executionId, sessionId: this.sessionId }) } catch {}
+    try { emitFlowEvent(this.requestId, { type: 'nodeStart', nodeId, executionId, sessionId: this.sessionId, workspaceId: this.workspaceId } as any) } catch {}
     try { this.onNodeStart?.(nodeId) } catch {}
 
     try {
@@ -105,7 +108,7 @@ export class FlowNodeRunner {
       this.contextLifecycle.publishContextState()
 
       const durationMs = Date.now() - startTime
-      try { emitFlowEvent(this.requestId, { type: 'nodeEnd', nodeId, durationMs, executionId, sessionId: this.sessionId }) } catch {}
+      try { emitFlowEvent(this.requestId, { type: 'nodeEnd', nodeId, durationMs, executionId, sessionId: this.sessionId, workspaceId: this.workspaceId } as any) } catch {}
 
       if (result.status === 'error') {
         const errorMsg = result.error || 'Node execution failed'

@@ -14,9 +14,7 @@
 import {
   createOpenAICompatibleProvider,
 } from './core/openai-compatible'
-
-// Models that support reasoningEffort (o1, o3 families)
-const supportsReasoningEffort = (id: string) => /^o[13](-|$)/i.test(id)
+import { supportsReasoningEffort } from '../../shared/model-capabilities'
 
 /**
  * OpenAI provider adapter using the OpenAI-compatible core.

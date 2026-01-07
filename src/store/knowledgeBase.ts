@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { getBackendClient } from '@/lib/backend/bootstrap'
+import { useWorkspaceUi } from './workspaceUi'
 
 export interface KnowledgeBaseStore {
   itemsMap: Record<string, any>
@@ -70,7 +71,7 @@ export function initKnowledgeBaseEvents(): void {
   
   // Items changed
   client.subscribe('kb.items.changed', (p: any) => {
-    const currentWorkspaceId = useBackendBinding.getState().workspaceId
+    const currentWorkspaceId = useWorkspaceUi.getState().root
     if (p?.workspaceId && currentWorkspaceId && p.workspaceId !== currentWorkspaceId) {
       return
     }
@@ -79,7 +80,7 @@ export function initKnowledgeBaseEvents(): void {
   
   // Files changed
   client.subscribe('kb.files.changed', (p: any) => {
-    const currentWorkspaceId = useBackendBinding.getState().workspaceId
+    const currentWorkspaceId = useWorkspaceUi.getState().root
     if (p?.workspaceId && currentWorkspaceId && p.workspaceId !== currentWorkspaceId) {
       return
     }

@@ -1,7 +1,7 @@
 import { memo, useRef, useEffect, useState, useCallback } from 'react'
 import { useUiStore } from '../store/ui'
 import { useFlowRuntime } from '../store/flowRuntime'
-import { useChatTimeline } from '../store/chatTimeline'
+// import { useChatTimeline } from '../store/chatTimeline'
 import { FlowService } from '../services/flow'
 import { Image, Group, Stack, Text, Paper, ActionIcon } from '@mantine/core'
 import { IconPhoto, IconPlus, IconX } from '@tabler/icons-react'
@@ -23,7 +23,7 @@ export default memo(function SessionInput() {
   const requestId = useFlowRuntime((s) => s.requestId)
   const feStatus = useFlowRuntime((s) => s.status)
   const isToolInput = useFlowRuntime((s) => s.isToolInput)
-  const addUserMessage = useChatTimeline((s) => s.addUserMessage)
+  // const addUserMessage = useChatTimeline((s) => s.addUserMessage)
   
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
   const [isDragging, setIsDragging] = useState(false)

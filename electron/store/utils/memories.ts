@@ -189,7 +189,8 @@ export async function applyMemoryCandidates(
     // Semantic similarity against existing memories in vector DB
     let bestMatch: { id: string; score: number } | null = null
     try {
-      const searchResults = await vs.search(text, 1, 'memories')
+      const root = await resolveWorkspaceRootAsync(workspaceId)
+      const searchResults = await vs.search(root, text, 1, 'memories')
       if (searchResults.length > 0) {
         const top = searchResults[0]
         if (top.score >= similarityThreshold) {

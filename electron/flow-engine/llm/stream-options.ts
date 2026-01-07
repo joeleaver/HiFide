@@ -1,5 +1,6 @@
 import type { MainFlowContext } from '../types'
 import { getDefaultModelOverrides } from '../../data/defaultModelSettings'
+import { supportsExtendedThinking } from '../../../shared/model-capabilities'
 
 export interface SamplingControls {
   temperature?: number
@@ -49,18 +50,7 @@ export function resolveSamplingControls(options: SamplingOptionsInput): Sampling
     (workingContext as any)?.reasoningEffort ??
     jsonDefaults?.reasoningEffort
 
-  const isGeminiWithThinking = provider === 'gemini' && /(2\.5|[^0-9]3[.-])/i.test(model)
-  const isAnthropicWithThinking = provider === 'anthropic' && (
-    /claude-4/i.test(model) ||
-    /claude-opus-4/i.test(model) ||
-    /claude-sonnet-4/i.test(model) ||
-    /claude-haiku-4/i.test(model) ||
-    /claude-3-7-sonnet/i.test(model) ||
-    /claude-3\.7/i.test(model) ||
-    /claude-3-5-sonnet/i.test(model) ||
-    /claude-3\.5-sonnet/i.test(model)
-  )
-  const modelSupportsThinking = isGeminiWithThinking || isAnthropicWithThinking
+  const modelSupportsThinking = supportsExtendedThinking(model)
 
   const includeThoughtsOverride = modelOverride?.includeThoughts
   const includeThoughtsDefault = (workingContext as any)?.includeThoughts

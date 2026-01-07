@@ -11,7 +11,7 @@
 import { BrowserWindow } from 'electron'
 import path from 'node:path'
 import { startKbWatcher, stopKbWatcher } from './state.js'
-import { getExplorerService, getLanguageServerService, getGitStatusService } from '../services/index.js'
+import { getExplorerService, getLanguageServerService, getGitStatusService, getGlobalIndexingOrchestratorService } from '../services/index.js'
 
 export type WorkspaceId = string // absolute folder path
 
@@ -72,6 +72,16 @@ class WorkspaceManagerImpl {
     if (!entry) {
       entry = { id: normalized, windows: new Set(), refCount: 0 }
       this.workspaces.set(normalized, entry)
+
+      // Register workspace with GlobalIndexingOrchestrator
+      try {
+        const orchestrator = getGlobalIndexingOrchestratorService()
+        await orchestrator.registerWorkspace(normalized)
+        console.log(`[WorkspaceManager] Registered workspace with indexing orchestrator: ${normalized}`)
+      } catch (error) {
+        console.error(`[WorkspaceManager] Failed to register workspace with indexing orchestrator:`, error)
+      }
+
       // Start watchers for this workspace
       await this.startWatchers(normalized, entry)
     }
@@ -111,6 +121,15 @@ class WorkspaceManagerImpl {
     const normalized = this.normalizeWorkspaceId(id)
     const entry = this.workspaces.get(normalized)
     if (!entry) return
+
+    // Unregister workspace from GlobalIndexingOrchestrator
+    try {
+      const orchestrator = getGlobalIndexingOrchestratorService()
+      await orchestrator.unregisterWorkspace(normalized)
+      console.log(`[WorkspaceManager] Unregistered workspace from indexing orchestrator: ${normalized}`)
+    } catch (error) {
+      console.error(`[WorkspaceManager] Failed to unregister workspace from indexing orchestrator:`, error)
+    }
 
     // Stop watchers
     try {      stopKbWatcher(normalized)
