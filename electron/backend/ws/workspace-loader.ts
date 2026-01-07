@@ -76,7 +76,7 @@ export async function loadWorkspace(options: WorkspaceLoadOptions): Promise<{ ok
         const orchestrator = getGlobalIndexingOrchestratorService()
         const { getSettingsService, getKBIndexerService, getMemoriesIndexerService } = await import('../../services/index.js')
         const settingsService = getSettingsService()
-        const indexingEnabled = settingsService.state.vector.indexingEnabled ?? true
+        const indexingEnabled = settingsService.getState().vector.indexingEnabled ?? true
 
         if (indexingEnabled) {
           console.log('[workspace-loader] Starting indexing for workspace:', workspaceId)

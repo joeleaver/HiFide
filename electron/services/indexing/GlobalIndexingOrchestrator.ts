@@ -15,9 +15,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { Service } from '../base/Service.js'
-import { PriorityIndexingQueue, IndexingType } from './PriorityIndexingQueue.js'
+import { PriorityIndexingQueue } from './PriorityIndexingQueue.js'
 import { WorkspaceIndexingManager, WorkspaceIndexingState } from './WorkspaceIndexingManager.js'
-import { getVectorService, getEmbeddingService, getSettingsService } from '../index.js'
+import { getVectorService, getSettingsService } from '../index.js'
 
 interface GlobalOrchestratorState {
   status: 'idle' | 'indexing' | 'paused'
@@ -28,7 +28,7 @@ interface GlobalOrchestratorState {
 export class GlobalIndexingOrchestrator extends Service<GlobalOrchestratorState> {
   private workers: Worker[] = []
   private maxWorkers = 4
-  private workerRequestMap = new Map<string, { resolve: (val: any) => void; reject: (err: any) => void }>()
+  private workerRequestMap = new Map<number, { resolve: (val: any) => void; reject: (err: any) => void }>()
   private reqId = 0
 
   private priorityQueue = new PriorityIndexingQueue()

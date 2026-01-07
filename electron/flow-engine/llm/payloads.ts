@@ -242,7 +242,7 @@ export function formatMessagesForGemini(
   const history = Array.isArray(context.messageHistory) ? context.messageHistory : []
 
   // Determine if we should re-inject reasoning for this model
-  const shouldEmbedReasoning = options?.model ? supportsReasoning('gemini', options.model) : false
+  const shouldEmbedReasoning = options?.model ? supportsReasoningPersistence('gemini', options.model) : false
 
   // Find the last user message index to keep its images
   const lastUserMsgIndex = [...history].reverse().findIndex((m) => m.role === 'user')

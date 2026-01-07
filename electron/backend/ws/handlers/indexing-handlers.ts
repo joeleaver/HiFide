@@ -98,7 +98,7 @@ export function createIndexingHandlers(
     const enabled = params?.enabled ?? true
 
     // Update orchestrator state
-    orchestrator.setIndexingEnabled(enabled)
+    orchestrator.setIndexingEnabled(workspaceId, enabled)
 
     // Persist to settings
     const settingsService = getSettingsService()
