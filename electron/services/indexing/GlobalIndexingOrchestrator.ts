@@ -14,6 +14,7 @@ import { Worker } from 'node:worker_threads'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
+import { app } from 'electron'
 import { Service } from '../base/Service.js'
 import { PriorityIndexingQueue } from './PriorityIndexingQueue.js'
 import { WorkspaceIndexingManager, WorkspaceIndexingState } from './WorkspaceIndexingManager.js'
@@ -422,11 +423,19 @@ export class GlobalIndexingOrchestrator extends Service<GlobalOrchestratorState>
       baseDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd()
     }
 
+    const appPath = app.getAppPath()
     const candidates = [
+      // ASAR unpacked (production) - use app.getAppPath() for correct resolution
+      path.join(appPath, 'dist-electron/workers/indexing/v2-parser-worker.mjs'),
+      // Vite build (Dev & Prod)
       path.join(process.cwd(), 'dist-electron/workers/indexing/v2-parser-worker.mjs'),
+      // compiled relative to services/indexing/
       path.join(baseDir, '../../workers/indexing/v2-parser-worker.js'),
+      // dev (ts-node)
       path.join(baseDir, '../../workers/indexing/v2-parser-worker.ts'),
+      // prod bundle (legacy)
       path.join(process.cwd(), 'dist-electron/workers/indexing/v2-parser-worker.js'),
+      // dev source
       path.join(process.cwd(), 'electron/workers/indexing/v2-parser-worker.ts')
     ]
 

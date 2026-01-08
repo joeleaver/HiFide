@@ -9,6 +9,7 @@ import OpenAI from 'openai'
 import { UiPayloadCache } from '../../core/uiPayloadCache'
 import { AGENT_MAX_STEPS } from '../../../src/store/utils/constants'
 import type { ProviderAdapter, StreamHandle, AgentTool } from '../../providers/provider'
+import { rateLimitTracker } from '../../providers/rate-limit-tracker'
 
 // Re-export types for convenience
 export type { ProviderAdapter, StreamHandle, AgentTool }
@@ -330,15 +331,9 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
       let conversationMessages = toOpenAIMessages(messages || [])
 
       // Add system message if provided
-      // Handle both Anthropic format (blocks array) and OpenAI format (string)
+      // OpenAI SDK accepts both string and array formats for content
       if (system) {
-        if (Array.isArray(system)) {
-          // Anthropic format - blocks array
-          conversationMessages.unshift({ role: 'system', content: system })
-        } else if (typeof system === 'string') {
-          // OpenAI/Fireworks format - string
-          conversationMessages.unshift({ role: 'system', content: system })
-        }
+        conversationMessages.unshift({ role: 'system', content: system })
       }
 
       // State for reasoning extraction (will be reset each step)
@@ -441,11 +436,38 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
                 }
               })
               await sleep(backoffMs)
+              // Check if cancelled during sleep
+              if (cancelled || ac.signal.aborted) break
             }
           }
 
           // Safety check - if stream wasn't assigned (shouldn't happen), skip this step
           if (!stream || cancelled) break
+
+          // Try to extract rate limit headers from the response (if available)
+          // OpenAI SDK exposes response metadata on the stream object for some providers
+          try {
+            const streamAny = stream as any
+            const response = streamAny?.response || streamAny?._response
+            if (response?.headers) {
+              // Convert Headers object to plain object
+              const headers: Record<string, string> = {}
+              if (typeof response.headers.forEach === 'function') {
+                response.headers.forEach((value: string, key: string) => {
+                  headers[key.toLowerCase()] = value
+                })
+              } else if (typeof response.headers.entries === 'function') {
+                for (const [key, value] of response.headers.entries()) {
+                  headers[key.toLowerCase()] = value
+                }
+              }
+              if (Object.keys(headers).length > 0) {
+                rateLimitTracker.updateFromHeaders(id as any, model, headers)
+              }
+            }
+          } catch {
+            // Headers extraction is best-effort, don't fail the request
+          }
 
           if (DEBUG) {
             console.log(`[${id}] Stream type:`, typeof stream, Object.prototype.toString.call(stream))
@@ -573,6 +595,12 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
             if (DEBUG) {
               console.log(`[${id}] Stream loop ended normally. cancelled=${cancelled}, aborted=${ac.signal.aborted}`)
             }
+
+            // Flush any remaining buffered reasoning (in case of incomplete tags)
+            if (reasoningExtractor && reasoningState.insideTag && reasoningState.buffer) {
+              stepReasoning += reasoningState.buffer
+              emit?.({ type: 'reasoning', provider: id, model, reasoning: reasoningState.buffer })
+            }
           } catch (err: any) {
             if (DEBUG) {
               console.log(`[${id}] Stream error:`, { name: err?.name, message: err?.message, status: err?.status })
@@ -665,7 +693,7 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
             // Helper to create tool result message
             // Gemini's OpenAI-compatible endpoint may reject role: 'tool' - use 'user' as workaround
             // See: https://discuss.ai.google.dev/t/returning-tool-function-results-over-openai-api/55933
-            const isGemini = id === 'gemini-openai' || id.startsWith('gemini')
+            const isGemini = id === 'gemini' || id.startsWith('gemini')
             const createToolResult = (callId: string, content: string): any => {
               if (isGemini) {
                 // Gemini workaround: use 'user' role with tool result context

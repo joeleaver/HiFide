@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx vitest run:*)",
+      "Bash(pnpm test:*)",
+      "Bash(npm test:*)",
+      "Bash(npx jest:*)",
+      "Bash(where node)",
+      "Bash(node --version:*)",
+      "Bash(nvm list:*)",
+      "Bash(dir \"%USERPROFILE%\\\\.nvm\\\\versions\\\\node\")",
+      "Bash(\"C:\\\\Program Files\\\\nodejs\\\\node.exe\" --version)",
+      "Bash(\"C:\\\\Program Files\\\\nodejs\\\\node.exe\" \"C:\\\\Program Files\\\\nodejs\\\\node_modules\\\\npm\\\\bin\\\\npx-cli.js\" jest --testPathPattern=\"applyEdits\")",
+      "Bash(npx tsc:*)",
+      "Bash(dir node_modulestypescriptbin)",
+      "Bash(dir node_modules.bintsc*)",
+      "Bash(cmd /c:*)",
+      "Bash(\"C:\\\\Program Files\\\\nodejs\\\\node.exe\" test-indent.mjs)",
+      "Bash(del:*)"
+    ]
+  }
+}

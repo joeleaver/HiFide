@@ -667,6 +667,10 @@ class LLMService {
         (accumulatedTotals.totalTokens || 0) > 0
       const lastReported = usageAccumulator.getLastReportedUsage()
 
+      // Token usage precedence:
+      // 1) Accumulated provider-reported totals (most accurate, from multiple onTokenUsage callbacks)
+      // 2) Last provider-reported usage (single callback, some providers only report once)
+      // 3) Local estimates from tokenizer (fallback for providers without usage reporting)
       const totals = hasAccum
         ? {
           inputTokens: accumulatedTotals.inputTokens ?? calcInput,

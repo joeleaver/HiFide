@@ -22,7 +22,7 @@ import {
  * Uses the OpenRouter API at https://openrouter.ai/api/v1
  */
 export const OpenRouterOpenAIProvider = createOpenAICompatibleProvider({
-  id: 'openrouter-openai',
+  id: 'openrouter',
   baseURL: 'https://openrouter.ai/api/v1',
   
   // OpenRouter requires HTTP-Referer and X-Title headers for attribution

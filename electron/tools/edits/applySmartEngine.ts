@@ -169,19 +169,45 @@ function normalizeCreateContentFromOpenAiPatch(contentLF: string): string {
 }
 
 
+type MatchResult = { start: number; end: number; indentFix?: (text: string) => string }
+
 // Layered matcher: exact -> whitespace-insensitive -> indent-insensitive -> anchor by first line
-function findReplaceOnce(hayLF: string, oldLF: string): null | { start: number; end: number } {
+function findReplaceOnce(hayLF: string, oldLF: string): null | MatchResult {
   if (!oldLF) return null
+
+  const getIndent = (s: string) => {
+    const match = s.match(/^[ \t]*/)
+    return match ? match[0] : ''
+  }
+
   // exact
   let idx = hayLF.indexOf(oldLF)
   if (idx !== -1) return { start: idx, end: idx + oldLF.length }
+
+  // Rebase indentation: convert units of fromIndent to units of toIndent
+  const rebaseIndent = (text: string, fromIndent: string, toIndent: string) => {
+    if (fromIndent === toIndent || !fromIndent) return text
+    const fromLen = fromIndent.length
+    return text.split('\n').map(line => {
+      if (!line.trim()) return line  // preserve empty lines
+      // Count how many "units" of fromIndent are at the start
+      let units = 0
+      let pos = 0
+      while (pos + fromLen <= line.length && line.slice(pos, pos + fromLen) === fromIndent) {
+        units++
+        pos += fromLen
+      }
+      // Replace with that many units of toIndent, keeping any remainder
+      return toIndent.repeat(units) + line.slice(pos)
+    }).join('\n')
+  }
+
   // whitespace-insensitive (collapse runs of space/tabs)
   const norm = (s: string) => s.replace(/[\t ]+/g, ' ').replace(/ *\n */g, '\n')
   const H = norm(hayLF), O = norm(oldLF)
   idx = H.indexOf(O)
   if (idx !== -1) {
     // Find the actual match boundaries in the original haystack
-    // We know it matches when normalized, so find the corresponding range
     let charCount = 0
     let startIdx = -1
     let endIdx = -1
@@ -196,32 +222,36 @@ function findReplaceOnce(hayLF: string, oldLF: string): null | { start: number; 
       return { start: startIdx, end: endIdx }
     }
     // Fallback: use first occurrence of first non-empty line as anchor
-    const first = (oldLF.split('\n').find(l => l.trim().length) || '').trim()
+    const firstNonEmptySearch = oldLF.split('\n').find(l => l.trim().length)
+    const first = (firstNonEmptySearch || '').trim()
     if (first) {
       const pos = hayLF.indexOf(first)
       if (pos !== -1) {
-        // Find how many lines oldLF spans
         const oldLineCount = oldLF.split('\n').length
         const hayLines = hayLF.split('\n')
         let currentPos = 0
         let lineIdx = 0
-        // Find which line contains pos
         for (let i = 0; i < hayLines.length; i++) {
-          if (currentPos + hayLines[i].length >= pos) {
-            lineIdx = i
-            break
-          }
-          currentPos += hayLines[i].length + 1 // +1 for newline
+          if (currentPos + hayLines[i].length >= pos) { lineIdx = i; break }
+          currentPos += hayLines[i].length + 1
         }
-        // Calculate end based on actual line content
         const matchedLines = hayLines.slice(lineIdx, lineIdx + oldLineCount)
         const matchedContent = matchedLines.join('\n')
-        const start = pos
+        const start = currentPos
         const end = start + matchedContent.length
+
+        // Indent fix for whitespace match
+        const searchIndent = getIndent(firstNonEmptySearch || '')
+        const hayIndent = getIndent(hayLines[lineIdx])
+        if (searchIndent !== hayIndent) {
+          return { start, end, indentFix: (t) => rebaseIndent(t, searchIndent, hayIndent) }
+        }
+
         return { start, end }
       }
     }
   }
+
   // indent-insensitive: compare left-trimmed lines across window length
   const oldLines = oldLF.split('\n')
   const hayLines = hayLF.split('\n')
@@ -234,36 +264,50 @@ function findReplaceOnce(hayLF: string, oldLF: string): null | { start: number; 
     }
     if (ok) {
       const start = hayLines.slice(0, i).join('\n').length + (i > 0 ? 1 : 0)
-      // Calculate end based on actual matched content length in haystack
       const matchedContent = hayLines.slice(i, i + olen).join('\n')
       const end = start + matchedContent.length
+
+      // Indent fix: find first non-empty line to anchor indentation
+      const firstIdx = oldLines.findIndex(l => l.trim().length)
+      if (firstIdx !== -1) {
+        const searchIndent = getIndent(oldLines[firstIdx])
+        const hayIndent = getIndent(hayLines[i + firstIdx])
+        if (searchIndent !== hayIndent) {
+          return { start, end, indentFix: (t) => rebaseIndent(t, searchIndent, hayIndent) }
+        }
+      }
+
       return { start, end }
     }
   }
+
   // anchor by first non-empty line
-  const first = oldLines.find(l => l.trim().length)
-  if (first) {
+  const firstNonEmptySearch = oldLines.find(l => l.trim().length)
+  if (firstNonEmptySearch) {
+    const first = firstNonEmptySearch.trim()
     const candIdx: number[] = []
     let pos = hayLF.indexOf(first)
     while (pos !== -1) { candIdx.push(pos); pos = hayLF.indexOf(first, pos + 1) }
     if (candIdx.length === 1) {
-      const start = candIdx[0]
-      // Find how many lines oldLF spans and calculate end based on actual content
+      const startPos = candIdx[0]
       const hayLines = hayLF.split('\n')
       let currentPos = 0
       let lineIdx = 0
-      // Find which line contains the match
       for (let i = 0; i < hayLines.length; i++) {
-        if (currentPos + hayLines[i].length >= start) {
-          lineIdx = i
-          break
-        }
-        currentPos += hayLines[i].length + 1 // +1 for newline
+        if (currentPos + hayLines[i].length >= startPos) { lineIdx = i; break }
+        currentPos += hayLines[i].length + 1
       }
-      // Calculate end based on actual matched lines in haystack
       const matchedLines = hayLines.slice(lineIdx, lineIdx + oldLines.length)
       const matchedContent = matchedLines.join('\n')
+      const start = currentPos
       const end = start + matchedContent.length
+
+      const searchIndent = getIndent(firstNonEmptySearch)
+      const hayIndent = getIndent(hayLines[lineIdx])
+      if (searchIndent !== hayIndent) {
+        return { start, end, indentFix: (t) => rebaseIndent(t, searchIndent, hayIndent) }
+      }
+
       return { start, end }
     }
   }
@@ -409,9 +453,10 @@ export async function applyEditsPayload(rawPayload: string, workspaceId?: string
       let failures = 0
       for (const g of op.groups) {
         const oldLF = toLF(g.oldText)
-        const newLF = toLF(g.newText)
+        let newLF = toLF(g.newText)
         const loc = findReplaceOnce(curLF, oldLF)
         if (!loc) { failures++; continue }
+        if (loc.indentFix) newLF = loc.indentFix(newLF)
         curLF = curLF.slice(0, loc.start) + newLF + curLF.slice(loc.end)
         changed = true
       }
@@ -464,9 +509,10 @@ export async function applyEditsPayload(rawPayload: string, workspaceId?: string
       const eol = detectEol(before)
       const hay = toLF(before)
       const oldLF = toLF(b.search)
-      const newLF = toLF(b.replace)
+      let newLF = toLF(b.replace)
       const loc = findReplaceOnce(hay, oldLF)
       if (!loc) { results.push({ path: rel, changed: false, message: 'no-match' }); previews.push({ path: rel, before, after: before, sizeBefore: before.length, sizeAfter: before.length }); continue }
+      if (loc.indentFix) newLF = loc.indentFix(newLF)
       const afterLF = hay.slice(0, loc.start) + newLF + hay.slice(loc.end)
       const after = fromLF(afterLF, eol)
       await atomicWrite(abs, after)

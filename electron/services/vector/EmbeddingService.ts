@@ -3,6 +3,7 @@ import { Worker } from 'worker_threads';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { app } from 'electron';
 
 // Simple LRU Cache implementation
 class LRUCache<K, V> {
@@ -138,10 +139,16 @@ export class EmbeddingService {
 
     // Robust ESM-compatible path resolution
     const currentDir = path.dirname(fileURLToPath(import.meta.url));
+    const appPath = app.getAppPath();
     const potentialPaths = [
-      path.resolve(currentDir, 'embedding-worker.mjs'), // Prod
-      path.resolve(currentDir, 'workers', 'embedding-worker.js'), // Dev
-      path.resolve(currentDir, '..', 'embedding-worker.mjs'), // Sibling dist
+      // ASAR unpacked (production)
+      path.resolve(appPath, 'embedding-worker.mjs'),
+      // Prod
+      path.resolve(currentDir, 'embedding-worker.mjs'),
+      // Dev
+      path.resolve(currentDir, 'workers', 'embedding-worker.js'),
+      // Sibling dist
+      path.resolve(currentDir, '..', 'embedding-worker.mjs'),
     ];
 
     const workerPath = potentialPaths.find(p => fs.existsSync(p));

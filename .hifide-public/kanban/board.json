@@ -111,6 +111,24 @@
       "archived": false
     },
     {
+      "id": "task-3b5b0fb9-f8d6-4b48-b103-600c4584f1c3",
+      "title": "Enhance applyEdits to handle indentation mismatches",
+      "status": "inProgress",
+      "order": 2,
+      "description": "Enhance the applyEdits tool to handle patches with mismatched indentation levels. This involves making the search logic more flexible to ignore leading whitespace differences while still ensuring a reliable match.",
+      "epicId": "epic-initial",
+      "kbArticleId": null,
+      "assignees": [],
+      "tags": [
+        "tooling",
+        "dx"
+      ],
+      "worklog": [],
+      "createdAt": 1767818670445,
+      "updatedAt": 1767818670445,
+      "archived": false
+    },
+    {
       "id": "task-ad6021ad-4f2a-4b5e-ac41-4dc0101aa0fe",
       "title": "Fix all TypeScript errors",
       "status": "done",

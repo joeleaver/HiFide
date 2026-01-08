@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // import { createRequire } from 'node:module';
 import fs from 'node:fs';
+import { app } from 'electron';
 import { Service } from '../base/Service.js';
 import { WatcherOptions, IndexingEvent } from './types.js';
 
@@ -37,16 +38,33 @@ export class WatcherService extends Service<WatcherState> {
             baseDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
         }
 
+        const appPath = app.getAppPath();
         const candidates = [
-            path.join(process.cwd(), 'dist-electron/workers/indexing/v2-watcher-worker.mjs'), // Vite build (Dev & Prod)
-            path.join(baseDir, '../../workers/indexing/v2-watcher-worker.js'), // compiled relative to services/indexing/
-            path.join(baseDir, '../../workers/indexing/v2-watcher-worker.ts'), // dev (ts-node)
-            path.join(process.cwd(), 'dist-electron/workers/indexing/v2-watcher-worker.js'), // prod bundle (legacy)
-            path.join(process.cwd(), 'electron/workers/indexing/v2-watcher-worker.ts'), // dev source
+            // ASAR unpacked (production) - use app.getAppPath() for correct resolution
+            path.join(appPath, 'dist-electron/workers/indexing/v2-watcher-worker.mjs'),
+            // ASAR unpacked relative to baseDir
+            path.join(baseDir, '../../workers/indexing/v2-watcher-worker.mjs'),
+            // Vite build (Dev & Prod)
+            path.join(process.cwd(), 'dist-electron/workers/indexing/v2-watcher-worker.mjs'),
+            // compiled relative to services/indexing/
+            path.join(baseDir, '../../workers/indexing/v2-watcher-worker.js'),
+            // dev (ts-node)
+            path.join(baseDir, '../../workers/indexing/v2-watcher-worker.ts'),
+            // prod bundle (legacy)
+            path.join(process.cwd(), 'dist-electron/workers/indexing/v2-watcher-worker.js'),
+            // dev source
+            path.join(process.cwd(), 'electron/workers/indexing/v2-watcher-worker.ts'),
         ];
 
+        console.log('[WatcherService] Looking for v2-watcher-worker');
+        console.log('[WatcherService] app.getAppPath():', appPath);
+        console.log('[WatcherService] baseDir:', baseDir);
+        console.log('[WatcherService] process.cwd():', process.cwd());
+        console.log('[WatcherService] Checking candidates:');
         for (const candidate of candidates) {
-            if (fs.existsSync(candidate)) return candidate;
+            const exists = fs.existsSync(candidate);
+            console.log(`  ${exists ? '✓' : '✗'} ${candidate}`);
+            if (exists) return candidate;
         }
 
         throw new Error('Could not find v2-watcher-worker');

@@ -137,7 +137,8 @@
       "**/node-pty/**/*.{node,dll,exe}",
       "node-modules/node-pty/build/Release/*.{node,dll,exe}",
       "**/vscode-ripgrep/**",
-      "**/@lancedb/lancedb*/**/*.node"
+      "**/@lancedb/lancedb*/**/*.node",
+      "dist-electron/workers/**/*.mjs"
     ],
     "npmRebuild": true,
     "win": {

@@ -22,8 +22,8 @@ export function supportsReasoningEffort(model: string): boolean {
       /claude-3-7-sonnet/i.test(model) || /claude-3\.7/i.test(model) ||
       /claude-3-5-sonnet/i.test(model) || /claude-3\.5-sonnet/i.test(model)) return true
 
-  // Gemini: 2.5+ and 3.x models
-  if (/(2\.5|[^0-9]3[.-])/i.test(model) && /gemini/i.test(model)) return true
+  // Gemini: 2.5+ and 3.x models (match gemini-2.5-*, gemini-3.0-*, etc.)
+  if (/gemini.*?(2\.5|(?:^|-)3\.)/i.test(model)) return true
 
   // Fireworks: all models support reasoning
   if (/^accounts\/fireworks/i.test(model)) return true
@@ -46,8 +46,8 @@ export function supportsExtendedThinking(model: string): boolean {
   const isOpenRouter = lowerModel.startsWith('openrouter/') || lowerModel.includes('openrouter')
   const cleanModel = isOpenRouter ? model.replace(/^openrouter\//i, '') : model
 
-  // Gemini 2.5+ or 3+
-  if (/(2\.5|[^0-9]3[.-])/i.test(cleanModel) && (/gemini/i.test(cleanModel) || isOpenRouter)) return true
+  // Gemini 2.5+ or 3+ (match gemini-2.5-*, gemini-3.0-*, etc.)
+  if (/gemini.*?(2\.5|(?:^|-)3\.)/i.test(cleanModel) || (isOpenRouter && /(2\.5|(?:^|-)3\.)/i.test(cleanModel))) return true
 
   // Anthropic Claude 3.5+ Sonnet, 3.7+, 4+
   if (/claude-4/i.test(cleanModel) || /claude-opus-4/i.test(cleanModel) ||
@@ -80,7 +80,7 @@ export function supportsReasoningPersistence(provider: string, model: string): b
 
   if (provider === 'gemini') {
     // Gemini 2.5+ and 3.x models support thinking
-    return /gemini-[23]\./i.test(model)
+    return /gemini.*?(2\.5|(?:^|-)3\.)/i.test(model)
   }
 
   // Fireworks and OpenRouter support all models

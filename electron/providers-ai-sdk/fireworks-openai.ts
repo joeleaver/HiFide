@@ -1,12 +1,12 @@
 /**
  * Fireworks provider using the OpenAI-compatible core.
- * 
+ *
  * Fireworks AI provides an OpenAI-compatible API endpoint.
  * This thin wrapper configures the core provider with Fireworks-specific settings.
- * 
+ *
  * Key features:
- * - Extracts <think>...</think> reasoning blocks from DeepSeek and similar models
- * - Filters out "None" artifacts common with reasoning models
+ * - Full OpenAI Chat Completions API compatibility
+ * - Supports streaming, function calling, and structured outputs
  */
 import {
   createOpenAICompatibleProvider,
@@ -20,14 +20,6 @@ import {
 export const FireworksOpenAIProvider = createOpenAICompatibleProvider({
   id: 'fireworks',
   baseURL: 'https://api.fireworks.ai/inference/v1',
-
-  // Add reasoning parameter like OpenRouter does
-  requestModifier: (body) => ({
-    ...body,
-  })
-
-  // Extract <think> tags from streaming responses
-  //reasoningExtractor: extractThinkTags
 })
 
 export default FireworksOpenAIProvider

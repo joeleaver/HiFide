@@ -40,6 +40,8 @@ interface TrackerState {
   anthropic: ProviderLimits
   gemini: ProviderLimits
   fireworks: ProviderLimits
+  xai: ProviderLimits
+  openrouter: ProviderLimits
 }
 
 /**
@@ -50,14 +52,16 @@ class RateLimitTracker {
     openai: {},
     anthropic: {},
     gemini: {},
-    fireworks: {}
+    fireworks: {},
+    xai: {},
+    openrouter: {}
   }
 
   /**
    * Check if we should wait before making a request
    * Returns wait time in ms (0 if no wait needed)
    */
-  async checkAndWait(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks', model: string): Promise<number> {
+  async checkAndWait(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter', model: string): Promise<number> {
     const providerState = (this.state as any)[provider] as ProviderLimits | undefined
     const limits = providerState ? providerState[model] : undefined
     if (!limits) return 0
@@ -101,7 +105,7 @@ class RateLimitTracker {
   /**
    * Update limits from successful response headers
    */
-  updateFromHeaders(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks', model: string, headers: any): void {
+  updateFromHeaders(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter', model: string, headers: any): void {
     if (!(this.state as any)[provider]) {
       // Initialize missing provider bucket defensively
       ;(this.state as any)[provider] = {}
@@ -183,7 +187,7 @@ class RateLimitTracker {
   /**
    * Update limits from 429 error
    */
-  updateFromError(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks', model: string, error: any, parsedInfo: any): void {
+  updateFromError(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter', model: string, error: any, parsedInfo: any): void {
     if (!(this.state as any)[provider]) {
       ;(this.state as any)[provider] = {}
     }
@@ -222,7 +226,7 @@ class RateLimitTracker {
    * Decrement request/token counters (optimistic tracking)
    * Called before making a request to track usage even if headers aren't available
    */
-  recordRequest(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks', model: string, estimatedTokens: number = 1000): void {
+  recordRequest(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter', model: string, estimatedTokens: number = 1000): void {
     const providerState = (this.state as any)[provider] as ProviderLimits | undefined
     const limits = providerState ? providerState[model] : undefined
     if (!limits) return
@@ -241,7 +245,7 @@ class RateLimitTracker {
   /**
    * Get current limits for debugging/UI display
    */
-  getLimits(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks', model: string): RateLimitInfo | undefined {
+  getLimits(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter', model: string): RateLimitInfo | undefined {
     const providerState = (this.state as any)[provider] as ProviderLimits | undefined
     return providerState ? providerState[model] : undefined
   }
@@ -249,7 +253,7 @@ class RateLimitTracker {
   /**
    * Clear limits for a specific provider/model (for testing)
    */
-  clearLimits(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks', model?: string): void {
+  clearLimits(provider: 'openai' | 'anthropic' | 'gemini' | 'fireworks' | 'xai' | 'openrouter', model?: string): void {
     const providerState = (this.state as any)[provider]
     if (!providerState) return
     if (model) {
