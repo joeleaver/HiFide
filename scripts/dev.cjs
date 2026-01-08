@@ -19,6 +19,6 @@ if (cleanResult.status !== 0) {
 
 // Step 2: Start vite
 const isWin = process.platform === 'win32'
-const viteResult = spawnSync('vite', [], { stdio: 'inherit', shell: isWin })
+const viteResult = spawnSync('npx', ['vite'], { stdio: 'inherit', shell: isWin })
 
 process.exit(viteResult.status ?? 1)

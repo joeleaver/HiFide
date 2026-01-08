@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   node-pty@1.1.0:
-    hash: d24d6bd86e8d245a395622fb5a70fe84838f5f3a2ab0604ee01f52c834813f82
+    hash: d132e0b1278972ac8103197307c779cd35bceceef4a4fa21cb613d5dd2efe539
     path: patches/node-pty@1.1.0.patch
   tree-sitter@0.25.0:
     hash: 1946b3938b812a174de5aeec6b07a065f64f80095637495c3f765073d8a15f9a
@@ -144,7 +144,7 @@ importers:
         version: 0.54.0
       node-pty:
         specifier: 1.1.0
-        version: 1.1.0(patch_hash=d24d6bd86e8d245a395622fb5a70fe84838f5f3a2ab0604ee01f52c834813f82)
+        version: 1.1.0(patch_hash=d132e0b1278972ac8103197307c779cd35bceceef4a4fa21cb613d5dd2efe539)
       openai:
         specifier: ^6.2.0
         version: 6.15.0(ws@8.18.3)(zod@4.3.4)
@@ -263,6 +263,9 @@ importers:
       jest:
         specifier: ^30.2.0
         version: 30.2.0(@types/node@25.0.3)(babel-plugin-macros@3.1.0)
+      node-addon-api:
+        specifier: ^8.5.0
+        version: 8.5.0
       node-gyp:
         specifier: ^10.3.1
         version: 10.3.1
@@ -11728,7 +11731,7 @@ snapshots:
 
   node-int64@0.4.0: {}
 
-  node-pty@1.1.0(patch_hash=d24d6bd86e8d245a395622fb5a70fe84838f5f3a2ab0604ee01f52c834813f82):
+  node-pty@1.1.0(patch_hash=d132e0b1278972ac8103197307c779cd35bceceef4a4fa21cb613d5dd2efe539):
     dependencies:
       node-addon-api: 7.1.1
 
