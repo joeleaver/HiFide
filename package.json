@@ -5,8 +5,8 @@
   "main": "dist-electron/main.mjs",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/clean-dist-electron.cjs && vite",
-    "build": "tsc && vite build && pnpm -s rebuild:native && pnpm -s package:electron",
+    "dev": "node scripts/dev.cjs",
+    "build": "node scripts/build.cjs",
     "preview": "vite preview",
     "package:electron": "node scripts/package-electron.cjs",
     "prepackage:kill": "node scripts/prepackage-kill.cjs",
