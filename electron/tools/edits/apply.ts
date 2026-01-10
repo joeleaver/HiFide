@@ -8,67 +8,26 @@ import type { AgentTool } from '../../providers/provider'
 import { randomUUID } from 'node:crypto'
 import { applyEditsPayload } from './applySmartEngine'
 
-const APPLY_EDITS_DESCRIPTION = [
-  '# applyEdits tool',
-  '',
-  'Use **applyEdits** for precise, surgical modifications to existing workspace files. The tool accepts a *single, plain-text payload* that describes one or more edits. Do **not** wrap the payload in JSON or Markdown code fences.',
-  '',
-  '## Supported formats',
-  '',
-  '### 1. Search/Replace blocks',
-  '```',
-  'File: path/to/file.ts',
-  '<<<<<<< SEARCH',
-  'old text',
-  '=======',
-  'new text',
-  '>>>>>>> REPLACE',
-  '```',
-  '- Repeat additional blocks by adding a blank line between them.',
-  '- The `SEARCH` section must match the file contents exactly (after normalizing line endings).',
-  '',
-  '### 2. OpenAI Patch format',
-  '```',
-  '*** Begin Patch',
-  '*** Update File: path/to/file.ts',
-  '@@',
-  '-old line',
-  '+new line',
-  '```',
-  '- Include at least one `@@` hunk header.',
-  '- Context lines (`unchanged`) are optional but recommended when multiple matches exist.',
-  '- `*** End Patch` is optional.',
-  '',
-  '### 3. Unified diff (git-style)',
-  '```',
-  '--- a/path/to/file.ts',
-  '+++ b/path/to/file.ts',
-  '@@',
-  '-old line',
-  '+new line',
-  '```',
-  '- File paths must be workspace-relative.',
-  '',
-  '## General rules',
-  '- Provide **only** the patch text as the tool input.',
-  '- Reference files relative to the workspace root.',
-  '- Keep edits minimal—prefer multiple targeted blocks over full rewrites.',
-  '- If nothing matches, the tool returns `no-match`; inspect the file and try again.',
-].join('\n');
-
 export const applyEditsTool: AgentTool = {
   name: 'applyEdits',
-  description: APPLY_EDITS_DESCRIPTION,
+  description: 'Apply file edits using Search/Replace blocks format.',
   parameters: {
     type: 'object',
     properties: {
       payload: {
         type: 'string',
-        description: 'Raw edit payload (OpenAI Patch, unified diff, or Search/Replace blocks). Provide only the patch content; plain text only, no JSON or code fences.'
+        description: `Search/Replace block format:
+File: path/to/file.ext
+<<<<<<< SEARCH
+exact text to find
+=======
+replacement text
+>>>>>>> REPLACE
+
+The SEARCH section must match the file content exactly (including whitespace).`
       }
     },
     required: ['payload'],
-    additionalProperties: false
   },
   run: async ({ payload }: { payload: string }, meta?: any) => {
     try {

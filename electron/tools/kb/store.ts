@@ -4,15 +4,15 @@ import { randomUUID } from 'node:crypto'
 
 export const knowledgeBaseStoreTool: AgentTool = {
   name: 'knowledgeBaseStore',
-  description: 'Create or update Knowledge Base entries (single source of truth). Do not write markdown files directly; persist via this tool and associate related workspace files as needed.',
+  description: 'Create or update a KB entry.',
   parameters: {
     type: 'object',
     properties: {
-      id: { type: 'string', description: 'Existing KB item id to update. Omit to create a new entry.' },
-      title: { type: 'string', description: 'Concise human-readable title. Required for create; optional for update.' },
-      description: { type: 'string', description: 'Markdown body of the entry. Keep concise and factual. Required for create; optional for update (must be non-empty when provided).' },
-      tags: { type: 'array', items: { type: 'string' }, description: 'Tags to assign (replaces existing tags on update). Prefer small, reusable tags.' },
-      files: { type: 'array', items: { type: 'string' }, description: 'Workspace-relative source file paths this entry documents. Use to link docs to code. Do not create or modify files directly.' }
+      id: { type: 'string' },
+      title: { type: 'string' },
+      description: { type: 'string' },
+      tags: { type: 'array', items: { type: 'string' } },
+      files: { type: 'array', items: { type: 'string' } }
     },
     required: [],
   },

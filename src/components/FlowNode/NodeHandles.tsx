@@ -57,6 +57,10 @@ export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
     // Tools node has optional Context In and Data In
     inputs.push({ id: 'context', label: 'Context In', color: contextColor })
     inputs.push({ id: 'data', label: 'Data In', color: CONNECTION_COLORS.data })
+  } else if (nodeType === 'semanticTools') {
+    // Semantic Tools node has Context In and Tools In (from upstream Tools node)
+    inputs.push({ id: 'context', label: 'Context In', color: contextColor })
+    inputs.push({ id: 'tools', label: 'Tools In', color: CONNECTION_COLORS.tools })
   } else if (nodeType === 'injectMessages') {
     // InjectMessages node has Context In and optional dynamic message inputs
     inputs.push({ id: 'context', label: 'Context In', color: contextColor })
@@ -132,6 +136,10 @@ export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
     // Tools node has Context Out and Tools output
     outputs.push({ id: 'context', label: 'Context Out', color: contextColor })
     outputs.push({ id: 'tools', label: 'Tools', color: CONNECTION_COLORS.tools })
+  } else if (nodeType === 'semanticTools') {
+    // Semantic Tools node has Context Out and Tools output (the 2 meta-tools)
+    outputs.push({ id: 'context', label: 'Context Out', color: contextColor })
+    outputs.push({ id: 'tools', label: 'Tools', color: CONNECTION_COLORS.tools })
   } else if (nodeType === 'defaultContextStart' || nodeType === 'newContext') {
     // Entry nodes only have Context Out (no data)
     outputs.push({ id: 'context', label: 'Context Out', color: contextColor })
@@ -150,8 +158,9 @@ export default function NodeHandles({ nodeType, config }: NodeHandlesProps) {
   // Slightly larger row height and offset to avoid overlap with header/overlays
   const minHeight = Math.max(30, maxHandles * 24) // At least 30px, or 24px per handle
 
-  // Debug: log handles for LLM Request nodes
-  if (nodeType === 'llmRequest') {
+  // Debug: log handles for semantic tools and LLM Request nodes
+  if (nodeType === 'semanticTools' || nodeType === 'llmRequest') {
+    console.log(`[NodeHandles] ${nodeType} handles:`, { inputs: inputs.map(i => i.id), outputs: outputs.map(o => o.id) })
   }
 
   return (

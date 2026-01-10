@@ -19,6 +19,7 @@ import { portalOutputNode, metadata as portalOutputMetadata } from './portalOutp
 import { injectMessagesNode, metadata as injectMessagesMetadata } from './injectMessages'
 import { cacheNode, metadata as cacheMetadata } from './cache'
 import { readFileNode, metadata as readFileMetadata } from './readFile'
+import { semanticToolsNode, metadata as semanticToolsMetadata } from './semanticTools'
 
 
 /**
@@ -86,6 +87,10 @@ const NODE_REGISTRY: Record<string, NodeMetadata> = {
   cache: {
     fn: cacheNode,
     ...cacheMetadata
+  },
+  semanticTools: {
+    fn: semanticToolsNode,
+    ...semanticToolsMetadata
   },
 }
 

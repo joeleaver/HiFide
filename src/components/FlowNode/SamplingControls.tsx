@@ -17,6 +17,10 @@ export interface ModelOverride {
   reasoningEffort?: 'low' | 'medium' | 'high'
   includeThoughts?: boolean
   thinkingBudget?: number
+  /** Gemini only: 'explicit' (default, guaranteed savings) or 'implicit' (automatic caching) */
+  geminiCacheMode?: 'explicit' | 'implicit'
+  /** Gemini explicit cache: token threshold for mid-loop cache rebuild (default: 500) */
+  geminiCacheRefreshThreshold?: number
 }
 
 interface SamplingControlsProps {
@@ -204,6 +208,42 @@ export const SamplingControls: React.FC<SamplingControlsProps> = ({
       </div>
       )}
 
+      {/* Gemini Cache Mode */}
+      {provider === 'gemini' && (
+      <div style={sectionStyle}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc' }}>
+          <span style={{ fontSize: 10, color: '#888', width: 90 }}>Cache mode:</span>
+          <select
+            value={get('geminiCacheMode') || 'explicit'}
+            onChange={(e) => set('geminiCacheMode', e.target.value as 'explicit' | 'implicit')}
+            style={{ ...selectStyle, flex: 1 }}
+          >
+            <option value="explicit">Explicit (guaranteed savings)</option>
+            <option value="implicit">Implicit (automatic)</option>
+          </select>
+        </label>
+        {(get('geminiCacheMode') || 'explicit') === 'explicit' && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cccccc', marginTop: 4 }}>
+            <span style={{ fontSize: 10, color: '#888', width: 90 }}>Refresh threshold:</span>
+            <input
+              type="number"
+              min={100}
+              step={100}
+              value={get('geminiCacheRefreshThreshold') ?? 500}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10)
+                set('geminiCacheRefreshThreshold', Number.isFinite(v) && v > 0 ? v : undefined)
+              }}
+              placeholder="500"
+              style={{ ...inputStyle, width: 70 }}
+            />
+            <span style={{ fontSize: 9, color: '#666' }}>tokens</span>
+          </label>
+        )}
+        <span style={hintStyle}>Explicit: 75-90% savings guaranteed. Implicit: probabilistic caching by Gemini.</span>
+      </div>
+      )}
+
       {/* Model-Specific Overrides */}
       <div style={{ borderTop: '1px solid #3e3e42', paddingTop: 10 }}>
         <div style={{ fontSize: 10, color: '#888', marginBottom: 6, fontWeight: 600 }}>
@@ -324,6 +364,41 @@ export const SamplingControls: React.FC<SamplingControlsProps> = ({
                           }}
                           placeholder="2048"
                           style={{ ...inputStyle, width: 60 }}
+                        />
+                      </label>
+                    )}
+                  </>
+                )}
+
+                {provider === 'gemini' && (
+                  <>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#cccccc' }}>
+                      <span style={{ fontSize: 9, color: '#888' }}>Cache:</span>
+                      <select
+                        value={override.geminiCacheMode || 'explicit'}
+                        onChange={(e) => updateOverride(idx, {
+                          geminiCacheMode: e.target.value as 'explicit' | 'implicit'
+                        })}
+                        style={{ ...selectStyle, width: 80 }}
+                      >
+                        <option value="explicit">Explicit</option>
+                        <option value="implicit">Implicit</option>
+                      </select>
+                    </label>
+                    {(override.geminiCacheMode || 'explicit') === 'explicit' && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#cccccc' }}>
+                        <span style={{ fontSize: 9, color: '#888' }}>Refresh:</span>
+                        <input
+                          type="number"
+                          min={100}
+                          step={100}
+                          value={override.geminiCacheRefreshThreshold ?? ''}
+                          onChange={(e) => {
+                            const v = parseInt(e.target.value, 10)
+                            updateOverride(idx, { geminiCacheRefreshThreshold: Number.isFinite(v) && v > 0 ? v : undefined })
+                          }}
+                          placeholder="500"
+                          style={{ ...inputStyle, width: 50 }}
                         />
                       </label>
                     )}

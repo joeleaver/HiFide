@@ -9,7 +9,11 @@
  * - Supports streaming, function calling, and structured outputs
  * - Supports reasoning effort for o1/o3 models
  *
- * Reference: https://platform.openai.com/docs/api-reference
+ * Caching: OpenAI provides automatic prefix caching (no code changes needed).
+ * Prompts ≥1024 tokens are automatically cached with prefix matching.
+ * Cached tokens cost 50% less. Cache eviction is typically 5-10 minutes.
+ *
+ * Reference: https://platform.openai.com/docs/guides/prompt-caching
  */
 import {
   createOpenAICompatibleProvider,

@@ -295,6 +295,33 @@ export function listActiveFlows(): string[] {
 }
 
 /**
+ * List active flow request IDs for a specific workspace
+ * This is the preferred method for workspace-scoped operations
+ */
+export function listActiveFlowsForWorkspace(workspaceId: string): string[] {
+  const result: string[] = []
+  for (const [requestId, scheduler] of activeFlows.entries()) {
+    if (scheduler.getWorkspaceId() === workspaceId) {
+      result.push(requestId)
+    }
+  }
+  return result
+}
+
+/**
+ * List active flow request IDs for a specific session
+ */
+export function listActiveFlowsForSession(sessionId: string): string[] {
+  const result: string[] = []
+  for (const [requestId, scheduler] of activeFlows.entries()) {
+    if (scheduler.getSessionId() === sessionId) {
+      result.push(requestId)
+    }
+  }
+  return result
+}
+
+/**
  * Get the active flows map (for RPC handlers)
  */
 export function getActiveFlows(): Map<string, FlowScheduler> {

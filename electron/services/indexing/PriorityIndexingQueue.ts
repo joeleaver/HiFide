@@ -19,17 +19,8 @@ interface QueueItem {
   event: IndexingEvent
 }
 
-interface QueueState {
-  items: QueueItem[]
-  workspaceQueues: Map<string, number[]> // workspaceId -> indices in items
-}
-
 export class PriorityIndexingQueue {
-  private state: QueueState = {
-    items: [],
-    workspaceQueues: new Map()
-  }
-
+  private items: QueueItem[] = []
   private lastRoundRobinWorkspace: string | null = null
 
   /**
@@ -40,17 +31,17 @@ export class PriorityIndexingQueue {
     const priority = this.getPriority(type)
 
     for (const event of events) {
-      const existingIndex = this.state.items.findIndex(
+      const existingIndex = this.items.findIndex(
         item => item.workspaceId === workspaceId && item.path === event.path
       )
 
       if (existingIndex !== -1) {
         // Deduplicate: update existing item
-        const existing = this.state.items[existingIndex]
+        const existing = this.items[existingIndex]
 
         if (event.type === 'unlink') {
           // Unlink overrides everything
-          this.state.items[existingIndex] = {
+          this.items[existingIndex] = {
             workspaceId,
             type,
             priority: Math.max(existing.priority, priority),
@@ -60,14 +51,14 @@ export class PriorityIndexingQueue {
           }
         } else if (existing.event.type === 'add') {
           // Keep as add, but update timestamp/priority
-          this.state.items[existingIndex] = {
+          this.items[existingIndex] = {
             ...existing,
             timestamp: event.timestamp,
             priority: Math.max(existing.priority, priority)
           }
         } else {
           // Update to new event
-          this.state.items[existingIndex] = {
+          this.items[existingIndex] = {
             workspaceId,
             type,
             priority: Math.max(existing.priority, priority),
@@ -78,7 +69,7 @@ export class PriorityIndexingQueue {
         }
       } else {
         // Add new item
-        this.state.items.push({
+        this.items.push({
           workspaceId,
           type,
           priority,
@@ -98,7 +89,7 @@ export class PriorityIndexingQueue {
    */
   pop(count: number): QueueItem[] {
     const result: QueueItem[] = []
-    const workspaces = Array.from(new Set(this.state.items.map(item => item.workspaceId)))
+    const workspaces = Array.from(new Set(this.items.map(item => item.workspaceId)))
 
     if (workspaces.length === 0) return []
 
@@ -110,15 +101,15 @@ export class PriorityIndexingQueue {
     }
 
     // Pop items round-robin from each workspace
-    for (let i = 0; i < count && this.state.items.length > 0; i++) {
+    for (let i = 0; i < count && this.items.length > 0; i++) {
       const wsIndex = (startIndex + i) % workspaces.length
       const ws = workspaces[wsIndex]
 
-      const itemIndex = this.state.items.findIndex(item => item.workspaceId === ws)
+      const itemIndex = this.items.findIndex(item => item.workspaceId === ws)
       if (itemIndex !== -1) {
-        const item = this.state.items[itemIndex]
+        const item = this.items[itemIndex]
         result.push(item)
-        this.state.items.splice(itemIndex, 1)
+        this.items.splice(itemIndex, 1)
         this.lastRoundRobinWorkspace = ws
       }
     }
@@ -130,15 +121,14 @@ export class PriorityIndexingQueue {
    * Peek at the next item without removing it
    */
   peek(): QueueItem | undefined {
-    return this.state.items[0]
+    return this.items[0]
   }
 
   /**
    * Clear all items from the queue
    */
   clear(): void {
-    this.state.items = []
-    this.state.workspaceQueues.clear()
+    this.items = []
     this.lastRoundRobinWorkspace = null
   }
 
@@ -146,22 +136,21 @@ export class PriorityIndexingQueue {
    * Clear items for a specific workspace
    */
   clearWorkspace(workspaceId: string): void {
-    this.state.items = this.state.items.filter(item => item.workspaceId !== workspaceId)
-    this.state.workspaceQueues.delete(workspaceId)
+    this.items = this.items.filter(item => item.workspaceId !== workspaceId)
   }
 
   /**
    * Get total queue length
    */
   getQueueLength(): number {
-    return this.state.items.length
+    return this.items.length
   }
 
   /**
    * Get queue length for a specific workspace
    */
   getWorkspaceQueueLength(workspaceId: string): number {
-    return this.state.items.filter(item => item.workspaceId === workspaceId).length
+    return this.items.filter(item => item.workspaceId === workspaceId).length
   }
 
   /**
@@ -184,7 +173,7 @@ export class PriorityIndexingQueue {
    * Sort queue by priority (desc) then timestamp (asc)
    */
   private sort(): void {
-    this.state.items.sort((a, b) => {
+    this.items.sort((a, b) => {
       if (b.priority !== a.priority) return b.priority - a.priority
       return a.timestamp - b.timestamp
     })

@@ -23,6 +23,12 @@ export type TokenUsage = {
   cachedTokens?: number  // Tokens served from cache (Gemini context caching)
   reasoningTokens?: number  // Tokens used for reasoning/thinking (Gemini 2.0, Claude 3.7)
   stepCount?: number  // Number of agentic turns/steps (for multi-turn LLM calls)
+  // Per-step output breakdown for token category tracking
+  stepOutput?: {
+    text: number        // Text tokens produced this step
+    reasoning: number   // Reasoning/thinking tokens this step
+    toolCallArgs: number // Tool call argument tokens this step
+  }
 }
 
 // Generic tool spec used by provider-native agent runtimes
@@ -55,6 +61,9 @@ export interface ProviderAdapter {
     // Thinking controls (Gemini 2.5+ and Anthropic Claude 3.5+ Sonnet, 3.7+, 4+)
     includeThoughts?: boolean
     thinkingBudget?: number
+    // Gemini caching controls
+    geminiCacheMode?: 'explicit' | 'implicit'
+    geminiCacheRefreshThreshold?: number
 
     messages?: ChatMessage[]  // For OpenAI and Fireworks (no 'system' role)
     system?: any  // For Anthropic (blocks) and OpenAI/Fireworks (string)

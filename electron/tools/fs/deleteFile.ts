@@ -4,15 +4,11 @@ import fs from 'node:fs/promises'
 
 export const deleteFileTool: AgentTool = {
   name: 'fsDeleteFile',
-  description: 'Delete a file from the workspace. If force=true, succeeds when the file is missing.',
+  description: 'Delete a file.',
   parameters: {
     type: 'object',
-    properties: {
-      path: { type: 'string', description: 'Workspace-relative file path' },
-      force: { type: 'boolean', default: true },
-    },
+    properties: { path: { type: 'string' } },
     required: ['path'],
-    additionalProperties: false,
   },
   run: async (input: any, meta?: any) => {
     const rel = input?.path

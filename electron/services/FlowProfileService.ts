@@ -126,8 +126,9 @@ export class FlowProfileService extends Service<FlowProfileState> {
 
   /**
    * Reload templates for a workspace (after save/delete/import)
+   * @param library - If provided, indicates which library changed (for targeted notifications)
    */
-  async reloadTemplatesFor(workspaceId: string): Promise<void> {
+  async reloadTemplatesFor(workspaceId: string, library?: FlowLibrary): Promise<void> {
     const templates = await listFlowTemplates(workspaceId)
     const systemTemplatesRecord = await loadSystemTemplates()
 
@@ -145,6 +146,14 @@ export class FlowProfileService extends Service<FlowProfileState> {
     wsState.systemTemplates = systemTemplates
 
     this.setState({ ...this.state })
+
+    // Emit event so other windows can be notified
+    // User flows are global, workspace flows are workspace-scoped
+    this.emit('flow:templates:changed', {
+      workspaceId,
+      library: library || 'user', // Default to user if not specified
+      templateCount: templates.length,
+    })
   }
 
   /**
@@ -187,7 +196,7 @@ export class FlowProfileService extends Service<FlowProfileState> {
       }
 
       if (reloadTemplates) {
-        await this.reloadTemplatesFor(workspaceId)
+        await this.reloadTemplatesFor(workspaceId, library)
       }
     } catch (error) {
       console.error('[FlowProfile] Failed to save profile:', error)
@@ -206,13 +215,15 @@ export class FlowProfileService extends Service<FlowProfileState> {
     try {
       // Try workspace library first
       const wsResult = await deleteWorkspaceFlowProfile(name, workspaceId)
-      
+
+      let deletedLibrary: FlowLibrary = 'workspace'
       // If not in workspace, or deletion failed for non-existence, try user library
       if (!wsResult.success) {
         await deleteFlowProfile(name)
+        deletedLibrary = 'user'
       }
 
-      await this.reloadTemplatesFor(workspaceId)
+      await this.reloadTemplatesFor(workspaceId, deletedLibrary)
     } catch (error) {
       console.error('[FlowProfile] Failed to delete profile:', error)
       throw error
@@ -291,7 +302,7 @@ export class FlowProfileService extends Service<FlowProfileState> {
       // For now, just pass the serialized data and let saveFlowProfile handle it
       // (saveFlowProfile will serialize them again, which is a no-op for already-serialized data)
       await saveFlowProfile(profile.nodes as any, profile.edges as any, profile.name, profile.description || '')
-      await this.reloadTemplatesFor(workspaceId)
+      await this.reloadTemplatesFor(workspaceId, 'user') // Imports go to user library
 
       this.setState({
         importResult: { success: true, name: profile.name },

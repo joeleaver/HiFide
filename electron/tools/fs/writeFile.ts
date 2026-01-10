@@ -10,15 +10,14 @@ import { resolveWithinWorkspace, resolveWithinWorkspaceWithRoot, atomicWrite } f
 
 export const writeFileTool: AgentTool = {
   name: 'fsWriteFile',
-  description: 'Write a UTF-8 text file atomically in the workspace. Automatically normalizes line endings to match the existing file (CRLF/LF). Use for new files or full rewrites; for surgical changes, prefer applyEdits or codeApplyEditsTargeted.',
+  description: 'Write a file in the workspace.',
   parameters: {
     type: 'object',
     properties: {
-      path: { type: 'string', description: 'Workspace-relative path' },
-      content: { type: 'string', description: 'Full file content to write' },
+      path: { type: 'string' },
+      content: { type: 'string' },
     },
     required: ['path', 'content'],
-    additionalProperties: false,
   },
   run: async (input: any, meta?: any) => {
     const rel = input?.path

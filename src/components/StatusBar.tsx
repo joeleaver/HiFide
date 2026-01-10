@@ -18,8 +18,7 @@ export default function StatusBar() {
   // Indexing status
   const indexingStatus = useIndexingStore((s) => s.status)
   const indexingLoading = useIndexingStore((s) => s.loading)
-  /* const startIndexing = useIndexingStore((s) => s.startIndexing) */
-  /* const stopIndexing = useIndexingStore((s) => s.stopIndexing) */
+  const indexingError = useIndexingStore((s) => s.error)
 
   // Subscribe to indexing status updates
   useEffect(() => {
@@ -135,17 +134,28 @@ export default function StatusBar() {
 
       {/* Right side - Combined status for agent view */}
       <Group gap={8} style={{ paddingRight: 8 }}>
+        {/* Indexing error state */}
+        {indexingError && (
+          <Tooltip label={`Indexing error: ${indexingError}`}>
+            <Group gap={4} px={4} style={{ cursor: 'help' }}>
+              <Text size="xs" style={{ color: '#fca5a5' }}>
+                Index Error
+              </Text>
+            </Group>
+          </Tooltip>
+        )}
+
         {/* Indexing status - detailed counts */}
-        {(indexingStatus?.isProcessing || indexingLoading) && (
+        {!indexingError && (indexingStatus?.isProcessing || indexingLoading) && (
           <Tooltip label={
-            indexingStatus?.currentTask 
+            indexingStatus?.currentTask
               ? `${indexingStatus.currentTask}`
-              : 'Indexing...'
+              : `Indexing: ${indexingStatus?.code?.indexed || 0} of ${indexingStatus?.code?.total || 0} files`
           }>
             <Group gap={4} px={4} style={{ cursor: 'help' }}>
               <Loader size={10} color="white" />
               <Text size="xs" style={{ color: '#fff' }}>
-                {indexingStatus?.code?.total || 0}/{indexingStatus?.code?.indexed || 0}
+                {indexingStatus?.code?.indexed || 0}/{indexingStatus?.code?.total || 0}
               </Text>
             </Group>
           </Tooltip>

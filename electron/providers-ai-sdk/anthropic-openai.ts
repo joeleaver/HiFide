@@ -9,6 +9,14 @@
  * - Supports streaming, function calling, and structured outputs
  * - Supports extended thinking for Claude 3.5+ Sonnet, 3.7+, and 4+
  *
+ * Caching: Anthropic requires explicit cache_control breakpoints. The core
+ * provider adds these automatically to the last tool definition and system
+ * message when using Anthropic models.
+ *
+ * NOTE: Anthropic's OpenAI-compatible API does NOT support prompt caching.
+ * For caching support, use Anthropic models via OpenRouter instead, which
+ * does support cache_control breakpoints.
+ *
  * Reference: https://docs.anthropic.com/en/api/openai-sdk
  */
 import {

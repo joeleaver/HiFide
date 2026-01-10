@@ -4,12 +4,10 @@ import { randomUUID } from 'node:crypto'
 
 export const knowledgeBaseGetTool: AgentTool = {
   name: 'knowledgeBaseGet',
-  description: 'Retrieve the full content of a Knowledge Base entry by its ID. Returns the raw markdown body and metadata.',
+  description: 'Get a KB entry by ID.',
   parameters: {
     type: 'object',
-    properties: {
-      id: { type: 'string', description: 'The unique ID of the Knowledge Base entry to retrieve.' }
-    },
+    properties: { id: { type: 'string' } },
     required: ['id']
   },
   run: async (input: any, meta?: any) => {

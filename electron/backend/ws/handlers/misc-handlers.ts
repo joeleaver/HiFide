@@ -311,25 +311,25 @@ export function createMiscHandlers(
 
   addMethod('flow.cancel', async ({ requestId }: { requestId?: string }) => {
     try {
-      const { cancelFlow } = await import('../../../flow-engine/index.js')
+      const { cancelFlow, listActiveFlowsForWorkspace } = await import('../../../flow-engine/index.js')
 
       if (requestId) {
         // Cancel specific flow
         const result = await cancelFlow(requestId)
         return result
       } else {
-        // Cancel all flows for this workspace
+        // Cancel all flows for THIS WORKSPACE ONLY (not global!)
         const workspaceId = await getConnectionWorkspaceId(connection)
         if (!workspaceId) {
           return { ok: false, error: 'No workspace bound' }
         }
 
-        const { getActiveFlows } = await import('../../../flow-engine/index.js')
-        const activeFlows = getActiveFlows()
+        // Get only flows for this workspace
+        const flowsToCancel = listActiveFlowsForWorkspace(workspaceId)
+        console.log(`[flow.cancel] Cancelling ${flowsToCancel.length} flows for workspace:`, workspaceId)
 
-        // Cancel all flows for this workspace
         const results = await Promise.all(
-          Array.from(activeFlows.keys()).map((rid) => cancelFlow(rid))
+          flowsToCancel.map((rid) => cancelFlow(rid))
         )
 
         const allOk = results.every((r) => r.ok)
@@ -345,7 +345,7 @@ export function createMiscHandlers(
   addMethod('flow.stop', async (args: any) => {
     // Re-use logic for flow.cancel
     try {
-      const { cancelFlow } = await import('../../../flow-engine/index.js')
+      const { cancelFlow, listActiveFlowsForWorkspace } = await import('../../../flow-engine/index.js')
       const requestId = args?.requestId
 
       if (requestId) {
@@ -353,18 +353,18 @@ export function createMiscHandlers(
         const result = await cancelFlow(requestId)
         return result
       } else {
-        // Cancel all flows for this workspace
+        // Cancel all flows for THIS WORKSPACE ONLY (not global!)
         const workspaceId = await getConnectionWorkspaceId(connection)
         if (!workspaceId) {
           return { ok: false, error: 'No workspace bound' }
         }
 
-        const { getActiveFlows } = await import('../../../flow-engine/index.js')
-        const activeFlows = getActiveFlows()
+        // Get only flows for this workspace
+        const flowsToCancel = listActiveFlowsForWorkspace(workspaceId)
+        console.log(`[flow.stop] Cancelling ${flowsToCancel.length} flows for workspace:`, workspaceId)
 
-        // Cancel all flows for this workspace
         const results = await Promise.all(
-          Array.from(activeFlows.keys()).map((rid) => cancelFlow(rid))
+          flowsToCancel.map((rid) => cancelFlow(rid))
         )
 
         const allOk = results.every((r) => r.ok)

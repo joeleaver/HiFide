@@ -11,8 +11,6 @@ async function ensureBoardLoadedFor(workspaceId?: string): Promise<KanbanBoard> 
   return await readKanbanBoard(workspaceId)
 }
 
-type FilterParams = { status?: KanbanStatus; epicId?: string }
-
 function filterArchivedTasks(board: KanbanBoard): KanbanBoard {
   const visibleTasks = board.tasks.filter((task) => !task.archived)
 
@@ -33,14 +31,6 @@ function filterDoneTasks(board: KanbanBoard): KanbanBoard {
   return { ...board, tasks: activeTasks }
 }
 
-function filterTasksByParams(tasks: KanbanTask[], params: FilterParams): KanbanTask[] {
-  return tasks.filter((task) => {
-    if (params.status && task.status !== params.status) return false
-    if (params.epicId && task.epicId !== params.epicId) return false
-    return true
-  })
-}
-
 function groupTasksByStatus(tasks: KanbanTask[]): Record<KanbanStatus, KanbanTask[]> {
   return {
     backlog: tasks.filter((t) => t.status === 'backlog'),
@@ -50,39 +40,42 @@ function groupTasksByStatus(tasks: KanbanTask[]): Record<KanbanStatus, KanbanTas
   }
 }
 
+/** Minify a task to essential fields only */
+function minifyTask(task: KanbanTask): Record<string, any> {
+  const mini: Record<string, any> = {
+    id: task.id,
+    title: task.title,
+  }
+  if (task.description) mini.description = task.description
+  if (task.epicId) mini.epicId = task.epicId
+  return mini
+}
+
 export const kanbanGetBoardTool: AgentTool = {
   name: 'kanbanGetBoard',
-  description: 'Retrieve the Kanban board, optionally filtered by status or epic.',
+  description: 'Retrieve active Kanban tasks grouped by status (backlog, todo, inProgress). Done tasks are excluded.',
   parameters: {
     type: 'object',
     properties: {
-      status: { type: 'string', enum: ['backlog', 'todo', 'inProgress', 'done'], description: 'Filter by task status' },
       epicId: { type: 'string', description: 'Filter by epic ID' },
     },
   },
-  run: async (input: { status?: KanbanStatus; epicId?: string }, meta?: any) => {
+  run: async (input: { epicId?: string }, meta?: any) => {
     const rawBoard = await ensureBoardLoadedFor(meta?.workspaceId)
     const board = filterDoneTasks(filterArchivedTasks(rawBoard))
 
-    const params: FilterParams = { status: input?.status, epicId: input?.epicId }
-
-    const tasks = filterTasksByParams(board.tasks, params)
-
-    const byStatus = groupTasksByStatus(tasks)
-    const counts = {
-      backlog: byStatus.backlog.length,
-      todo: byStatus.todo.length,
-      inProgress: byStatus.inProgress.length,
-      done: byStatus.done.length,
+    let tasks = board.tasks
+    if (input?.epicId) {
+      tasks = tasks.filter(t => t.epicId === input.epicId)
     }
 
+    const byStatus = groupTasksByStatus(tasks)
+
+    // Return minimal object with only active statuses
     return {
-      summary: `Returned Kanban board with ${tasks.length} task(s).`,
-      board,
-      tasks,
-      byStatus,
-      counts,
-      filter: params,
+      backlog: byStatus.backlog.map(minifyTask),
+      todo: byStatus.todo.map(minifyTask),
+      inProgress: byStatus.inProgress.map(minifyTask),
     }
   },
 }

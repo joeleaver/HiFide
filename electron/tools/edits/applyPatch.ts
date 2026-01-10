@@ -310,24 +310,13 @@ function applyHunksToContent(original: string, hunks: Hunk[]): { ok: boolean; co
 
 export const applyPatchTool: AgentTool = {
   name: 'applyPatch',
-  description: 'Apply a unified-diff patch (git-style). Accepts raw patch, fenced diff, or *** Begin/End Patch markers. Use dryRun to preview; for small, precise changes prefer applyEdits.',
+  description: 'Apply a unified-diff patch.',
   parameters: {
     type: 'object',
     properties: {
-      patch: {
-        type: 'string',
-        description: 'Unified diff patch text in standard git diff format. Must include diff headers, --- / +++ lines, @@ hunk headers, and properly prefixed hunk lines (space/+/-).'
-      },
-      strip: {
-        type: 'integer',
-        description: 'Number of leading path components to strip (like git apply -pN). Usually 0 or 1. Auto-detected for a/ b/ prefixes.',
-        minimum: 0,
-        maximum: 10
-      },
-      dryRun: {
-        type: 'boolean',
-        description: 'If true, validate and preview changes without writing to disk. Always use dryRun:true first to verify the patch.'
-      }
+      patch: { type: 'string' },
+      strip: { type: 'integer' },
+      dryRun: { type: 'boolean' }
     },
     required: ['patch']
   },

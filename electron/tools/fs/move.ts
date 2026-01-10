@@ -4,16 +4,14 @@ import fs from 'node:fs/promises'
 
 export const moveTool: AgentTool = {
   name: 'fsMove',
-  description: 'Move/rename a file or directory within the workspace',
+  description: 'Move or rename a file.',
   parameters: {
     type: 'object',
     properties: {
-      from: { type: 'string', description: 'Source workspace-relative path' },
-      to: { type: 'string', description: 'Destination workspace-relative path' },
-      overwrite: { type: 'boolean', default: true },
+      from: { type: 'string' },
+      to: { type: 'string' },
     },
     required: ['from', 'to'],
-    additionalProperties: false,
   },
   run: async ({ from, to, overwrite = true }: { from: string; to: string; overwrite?: boolean }, meta?: any) => {
     const src = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, from) : resolveWithinWorkspace(from)

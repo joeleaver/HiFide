@@ -1,12 +1,12 @@
 /**
  * GlobalIndexingOrchestrator
- * 
+ *
  * Main process service that manages:
  * - Global worker pool (sized by settings)
  * - Global priority queue across all workspaces
  * - Round-robin scheduling between open workspaces
  * - Workspace lifecycle management
- * 
+ *
  * This replaces the old IndexOrchestrator with proper workspace isolation.
  */
 
@@ -20,34 +20,61 @@ import { PriorityIndexingQueue } from './PriorityIndexingQueue.js'
 import { WorkspaceIndexingManager, WorkspaceIndexingState } from './WorkspaceIndexingManager.js'
 import { getVectorService, getSettingsService } from '../index.js'
 
+// Configuration constants
+const DEFAULT_MAX_WORKERS = 4
+const WORKER_REQUEST_TIMEOUT_MS = 30000
+const QUEUE_PROCESS_DEBOUNCE_MS = 10
+const REINDEX_SETTLE_DELAY_MS = 500
+
 interface GlobalOrchestratorState {
   status: 'idle' | 'indexing' | 'paused'
   activeWorkers: number
   totalQueueLength: number
+  failedItems: number
 }
 
 export class GlobalIndexingOrchestrator extends Service<GlobalOrchestratorState> {
   private workers: Worker[] = []
-  private maxWorkers = 4
+  private maxWorkers = DEFAULT_MAX_WORKERS
   private workerRequestMap = new Map<number, { resolve: (val: any) => void; reject: (err: any) => void }>()
   private reqId = 0
 
   private priorityQueue = new PriorityIndexingQueue()
   private workspaceManagers = new Map<string, WorkspaceIndexingManager>()
   private activeWorkers = 0
+  private failedItemsCount = 0
   private processingTimer: NodeJS.Timeout | null = null
+  private isShuttingDown = false
 
   constructor() {
     super(
       {
         status: 'idle',
         activeWorkers: 0,
-        totalQueueLength: 0
+        totalQueueLength: 0,
+        failedItems: 0
       },
       'global_indexing_orchestrator'
     )
 
     this.loadSettings()
+    this.setupGracefulShutdown()
+  }
+
+  /**
+   * Setup graceful shutdown handlers
+   */
+  private setupGracefulShutdown(): void {
+    const shutdown = async () => {
+      if (this.isShuttingDown) return
+      this.isShuttingDown = true
+      console.log('[GlobalIndexingOrchestrator] Graceful shutdown initiated...')
+      await this.terminate()
+    }
+
+    app.on('before-quit', shutdown)
+    process.on('SIGTERM', shutdown)
+    process.on('SIGINT', shutdown)
   }
 
   protected onStateChange(_updates: Partial<GlobalOrchestratorState>): void {
@@ -97,6 +124,7 @@ export class GlobalIndexingOrchestrator extends Service<GlobalOrchestratorState>
 
     for (let i = 0; i < this.maxWorkers; i++) {
       const worker = new Worker(workerPath, { execArgv })
+      const workerId = i
 
       worker.on('message', msg => {
         if (msg.type === 'result') {
@@ -105,6 +133,19 @@ export class GlobalIndexingOrchestrator extends Service<GlobalOrchestratorState>
             this.workerRequestMap.delete(msg.id)
             req.resolve(msg.result)
           }
+        }
+      })
+
+      worker.on('error', err => {
+        console.error(`[GlobalIndexingOrchestrator] Worker ${workerId} error:`, err)
+        // Reject all pending requests for this worker
+        // Note: We can't easily track which requests went to which worker,
+        // so we just log the error and let the timeout handle cleanup
+      })
+
+      worker.on('exit', code => {
+        if (code !== 0 && !this.isShuttingDown) {
+          console.error(`[GlobalIndexingOrchestrator] Worker ${workerId} exited with code ${code}`)
         }
       })
 
@@ -117,17 +158,41 @@ export class GlobalIndexingOrchestrator extends Service<GlobalOrchestratorState>
    */
   async terminate(): Promise<void> {
     console.log('[GlobalIndexingOrchestrator] Terminating all workers...')
+    this.isShuttingDown = true
+
     if (this.processingTimer) {
       clearTimeout(this.processingTimer)
       this.processingTimer = null
     }
 
+    // Reject all pending requests
+    for (const [reqId, handler] of this.workerRequestMap.entries()) {
+      handler.reject(new Error('Worker terminated during shutdown'))
+      this.workerRequestMap.delete(reqId)
+    }
+
+    // Clean up all workspace managers
+    for (const [workspaceId, manager] of this.workspaceManagers.entries()) {
+      try {
+        await manager.cleanup()
+      } catch (err) {
+        console.warn(`[GlobalIndexingOrchestrator] Failed to cleanup manager for ${workspaceId}:`, err)
+      }
+    }
+    this.workspaceManagers.clear()
+
+    // Terminate workers
     const terminatePromises = this.workers.map(worker =>
       worker.terminate().catch(err => console.warn('[GlobalIndexingOrchestrator] Failed to terminate worker:', err))
     )
     await Promise.all(terminatePromises)
     this.workers = []
     this.activeWorkers = 0
+
+    // Clear the queue
+    this.priorityQueue.clear()
+
+    console.log('[GlobalIndexingOrchestrator] Shutdown complete')
   }
 
   /**
@@ -226,19 +291,23 @@ export class GlobalIndexingOrchestrator extends Service<GlobalOrchestratorState>
    * Process the global queue
    */
   private processQueue(): void {
+    if (this.isShuttingDown) return
+
     if (this.processingTimer) {
       clearTimeout(this.processingTimer)
     }
 
     this.processingTimer = setTimeout(() => {
       this.doProcessQueue()
-    }, 10)
+    }, QUEUE_PROCESS_DEBOUNCE_MS)
   }
 
   /**
    * Actually process queue items
    */
   private doProcessQueue(): void {
+    if (this.isShuttingDown) return
+
     while (this.activeWorkers < this.maxWorkers && this.priorityQueue.getQueueLength() > 0) {
       const items = this.priorityQueue.pop(1)
       if (items.length === 0) break
@@ -249,8 +318,10 @@ export class GlobalIndexingOrchestrator extends Service<GlobalOrchestratorState>
 
       this.processItem(item).finally(() => {
         this.activeWorkers--
-        this.setState({ activeWorkers: this.activeWorkers })
-        this.doProcessQueue()
+        this.setState({ activeWorkers: this.activeWorkers, failedItems: this.failedItemsCount })
+        if (!this.isShuttingDown) {
+          this.doProcessQueue()
+        }
       })
     }
 
@@ -286,17 +357,35 @@ export class GlobalIndexingOrchestrator extends Service<GlobalOrchestratorState>
             `[GlobalIndexingOrchestrator] Indexed ${result.chunks.length} chunks from ${item.path}`
           )
 
-          // Update manager state
+          // Update manager state - decrement missing, increment indexed
           manager.updateState({
             code: {
               ...state.code,
-              indexed: state.code.indexed + 1
+              indexed: state.code.indexed + 1,
+              missing: Math.max(0, state.code.missing - 1)
             }
           })
         }
+      } else if (result && result.skipped) {
+        // File was skipped (e.g., too large) - decrement missing without incrementing indexed
+        manager.updateState({
+          code: {
+            ...state.code,
+            missing: Math.max(0, state.code.missing - 1)
+          }
+        })
       }
     } catch (error) {
       console.error(`[GlobalIndexingOrchestrator] Failed to process item ${item.path}:`, error)
+      this.failedItemsCount++
+      // Update manager state to reflect the failure
+      manager.updateState({
+        code: {
+          ...state.code,
+          missing: Math.max(0, state.code.missing - 1),
+          stale: state.code.stale + 1
+        }
+      })
     }
   }
 
@@ -317,13 +406,13 @@ export class GlobalIndexingOrchestrator extends Service<GlobalOrchestratorState>
 
       worker.postMessage({ ...message, id: reqId })
 
-      // Timeout after 30 seconds
+      // Timeout after configured duration
       setTimeout(() => {
         if (this.workerRequestMap.has(reqId)) {
           this.workerRequestMap.delete(reqId)
-          reject(new Error('Worker request timeout'))
+          reject(new Error(`Worker request timeout after ${WORKER_REQUEST_TIMEOUT_MS}ms`))
         }
-      }, 30000)
+      }, WORKER_REQUEST_TIMEOUT_MS)
     })
   }
 
@@ -365,8 +454,16 @@ export class GlobalIndexingOrchestrator extends Service<GlobalOrchestratorState>
 
     this.loadSettings()
     await this.stop(workspaceId)
-    await new Promise(resolve => setTimeout(resolve, 500))
-    await this.init()
+    await new Promise(resolve => setTimeout(resolve, REINDEX_SETTLE_DELAY_MS))
+
+    // Reset failed items count on reindex
+    this.failedItemsCount = 0
+    this.setState({ failedItems: 0 })
+
+    // Only reinitialize workers if none exist (don't affect other workspaces)
+    if (this.workers.length === 0) {
+      await this.init()
+    }
 
     manager.updateState({
       totalFilesDiscovered: 0,
@@ -396,6 +493,7 @@ export class GlobalIndexingOrchestrator extends Service<GlobalOrchestratorState>
 
   /**
    * Run startup check for a workspace
+   * Compares files on disk with indexed files and queues missing ones
    */
   async runStartupCheck(workspaceId: string): Promise<void> {
     const manager = this.getWorkspaceManager(workspaceId)
@@ -407,9 +505,37 @@ export class GlobalIndexingOrchestrator extends Service<GlobalOrchestratorState>
       return
     }
 
-    // TODO: Implement startup check logic
-    // This should check for missing items and queue them for indexing
     console.log(`[GlobalIndexingOrchestrator] Running startup check for ${workspaceId}`)
+
+    try {
+      const vectorService = getVectorService()
+      if (!vectorService) {
+        console.warn('[GlobalIndexingOrchestrator] VectorService not available for startup check')
+        return
+      }
+
+      // Get already indexed file paths from the vector database
+      const indexedPaths = await vectorService.getIndexedFilePaths(workspaceId, 'code')
+      console.log(`[GlobalIndexingOrchestrator] Found ${indexedPaths.size} already indexed files`)
+
+      // Start the watcher to discover current files
+      // The watcher will emit events for files not in indexedPaths
+      manager.setStatus('indexing')
+      await manager.startWatcher({ ignoreInitial: false })
+
+      // Update state to reflect we're checking
+      manager.updateState({
+        code: {
+          ...state.code,
+          indexed: indexedPaths.size
+        }
+      })
+
+      this.processQueue()
+    } catch (error) {
+      console.error(`[GlobalIndexingOrchestrator] Startup check failed for ${workspaceId}:`, error)
+      manager.setStatus('idle')
+    }
   }
 
   /**

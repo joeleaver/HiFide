@@ -11,30 +11,19 @@ import { calculateBudget } from '../../agent/types'
 
 export const assessTaskTool: AgentTool = {
   name: 'agentAssessTask',
-  description: 'Analyze the user request to determine scope and plan your approach. Call this FIRST before taking other actions to understand your resource budget.',
+  description: 'Assess task scope and get resource budget.',
   parameters: {
     type: 'object',
     properties: {
       task_type: {
         type: 'string',
         enum: ['simple_query', 'file_edit', 'multi_file_refactor', 'codebase_audit', 'exploration'],
-        description: 'What type of task is this? simple_query=read 1 file, file_edit=edit 1-3 files, multi_file_refactor=edit 4+ files, codebase_audit=analyze entire codebase, exploration=understand structure',
       },
-      estimated_files: {
-        type: 'number',
-        description: 'How many files will you likely need to examine?',
-      },
-      estimated_iterations: {
-        type: 'number',
-        description: 'How many tool-calling rounds do you estimate?',
-      },
-      strategy: {
-        type: 'string',
-        description: 'Brief description of your approach (1-2 sentences)',
-      },
+      estimated_files: { type: 'number' },
+      estimated_iterations: { type: 'number' },
+      strategy: { type: 'string' },
     },
     required: ['task_type', 'estimated_files', 'estimated_iterations', 'strategy'],
-    additionalProperties: false,
   },
   run: async (input: { task_type: TaskType; estimated_files: number; estimated_iterations: number; strategy: string }, meta?: { requestId?: string }) => {
     const requestId = meta?.requestId || 'unknown'

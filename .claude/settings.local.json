@@ -16,7 +16,11 @@
       "Bash(dir node_modules.bintsc*)",
       "Bash(cmd /c:*)",
       "Bash(\"C:\\\\Program Files\\\\nodejs\\\\node.exe\" test-indent.mjs)",
-      "Bash(del:*)"
+      "Bash(del:*)",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm exec tsc:*)",
+      "Bash(pnpm lint:*)",
+      "Bash(pnpm exec eslint:*)"
     ]
   }
 }

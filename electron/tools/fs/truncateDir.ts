@@ -5,15 +5,11 @@ import path from 'node:path'
 
 export const truncateDirTool: AgentTool = {
   name: 'fsTruncateDir',
-  description: 'Empty a directory without deleting the directory itself (recursive remove of contents).',
+  description: 'Empty a directory.',
   parameters: {
     type: 'object',
-    properties: {
-      path: { type: 'string', description: 'Workspace-relative directory path' },
-      ensureExists: { type: 'boolean', default: true },
-    },
+    properties: { path: { type: 'string' } },
     required: ['path'],
-    additionalProperties: false,
   },
   run: async ({ path: rel, ensureExists = true }: { path: string; ensureExists?: boolean }, meta?: any) => {
     const abs = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, rel) : resolveWithinWorkspace(rel)

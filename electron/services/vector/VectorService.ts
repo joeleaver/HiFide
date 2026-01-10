@@ -6,7 +6,7 @@ import { getEmbeddingService } from '../index.js';
 
 const DEBUG_VECTOR = process.env.HF_VECTOR_DEBUG === '1';
 
-export type TableType = 'code' | 'kb' | 'memories';
+export type TableType = 'code' | 'kb' | 'memories' | 'tools';
 
 export interface VectorItem {
   id: string;
@@ -56,6 +56,7 @@ interface VectorWorkspaceState {
       code: TableStatus;
       kb: TableStatus;
       memories: TableStatus;
+      tools: TableStatus;
     };
   };
 }
@@ -74,7 +75,8 @@ export class VectorService {
     const baseNames: Record<TableType, string> = {
       code: 'code_vectors',
       kb: 'kb_vectors',
-      memories: 'memory_vectors'
+      memories: 'memory_vectors',
+      tools: 'tools_vectors'
     };
 
     return `${baseNames[type]}_${hash}`;
@@ -116,6 +118,7 @@ export class VectorService {
             code: { count: 0, indexedAt: null, exists: false },
             kb: { count: 0, indexedAt: null, exists: false },
             memories: { count: 0, indexedAt: null, exists: false },
+            tools: { count: 0, indexedAt: null, exists: false },
           }
         }
       };
@@ -345,7 +348,7 @@ export class VectorService {
     if (!state.db) return;
     try {
       const tableNames = await state.db.tableNames();
-      const tableTypes: TableType[] = ['code', 'kb', 'memories'];
+      const tableTypes: TableType[] = ['code', 'kb', 'memories', 'tools'];
       for (const type of tableTypes) {
         const config = this.getTableConfig(workspaceRoot, type);
         if (tableNames.includes(config.tableName)) {
@@ -529,7 +532,7 @@ export class VectorService {
   async purge(workspaceRoot: string, type?: TableType) {
     const state = await this.ensureInitialized(workspaceRoot);
     if (state.db) {
-      const allTableTypes: TableType[] = ['code', 'kb', 'memories'];
+      const allTableTypes: TableType[] = ['code', 'kb', 'memories', 'tools'];
       const typesToPurge = type ? [type] : allTableTypes;
       for (const t of typesToPurge) {
         const config = this.getTableConfig(workspaceRoot, t);

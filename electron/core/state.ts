@@ -11,7 +11,7 @@ import path from 'node:path'
 import fsPromises from 'node:fs/promises'
 import chokidar, { type FSWatcher } from 'chokidar'
 import { AnthropicOpenAIProvider as AnthropicAiSdkProvider } from '../providers-ai-sdk/anthropic-openai'
-import { GeminiOpenAIProvider as GeminiAiSdkProvider } from '../providers-ai-sdk/gemini-openai'
+import { GeminiNativeProvider } from '../providers-ai-sdk/gemini-native'
 import { FireworksOpenAIProvider } from '../providers-ai-sdk/fireworks-openai'
 import { OpenAIOpenAIProvider as OpenAiSdkProvider } from '../providers-ai-sdk/openai-openai'
 import { XAIOpenAIProvider as XaiAiSdkProvider } from '../providers-ai-sdk/xai-openai'
@@ -190,7 +190,7 @@ export function stopKbWatcher(workspaceRoot?: string): void {
 export const providers: Record<string, ProviderAdapter> = {
   openai: OpenAiSdkProvider,
   anthropic: AnthropicAiSdkProvider,
-  gemini: GeminiAiSdkProvider,
+  gemini: GeminiNativeProvider,
   fireworks: FireworksOpenAIProvider,
   xai: XaiAiSdkProvider,
   openrouter: OpenRouterProvider,

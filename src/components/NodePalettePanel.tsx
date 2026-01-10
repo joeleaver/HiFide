@@ -10,6 +10,7 @@ const NODE_PALETTE: Array<{ nodeType: string; label: string; icon: string; descr
   { nodeType: 'newContext', label: 'New Context', icon: '🔀', description: 'Create new execution context with different model/provider' },
   { nodeType: 'llmRequest', label: 'LLM Request', icon: '💬', description: 'Send a request to the LLM' },
   { nodeType: 'tools', label: 'Tools', icon: '🔧', description: 'Provide tools to LLM (auto or specific list)' },
+  { nodeType: 'semanticTools', label: 'Semantic Tools', icon: '🔍', description: 'Semantic tool discovery (connect Tools node → this → LLM). 85% token reduction.' },
   { nodeType: 'injectMessages', label: 'Inject Messages', icon: '💉', description: 'Inject user/assistant message pair into conversation history' },
   { nodeType: 'intentRouter', label: 'Intent Router', icon: '🔀', description: 'Route based on LLM-classified user intent' },
   { nodeType: 'extractMemories', label: 'Extract Memories', icon: '🧠', description: 'Extract durable workspace memories and write to .hifide-public/memories.json' },

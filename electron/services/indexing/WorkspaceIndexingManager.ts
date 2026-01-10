@@ -26,7 +26,7 @@ export class WorkspaceIndexingManager extends EventEmitter {
   private workspaceId: string
   private state: WorkspaceIndexingState
   private watcher: WatcherService
-  private watcherHandlerRegistered = false
+  private eventsHandler: ((events: IndexingEvent[]) => void) | null = null
 
   constructor(workspaceId: string) {
     super()
@@ -75,46 +75,51 @@ export class WorkspaceIndexingManager extends EventEmitter {
   async startWatcher(options?: any): Promise<void> {
     console.log(`[WorkspaceIndexingManager] Starting watcher for ${this.workspaceId}`)
 
-    if (!this.watcherHandlerRegistered) {
-      this.watcher.on('events', (events: IndexingEvent[]) => {
-        console.log(
-          `[WorkspaceIndexingManager] [${this.workspaceId}] Received ${events.length} file events`
-        )
-
-        // Update counts based on events
-        let totalDelta = 0
-        let indexedDelta = 0
-        let missingDelta = 0
-
-        for (const event of events) {
-          if (event.type === 'change') {
-            indexedDelta--
-          } else if (event.type === 'unlink') {
-            indexedDelta--
-            totalDelta--
-          } else if (event.type === 'add') {
-            totalDelta++
-            missingDelta++
-          }
-        }
-
-        if (totalDelta !== 0 || indexedDelta !== 0 || missingDelta !== 0) {
-          this.updateState({
-            code: {
-              total: Math.max(0, this.state.code.total + totalDelta),
-              indexed: Math.max(0, this.state.code.indexed + indexedDelta),
-              missing: Math.max(0, this.state.code.missing + missingDelta),
-              stale: this.state.code.stale
-            }
-          })
-        }
-
-        // Emit events for GlobalIndexingOrchestrator to handle
-        this.emit('file-events', events)
-      })
-
-      this.watcherHandlerRegistered = true
+    // Remove any existing handler before registering a new one
+    if (this.eventsHandler) {
+      this.watcher.off('events', this.eventsHandler)
+      this.eventsHandler = null
     }
+
+    // Create and register new handler
+    this.eventsHandler = (events: IndexingEvent[]) => {
+      console.log(
+        `[WorkspaceIndexingManager] [${this.workspaceId}] Received ${events.length} file events`
+      )
+
+      // Update counts based on events
+      let totalDelta = 0
+      let indexedDelta = 0
+      let missingDelta = 0
+
+      for (const event of events) {
+        if (event.type === 'change') {
+          indexedDelta--
+        } else if (event.type === 'unlink') {
+          indexedDelta--
+          totalDelta--
+        } else if (event.type === 'add') {
+          totalDelta++
+          missingDelta++
+        }
+      }
+
+      if (totalDelta !== 0 || indexedDelta !== 0 || missingDelta !== 0) {
+        this.updateState({
+          code: {
+            total: Math.max(0, this.state.code.total + totalDelta),
+            indexed: Math.max(0, this.state.code.indexed + indexedDelta),
+            missing: Math.max(0, this.state.code.missing + missingDelta),
+            stale: this.state.code.stale
+          }
+        })
+      }
+
+      // Emit events for GlobalIndexingOrchestrator to handle
+      this.emit('file-events', events)
+    }
+
+    this.watcher.on('events', this.eventsHandler)
 
     await this.watcher.start(this.workspaceId, options)
 
@@ -160,6 +165,11 @@ export class WorkspaceIndexingManager extends EventEmitter {
    */
   async cleanup(): Promise<void> {
     console.log(`[WorkspaceIndexingManager] Cleaning up ${this.workspaceId}`)
+    // Remove events handler before stopping watcher
+    if (this.eventsHandler) {
+      this.watcher.off('events', this.eventsHandler)
+      this.eventsHandler = null
+    }
     await this.stopWatcher()
     this.removeAllListeners()
   }

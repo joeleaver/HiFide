@@ -14,6 +14,7 @@ import {
   getKnowledgeBaseService,
   getAppService,
   getFlowGraphService,
+  getFlowProfileService,
   getProviderService,
   getFlowContextsService,
   getSettingsService,
@@ -114,20 +115,23 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
     lastLoadedAt: data.lastLoadedAt || null,
   }))
 
-  // Indexing orchestrator status
+  // Indexing orchestrator status - listens to 'workspace-state-changed' from GlobalIndexingOrchestrator
   const indexingOrchestratorService = getGlobalIndexingOrchestratorService()
-  addWorkspaceSubscription(indexingOrchestratorService, 'index-orchestrator-status', 'indexing.status.changed', (data) => ({
-    workspaceId: data.workspaceId,
-    isProcessing: !!data.isProcessing,
-    currentTask: data.currentTask || null,
-    queueLength: typeof data.queueLength === 'number' ? data.queueLength : 0,
-    indexedCount: typeof data.indexedCount === 'number' ? data.indexedCount : 0,
-    // Detailed counts
-    code: data.code || { total: 0, indexed: 0, missing: 0 },
-    kb: data.kb || { total: 0, indexed: 0, missing: 0 },
-    memories: data.memories || { total: 0, indexed: 0, missing: 0 },
-    indexingEnabled: typeof data.indexingEnabled === 'boolean' ? data.indexingEnabled : true,
-  }))
+  addWorkspaceSubscription(indexingOrchestratorService, 'workspace-state-changed', 'indexing.status.changed', (data) => {
+    const state = data.state || {}
+    return {
+      workspaceId: data.workspaceId,
+      isProcessing: state.status === 'indexing',
+      currentTask: null,
+      queueLength: 0, // Queue length is tracked globally, not per workspace
+      indexedCount: state.indexedCount || 0,
+      // Detailed counts
+      code: state.code || { total: 0, indexed: 0, missing: 0 },
+      kb: state.kb || { total: 0, indexed: 0, missing: 0 },
+      memories: state.memories || { total: 0, indexed: 0, missing: 0 },
+      indexingEnabled: typeof state.indexingEnabled === 'boolean' ? state.indexingEnabled : true,
+    }
+  })
 
   // Knowledge Base items
   const kbService = getKnowledgeBaseService()
@@ -203,6 +207,35 @@ export function setupEventSubscriptions(connection: RpcConnection): () => void {
     edgesCount: Array.isArray(data.edges) ? data.edges.length : 0,
     reason: data?.reason || 'unknown',
   }))
+
+  // Flow templates changed - hybrid subscription:
+  // - User library changes: notify ALL windows (global) since user flows are shared across workspaces
+  // - Workspace library changes: notify only windows in that workspace
+  const flowProfileService = getFlowProfileService()
+  const flowTemplatesHandler = async (data: any) => {
+    try {
+      const library = data?.library || 'user'
+      const payload = {
+        library,
+        workspaceId: data?.workspaceId || null,
+        templateCount: typeof data?.templateCount === 'number' ? data.templateCount : 0,
+      }
+
+      if (library === 'user') {
+        // User flows are global - notify this connection regardless of workspace
+        connection.sendNotification('flowEditor.templates.changed', payload)
+      } else {
+        // Workspace flows - only notify if connection is in the same workspace
+        const boundWorkspace = await getConnectionWorkspaceId(connection)
+        if (!boundWorkspace) return
+        const eventWorkspace = data?.workspaceId
+        if (eventWorkspace && !samePath(boundWorkspace, eventWorkspace)) return
+        connection.sendNotification('flowEditor.templates.changed', payload)
+      }
+    } catch {}
+  }
+  flowProfileService.on('flow:templates:changed', flowTemplatesHandler)
+  subscriptions.push({ service: flowProfileService, event: 'flow:templates:changed', handler: flowTemplatesHandler, workspaceScoped: false })
 
   // Provider/models
   const providerService = getProviderService()

@@ -89,10 +89,12 @@ export function createSessionHandlers(
 
       const sessionService = getSessionService()
 
-      // Cancel any running flows before switching sessions
+      // Cancel any running flows for THIS WORKSPACE before switching sessions
+      // This is workspace-scoped to avoid cancelling flows in other windows/workspaces
       try {
-        const { listActiveFlows, cancelFlow } = await import('../../../flow-engine/index.js')
-        const activeFlows = listActiveFlows()
+        const { listActiveFlowsForWorkspace, cancelFlow } = await import('../../../flow-engine/index.js')
+        const activeFlows = listActiveFlowsForWorkspace(workspaceId)
+        console.log(`[session.select] Cancelling ${activeFlows.length} flows for workspace:`, workspaceId)
         for (const requestId of activeFlows) {
           await cancelFlow(requestId)
         }
@@ -157,10 +159,12 @@ export function createSessionHandlers(
 
       const sessionService = getSessionService()
 
-      // Cancel any running flows before creating new session
+      // Cancel any running flows for THIS WORKSPACE before creating new session
+      // This is workspace-scoped to avoid cancelling flows in other windows/workspaces
       try {
-        const { listActiveFlows, cancelFlow } = await import('../../../flow-engine/index.js')
-        const activeFlows = listActiveFlows()
+        const { listActiveFlowsForWorkspace, cancelFlow } = await import('../../../flow-engine/index.js')
+        const activeFlows = listActiveFlowsForWorkspace(workspaceId)
+        console.log(`[session.new] Cancelling ${activeFlows.length} flows for workspace:`, workspaceId)
         for (const requestId of activeFlows) {
           await cancelFlow(requestId)
         }

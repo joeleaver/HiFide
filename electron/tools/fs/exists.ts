@@ -4,12 +4,11 @@ import fs from 'node:fs/promises'
 
 export const existsTool: AgentTool = {
   name: 'fsExists',
-  description: 'Check if a workspace-relative path exists',
+  description: 'Check if a path exists.',
   parameters: {
     type: 'object',
-    properties: { path: { type: 'string', description: 'Workspace-relative path' } },
+    properties: { path: { type: 'string' } },
     required: ['path'],
-    additionalProperties: false,
   },
   run: async ({ path: rel }: { path: string }, meta?: any) => {
     const abs = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, rel) : resolveWithinWorkspace(rel)

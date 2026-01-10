@@ -88,3 +88,12 @@ export function getAgentToolSnapshot(workspaceId?: string | null): AgentTool[] {
 
   return getCachedTools(null) ?? [...builtinAgentTools]
 }
+
+/**
+ * Get a specific tool by name for a workspace.
+ * Used by semanticTools node for tool execution.
+ */
+export function getToolByName(toolName: string, workspaceId?: string | null): AgentTool | undefined {
+  const tools = getAgentToolSnapshot(workspaceId)
+  return tools.find(t => t.name === toolName)
+}

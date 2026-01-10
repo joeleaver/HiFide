@@ -7,17 +7,11 @@ export interface AskForInputParams {
 
 export const askForInputTool: AgentTool = {
   name: 'askForInput',
-  description: 'Ask the user for input (text or multi-modal) and wait for their response.',
+  description: 'Ask the user for input.',
   parameters: {
     type: 'object',
-    properties: {
-      prompt: {
-        type: 'string',
-        description: 'The message to show to the user when asking for input.'
-      }
-    },
+    properties: { prompt: { type: 'string' } },
     required: ['prompt'],
-    additionalProperties: false
   },
 
   run: async (args: AskForInputParams, meta?: any): Promise<any> => {

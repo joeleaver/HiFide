@@ -10,7 +10,15 @@
  * - Supports reasoning via OpenRouter's reasoning API
  * - Captures Gemini 3 thought signatures for multi-step function calling
  *
- * Reference: https://openrouter.ai/docs
+ * Caching: OpenRouter supports prompt caching for multiple providers:
+ * - Anthropic (Claude): Uses cache_control breakpoints (75% off cached tokens)
+ * - Gemini: Uses cache_control breakpoints (75% off cached tokens)
+ * - Gemini 2.5+: Also has implicit caching (automatic, no breakpoints needed)
+ *
+ * The core provider automatically adds cache_control to system messages and
+ * tool definitions for Claude and Gemini models via OpenRouter.
+ *
+ * Reference: https://openrouter.ai/docs/guides/best-practices/prompt-caching
  */
 import {
   createOpenAICompatibleProvider,

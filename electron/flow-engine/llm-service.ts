@@ -29,7 +29,7 @@ import { getProviderKey, providers } from '../core/state'
 import { getAgentToolSnapshot } from '../tools/agentToolRegistry.js'
 import { createCallbackEventEmitters } from './execution-events'
 import { rateLimitTracker } from '../providers/rate-limit-tracker'
-import { parseRateLimitError, sleep, withRetries } from '../providers/retry'
+import { parseRateLimitError, sleep } from '../providers/retry'
 import {
   estimateInputTokens,
   formatMessagesForAnthropic,
@@ -37,13 +37,55 @@ import {
   logLLMRequestPayload,
 } from './llm/payloads'
 
-import { createTokenCounter, ToolUsageTracker, UsageAccumulator } from './llm/usage-tracker'
+import { createTokenCounter, ToolUsageTracker, UsageAccumulator, StepCategoryBreakdown } from './llm/usage-tracker'
 import { resolveSamplingControls } from './llm/stream-options'
 import { wrapToolsWithPolicy } from './llm/tool-policy'
 import { getSettingsService } from '../services/index.js'
 import type { TokenUsage } from '../store/types.js'
+import * as fs from 'fs'
+import * as path from 'path'
+import { app } from 'electron'
 
 const DEBUG_USAGE = process.env.HF_DEBUG_USAGE === '1' || process.env.HF_DEBUG_TOKENS === '1'
+
+// Debug logging for semantic tools debugging
+const DEBUG_LLM_FILE = process.env.HF_DEBUG_LLM_FILE === '1'
+let debugLogPath: string | null = null
+
+function getDebugLogPath(): string {
+  if (!debugLogPath) {
+    try {
+      const userDataPath = app.getPath('userData')
+      debugLogPath = path.join(userDataPath, 'llm-debug.log')
+    } catch {
+      debugLogPath = '/tmp/hifide-llm-debug.log'
+    }
+  }
+  return debugLogPath
+}
+
+function debugLog(category: string, data: any) {
+  if (!DEBUG_LLM_FILE) return
+  try {
+    const timestamp = new Date().toISOString()
+    const entry = {
+      timestamp,
+      category,
+      ...data
+    }
+    const logLine = JSON.stringify(entry, null, 2) + '\n\n---\n\n'
+    fs.appendFileSync(getDebugLogPath(), logLine)
+  } catch (e) {
+    console.error('[debugLog] Failed to write:', e)
+  }
+}
+
+function clearDebugLog() {
+  if (!DEBUG_LLM_FILE) return
+  try {
+    fs.writeFileSync(getDebugLogPath(), `=== LLM Debug Log Started ${new Date().toISOString()} ===\n\n`)
+  } catch {}
+}
 
 
 
@@ -116,6 +158,9 @@ class LLMService {
    * event emission, and error handling.
    */
   async chat(request: LLMServiceRequest): Promise<LLMServiceResponse> {
+    // Clear debug log at the start of each chat
+    clearDebugLog()
+
     const {
       overrideProvider: requestProvider,
       overrideModel: requestModel,
@@ -223,11 +268,17 @@ class LLMService {
     // llm-service is responsible for converting MainFlowContext to provider-specific format
     let formattedMessages: any
 
+    // Detect if we should use Anthropic formatting (with cache_control markers)
+    // This applies to native Anthropic provider OR Anthropic models via OpenRouter
+    const isAnthropicModel = effectiveProvider === 'anthropic' ||
+      (effectiveProvider === 'openrouter' && /claude|anthropic/i.test(effectiveModel))
+
 	if (skipHistory) {
 	  // For stateless calls (like intentRouter), just send the message directly
       // Format it appropriately for each provider
-      if (effectiveProvider === 'anthropic') {
+      if (isAnthropicModel) {
         // Include system instructions even in stateless mode (skipHistory)
+        // Use cache_control for Anthropic models (works via OpenRouter too)
         const systemText = request.systemInstructions ?? context.systemInstructions ?? ''
         const system = systemText
           ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }]
@@ -253,7 +304,8 @@ class LLMService {
 	  const latestContext: MainFlowContext = request.systemInstructions
 	    ? { ...workingContext, systemInstructions: request.systemInstructions }
 	    : workingContext
-	  if (effectiveProvider === 'anthropic') {
+	  if (isAnthropicModel) {
+	    // Use Anthropic formatting with cache_control for native Anthropic or OpenRouter+Claude
 	    formattedMessages = formatMessagesForAnthropic(latestContext, { model: effectiveModel })
 	  } else {
         formattedMessages = formatMessagesForOpenAI(latestContext, { provider: effectiveProvider, model: effectiveModel })
@@ -287,7 +339,7 @@ class LLMService {
     const eventHandlers = createCallbackEventEmitters(emit, effectiveProvider, effectiveModel)
 
 
-    let __bdSystemText: string | undefined
+    let __bdSystemText: string | any[] | undefined  // String (OpenAI) or array of blocks (Anthropic)
     let __bdMessages: any[] | undefined
 
     const registerToolResult = (payload: { key: string; data: unknown }) => {
@@ -302,15 +354,31 @@ class LLMService {
     const emitUsage = eventHandlers.onTokenUsage
 
     const onToolStartWrapped = (ev: { callId?: string; name: string; arguments?: any }) => {
+      debugLog('TOOL_START', {
+        callId: ev.callId,
+        toolName: ev.name,
+        arguments: ev.arguments
+      })
       try { toolUsageTracker.handleToolStart(ev) } catch {}
       eventHandlers.onToolStart(ev)
     }
     const onToolEndWrapped = (ev: { callId?: string; name: string; result?: any }) => {
+      debugLog('TOOL_END', {
+        callId: ev.callId,
+        toolName: ev.name,
+        result: ev.result
+      })
       try { toolUsageTracker.handleToolEnd(ev) } catch {}
       eventHandlers.onToolEnd(ev as any)
     }
 
     const onStepWrapped = (step: { text: string; reasoning?: string; toolCalls?: any[]; toolResults?: any[] }) => {
+      debugLog('LLM_STEP', {
+        text: step.text,
+        reasoning: step.reasoning,
+        toolCalls: step.toolCalls,
+        toolResults: step.toolResults
+      })
       if (skipHistory) return
 
       // =========================================================================
@@ -357,7 +425,61 @@ class LLMService {
       contextManager.addMessage(assistantMessage)
     }
 
-    const onTokenUsageWrapped = (usage: { inputTokens: number; outputTokens: number; totalTokens: number; cachedTokens?: number; reasoningTokens?: number }) => {
+    // Per-step tracking state
+    // These track cumulative values that grow across steps
+    let cumulativeAssistantText = ''
+    let cumulativeAssistantReasoning = ''
+
+    // Fixed input token counts (computed lazily on first usage event)
+    // These don't change between steps, but we can't compute them until after
+    // provider-specific setup assigns __bdSystemText and __bdMessages
+    let fixedTokensComputed = false
+    let fixedSystemTokens = 0
+    let fixedToolDefsTokens = 0
+    let fixedUserMsgTokens = 0
+
+    const computeFixedTokens = () => {
+      if (fixedTokensComputed) return
+      fixedTokensComputed = true
+
+      // Handle system text - can be string or array of Anthropic blocks
+      let systemText = ''
+      if (typeof __bdSystemText === 'string') {
+        systemText = __bdSystemText
+      } else if (Array.isArray(__bdSystemText)) {
+        // Anthropic format: [{ type: 'text', text: '...' }]
+        systemText = __bdSystemText
+          .map((block: any) => block?.text || '')
+          .filter(Boolean)
+          .join('\n')
+      }
+      fixedSystemTokens = tokenCounter.count(systemText)
+      fixedToolDefsTokens = tokenCounter.count(JSON.stringify(hydratedTools || []))
+      fixedUserMsgTokens = 0
+      if (Array.isArray(__bdMessages)) {
+        for (const entry of __bdMessages) {
+          const role = (entry && (entry as any).role) || ''
+          const content = (entry && (entry as any).content) ?? ''
+          if (role === 'user') {
+            fixedUserMsgTokens += tokenCounter.count(typeof content === 'string' ? content : String(content))
+          }
+        }
+      }
+    }
+
+    const onTokenUsageWrapped = (usage: {
+      inputTokens: number
+      outputTokens: number
+      totalTokens: number
+      cachedTokens?: number
+      reasoningTokens?: number
+      stepCount?: number
+      stepOutput?: { text: string; reasoning: string; toolCallArgs: string }
+    }) => {
+      // Compute fixed token counts on first usage event
+      // (after provider-specific setup has assigned __bdSystemText and __bdMessages)
+      computeFixedTokens()
+
       usageAccumulator.recordProviderUsage(
         usage,
         DEBUG_USAGE
@@ -369,12 +491,62 @@ class LLMService {
           : undefined
       )
 
+      // Track per-step category breakdown
+      const stepNumber = usage.stepCount || 1
+      const stepOutput = usage.stepOutput || { text: '', reasoning: '', toolCallArgs: '' }
+
+      // Calculate output categories for this step
+      const outputTextTokens = tokenCounter.count(stepOutput.text || '')
+      const outputReasoningTokens = tokenCounter.count(stepOutput.reasoning || '')
+      const outputToolCallsTokens = tokenCounter.count(stepOutput.toolCallArgs || '')
+
+      // Calculate input categories for this step
+      // Fixed categories (same every step): system, tools, user messages
+      // Growing categories: assistant messages, reasoning, tool results
+      const assistantMsgTokens = tokenCounter.count(cumulativeAssistantText)
+      const assistantReasoningTokens = tokenCounter.count(cumulativeAssistantReasoning)
+      // Tool results come from the toolUsageTracker which updates via onToolEndWrapped
+      const currentToolResults = toolUsageTracker.getSnapshot().resultsTokensIn
+
+      const categories: StepCategoryBreakdown = {
+        // Input (sent to model)
+        systemInstructions: fixedSystemTokens,
+        toolDefinitions: fixedToolDefsTokens,
+        userMessages: fixedUserMsgTokens,
+        assistantMessages: assistantMsgTokens,
+        assistantReasoning: assistantReasoningTokens,
+        toolResults: currentToolResults,
+        // Output (produced by model)
+        outputText: outputTextTokens,
+        outputReasoning: outputReasoningTokens,
+        outputToolCalls: outputToolCallsTokens
+      }
+
+      // Record this step's usage with categories
+      usageAccumulator.recordStepUsage({
+        stepNumber,
+        categories,
+        providerInputTokens: usage.inputTokens || 0,
+        providerOutputTokens: usage.outputTokens || 0,
+        cachedTokens: usage.cachedTokens || 0
+      })
+
+      // Update cumulative values for next step
+      // The current step's output becomes part of the next step's input
+      if (stepOutput.text) {
+        cumulativeAssistantText += (cumulativeAssistantText ? '\n' : '') + stepOutput.text
+      }
+      if (stepOutput.reasoning) {
+        cumulativeAssistantReasoning += (cumulativeAssistantReasoning ? '\n' : '') + stepOutput.reasoning
+      }
+
       if (DEBUG_USAGE) {
         try {
           console.log('[LLMService] provider usage event', {
             provider: effectiveProvider,
             model: effectiveModel,
             usage,
+            stepCategories: categories
           })
         } catch {}
       }
@@ -409,7 +581,9 @@ class LLMService {
       temperature: effectiveTemperature,
       reasoningEffort: effectiveReasoningEffort,
       includeThoughts,
-      thinkingBudget: effectiveThinkingBudget
+      thinkingBudget: effectiveThinkingBudget,
+      geminiCacheMode,
+      geminiCacheRefreshThreshold
     } = resolveSamplingControls({
       provider: effectiveProvider,
       model: effectiveModel,
@@ -483,6 +657,9 @@ class LLMService {
             ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
             ...(includeThoughts ? { includeThoughts: true } : {}),
             ...(effectiveThinkingBudget !== undefined ? { thinkingBudget: effectiveThinkingBudget } : {}),
+            // Gemini-specific: cache mode (explicit or implicit) and refresh threshold
+            ...(geminiCacheMode ? { geminiCacheMode } : {}),
+            ...(geminiCacheRefreshThreshold !== undefined ? { geminiCacheRefreshThreshold } : {}),
             // Callbacks that providers call - these are wrapped to emit ExecutionEvents
             onChunk: (text: string) => {
               if (!text) return
@@ -509,12 +686,17 @@ class LLMService {
 
           // Provider-specific options
           let streamOpts: any
-          if (effectiveProvider === 'anthropic') {
+          if (isAnthropicModel) {
+            // Anthropic format (native Anthropic or OpenRouter+Claude): { system, messages }
+            // System has cache_control markers for prompt caching
             streamOpts = {
               ...baseStreamOpts,
               system: formattedMessages.system,
               messages: formattedMessages.messages
             }
+            // Capture for usage breakdown
+            __bdSystemText = formattedMessages.system
+            __bdMessages = formattedMessages.messages
           } else {
             // OpenAI and others: split system out for top-level and avoid duplication
             let systemText: string | undefined
@@ -551,79 +733,72 @@ class LLMService {
             tools: hydratedTools
           })
 
-          // Wrap provider call with retry logic
-          await withRetries(
-            async () => {
-              const policyTools = (hydratedTools && hydratedTools.length)
-                ? wrapToolsWithPolicy(hydratedTools, {
-                  // Disable dedupe for fsReadLines/fsReadFile to ensure RAW text is returned (no cached JSON stubs)
-                  dedupeReadLines: false,
-                  // Remove re-read limits for fsReadLines so LLMs can read, edit, then re-read to verify
+          // Debug file logging for semantic tools investigation
+          debugLog('LLM_REQUEST', {
+            provider: effectiveProvider,
+            model: effectiveModel,
+            systemInstructions: typeof __bdSystemText === 'string'
+              ? __bdSystemText
+              : Array.isArray(__bdSystemText)
+                ? __bdSystemText.map((b: any) => b?.text).join('\n')
+                : undefined,
+            messages: __bdMessages,
+            toolDefinitions: hydratedTools?.map((t: any) => ({
+              name: t.name,
+              description: t.description,
+              parameters: t.parameters
+            }))
+          })
 
-                  dedupeReadFile: false,
-                })
-                : []
+          // NOTE: Retry logic is handled at the provider level (per-step in agentic loop).
+          // Service-level retry would restart the entire flow, losing progress from previous steps.
+          const policyTools = (hydratedTools && hydratedTools.length)
+            ? wrapToolsWithPolicy(hydratedTools, {
+              // Disable dedupe for fsReadLines/fsReadFile to ensure RAW text is returned (no cached JSON stubs)
+              dedupeReadLines: false,
+              // Remove re-read limits for fsReadLines so LLMs can read, edit, then re-read to verify
+              dedupeReadFile: false,
+            })
+            : []
 
-              const agentStreamConfig = {
-                ...streamOpts,
-                tools: policyTools,
-                responseSchema,
-                toolMeta: {
-                  requestId: context.contextId,
-                  workspaceId: (flowAPI as any)?.workspaceId,
-                  flowAPI, // Pass FlowAPI so tools like askForInput can use it
-                },
-                onToolStart: onToolStartWrapped,
-                onToolEnd: onToolEndWrapped,
-                onToolError: eventHandlers.onToolError,
-                onStep: onStepWrapped
-              }
-
-              if (process.env.HF_FLOW_DEBUG === '1') {
-                try {
-                  const { apiKey: _apiKey, ...loggableConfig } = agentStreamConfig as any
-                  const logPayload = {
-                    provider: effectiveProvider,
-                    model: effectiveModel,
-                    config: loggableConfig
-                  }
-                  console.log(
-                    '[llm-service] agentStream config',
-                    inspect(logPayload, {
-                      depth: null,
-                      maxArrayLength: null,
-                      breakLength: 120,
-                      colors: false
-                    })
-                  )
-                } catch {}
-              }
-
-              streamHandle = await providerAdapter.agentStream(agentStreamConfig)
-
-              try { flowAPI.log.debug('llmService.chat agentStream started', { provider: effectiveProvider, model: effectiveModel }) } catch { }
-
+          const agentStreamConfig = {
+            ...streamOpts,
+            tools: policyTools,
+            responseSchema,
+            toolMeta: {
+              requestId: context.contextId,
+              workspaceId: (flowAPI as any)?.workspaceId,
+              flowAPI, // Pass FlowAPI so tools like askForInput can use it
             },
-            {
-              max: 3,
-              maxWaitMs: 60000,
-              onRateLimitWait: ({ attempt, waitMs, reason }: { attempt: number; waitMs: number; reason?: string }) => {
+            onToolStart: onToolStartWrapped,
+            onToolEnd: onToolEndWrapped,
+            onToolError: eventHandlers.onToolError,
+            onStep: onStepWrapped
+          }
 
-
-                // Emit event to UI
-                flowAPI.emitExecutionEvent({
-                  type: 'rate_limit_wait',
-                  provider: effectiveProvider,
-                  model: effectiveModel,
-                  rateLimitWait: {
-                    attempt,
-                    waitMs,
-                    reason
-                  }
-                })
+          if (process.env.HF_FLOW_DEBUG === '1') {
+            try {
+              const { apiKey: _apiKey, ...loggableConfig } = agentStreamConfig as any
+              const logPayload = {
+                provider: effectiveProvider,
+                model: effectiveModel,
+                config: loggableConfig
               }
-            }
-          )
+              console.log(
+                '[llm-service] agentStream config',
+                inspect(logPayload, {
+                  depth: null,
+                  maxArrayLength: null,
+                  breakLength: 120,
+                  colors: false
+                })
+              )
+            } catch {}
+          }
+
+          streamHandle = await providerAdapter.agentStream(agentStreamConfig)
+
+          try { flowAPI.log.debug('llmService.chat agentStream started', { provider: effectiveProvider, model: effectiveModel }) } catch { }
 	    } catch (e: any) {
           // Check if this was a rate limit error and update tracker
           const rateLimitInfo = parseRateLimitError(e)
@@ -638,7 +813,14 @@ class LLMService {
       })
 
       // Emit usage breakdown (general; precise when tokenizer available)
-      const instructionsTokens = tokenCounter.count(__bdSystemText || '')
+      // Handle system text - can be string or array of Anthropic blocks
+      let systemTextForBreakdown = ''
+      if (typeof __bdSystemText === 'string') {
+        systemTextForBreakdown = __bdSystemText
+      } else if (Array.isArray(__bdSystemText)) {
+        systemTextForBreakdown = __bdSystemText.map((block: any) => block?.text || '').filter(Boolean).join('\n')
+      }
+      const instructionsTokens = tokenCounter.count(systemTextForBreakdown)
       let userMsgTokens = 0
       let assistantMsgTokens = 0
       if (Array.isArray(__bdMessages)) {
@@ -677,6 +859,7 @@ class LLMService {
           outputTokens: accumulatedTotals.outputTokens ?? calcOutput,
           totalTokens: accumulatedTotals.totalTokens ?? ((accumulatedTotals.inputTokens ?? calcInput) + (accumulatedTotals.outputTokens ?? calcOutput)),
           cachedTokens: Math.max(0, accumulatedTotals.cachedTokens || 0),
+          reasoningTokens: accumulatedTotals.reasoningTokens || 0,
           stepCount: accumulatedTotals.stepCount || 0
         }
         : (lastReported
@@ -685,11 +868,16 @@ class LLMService {
             outputTokens: lastReported.outputTokens ?? calcOutput,
             totalTokens: lastReported.totalTokens ?? ((lastReported.inputTokens ?? calcInput) + (lastReported.outputTokens ?? calcOutput)),
             cachedTokens: Math.max(0, lastReported.cachedTokens || (lastReported as any).cachedInputTokens || 0),
+            reasoningTokens: lastReported.reasoningTokens || 0,
             stepCount: lastReported.stepCount || 0
           }
-          : { inputTokens: calcInput, outputTokens: calcOutput, totalTokens: calcInput + calcOutput, cachedTokens: 0, stepCount: 0 })
+          : { inputTokens: calcInput, outputTokens: calcOutput, totalTokens: calcInput + calcOutput, cachedTokens: 0, reasoningTokens: 0, stepCount: 0 })
 
-      const thoughtsTokens = Math.max(0, Number(totals.outputTokens || 0) - (assistantTextTokens + toolCallsTokens))
+      // Use explicitly reported reasoning tokens if available (from o1/o3 models),
+      // otherwise fall back to delta calculation (output - text - tool calls)
+      const thoughtsTokens = (totals.reasoningTokens || 0) > 0
+        ? totals.reasoningTokens
+        : Math.max(0, Number(totals.outputTokens || 0) - (assistantTextTokens + toolCallsTokens))
 
       const toolKeys = new Set([
         ...Object.keys(toolSnapshot.argsTokensByTool || {}),
@@ -706,6 +894,10 @@ class LLMService {
         ])
       )
 
+      // Get per-step breakdown for agentic requests
+      const agenticBreakdown = usageAccumulator.getAgenticBreakdown()
+      const hasPerStepData = agenticBreakdown.steps.length > 1
+
       try {
         flowAPI.log?.debug?.('LLMService.chat emitting usage_breakdown', {
           provider: effectiveProvider,
@@ -713,7 +905,9 @@ class LLMService {
           totals,
           hasAccum,
           calcInput,
-          calcOutput
+          calcOutput,
+          hasPerStepData,
+          stepCount: agenticBreakdown.steps.length
         })
       } catch {}
 
@@ -738,7 +932,26 @@ class LLMService {
             },
             totals: { ...totals },
             estimated: !tokenCounter.precise,
-            tools: toolsBreakdown
+            tools: toolsBreakdown,
+            // Per-step breakdown for multi-step agentic requests
+            perStep: hasPerStepData ? agenticBreakdown.steps.map(step => ({
+              stepNumber: step.stepNumber,
+              categories: step.categories,
+              providerInputTokens: step.providerInputTokens,
+              providerOutputTokens: step.providerOutputTokens,
+              cachedTokens: step.cachedTokens,
+              inputTotal: step.inputTotal,
+              outputTotal: step.outputTotal
+            })) : undefined,
+            // Re-sent context summary
+            resent: hasPerStepData ? agenticBreakdown.summary.resent : undefined,
+            // Comparison of accumulated vs unique tokens
+            comparison: hasPerStepData ? {
+              accumulatedInput: agenticBreakdown.summary.accumulatedInput,
+              uniqueInput: agenticBreakdown.summary.uniqueInput,
+              accumulatedOutput: agenticBreakdown.summary.accumulatedOutput,
+              uniqueOutput: agenticBreakdown.summary.uniqueOutput
+            } : undefined
           }
         })
       } catch (e) {

@@ -2,6 +2,7 @@ import { EmbeddingService } from './vector/EmbeddingService.js';
 import { VectorService } from './vector/VectorService.js';
 import { KBIndexerService } from './vector/KBIndexerService.js';
 import { MemoriesIndexerService } from './vector/MemoriesIndexerService.js';
+import { ToolsIndexerService } from './vector/ToolsIndexerService.js';
 import { GlobalIndexingOrchestrator } from './indexing/GlobalIndexingOrchestrator.js';
 import { WorkspaceService } from './WorkspaceService.js';
 import { ToolsService } from './ToolsService.js';
@@ -28,6 +29,7 @@ let embeddingService: EmbeddingService;
 let vectorService: VectorService;
 let kbIndexerService: KBIndexerService;
 let memoriesIndexerService: MemoriesIndexerService;
+let toolsIndexerService: ToolsIndexerService;
 let globalIndexingOrchestratorService: GlobalIndexingOrchestrator;
 let workspaceService: WorkspaceService;
 let toolsService: ToolsService;
@@ -97,6 +99,11 @@ export function initializeServices() {
   mcpService = new McpService();
   registry.register('mcp', mcpService);
 
+  toolsIndexerService = new ToolsIndexerService();
+  registry.register('toolsIndexer', toolsIndexerService);
+  // Attach MCP listener after MCP service is registered
+  toolsIndexerService.attachMcpListener();
+
   explorerService = new ExplorerService();
   registry.register('explorer', explorerService);
 
@@ -135,6 +142,7 @@ export const getEmbeddingService = () => embeddingService;
 export const getVectorService = () => vectorService;
 export const getKBIndexerService = () => kbIndexerService;
 export const getMemoriesIndexerService = () => memoriesIndexerService;
+export const getToolsIndexerService = () => toolsIndexerService;
 export const getGlobalIndexingOrchestratorService = () => globalIndexingOrchestratorService;
 export const getWorkspaceService = () => workspaceService;
 export const getToolsService = () => toolsService;

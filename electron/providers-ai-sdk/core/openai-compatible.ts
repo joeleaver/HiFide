@@ -1,11 +1,12 @@
 /**
  * Core OpenAI-compatible provider factory.
- * 
+ *
  * This module provides a factory function to create provider adapters for any
  * OpenAI-compatible API. The OpenRouter provider is the reference implementation,
  * and other providers (Fireworks, xAI, OpenAI direct, etc.) are thin wrappers.
  */
 import OpenAI from 'openai'
+import * as fs from 'fs'
 import { UiPayloadCache } from '../../core/uiPayloadCache'
 import { AGENT_MAX_STEPS } from '../../../src/store/utils/constants'
 import type { ProviderAdapter, StreamHandle, AgentTool } from '../../providers/provider'
@@ -16,7 +17,7 @@ export type { ProviderAdapter, StreamHandle, AgentTool }
 
 const DEBUG = process.env.HF_AI_SDK_DEBUG === '1' || process.env.HF_DEBUG_AI_SDK === '1'
 
-// Rate limiting constants
+// Rate limiting constants for per-step retries within the agentic loop
 const MAX_RETRIES = 5
 const INITIAL_BACKOFF_MS = 1000
 const MAX_BACKOFF_MS = 60000
@@ -73,6 +74,50 @@ export interface ProviderConfig {
    * If provided, text deltas will be passed through this function.
    */
   reasoningExtractor?: (text: string, state: ReasoningState) => ReasoningExtractorResult
+  /**
+   * Hook to get per-request headers for session affinity/caching.
+   * Used by providers like Fireworks (x-session-affinity) and xAI (x-grok-conv-id).
+   */
+  getSessionHeaders?: (context: RequestContext) => Record<string, string> | undefined
+  /**
+   * If true, omit stream_options from requests (for providers that don't support it).
+   * Default: false (include stream_options: { include_usage: true })
+   */
+  omitStreamOptions?: boolean
+  /**
+   * Hook to create/retrieve an explicit cache before the agentic loop.
+   * If provided, the returned cache ID will be included in extra_body for all requests.
+   * Used by Gemini for explicit caching (90% cost savings on 2.5 models).
+   *
+   * @param context - Cache context with API key, model, system, tools
+   * @returns Promise resolving to cache ID (e.g., "cachedContents/xxx") or null to skip caching
+   */
+  getCacheId?: (context: CacheContext) => Promise<string | null>
+}
+
+/**
+ * Context for cache creation/retrieval
+ */
+export interface CacheContext {
+  /** API key for cache API calls */
+  apiKey: string
+  /** Model name */
+  model: string
+  /** System instructions */
+  systemInstruction?: string
+  /** Tools in OpenAI format */
+  tools?: Array<{
+    type: 'function'
+    function: {
+      name: string
+      description?: string
+      parameters?: any
+    }
+  }>
+  /** Session ID for cache key management */
+  sessionId?: string
+  /** Cache mode: 'explicit' (default) for guaranteed savings, 'implicit' for automatic caching */
+  geminiCacheMode?: 'explicit' | 'implicit'
 }
 
 export interface RequestContext {
@@ -82,6 +127,8 @@ export interface RequestContext {
   reasoningEffort?: string
   includeThoughts?: boolean
   thinkingBudget?: number
+  /** Session/conversation ID for cache affinity (from toolMeta.requestId) */
+  sessionId?: string
 }
 
 export interface ChunkContext {
@@ -123,67 +170,59 @@ function sanitizeName(name: string): string {
 
 /**
  * Clean up JSON Schema parameters for tool definitions.
- * - Removes additionalProperties which some providers don't support
- * - Adds placeholder property for parameterless functions (some providers require non-empty properties)
+ *
+ * Minimal cleaning to maximize compatibility across providers while preserving
+ * the original schema structure as much as possible.
  */
 function cleanParameters(params: any): any {
-  const placeholderProp = { _: { type: 'string', description: 'Not used' } }
-
+  // Handle missing/invalid params
   if (!params || typeof params !== 'object') {
-    return { type: 'object', properties: placeholderProp }
+    return {
+      type: 'object',
+      properties: {},
+      required: []
+    }
   }
 
   // Deep clone to avoid mutating original
   const cleaned = JSON.parse(JSON.stringify(params))
 
-  // Recursively clean schema objects
-  function cleanSchema(obj: any): void {
-    if (!obj || typeof obj !== 'object') return
-
-    // Remove additionalProperties
-    delete obj.additionalProperties
-
-    // Remove validation keywords that some providers don't support
-    delete obj.minLength
-    delete obj.maxLength
-    delete obj.minimum
-    delete obj.maximum
-    delete obj.pattern
-    delete obj.format
-    delete obj.minItems
-    delete obj.maxItems
-    delete obj.uniqueItems
-
-    // Process nested properties
-    if (obj.properties && typeof obj.properties === 'object') {
-      for (const key of Object.keys(obj.properties)) {
-        cleanSchema(obj.properties[key])
-      }
-    }
-
-    // Process array items
-    if (obj.items) {
-      cleanSchema(obj.items)
-    }
+  // Ensure type is object (required by all providers)
+  if (cleaned.type !== 'object') {
+    cleaned.type = 'object'
   }
 
-  cleanSchema(cleaned)
-
-  // Ensure non-empty properties
-  if (!cleaned.properties || Object.keys(cleaned.properties).length === 0) {
-    cleaned.properties = placeholderProp
+  // Ensure properties exists (required by most providers)
+  if (!cleaned.properties || typeof cleaned.properties !== 'object') {
+    cleaned.properties = {}
   }
 
-  // Ensure required array exists (some providers require it)
+  // Ensure required is an array (some providers require it even if empty)
   if (!Array.isArray(cleaned.required)) {
     cleaned.required = []
   }
 
-  // GLM-4 quirk: tools with no required parameters don't get called properly.
-  // Add a dummy required parameter if needed.
-  if (cleaned.required.length === 0) {
-    cleaned.properties._confirm = { type: 'boolean', description: 'Set to true to execute', default: true }
-    cleaned.required = ['_confirm']
+  // Remove additionalProperties - not supported by all providers and can cause issues
+  delete cleaned.additionalProperties
+
+  // Recursively clean nested schemas (for objects with nested properties)
+  function cleanNested(obj: any): void {
+    if (!obj || typeof obj !== 'object') return
+
+    delete obj.additionalProperties
+
+    if (obj.properties && typeof obj.properties === 'object') {
+      for (const key of Object.keys(obj.properties)) {
+        cleanNested(obj.properties[key])
+      }
+    }
+    if (obj.items) {
+      cleanNested(obj.items)
+    }
+  }
+
+  for (const key of Object.keys(cleaned.properties)) {
+    cleanNested(cleaned.properties[key])
   }
 
   return cleaned
@@ -191,8 +230,15 @@ function cleanParameters(params: any): any {
 
 /**
  * Build tools in OpenAI function calling format.
+ *
+ * @param tools - Array of agent tools to convert
+ * @param options.addCacheControl - If true, adds cache_control to the last tool to enable
+ *   prefix caching. Supported by Anthropic and Gemini models via OpenRouter.
  */
-function buildOpenAITools(tools: AgentTool[] | undefined): { 
+function buildOpenAITools(
+  tools: AgentTool[] | undefined,
+  options?: { addCacheControl?: boolean }
+): {
   openaiTools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined
   toolMap: Map<string, AgentTool>
   nameMap: Map<string, string>
@@ -200,28 +246,38 @@ function buildOpenAITools(tools: AgentTool[] | undefined): {
   if (!tools?.length) {
     return { openaiTools: undefined, toolMap: new Map(), nameMap: new Map() }
   }
-  
-  const openaiTools: OpenAI.Chat.Completions.ChatCompletionTool[] = []
+
+  const openaiTools: any[] = []  // Use any[] to allow cache_control field
   const toolMap = new Map<string, AgentTool>()
   const nameMap = new Map<string, string>() // safe -> original
-  
-  for (const t of tools) {
+
+  for (let i = 0; i < tools.length; i++) {
+    const t = tools[i]
     if (!t?.name || typeof t.run !== 'function') continue
     const safe = sanitizeName(t.name)
     nameMap.set(safe, t.name)
     toolMap.set(safe, t)
-    
-    openaiTools.push({
+
+    const toolDef: any = {
       type: 'function',
       function: {
         name: safe,
         description: t.description || '',
-        parameters: cleanParameters(t.parameters),
-        strict: false
+        parameters: cleanParameters(t.parameters)
+        // Note: strict mode removed - let providers use their defaults
+        // strict: true requires additionalProperties: false which we can't guarantee for all tools
       }
-    })
+    }
+
+    // Add cache_control to the LAST tool for Anthropic-style caching
+    // This caches all tools up to and including this one
+    if (options?.addCacheControl && i === tools.length - 1) {
+      toolDef.cache_control = { type: 'ephemeral' }
+    }
+
+    openaiTools.push(toolDef)
   }
-  
+
   return { openaiTools: openaiTools.length ? openaiTools : undefined, toolMap, nameMap }
 }
 
@@ -266,7 +322,12 @@ function toOpenAIMessages(messages: any[]): OpenAI.Chat.Completions.ChatCompleti
     if (msg.role === 'user') {
       result.push({ role: 'user', content: convertMessageContent(msg.content) })
     } else if (msg.role === 'assistant') {
-      result.push({ role: 'assistant', content: convertMessageContent(msg.content) })
+      // Preserve tool_calls from message history - required for proper conversation context
+      const assistantMsg: any = { role: 'assistant', content: convertMessageContent(msg.content) }
+      if (msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+        assistantMsg.tool_calls = msg.tool_calls
+      }
+      result.push(assistantMsg)
     } else if (msg.role === 'tool') {
       result.push({
         role: 'tool',
@@ -287,7 +348,7 @@ function toOpenAIMessages(messages: any[]): OpenAI.Chat.Completions.ChatCompleti
  * Create an OpenAI-compatible provider adapter.
  */
 export function createOpenAICompatibleProvider(config: ProviderConfig): ProviderAdapter {
-  const { id, baseURL, defaultHeaders, requestModifier, chunkProcessor, reasoningExtractor } = config
+  const { id, baseURL, defaultHeaders, requestModifier, chunkProcessor, reasoningExtractor, getSessionHeaders, omitStreamOptions, getCacheId } = config
 
   return {
     id,
@@ -312,7 +373,9 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
       onStep,
       reasoningEffort,
       includeThoughts,
-      thinkingBudget
+      thinkingBudget,
+      geminiCacheMode,
+      geminiCacheRefreshThreshold: _geminiCacheRefreshThreshold
     }): Promise<StreamHandle> {
       const ac = new AbortController()
 
@@ -323,17 +386,59 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
         defaultHeaders
       })
 
-      // Build tools
-      const { openaiTools, toolMap, nameMap } = buildOpenAITools(tools)
+      // Build tools - add cache_control for providers that support explicit breakpoints
+      // - Anthropic: explicit cache_control breakpoints (but NOT via their OpenAI-compatible API)
+      // - OpenRouter: passes cache_control to underlying provider (Claude, Gemini)
+      // - Gemini direct: has implicit caching (automatic), does NOT support cache_control syntax
+      // - OpenAI: has automatic prefix caching, does NOT support cache_control syntax
+      // See: https://openrouter.ai/docs/guides/best-practices/prompt-caching
+      const supportsCacheControl = id === 'openrouter' && /claude|anthropic|gemini/i.test(model)
+      const { openaiTools, toolMap, nameMap } = buildOpenAITools(tools, {
+        addCacheControl: supportsCacheControl
+      })
       const hasTools = !!openaiTools?.length
 
       // Convert messages - this array will be mutated during the agentic loop
       let conversationMessages = toOpenAIMessages(messages || [])
 
-      // Add system message if provided
-      // OpenAI SDK accepts both string and array formats for content
-      if (system) {
-        conversationMessages.unshift({ role: 'system', content: system })
+      // Explicit cache ID (for providers like Gemini that support it)
+      let explicitCacheId: string | null = null
+
+      // Try to get/create an explicit cache if the provider supports it
+      // IMPORTANT: This must happen BEFORE adding system message, because with explicit caching
+      // the system and tools are IN the cache and should NOT be in the request
+      if (getCacheId) {
+        try {
+          explicitCacheId = await getCacheId({
+            apiKey,
+            model,
+            systemInstruction: system,
+            tools: openaiTools as any,
+            sessionId: toolMeta?.requestId,
+            geminiCacheMode
+          })
+          if (explicitCacheId) {
+            console.log(`[${id}] Using explicit cache: ${explicitCacheId}`)
+          }
+        } catch (err: any) {
+          // Cache creation failed - continue without caching
+          console.warn(`[${id}] Failed to create explicit cache:`, err?.message || err)
+          explicitCacheId = null
+        }
+      }
+
+      // Add system message if provided - but NOT if we have an explicit cache
+      // (with explicit caching, system is stored in the cache)
+      if (system && !explicitCacheId) {
+        if (supportsCacheControl) {
+          // Use array format with cache_control breakpoint
+          conversationMessages.unshift({
+            role: 'system',
+            content: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+          } as any)
+        } else {
+          conversationMessages.unshift({ role: 'system', content: system })
+        }
       }
 
       // State for reasoning extraction (will be reset each step)
@@ -365,14 +470,47 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
             tagName: ''
           }
 
+          // Progressive caching: Mark the last message as a cache breakpoint
+          // This ensures each step caches all previous conversation history
+          // Only do this for step 2+, and only for providers that support cache_control
+          if (supportsCacheControl && stepCount > 1 && conversationMessages.length > 1) {
+            const lastIdx = conversationMessages.length - 1
+            const lastMsg = conversationMessages[lastIdx] as any
+
+            // Add cache_control to the last message's content
+            // This extends the cached prefix to include all previous messages
+            if (lastMsg.role === 'tool') {
+              // For tool messages, wrap content in array format with cache_control
+              if (typeof lastMsg.content === 'string') {
+                lastMsg.content = [{ type: 'text', text: lastMsg.content, cache_control: { type: 'ephemeral' } }]
+              }
+            } else if (lastMsg.role === 'assistant' || lastMsg.role === 'user') {
+              // For user/assistant messages with string content
+              if (typeof lastMsg.content === 'string') {
+                lastMsg.content = [{ type: 'text', text: lastMsg.content, cache_control: { type: 'ephemeral' } }]
+              } else if (Array.isArray(lastMsg.content) && lastMsg.content.length > 0) {
+                // Add cache_control to last content block
+                const lastBlock = lastMsg.content[lastMsg.content.length - 1]
+                if (lastBlock && !lastBlock.cache_control) {
+                  lastBlock.cache_control = { type: 'ephemeral' }
+                }
+              }
+            }
+          }
+
           // Build request body fresh each iteration (like OpenRouter)
+          // When using explicit cache, tools are IN the cache and should NOT be in the request
+          const includeTools = hasTools && !explicitCacheId
           let requestBody: any = {
             model,
             messages: conversationMessages,
-            tools: hasTools ? openaiTools : undefined,
-            tool_choice: hasTools ? 'auto' : undefined,
+            tools: includeTools ? openaiTools : undefined,
+            tool_choice: includeTools ? 'auto' : undefined,
             temperature: typeof temperature === 'number' ? temperature : undefined,
-            stream: true
+            stream: true,
+            // Request usage stats in streaming response (required for per-step tracking)
+            // Some providers may not support this - use omitStreamOptions in provider config to disable
+            ...(omitStreamOptions ? {} : { stream_options: { include_usage: true } })
           }
 
           // Add responseSchema if provided (for structured outputs)
@@ -383,17 +521,30 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
             }
           }
 
+          // Build request context for provider hooks
+          const requestContext: RequestContext = {
+            model,
+            hasTools,
+            temperature,
+            reasoningEffort,
+            includeThoughts,
+            thinkingBudget,
+            sessionId: toolMeta?.requestId
+          }
+
           // Apply provider-specific modifications
           if (requestModifier) {
-            requestBody = requestModifier(requestBody, {
-              model,
-              hasTools,
-              temperature,
-              reasoningEffort,
-              includeThoughts,
-              thinkingBudget
-            })
+            requestBody = requestModifier(requestBody, requestContext)
           }
+
+          // Add explicit cache reference if available (Gemini explicit caching)
+          // Put cached_content directly in the request body (not in extra_body)
+          if (explicitCacheId) {
+            requestBody.cached_content = explicitCacheId
+          }
+
+          // Get session-specific headers for cache affinity (Fireworks, xAI)
+          const sessionHeaders = getSessionHeaders?.(requestContext)
 
           if (DEBUG) {
             console.log(`[${id}] Step ${stepCount}, messages: ${conversationMessages.length}`)
@@ -403,15 +554,80 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
             console.log(`[${id}] Full request body:`, JSON.stringify(requestBody, null, 2))
             if (stepCount === 1 && hasTools) {
               console.log(`[${id}] Tool count: ${openaiTools!.length}`)
+              // Log full tool definitions to debug parameter issues
+              console.log(`[${id}] Tool definitions:`, JSON.stringify(openaiTools, null, 2))
             }
           }
 
-          // Make API call with exponential backoff for rate limiting
+          // Always log tool definitions on first step if HF_DEBUG_TOOLS=1
+          if (process.env.HF_DEBUG_TOOLS === '1' && stepCount === 1 && hasTools) {
+            console.log(`[${id}] === TOOL DEFINITIONS SENT TO API ===`)
+            console.log(JSON.stringify(openaiTools, null, 2))
+            console.log(`[${id}] === END TOOL DEFINITIONS ===`)
+          }
+
+          // Cache debug logging to file (HF_DEBUG_CACHE_FILE=1)
+          if (process.env.HF_DEBUG_CACHE_FILE === '1') {
+            try {
+              const debugFile = '/tmp/hifide-cache-debug.json'
+              let debugData: any = { steps: [] }
+              try {
+                if (fs.existsSync(debugFile)) {
+                  debugData = JSON.parse(fs.readFileSync(debugFile, 'utf8'))
+                }
+              } catch {}
+
+              const stepData = {
+                timestamp: new Date().toISOString(),
+                provider: id,
+                model,
+                stepCount,
+                supportsCacheControl,
+                messageCount: conversationMessages.length,
+                messages: conversationMessages.map((m: any, i: number) => ({
+                  index: i,
+                  role: m.role,
+                  contentType: typeof m.content,
+                  hasToolCalls: !!(m.tool_calls?.length),
+                  contentLength: typeof m.content === 'string' ? m.content.length : 0
+                })),
+                toolsHaveCache: openaiTools?.some((t: any) => t.cache_control) || false
+              }
+
+              debugData.steps.push(stepData)
+              if (debugData.steps.length > 20) debugData.steps = debugData.steps.slice(-20)
+              fs.writeFileSync(debugFile, JSON.stringify(debugData, null, 2))
+            } catch {}
+          }
+
+          // Make API call with per-step retry for rate limits
+          // This is the correct place for retry logic since each step is independent.
+          // Service-level retry would restart the entire agentic loop, losing progress.
           let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk> | undefined
+
+          // Extract extra_body from requestBody - it needs to be passed as a separate option
+          // The OpenAI SDK merges extra_body into the HTTP body, but it expects it in options
+          const { extra_body, ...bodyWithoutExtraBody } = requestBody
+
+          // Debug logging for explicit cache
+          if (explicitCacheId) {
+            console.log(`[${id}] Request with explicit cache:`, {
+              cacheId: explicitCacheId,
+              cached_content_in_body: bodyWithoutExtraBody.cached_content || 'not set',
+              messageCount: conversationMessages.length
+            })
+          }
+
           for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
             if (cancelled || ac.signal.aborted) break
             try {
-              stream = await client.chat.completions.create(requestBody, { signal: ac.signal }) as any
+              // Pass the body directly - cached_content is included if using explicit caching
+              // extra_body (for things like google.thinking_config) is passed via body option
+              stream = await client.chat.completions.create(bodyWithoutExtraBody, {
+                signal: ac.signal,
+                headers: sessionHeaders,
+                ...(extra_body ? { body: extra_body } : {})
+              }) as any
               break
             } catch (err: any) {
               // Don't retry non-rate-limit errors or abort errors
@@ -542,9 +758,15 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
               // Handle tool calls - use ID-based tracking for safety
               // Gemini sends each parallel tool call as a complete chunk with index=0 but different IDs
               // OpenAI streams partial data for each tool call with incrementing indices
+              // OpenRouter may pass through Anthropic's format (tc.name, tc.input) instead of OpenAI's (tc.function.name, tc.function.arguments)
               if (delta?.tool_calls) {
                 for (const tc of delta.tool_calls) {
                   if (!tc.id) continue // Skip if no ID
+
+                  // Handle both OpenAI format (tc.function.name/arguments) and Anthropic format (tc.name/input)
+                  const tcName = tc.function?.name || tc.name || ''
+                  // Anthropic uses tc.input (object), OpenAI uses tc.function.arguments (string)
+                  const tcArgs = tc.function?.arguments || (tc.input ? JSON.stringify(tc.input) : '')
 
                   // Check if this is a new tool call (not seen before)
                   if (!seenToolIds.has(tc.id)) {
@@ -552,16 +774,16 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
                     seenToolIds.add(tc.id)
                     toolCalls.set(toolCalls.size, {
                       id: tc.id,
-                      name: tc.function?.name || '',
-                      arguments: tc.function?.arguments || ''
+                      name: tcName,
+                      arguments: tcArgs
                     })
                   } else {
                     // Existing tool call - append arguments (streaming delta)
                     // Find the entry with this ID and append arguments
                     for (const [, call] of toolCalls.entries()) {
                       if (call.id === tc.id) {
-                        if (tc.function?.name) call.name = tc.function.name
-                        if (tc.function?.arguments) call.arguments += tc.function.arguments
+                        if (tcName) call.name = tcName
+                        if (tcArgs) call.arguments += tcArgs
                         break
                       }
                     }
@@ -590,6 +812,71 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
               // Capture usage
               if (chunk.usage) {
                 stepUsage = chunk.usage
+                // Log cache stats for debugging (enabled via HF_DEBUG_CACHE=1)
+                if (process.env.HF_DEBUG_CACHE === '1') {
+                  const cached = chunk.usage.prompt_tokens_details?.cached_tokens || 0
+                  const cacheDiscount = (chunk as any).cache_discount
+                  const nativeCache = (chunk as any).native_tokens_prompt_cached
+                  if (cached > 0 || cacheDiscount || nativeCache) {
+                    console.log(`[${id}] Cache stats:`, {
+                      prompt_tokens: chunk.usage.prompt_tokens,
+                      cached_tokens: cached,
+                      cache_discount: cacheDiscount,
+                      native_cached: nativeCache,
+                      full_usage: JSON.stringify(chunk.usage)
+                    })
+                  }
+                }
+                // Always log usage to file for cache debugging (HF_DEBUG_CACHE_FILE=1)
+                // This captures EVERY step's usage, even when cached_tokens is 0
+                if (process.env.HF_DEBUG_CACHE_FILE === '1') {
+                  try {
+                    const usageFile = '/tmp/hifide-usage-debug.json'
+                    let usageData: any = { entries: [] }
+                    try {
+                      if (fs.existsSync(usageFile)) {
+                        usageData = JSON.parse(fs.readFileSync(usageFile, 'utf8'))
+                      }
+                    } catch {}
+
+                    const usage = chunk.usage as any
+                    usageData.entries.push({
+                      timestamp: new Date().toISOString(),
+                      provider: id,
+                      model,
+                      stepCount,
+                      // Raw usage object from API
+                      rawUsage: chunk.usage,
+                      // Extracted values - check ALL possible cache locations
+                      extracted: {
+                        prompt_tokens: usage.prompt_tokens,
+                        completion_tokens: usage.completion_tokens,
+                        // OpenAI format
+                        cached_tokens_openai: usage.prompt_tokens_details?.cached_tokens || 0,
+                        // OpenRouter/Anthropic format
+                        native_cached: usage.native_tokens_prompt_cached || 0,
+                        cache_read: usage.cache_read_input_tokens || 0,
+                        // Gemini format at root (camelCase and snake_case)
+                        cachedContentTokenCount: usage.cachedContentTokenCount || 0,
+                        cached_content_token_count: usage.cached_content_token_count || 0,
+                        // Gemini format nested in usage_metadata (both cases)
+                        usage_metadata_camel: usage.usage_metadata?.cachedContentTokenCount || 0,
+                        usage_metadata_snake: usage.usage_metadata?.cached_content_token_count || 0,
+                        // Check for any key containing 'cache' (for discovery)
+                        cacheRelatedKeys: Object.keys(usage).filter((k: string) =>
+                          k.toLowerCase().includes('cache')
+                        ),
+                        // Also check usage_metadata keys if present
+                        usageMetadataKeys: usage.usage_metadata ? Object.keys(usage.usage_metadata) : []
+                      },
+                      // Full chunk for analysis
+                      fullChunk: chunk
+                    })
+
+                    if (usageData.entries.length > 50) usageData.entries = usageData.entries.slice(-50)
+                    fs.writeFileSync(usageFile, JSON.stringify(usageData, null, 2))
+                  } catch {}
+                }
               }
             }
             if (DEBUG) {
@@ -612,14 +899,54 @@ export function createOpenAICompatibleProvider(config: ProviderConfig): Provider
             throw err
           }
 
-          // Emit token usage
+          // Emit token usage with explicit reasoning tokens when available
           if (stepUsage && onTokenUsage) {
+            // Extract reasoning tokens from completion_tokens_details (OpenAI o1/o3 models)
+            // or from dedicated reasoning_tokens field (some providers)
+            const reasoningTokens =
+              stepUsage.completion_tokens_details?.reasoning_tokens ||
+              stepUsage.reasoning_tokens ||
+              0
+
+            // Extract cached tokens - check multiple possible locations:
+            // - OpenAI: prompt_tokens_details.cached_tokens
+            // - OpenRouter/Anthropic: native_tokens_prompt_cached or prompt_tokens_details.cached_tokens
+            // - Some providers: cache_read_input_tokens
+            // - Gemini native: cached_content_token_count (in usage_metadata, snake_case)
+            // - Gemini variants: cachedContentTokenCount (camelCase) or at root
+            const cachedTokens =
+              stepUsage.prompt_tokens_details?.cached_tokens ||
+              stepUsage.native_tokens_prompt_cached ||
+              stepUsage.cache_read_input_tokens ||
+              // Gemini formats (check both usage_metadata and root, both cases)
+              stepUsage.usage_metadata?.cached_content_token_count ||
+              stepUsage.usage_metadata?.cachedContentTokenCount ||
+              stepUsage.cached_content_token_count ||
+              stepUsage.cachedContentTokenCount ||
+              0
+
+            // Collect tool call arguments for output category tracking
+            const toolCallArgs = Array.from(toolCalls.values())
+              .filter(tc => tc.id && tc.name)
+              .map(tc => tc.arguments)
+              .join('')
+
+            // Estimate token counts from output content (~4 chars per token)
+            const estimateTokens = (s: string) => Math.ceil((s?.length || 0) / 4)
+
             onTokenUsage({
               inputTokens: stepUsage.prompt_tokens || 0,
               outputTokens: stepUsage.completion_tokens || 0,
               totalTokens: stepUsage.total_tokens || 0,
-              cachedTokens: stepUsage.prompt_tokens_details?.cached_tokens || 0,
-              stepCount: stepCount
+              cachedTokens,
+              reasoningTokens,
+              stepCount: stepCount,
+              // Output token estimates for per-step category tracking
+              stepOutput: {
+                text: estimateTokens(stepText),
+                reasoning: estimateTokens(stepReasoning),
+                toolCallArgs: estimateTokens(toolCallArgs)
+              }
             })
           }
 

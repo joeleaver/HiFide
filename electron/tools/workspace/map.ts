@@ -425,8 +425,8 @@ function summarizeExtensions(meta: FileMeta[]) {
 
 export const workspaceMapTool: AgentTool = {
   name: 'workspaceMap',
-  description: 'Stack-agnostic project orientation: dependency influence, large modules, config anchors, and a markdown directory tree. No inputs; always runs full analysis.',
-  parameters: { type: 'object', properties: {}, additionalProperties: false },
+  description: 'Get project structure overview.',
+  parameters: { type: 'object', properties: {} },
   run: async (_args?: Record<string, never>, meta?: any) => {
     const t0 = Date.now()
     const root = await resolveWorkspaceRootAsync(meta?.workspaceId)

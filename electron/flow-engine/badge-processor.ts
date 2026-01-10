@@ -787,6 +787,37 @@ class BadgeConfigRegistry {
       shouldShowPreview: (_badge: any) => false
     })
 
+    // Semantic Tools - searchTools meta-tool
+    this.register({
+      toolName: 'searchTools',
+      defaultType: 'tool',
+      contentType: 'operation-result',
+      requiresExpansion: true,
+      generateTitle: (badge: any) => {
+        const query = badge.args?.query
+        return query ? `"${shortenMiddle(query, 60)}"` : 'Search Tools'
+      },
+      generateLabel: (_badge: any) => '',
+      enrichMetadata: (badge: any) => {
+        const md: Record<string, any> = {
+          query: badge.args?.query,
+        }
+        md.fullParams = buildToolPayload(badge)
+        const count = badge.result?.found ?? badge.result?.tools?.length
+        if (typeof count === 'number') {
+          md.resultCount = count
+        }
+        return md
+      },
+      determineStatus: (badge: any) => {
+        if (badge.result?.error) return 'error'
+        if (badge.result?.found === 0 || badge.result?.tools?.length === 0) return 'warning'
+        return 'success'
+      },
+      isExpandable: (_badge: any) => true,
+      shouldShowPreview: (_badge: any) => false
+    })
+
     // Default fallback for unknown tools
     this.register({
       toolName: '*',

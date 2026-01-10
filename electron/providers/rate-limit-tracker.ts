@@ -1,16 +1,50 @@
 /**
  * Proactive Rate Limit Tracker
- * 
+ *
  * Learns rate limits from provider responses and errors, then enforces
  * them BEFORE making requests to prevent 429 errors.
- * 
+ *
  * Features:
  * - Learns limits from response headers (OpenAI, Anthropic)
  * - Learns limits from 429 error messages
  * - Tracks usage per provider/model
  * - Enforces waits before requests
  * - Time-window based reset (per-minute, per-day, etc.)
+ * - Configurable token threshold for proactive waiting
  */
+
+// Configuration for rate limit behavior
+export interface RateLimitConfig {
+  /**
+   * Token threshold percentage (0-1) below which to trigger proactive waiting.
+   * Default: 0.05 (5%) - waits when remaining tokens < 5% of limit.
+   * Lower values = more aggressive (less waiting), higher values = more conservative.
+   */
+  tokenThresholdPercent: number
+}
+
+// Default configuration
+const DEFAULT_CONFIG: RateLimitConfig = {
+  tokenThresholdPercent: 0.05  // 5% - reduced from 10% to be less conservative
+}
+
+// Current configuration (can be updated at runtime)
+let currentConfig: RateLimitConfig = { ...DEFAULT_CONFIG }
+
+/**
+ * Update rate limit configuration.
+ * @param config Partial configuration to merge with current config
+ */
+export function configureRateLimits(config: Partial<RateLimitConfig>): void {
+  currentConfig = { ...currentConfig, ...config }
+}
+
+/**
+ * Get current rate limit configuration.
+ */
+export function getRateLimitConfig(): RateLimitConfig {
+  return { ...currentConfig }
+}
 
 export interface RateLimitInfo {
   // Request limits
@@ -88,9 +122,9 @@ class RateLimitTracker {
       }
     }
 
-    // Check token limits (conservative: wait if < 10% remaining)
+    // Check token limits (configurable threshold, default 5%)
     if (limits.tokensLimit && limits.tokensRemaining !== undefined) {
-      const tokensThreshold = limits.tokensLimit * 0.1
+      const tokensThreshold = limits.tokensLimit * currentConfig.tokenThresholdPercent
       if (limits.tokensRemaining < tokensThreshold) {
         if (limits.tokensResetAt && limits.tokensResetAt > now) {
           const resetWaitMs = limits.tokensResetAt.getTime() - now.getTime()

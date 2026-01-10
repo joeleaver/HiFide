@@ -78,6 +78,9 @@ export async function loadWorkspace(options: WorkspaceLoadOptions): Promise<{ ok
         const settingsService = getSettingsService()
         const indexingEnabled = settingsService.getState().vector.indexingEnabled ?? true
 
+        // Always register the workspace first (required before start)
+        await orchestrator.registerWorkspace(workspaceId)
+
         if (indexingEnabled) {
           console.log('[workspace-loader] Starting indexing for workspace:', workspaceId)
           // Start all three indexers: code, KB, and memories
@@ -86,9 +89,16 @@ export async function loadWorkspace(options: WorkspaceLoadOptions): Promise<{ ok
           await getMemoriesIndexerService().indexWorkspace(workspaceId, false)
         } else {
           console.log('[workspace-loader] Indexing disabled, skipping start for workspace:', workspaceId)
+          // Still set the enabled state on the manager
+          orchestrator.setIndexingEnabled(workspaceId, false)
         }
       } catch (err) {
         console.error('[workspace-loader] Failed to start indexing:', err)
+        // Send notification about indexing failure so UI can show it
+        connection.sendNotification('indexing.error', {
+          workspaceId,
+          error: err instanceof Error ? err.message : String(err)
+        })
         // Don't fail workspace load if indexing fails
       }
 

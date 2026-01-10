@@ -61,13 +61,13 @@ async function runSemanticKBSearch({
 
 export const knowledgeBaseSearchTool: AgentTool = {
   name: 'knowledgeBaseSearch',
-  description: 'Search the project Knowledge Base for documentation. This tool uses a multi-stage search: it first performs a keyword/tag match and then falls back to a semantic vector search if results are sparse. Effectively handles natural language questions and multi-word queries. If information is missing, create or update entries with knowledgeBaseStore instead of writing files.',
+  description: 'Search the Knowledge Base.',
   parameters: {
     type: 'object',
     properties: {
-      query: { type: 'string', description: 'Search text matched against title, tags, markdown body, and related file paths. Optional.' },
-      tags: { type: 'array', items: { type: 'string' }, description: 'Filter results to entries containing ALL these tags (case-insensitive).' },
-      limit: { type: 'number', description: 'Maximum number of results to return (default 50).' }
+      query: { type: 'string' },
+      tags: { type: 'array', items: { type: 'string' } },
+      limit: { type: 'number' }
     },
   },
   run: async (input: any, meta?: any) => {

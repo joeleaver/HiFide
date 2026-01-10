@@ -4,13 +4,10 @@ import { getVectorService, getKBIndexerService } from '../../services/index.js'
 
 export const knowledgeBaseDeleteTool: AgentTool = {
   name: 'knowledgeBaseDelete',
-  description:
-    'Delete a Knowledge Base entry by id. Removes the underlying markdown file from .hifide-public/kb. Use with caution.',
+  description: 'Delete a KB entry.',
   parameters: {
     type: 'object',
-    properties: {
-      id: { type: 'string', description: 'Existing KB item id to delete.' },
-    },
+    properties: { id: { type: 'string' } },
     required: ['id'],
   },
   run: async (input: any, meta?: any) => {

@@ -10,11 +10,10 @@ import { getResourceRecommendation } from '../../agent/types'
 
 export const checkResourcesTool: AgentTool = {
   name: 'agentCheckResources',
-  description: 'Check your current token usage and remaining budget. Use this periodically to stay aware of resource constraints.',
+  description: 'Check token usage and budget.',
   parameters: {
     type: 'object',
     properties: {},
-    additionalProperties: false,
   },
   run: async (_input: any, meta?: { requestId?: string }) => {
     const requestId = meta?.requestId || 'unknown'

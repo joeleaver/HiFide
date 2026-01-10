@@ -3,24 +3,16 @@ import { getKanbanService } from '../../services/index.js'
 
 export const kanbanDeleteTaskTool: AgentTool = {
   name: 'kanbanDeleteTask',
-  description: 'Delete a task from the Kanban board.',
+  description: 'Delete a Kanban task.',
   parameters: {
     type: 'object',
-    properties: { taskId: { type: 'string', minLength: 1 } },
+    properties: { taskId: { type: 'string' } },
     required: ['taskId'],
-    additionalProperties: false,
   },
   run: async (input: { taskId: string }, meta?: any) => {
     const kanbanService = getKanbanService()
-
     const result = await kanbanService.kanbanDeleteTask(input.taskId, meta?.workspaceId)
-    if (!result?.ok) {
-      throw new Error(`Failed to delete task ${input.taskId}`)
-    }
-
-    return {
-      summary: `Deleted task ${input.taskId}.`,
-      deleted: { taskId: input.taskId },
-    }
+    if (!result?.ok) throw new Error(`Failed to delete task ${input.taskId}`)
+    return { ok: true, deleted: input.taskId }
   },
 }

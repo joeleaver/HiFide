@@ -163,6 +163,10 @@ export function formatMessagesForOpenAI(
   return messages
 }
 
+// Marker used to separate base system instructions from injected memories
+// This allows caching of stable base instructions while keeping memories uncached
+const MEMORIES_MARKER = '## Relevant workspace memories'
+
 export function formatMessagesForAnthropic(
   context: MainFlowContext,
   options?: { model?: string }
@@ -171,10 +175,30 @@ export function formatMessagesForAnthropic(
   messages: Array<{ role: 'user' | 'assistant'; content: any }>
 } {
   const systemInstructions = context.systemInstructions || ''
-  const system: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }> | undefined =
-    systemInstructions
-      ? [{ type: 'text' as const, text: systemInstructions, cache_control: { type: 'ephemeral' as const } }]
-      : undefined
+
+  // Split system instructions into cacheable base and uncacheable memories
+  // This preserves cache efficiency when memories change between requests
+  let system: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }> | undefined
+
+  if (systemInstructions) {
+    const markerIndex = systemInstructions.indexOf(MEMORIES_MARKER)
+
+    if (markerIndex > 0) {
+      // Split: base instructions (cached) + memories (not cached)
+      const baseInstructions = systemInstructions.slice(0, markerIndex).trim()
+      const memoriesSection = systemInstructions.slice(markerIndex).trim()
+
+      system = [
+        // Base instructions are cached - this is the stable prefix
+        { type: 'text' as const, text: baseInstructions, cache_control: { type: 'ephemeral' as const } },
+        // Memories are NOT cached - they can change without breaking cache
+        { type: 'text' as const, text: memoriesSection }
+      ]
+    } else {
+      // No memories marker - cache the entire system message
+      system = [{ type: 'text' as const, text: systemInstructions, cache_control: { type: 'ephemeral' as const } }]
+    }
+  }
 
   const history = Array.isArray(context.messageHistory) ? context.messageHistory : []
 

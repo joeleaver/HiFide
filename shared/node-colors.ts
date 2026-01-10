@@ -10,6 +10,7 @@ export const NODE_COLORS: Record<string, string> = {
   newContext: '#9b59b6',
   llmRequest: '#1e3a8a',      // Dark blue - easy on the eyes for the most common node
   tools: '#f97316',
+  semanticTools: '#22c55e',    // Green - semantic search powered tools
   injectMessages: '#06b6d4',  // Cyan - message injection/context manipulation
   intentRouter: '#f39c12',
   extractMemories: '#8e44ad',
@@ -35,6 +36,7 @@ export const NODE_TYPE_LABELS: Record<string, string> = {
   newContext: 'New Context',
   llmRequest: 'LLM Request',
   tools: 'Tools',
+  semanticTools: 'Semantic Tools',
   injectMessages: 'Inject Messages',
   intentRouter: 'Intent Router',
   extractMemories: 'Extract Memories',
@@ -69,6 +71,7 @@ export const NODE_CATEGORIES: Record<string, NodeCategory> = {
   readFile: 'input',
   llmRequest: 'llm',
   tools: 'llm',
+  semanticTools: 'llm',
   newContext: 'llm',
   injectMessages: 'llm',
   intentRouter: 'flow-control',

@@ -179,6 +179,7 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
 
       case 'reasoning':
         // Buffer streaming reasoning and flush immediately
+        // Note: execution-event-router sends reasoning content as 'text' property
         if (ev.text) {
           const prev = buffers.reasoning.get(key) || ''
           buffers.reasoning.set(key, prev + ev.text)
@@ -192,7 +193,16 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
           // Recompute key with potentially recovered identifiers
           const usageKeyForBuffer = `${ev.nodeId || 'global'}::${ev.executionId || 'global'}`
           const toolCalls = buffers.toolCalls.get(usageKeyForBuffer) || []
-          const toolName = ev.toolName || 'unknown'
+          let toolName = ev.toolName || 'unknown'
+          let toolArgs = ev.toolArgs
+
+          // Transparent handling for executeTool - show the inner tool's badge instead
+          // This makes the semantic tools layer invisible to the user
+          if (toolName === 'executeTool' && typeof ev.toolArgs?.toolName === 'string') {
+            toolName = ev.toolArgs.toolName
+            toolArgs = ev.toolArgs.parameters ?? {}
+          }
+
           const label = formatToolName(toolName)
 
           toolCalls.push({
@@ -201,7 +211,7 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
             toolName,
             label,
             callId: ev.callId,
-            args: ev.toolArgs,
+            args: toolArgs,
             status: 'running' as const,
             timestamp: Date.now(),
             expandable: false, // Will be set by enrichBadgeWithToolData
@@ -220,8 +230,21 @@ export function startTimelineListener(requestId: string, args: FlowExecutionArgs
 
           const tool = toolCalls.find((t) => t.callId === ev.callId)
           if (tool) {
-            tool.status = 'success'
-            tool.result = ev.result
+            let result = ev.result
+
+            // Transparent handling for executeTool - unwrap the inner result
+            // executeTool returns: { success, toolName, result: <inner result> }
+            if (ev.toolName === 'executeTool' && ev.result?.result !== undefined) {
+              result = ev.result.result
+              // Handle error case from executeTool wrapper
+              if (ev.result.success === false) {
+                tool.status = 'error'
+                tool.error = ev.result.error || 'Tool execution failed'
+              }
+            }
+
+            tool.status = tool.status || 'success'
+            tool.result = result
             tool.endTimestamp = Date.now()
 
             // Enrich badge with interactive data and content type based on tool

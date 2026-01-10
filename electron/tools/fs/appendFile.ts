@@ -4,15 +4,14 @@ import fs from 'node:fs/promises'
 
 export const appendFileTool: AgentTool = {
   name: 'fsAppendFile',
-  description: 'Append UTF-8 text to a file in the workspace (creates file if missing)',
+  description: 'Append text to a file.',
   parameters: {
     type: 'object',
     properties: {
-      path: { type: 'string', description: 'Workspace-relative file path' },
-      content: { type: 'string', description: 'Text to append' },
+      path: { type: 'string' },
+      content: { type: 'string' },
     },
     required: ['path', 'content'],
-    additionalProperties: false,
   },
   run: async (input: any, meta?: any) => {
     const rel = input?.path

@@ -103,7 +103,8 @@ export class WatcherService extends Service<WatcherState> {
                     }
                 } else if (msg.type === 'ready') {
                     this.setState({ status: 'ready' });
-                    this.emit('ready', { totalFiles: msg.totalFiles });
+                    // Pass total discovered files count along with ready event
+                    this.emit('ready', { totalFiles: msg.totalFiles ?? 0 });
                 } else if (msg.type === 'error') {
                     this.setState({ status: 'error', error: msg.error });
                     console.error('[WatcherService] Worker error:', msg.error);
@@ -113,9 +114,6 @@ export class WatcherService extends Service<WatcherState> {
                         timestamp: Date.now()
                     }));
                     this.emit('events', events);
-                } else if (msg.type === 'ready') {
-                    // Pass total discovered files count along with ready event
-                    this.emit('ready', msg.totalFiles);
                 }
             });
 

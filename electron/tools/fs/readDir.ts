@@ -11,12 +11,11 @@ import path from 'node:path'
 
 export const readDirTool: AgentTool = {
   name: 'fsReadDir',
-  description: 'List directory entries (name, isDirectory, path). Use for quick structure checks; to locate code, prefer workspaceSearch.',
+  description: 'List directory contents.',
   parameters: {
     type: 'object',
-    properties: { path: { type: 'string', description: 'Workspace-relative path' } },
+    properties: { path: { type: 'string' } },
     required: ['path'],
-    additionalProperties: false,
   },
   run: async ({ path: rel }: { path: string }, meta?: any) => {
     try {

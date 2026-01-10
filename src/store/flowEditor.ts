@@ -232,5 +232,13 @@ export function initFlowEditorEvents(): void {
     await hydrateFromBackend(`graph-changed:${reason}`)
 
   })
+
+  // Templates changed - fired when flows are saved/deleted/imported
+  // User flows are global so this notification comes to ALL windows
+  client.subscribe('flowEditor.templates.changed', async (payload: any) => {
+    const library = payload?.library ?? 'user'
+    console.log(`[flowEditor] Templates changed notification (library: ${library})`)
+    await hydrateFromBackend(`templates-changed:${library}`)
+  })
 }
 

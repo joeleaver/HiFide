@@ -41,9 +41,54 @@ export interface UsageEventData {
 }
 
 /**
+ * Per-step category breakdown for agentic loops.
+ * Matches StepCategoryBreakdown from usage-tracker.ts
+ */
+export interface StepCategoryBreakdownEvent {
+  // Input categories (sent to model)
+  systemInstructions: number
+  toolDefinitions: number
+  userMessages: number
+  assistantMessages: number
+  assistantReasoning: number
+  toolResults: number
+  // Output categories (produced by model)
+  outputText: number
+  outputReasoning: number
+  outputToolCalls: number
+}
+
+/**
+ * Per-step usage data for agentic loops.
+ */
+export interface StepUsageEvent {
+  stepNumber: number
+  categories: StepCategoryBreakdownEvent
+  providerInputTokens: number
+  providerOutputTokens: number
+  cachedTokens: number
+  inputTotal: number
+  outputTotal: number
+}
+
+/**
+ * Re-sent context totals by category.
+ */
+export interface ResentContextEvent {
+  systemInstructions: number
+  toolDefinitions: number
+  userMessages: number
+  assistantMessages: number
+  assistantReasoning: number
+  toolResults: number
+  total: number
+}
+
+/**
  * Detailed usage breakdown event data
  */
 export interface UsageBreakdownEventData {
+  // Existing fields (keep for single-step and backwards compat)
   input: {
     instructions?: number
     userMessages?: number
@@ -67,10 +112,25 @@ export interface UsageBreakdownEventData {
     inputTokens: number
     outputTokens: number
     totalTokens: number
+    cachedTokens?: number  // Tokens served from cache
     costEstimate?: number
     stepCount?: number  // Number of agentic turns/steps
   }
   estimated: boolean
+
+  // NEW: Per-step category breakdown (for multi-step agentic requests)
+  perStep?: StepUsageEvent[]
+
+  // NEW: Re-sent context summary (overhead from context re-sending)
+  resent?: ResentContextEvent
+
+  // NEW: Unique vs accumulated comparison
+  comparison?: {
+    accumulatedInput: number
+    uniqueInput: number
+    accumulatedOutput: number
+    uniqueOutput: number
+  }
 }
 
 

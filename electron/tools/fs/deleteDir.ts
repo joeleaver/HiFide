@@ -4,16 +4,11 @@ import fs from 'node:fs/promises'
 
 export const deleteDirTool: AgentTool = {
   name: 'fsDeleteDir',
-  description: 'Delete a directory from the workspace (recursive, force by default). USE WITH CARE.',
+  description: 'Delete a directory.',
   parameters: {
     type: 'object',
-    properties: {
-      path: { type: 'string', description: 'Workspace-relative directory path' },
-      recursive: { type: 'boolean', default: true },
-      force: { type: 'boolean', default: true },
-    },
+    properties: { path: { type: 'string' } },
     required: ['path'],
-    additionalProperties: false,
   },
   run: async ({ path: rel, recursive = true, force = true }: { path: string; recursive?: boolean; force?: boolean }, meta?: any) => {
     const abs = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, rel) : resolveWithinWorkspace(rel)

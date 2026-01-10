@@ -68,13 +68,7 @@ function getIndexingStatus(meta?: any): IndexingStatus {
  * Generate dynamic tool description based on indexing status
  */
 function getToolDescription(): string {
-  const status = getIndexingStatus()
-
-  if (!status.enabled) {
-    return 'Unified workspace search combining filename matching, ripgrep patterns, path matching, and tokenized content search. Results are ranked by relevance score. Semantic search is currently disabled (indexing is off).'
-  }
-
-  return `Unified workspace search combining filename matching, ripgrep patterns, path matching, tokenized content search, and semantic/vector similarity (index ${status.percentComplete}% complete). Results are ranked by relevance score across all search methods.`
+  return 'Search workspace files and content.'
 }
 
 export interface SearchWorkspaceParams {
@@ -98,34 +92,17 @@ export const searchWorkspaceTool: AgentTool = {
   parameters: {
     type: 'object',
     properties: {
-      query: {
-        type: 'string',
-        description: 'Search pattern (literal text, regex, or natural language query). Examples: "function handleClick", "class.*extends", "how are users authenticated"'
-      },
+      query: { type: 'string' },
       filters: {
         type: 'object',
         properties: {
-          pathsInclude: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Glob patterns to include (e.g., ["src/**/*.ts", "electron/**/*.ts"])'
-          },
-          pathsExclude: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Glob patterns to exclude (e.g., ["**/*.test.ts", "dist/**"])'
-          },
-          maxResults: {
-            type: 'integer',
-            minimum: 1,
-            description: 'Maximum number of results to return (default: 10)'
-          }
-        },
-        additionalProperties: false
+          pathsInclude: { type: 'array', items: { type: 'string' } },
+          pathsExclude: { type: 'array', items: { type: 'string' } },
+          maxResults: { type: 'integer' }
+        }
       }
     },
     required: ['query'],
-    additionalProperties: false
   },
 
   run: async (args: SearchWorkspaceParams, meta?: any): Promise<any> => {

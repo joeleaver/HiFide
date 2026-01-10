@@ -194,36 +194,18 @@ async function readRegex(abs: string, encoding: BufferEncoding, opts: { pattern:
 
 export const readLinesTool: AgentTool = {
   name: 'fsReadLines',
-  description: 'Read specific lines (head/tail/range/around) or regex matches from a UTF-8/UTF-16LE text file in the workspace. Also accepts a handle from workspaceSearch to target a precise range.',
+  description: 'Read lines from a file. Modes: head, tail, range, around, regex.',
   parameters: {
     type: 'object',
     properties: {
-      path: { type: 'string', description: 'Workspace-relative file path' },
-      handle: { type: 'string', description: 'Base64-encoded handle { t:"h", p: path, s: startLine, e: endLine }. If provided, overrides path/start/end.' },
-      mode: { type: 'string', enum: ['head','tail','range','regex','around'], default: 'range' },
-      headLines: { type: 'integer', minimum: 1, maximum: MAX_LINES, default: DEFAULT_LINES },
-      tailLines: { type: 'integer', minimum: 1, maximum: MAX_LINES, default: DEFAULT_LINES },
-      startLine: { type: 'integer', minimum: 1 },
-      endLine: { type: 'integer', minimum: 1 },
-      // around
-      focusLine: { type: 'integer', minimum: 1, description: 'Center line (1-based) for around-mode' },
-      beforeLines: { type: 'integer', minimum: 0, maximum: MAX_LINES, default: 10 },
-      afterLines: { type: 'integer', minimum: 0, maximum: MAX_LINES, default: 10 },
-      window: { type: 'integer', minimum: 0, maximum: MAX_LINES, description: 'Convenience: sets beforeLines and afterLines to this value when mode=around' },
-
-      normalizeEol: { type: 'boolean', default: true },
-      expandImports: { type: 'boolean', default: false, description: 'When true (range/around mode), extend the start upward to include contiguous import/export lines.' },
-      maxBytes: { type: 'integer', minimum: 1024, maximum: 1048576, default: DEFAULT_MAX_BYTES },
-      rejectIfBinary: { type: 'boolean', default: true },
-      // regex
+      path: { type: 'string' },
+      handle: { type: 'string' },
+      mode: { type: 'string', enum: ['head', 'tail', 'range', 'regex', 'around'] },
+      startLine: { type: 'integer' },
+      endLine: { type: 'integer' },
+      focusLine: { type: 'integer' },
       pattern: { type: 'string' },
-      flags: { type: 'string', description: "Only 'i' and 'm' are allowed" },
-      contextBefore: { type: 'integer', minimum: 0, maximum: 20, default: 2 },
-      contextAfter: { type: 'integer', minimum: 0, maximum: 20, default: 2 },
-      maxMatches: { type: 'integer', minimum: 1, maximum: 100, default: 25 },
     },
-    // path is optional when handle is provided
-    additionalProperties: false,
   },
   run: async (input: any, meta?: any) => {
     function fromB64<T=any>(h?: string): T | null {

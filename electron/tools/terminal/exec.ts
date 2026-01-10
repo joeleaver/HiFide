@@ -5,26 +5,15 @@ import * as ptySpawn from '../../services/ptySpawn.js'
 
 export const terminalExecTool: AgentTool = {
   name: 'terminalExec',
-  description: `Execute command non-interactively via node-pty.spawn(prog, args). No shell, no persistence/UI panel.
-
-Returns full stdout/stderr (ANSI stripped) up to 500 lines preview + exitCode/timedOut.
-
-Badge: hover/expand for command preview, full output preview (4k chars), CWD, duration, lines, exit status.
-
-60s timeout → kill, partial output + timedOut=true.
-
-Shell features (pipes, cd): 'powershell -Command \"cmd\"' or 'bash -c \"cmd\"'.
-
-CWD: workspace root (from meta) or process.cwd().`,
+  description: 'Execute a shell command.',
   parameters: {
     type: 'object',
     properties: {
-      command: { type: 'string', description: 'Command line (prog arg1 arg2...)' },
-      timeoutMs: { type: 'integer', minimum: 500, maximum: 30000, default: 60000, description: 'Timeout (ms)' },
-      cwd: { type: 'string', description: 'Override CWD (absolute)' }
+      command: { type: 'string' },
+      timeoutMs: { type: 'integer' },
+      cwd: { type: 'string' }
     },
     required: ['command'],
-    additionalProperties: false,
   },
   run: async (args: { command: string; timeoutMs?: number; cwd?: string }, meta?: Record<string, any> & { workspaceId?: string }) => {
     const MAX_LINES = 500

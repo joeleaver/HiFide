@@ -4,17 +4,14 @@ import fs from 'node:fs/promises'
 
 export const copyTool: AgentTool = {
   name: 'fsCopy',
-  description: 'Copy a file or directory within the workspace',
+  description: 'Copy a file or directory.',
   parameters: {
     type: 'object',
     properties: {
-      from: { type: 'string', description: 'Source workspace-relative path' },
-      to: { type: 'string', description: 'Destination workspace-relative path' },
-      recursive: { type: 'boolean', default: true },
-      overwrite: { type: 'boolean', default: true },
+      from: { type: 'string' },
+      to: { type: 'string' },
     },
     required: ['from', 'to'],
-    additionalProperties: false,
   },
   run: async ({ from, to, recursive = true, overwrite = true }: { from: string; to: string; recursive?: boolean; overwrite?: boolean }, meta?: any) => {
     const src = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, from) : resolveWithinWorkspace(from)

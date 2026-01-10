@@ -14,6 +14,7 @@ import { IntentRouterConfig } from './configSections/IntentRouterConfig'
 import { ExtractMemoriesConfig } from './configSections/ExtractMemoriesConfig'
 import { CacheConfig } from './configSections/CacheConfig'
 import { ToolsConfig } from './configSections/ToolsConfig'
+import { SemanticToolsConfig } from './configSections/SemanticToolsConfig'
 
 interface NodeConfigProps {
   nodeId: string
@@ -134,6 +135,9 @@ export default function NodeConfig({ nodeId, nodeType, config, onConfigChange }:
         <CacheConfig nodeId={nodeId} config={config} onConfigChange={onConfigChange} />
       )}
 
+      {nodeType === 'semanticTools' && (
+        <SemanticToolsConfig config={config} onConfigChange={onConfigChange} />
+      )}
 
     </div>
   )

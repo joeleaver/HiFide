@@ -4,15 +4,11 @@ import fs from 'node:fs/promises'
 
 export const createDirTool: AgentTool = {
   name: 'fsCreateDir',
-  description: 'Create a directory inside the workspace (recursive by default)',
+  description: 'Create a directory.',
   parameters: {
     type: 'object',
-    properties: {
-      path: { type: 'string', description: 'Workspace-relative directory path' },
-      recursive: { type: 'boolean', default: true },
-    },
+    properties: { path: { type: 'string' } },
     required: ['path'],
-    additionalProperties: false,
   },
   run: async ({ path: rel, recursive = true }: { path: string; recursive?: boolean }, meta?: any) => {
     const abs = meta?.workspaceId ? resolveWithinWorkspaceWithRoot(meta.workspaceId, rel) : resolveWithinWorkspace(rel)

@@ -243,34 +243,24 @@ async function tryRipgrepSearch({ root, pattern, includeGlobs, excludeGlobs, opt
 
 export const grepTool: AgentTool = {
   name: 'textGrep',
-  description: 'Low-level text/regex search across files. Prefer workspaceSearch first; use only for exact regex or specialty cases. Read-only and workspace-scoped.',
+  description: 'Search files with regex.',
   parameters: {
     type: 'object',
     properties: {
-      pattern: { type: 'string', description: 'Regex pattern (or literal when options.literal=true)' },
-      files: { type: 'array', items: { type: 'string' }, description: 'Include globs (workspace-relative)' },
+      pattern: { type: 'string' },
+      files: { type: 'array', items: { type: 'string' } },
       options: {
         type: 'object',
         properties: {
           ignoreCase: { type: 'boolean' },
-          invert: { type: 'boolean' },
           lineNumbers: { type: 'boolean' },
           filenamesOnly: { type: 'boolean' },
-          before: { type: 'integer', minimum: 0 },
-          after: { type: 'integer', minimum: 0 },
-          context: { type: 'integer', minimum: 0 },
-          exclude: { type: 'array', items: { type: 'string' } },
-          maxFiles: { type: 'integer', minimum: 1 },
-          maxResults: { type: 'integer', minimum: 1 },
-          maxFileBytes: { type: 'integer', minimum: 1 },
-          literal: { type: 'boolean' },
-          cursor: { type: 'string', description: 'Opaque pagination cursor from a previous call' }
-        },
-        additionalProperties: false
+          maxResults: { type: 'integer' },
+          literal: { type: 'boolean' }
+        }
       }
     },
     required: ['pattern', 'files'],
-    additionalProperties: false
   },
   run: async ({ pattern, files, options = {} }: {
     pattern: string

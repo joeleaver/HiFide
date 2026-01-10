@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { app } from 'electron';
+import type { TableType } from './VectorService.js';
 
 // Simple LRU Cache implementation
 class LRUCache<K, V> {
@@ -188,48 +189,37 @@ export class EmbeddingService {
     return this.worker;
   }
 
-  async getDimension(type?: 'code' | 'kb' | 'memories'): Promise<number> {
+  async getDimension(type?: TableType): Promise<number> {
     const settings = (getSettingsService() as any).state;
     const vectorSettings = settings.vector;
-    
-    // Determine model ID for this table
+
+    // Determine model ID for this table (local models only)
+    // 'tools' uses the default model since it doesn't have a specific setting
     let modelId = vectorSettings?.localModel || 'Xenova/all-MiniLM-L6-v2';
     if (type === 'code' && vectorSettings?.codeLocalModel) modelId = vectorSettings.codeLocalModel;
     if (type === 'kb' && vectorSettings?.kbLocalModel) modelId = vectorSettings.kbLocalModel;
     if (type === 'memories' && vectorSettings?.memoriesLocalModel) modelId = vectorSettings.memoriesLocalModel;
 
-    // Use specific model from UI choice to determine provider if needed
-    let modelName = vectorSettings?.model || '';
-    if (type === 'code' && vectorSettings?.codeModel) modelName = vectorSettings.codeModel;
-    if (type === 'kb' && vectorSettings?.kbModel) modelName = vectorSettings.kbModel;
-    if (type === 'memories' && vectorSettings?.memoriesModel) modelName = vectorSettings.memoriesModel;
-
-    if (modelName.startsWith('text-embedding-3')) {
-      return modelName.includes('large') ? 3072 : 1536;
-    }
-
+    // Determine dimensions based on model
     if (modelId.includes('nomic') || modelId.includes('code-rank-embed')) {
       return 768;
     }
     return 384;
   }
 
-  async embed(text: string, type?: 'code' | 'kb' | 'memories'): Promise<number[]> {
+  async embed(text: string, type?: TableType): Promise<number[]> {
     const settings = (getSettingsService() as any).state;
     const vectorSettings = settings.vector;
 
+    // Determine local model ID for this table
+    // 'tools' uses the default model since it doesn't have a specific setting
     let modelId = vectorSettings?.localModel || 'Xenova/all-MiniLM-L6-v2';
     if (type === 'code' && vectorSettings?.codeLocalModel) modelId = vectorSettings.codeLocalModel;
     if (type === 'kb' && vectorSettings?.kbLocalModel) modelId = vectorSettings.kbLocalModel;
     if (type === 'memories' && vectorSettings?.memoriesLocalModel) modelId = vectorSettings.memoriesLocalModel;
 
-    let modelName = vectorSettings?.model || '';
-    if (type === 'code' && vectorSettings?.codeModel) modelName = vectorSettings.codeModel;
-    if (type === 'kb' && vectorSettings?.kbModel) modelName = vectorSettings.kbModel;
-    if (type === 'memories' && vectorSettings?.memoriesModel) modelName = vectorSettings.memoriesModel;
-
     const cacheKey = `${modelId}:${text}`;
-    
+
     // Check cache
     if (this.cache.has(cacheKey)) {
       const cached = this.cache.get(cacheKey);
@@ -243,34 +233,22 @@ export class EmbeddingService {
       }
     }
 
-    // Generate embedding
-    const provider = modelName.startsWith('text-embedding-3') ? 'openai' : 'local';
-
-    let vector: number[];
-    if (provider === 'openai') {
-      vector = await this.embedOpenAI(text, modelName);
-    } else {
-      vector = await this.embedLocal(text, modelId, type);
-    }
+    // Generate embedding using local model
+    const vector = await this.embedLocal(text, modelId, type);
 
     // Store in cache
     this.cache.set(cacheKey, vector);
-    
+
     // Log cache size periodically
     if (Math.random() < 0.01) {
       const stats = this.getCacheStats();
       console.log(`[EmbeddingService] Cache miss. Stats: ${stats.size} entries, ${stats.bytesUsedMB.toFixed(2)}MB`);
     }
-    
+
     return vector;
   }
 
-  private async embedOpenAI(_text: string, modelName: string): Promise<number[]> {
-    const dim = modelName.includes('large') ? 3072 : 1536;
-    return new Array(dim).fill(0).map(() => Math.random());
-  }
-
-  private async embedLocal(text: string, modelId: string, type?: 'code' | 'kb' | 'memories'): Promise<number[]> {
+  private async embedLocal(text: string, modelId: string, type?: TableType): Promise<number[]> {
     try {
       const worker = await this.getWorker();
       const id = `req-${++this.requestIdCounter}`;

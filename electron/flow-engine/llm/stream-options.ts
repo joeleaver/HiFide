@@ -8,6 +8,10 @@ export interface SamplingControls {
   includeThoughts?: boolean
   thinkingBudget?: number
   modelSupportsThinking: boolean
+  /** Gemini caching mode: 'explicit' (default) for guaranteed savings, 'implicit' for automatic caching */
+  geminiCacheMode?: 'explicit' | 'implicit'
+  /** Gemini explicit cache refresh threshold in tokens (default: 500). Cache is rebuilt when fresh content exceeds this. */
+  geminiCacheRefreshThreshold?: number
 }
 
 interface SamplingOptionsInput {
@@ -72,12 +76,28 @@ export function resolveSamplingControls(options: SamplingOptionsInput): Sampling
         ? jsonDefaults.thinkingBudget
         : (includeThoughts && modelSupportsThinking ? 2048 : undefined)))
 
+  // Gemini cache mode: 'explicit' (default) or 'implicit'
+  // Only applies to Gemini provider - explicit caching gives guaranteed savings,
+  // implicit relies on Gemini's automatic (probabilistic) caching
+  const geminiCacheModeOverride = (modelOverride as any)?.geminiCacheMode as 'explicit' | 'implicit' | undefined
+  const geminiCacheModeDefault = (workingContext as any)?.geminiCacheMode as 'explicit' | 'implicit' | undefined
+  const geminiCacheMode: 'explicit' | 'implicit' | undefined =
+    geminiCacheModeOverride ?? geminiCacheModeDefault ?? (jsonDefaults as any)?.geminiCacheMode
+
+  // Gemini cache refresh threshold: token count at which to rebuild cache mid-loop
+  const geminiCacheRefreshThresholdOverride = (modelOverride as any)?.geminiCacheRefreshThreshold as number | undefined
+  const geminiCacheRefreshThresholdDefault = (workingContext as any)?.geminiCacheRefreshThreshold as number | undefined
+  const geminiCacheRefreshThreshold: number | undefined =
+    geminiCacheRefreshThresholdOverride ?? geminiCacheRefreshThresholdDefault ?? (jsonDefaults as any)?.geminiCacheRefreshThreshold
+
   return {
     temperature,
     reasoningEffort,
     includeThoughts,
     thinkingBudget,
-    modelSupportsThinking
+    modelSupportsThinking,
+    geminiCacheMode,
+    geminiCacheRefreshThreshold
   }
 }
 

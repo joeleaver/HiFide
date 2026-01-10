@@ -41,7 +41,7 @@ import { buildMenu } from './ipc/menu'
 // Provider setup
 
 import { AnthropicOpenAIProvider as AnthropicAiSdkProvider } from './providers-ai-sdk/anthropic-openai'
-import { GeminiOpenAIProvider as GeminiAiSdkProvider } from './providers-ai-sdk/gemini-openai'
+import { GeminiNativeProvider } from './providers-ai-sdk/gemini-native'
 
 // State management
 import { providers, providerCapabilities } from './core/state'
@@ -130,7 +130,7 @@ process.on('unhandledRejection', (reason: any) => {
 // Initialize provider adapters
 
 providers.anthropic = AnthropicAiSdkProvider as any
-providers.gemini = GeminiAiSdkProvider as any
+providers.gemini = GeminiNativeProvider as any
 
 // Initialize provider capabilities
 providerCapabilities.openai = { tools: true, jsonSchema: true, vision: false, streaming: true }

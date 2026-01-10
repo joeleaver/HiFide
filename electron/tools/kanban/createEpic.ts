@@ -4,30 +4,23 @@ import type { KanbanEpic } from '../../store'
 
 export const kanbanCreateEpicTool: AgentTool = {
   name: 'kanbanCreateEpic',
-  description: 'Create a new epic on the Kanban board.',
+  description: 'Create a Kanban epic.',
   parameters: {
     type: 'object',
     properties: {
-      name: { type: 'string', minLength: 1 },
+      name: { type: 'string' },
       color: { type: 'string' },
-      description: { type: 'string' },
     },
     required: ['name'],
-    additionalProperties: false,
   },
-  run: async (input: { name: string; color?: string; description?: string }, meta?: any) => {
+  run: async (input: { name: string; color?: string }, meta?: any) => {
     const kanbanService = getKanbanService()
-
     const epic: KanbanEpic = await kanbanService.kanbanCreateEpic({
       workspaceId: meta?.workspaceId,
       name: input.name,
       color: input.color || '#3b82f6',
-      description: input.description || '',
+      description: '',
     })
-
-    return {
-      summary: `Created epic "${epic.name}".`,
-      epic,
-    }
+    return { ok: true, id: epic.id, name: epic.name }
   },
 }
